@@ -1,0 +1,1488 @@
+const { onRequest } = require("firebase-functions/v2/https");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { setGlobalOptions } = require("firebase-functions/v2");
+const logger = require("firebase-functions/logger");
+const admin = require("firebase-admin");
+const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
+
+setGlobalOptions({ maxInstances: 2, memory: "256Mi", region: "us-central1" });
+
+admin.initializeApp();
+const db = admin.firestore();
+
+// ═══════════════════════════════════════════════════
+// MERCADO PAGO FUNCTIONS (existing)
+// ═══════════════════════════════════════════════════
+
+exports.createPreference = onRequest({ cors: true }, async (req, res) => {
+    if (req.method !== "POST") {
+      return res.status(405).send("Method Not Allowed");
+    }
+
+    const { orderId, items, deliveryCost, commerceId } = req.body;
+
+    try {
+      const commerceDoc = await db.collection("comercios").doc(commerceId).get();
+      if (!commerceDoc.exists) throw new Error("Comercio no encontrado");
+      
+      const commerceData = commerceDoc.data();
+      const accessToken = commerceData.mpAccessToken;
+
+      if (!accessToken) {
+        throw new Error("Este comercio no tiene configurado Mercado Pago");
+      }
+
+      const client = new MercadoPagoConfig({ accessToken: accessToken });
+      const preferenceInstance = new Preference(client);
+
+      const response = await preferenceInstance.create({
+        body: {
+          items: items.map(item => ({
+            title: item.name,
+            unit_price: Number(item.price),
+            quantity: Number(item.qty),
+            currency_id: "ARS"
+          })),
+          shipments: {
+            cost: Number(deliveryCost),
+            mode: "not_specified"
+          },
+          external_reference: orderId.toString(),
+          notification_url: `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/mercadopagoWebhook?comercioId=${commerceId}`,
+          back_urls: {
+            success: `https://${process.env.GCLOUD_PROJECT}.web.app/#/order-success/${orderId}`,
+            failure: `https://${process.env.GCLOUD_PROJECT}.web.app/#/cart`,
+            pending: `https://${process.env.GCLOUD_PROJECT}.web.app/#/order-success/${orderId}`
+          },
+          auto_return: "approved"
+        }
+      });
+      
+      const orderSnap = await db.collection("orders").where("orderId", "==", orderId).get();
+      if (!orderSnap.empty) {
+        await orderSnap.docs[0].ref.update({ mpPreferenceId: response.id });
+      }
+
+      res.status(200).json({ 
+        id: response.id,
+        initPoint: response.init_point
+      });
+
+    } catch (error) {
+      console.error("MP Preference Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+});
+
+const CLIENT_ID = "5274234275247081";
+const CLIENT_SECRET = "qTxbuLwOGJ9TEWxUqJw2Ba4HSkmMlIw2";
+const REDIRECT_URI = `https://godelivery-magdalena.web.app/mp-connect`;
+
+exports.mercadopagoConnect = onRequest({ cors: true }, async (req, res) => {
+  const { code, comercioId } = req.body;
+
+  if (!code || !comercioId) {
+    return res.status(400).json({ error: "Faltan parámetros" });
+  }
+
+  try {
+    const response = await fetch("https://api.mercadopago.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_secret: CLIENT_SECRET,
+        client_id: CLIENT_ID,
+        grant_type: "authorization_code",
+        code: code,
+        redirect_uri: REDIRECT_URI
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.access_token) {
+      await db.collection("comercios").doc(comercioId).update({
+        mpAccessToken: data.access_token,
+        mpRefreshToken: data.refresh_token,
+        mpUserId: data.user_id,
+        mpConnectedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      res.status(200).json({ success: true });
+    } else {
+      throw new Error(data.message || "Error al obtener el token");
+    }
+  } catch (error) {
+    logger.error("MP Connect Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+exports.mercadopagoWebhook = onRequest(async (req, res) => {
+  const { query, body } = req;
+  const topic = query.topic || query.type || (body && body.type) || (body && body.action && body.action.split('.')[0]);
+  const commerceId = query.comercioId;
+
+  if (topic === "payment" && commerceId) {
+    const paymentId = query.id || query["data.id"] || (body && body.data && body.data.id) || (body && body.id);
+    
+    try {
+      const commerceDoc = await db.collection("comercios").doc(commerceId).get();
+      if (!commerceDoc.exists) throw new Error("Comercio no encontrado");
+      const accessToken = commerceDoc.data().mpAccessToken;
+
+      const client = new MercadoPagoConfig({ accessToken: accessToken });
+      const paymentInstance = new Payment(client);
+      const payment = await paymentInstance.get({ id: paymentId });
+      
+      if (payment.status === "approved") {
+        const orderId = Number(payment.external_reference);
+        
+        const orderSnap = await db.collection("orders").where("orderId", "==", orderId).get();
+        if (!orderSnap.empty) {
+          const orderDoc = orderSnap.docs[0];
+          const orderData = orderDoc.data();
+          
+          // IDEMPOTENCY CHECK: skip if already processed/paid
+          if (orderData.paymentStatus !== "paid") {
+            await orderDoc.ref.update({ 
+              status: "pending",
+              paymentStatus: "paid",
+              mpPaymentId: paymentId
+            });
+            logger.info(`Webhook: Order ${orderId} marked as PAID and PENDING successfully.`);
+          } else {
+            logger.info(`Webhook: Order ${orderId} already processed.`);
+          }
+        }
+      }
+    } catch (error) {
+      logger.error("Webhook processing error:", error);
+    }
+  }
+
+  res.status(200).send("OK");
+});
+
+
+// ═══════════════════════════════════════════════════
+// PUSH NOTIFICATION FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+/**
+ * Helper: Get all FCM tokens for a user
+ */
+async function getUserTokens(userId) {
+  try {
+    const tokensSnap = await db.collection("users").doc(userId).collection("fcmTokens").get();
+    return tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+  } catch (err) {
+    logger.warn(`Error getting tokens for user ${userId}:`, err);
+    return [];
+  }
+}
+
+/**
+ * Helper: Send push notification to a list of tokens
+ */
+async function sendPush(tokens, notification, data = {}) {
+  if (!tokens || tokens.length === 0) return;
+
+  // User requested title to be strictly "Go Delivery"
+  const finalTitle = "Go Delivery";
+  const finalBody = notification.title ? `${notification.title}\n${notification.body}` : notification.body;
+
+  // Ensure absolute HTTPS URL for the deep links to bypass relative SW resolution bugs
+  let targetUrl = data.url || "/#/";
+  if (targetUrl.startsWith('#') || targetUrl.startsWith('/#')) {
+    targetUrl = "https://godelivery-magdalena.web.app/" + targetUrl.replace(/^\//, "");
+  } else if (targetUrl.startsWith('/')) {
+    targetUrl = "https://godelivery-magdalena.web.app" + targetUrl;
+  }
+
+  const message = {
+    notification: {
+      title: "Go Delivery",
+      body: finalBody
+    },
+    data: {
+      ...data,
+      title: "Go Delivery",
+      body: finalBody,
+      icon: "/logo-pwa.png",
+      badge: "/badge-icon.png",
+      url: targetUrl
+    },
+    android: {
+      priority: "high",
+      ttl: 3600000,
+      notification: {
+        priority: "max",
+        sound: "default",
+        defaultSound: true,
+        defaultVibrateTimings: true,
+        visibility: "public"
+      }
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: "default",
+          badge: 1,
+          contentAvailable: true,
+          mutableContent: true,
+          priority: 10
+        }
+      }
+    },
+    webpush: {
+      headers: {
+        Urgency: "high"
+      },
+      notification: {
+        title: "Go Delivery",
+        body: finalBody,
+        icon: "https://godelivery-magdalena.web.app/logo-pwa.png",
+        badge: "https://godelivery-magdalena.web.app/badge-icon.png",
+        vibrate: [200, 100, 200, 100, 200],
+        requireInteraction: true,
+        tag: data.tag || undefined,
+        data: {
+          ...data,
+          url: targetUrl
+        }
+      },
+      fcmOptions: {
+        link: targetUrl
+      }
+    },
+    tokens
+  };
+
+  if (data.imageUrl && (data.imageUrl.startsWith("http://") || data.imageUrl.startsWith("https://"))) {
+    message.notification.image = data.imageUrl;
+    message.webpush.notification.image = data.imageUrl;
+  }
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
+    
+    // Clean up invalid tokens
+    if (response.failureCount > 0) {
+      const tokensToDelete = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const errorCode = resp.error?.code;
+          if (errorCode === "messaging/invalid-registration-token" || 
+              errorCode === "messaging/registration-token-not-registered") {
+            tokensToDelete.push(tokens[idx]);
+          }
+        }
+      });
+
+      if (tokensToDelete.length > 0) {
+        logger.info(`Cleaning up ${tokensToDelete.length} invalid tokens`);
+        
+        // Chunk tokensToDelete into groups of 30 for parallel search and destroy
+        const chunks = [];
+        for (let i = 0; i < tokensToDelete.length; i += 30) {
+          chunks.push(tokensToDelete.slice(i, i + 30));
+        }
+
+        await Promise.all(chunks.map(async (chunk) => {
+          try {
+            const snap = await db.collectionGroup("fcmTokens").where("token", "in", chunk).get();
+            if (!snap.empty) {
+              const batch = db.batch();
+              snap.docs.forEach(d => batch.delete(d.ref));
+              await batch.commit();
+            }
+          } catch (err) {
+            logger.error("Error deleting fcmToken chunk:", err);
+          }
+        }));
+      }
+    }
+    
+    logger.info(`Push sent: ${response.successCount} success, ${response.failureCount} failed`);
+  } catch (err) {
+    logger.error("Error sending push:", err);
+  }
+}
+
+/**
+ * Helper: Get all online delivery tokens
+ */
+async function getOnlineDeliveryTokens() {
+  try {
+    const snap = await db.collection("users").where("isOnline", "==", true).get();
+    let tokens = [];
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const isDel = (data.isDelivery === true || data.isDelivery === "true" || data.role === "delivery") && data.deliveryStatus === "approved";
+      if (isDel) {
+        // Only include drivers who do NOT have any active/ongoing orders in progress
+        const activeOrdersCountSnap = await db.collection("orders")
+          .where("driverId", "==", doc.id)
+          .where("status", "in", ["confirmed", "ready", "delivering"])
+          .get();
+          
+        if (activeOrdersCountSnap.empty) {
+          const userTokens = await getUserTokens(doc.id);
+          tokens = tokens.concat(userTokens);
+        }
+      }
+    }
+    return [...new Set(tokens)];
+  } catch (err) {
+    logger.error("Error getting online delivery tokens:", err);
+    return [];
+  }
+}
+
+/**
+ * Helper: Get all admin tokens
+ */
+async function getAdminTokens() {
+  try {
+    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+    let tokens = [];
+    for (const doc of adminsSnap.docs) {
+      const userTokens = await getUserTokens(doc.id);
+      tokens = tokens.concat(userTokens);
+    }
+    return [...new Set(tokens)];
+  } catch (err) {
+    logger.error("Error getting admin tokens:", err);
+    return [];
+  }
+}
+
+/**
+ * Trigger: New order created → Notify Client and Commerce
+ */
+exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => {
+  const order = event.data.data();
+  const orderId = event.params.orderId;
+  if (!order) return;
+
+  const orderNum = order.orderId || orderId.slice(0, 6);
+
+  try {
+    // 1. If it's a GoFavor order, notify all online drivers immediately
+    if (order.isFavor) {
+      const driverTokens = await getOnlineDeliveryTokens();
+      if (driverTokens.length > 0) {
+        const orderType = order.favorType === "compra" ? "compra" : "mandado";
+        await sendPush(driverTokens, {
+          title: `🛵 ¡Nuevo GoFavor Disponible!`,
+          body: `Hay un nuevo GoFavor (${orderType.toUpperCase()}) listo para tomar.`
+        }, { tag: `new-favor-${orderId}`, url: "#/delivery" });
+      }
+      return;
+    }
+
+    // 2. Regular commerce owner notification (Only if Cash payment, Mercado Pago waits for confirmation)
+    if (order.paymentMethod === 'efectivo') {
+      const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
+      if (comercioDoc.exists) {
+        const comData = comercioDoc.data();
+        const ownerId = comData.ownerId;
+        const commerceName = (comData.name || "").toLowerCase();
+        const isGoMarket = commerceName.includes("go!") && commerceName.includes("market");
+
+        if (isGoMarket) {
+          // If it's GoMarket, notify ALL admins
+          const adminTokens = await getAdminTokens();
+          await sendPush(adminTokens, {
+            title: "🛒 ¡Nuevo Pedido en GoMarket!",
+            body: `Recibiste el pedido #${orderNum} de ${order.userName || "un cliente"}.`
+          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
+        } else {
+          // Regular commerce owner notification
+          const ownerTokens = await getUserTokens(ownerId);
+          await sendPush(ownerTokens, {
+            title: "🔔 ¡Nuevo Pedido Recibido!",
+            body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`
+          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
+        }
+      }
+    }
+  } catch (err) {
+    logger.error("Error in onOrderCreated:", err);
+  }
+});
+
+/**
+ * Trigger: New chat message → Notify the other participant
+ */
+exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId}", async (event) => {
+  const message = event.data.data();
+  const chatId = event.params.chatId;
+  
+  if (!message || !message.senderId) return;
+
+  try {
+    // Get the chat document to find participants
+    const chatDoc = await db.collection("chats").doc(chatId).get();
+    if (!chatDoc.exists) return;
+    
+    const chatData = chatDoc.data();
+    const orderId = chatData.orderId;
+    
+    // Get the order to find all relevant parties
+    const orderDoc = await db.collection("orders").doc(orderId).get();
+    if (!orderDoc.exists) return;
+    
+    const order = orderDoc.data();
+    const senderName = message.senderName || "Alguien";
+    
+    // Determine who to notify (everyone except the sender)
+    let recipientIds = [];
+    
+    if (chatData.type === "client-commerce") {
+      // If sender is client → notify commerce owner
+      // If sender is commerce → notify client
+      if (message.senderId === order.userId) {
+        // Client sent → notify commerce owner
+        const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
+        if (comercioDoc.exists) {
+          recipientIds.push(comercioDoc.data().ownerId);
+        }
+      } else {
+        // Commerce sent → notify client
+        recipientIds.push(order.userId);
+      }
+    } else if (chatData.type === "client-delivery") {
+      // If sender is client → notify delivery
+      // If sender is delivery → notify client
+      if (message.senderId === order.userId) {
+        if (order.driverId) recipientIds.push(order.driverId);
+      } else {
+        recipientIds.push(order.userId);
+      }
+    }
+
+    // Get tokens and send
+    for (const recipientId of recipientIds) {
+      const tokens = await getUserTokens(recipientId);
+      if (tokens.length > 0) {
+        await sendPush(tokens, {
+          title: `💬 ${senderName}`,
+          body: message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text
+        }, {
+          tag: `chat-${chatId}`,
+          url: `#/pedido/${orderId}`,
+          type: "chat_message"
+        });
+      }
+    }
+  } catch (err) {
+    logger.error("Error in onNewChatMessage:", err);
+  }
+});
+
+/**
+ * Trigger: Order status change → Notify relevant parties
+ */
+exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const orderId = event.params.orderId;
+
+  if (!before || !after) return;
+  
+  // Only trigger on important changes
+  if (before.status === after.status && 
+      before.paymentStatus === after.paymentStatus &&
+      before.driverId === after.driverId &&
+      JSON.stringify(before.items) === JSON.stringify(after.items) &&
+      before.total === after.total) {
+    return;
+  }
+
+  const orderNum = after.orderId || orderId.slice(0, 6);
+
+  try {
+    // Payment Status Change Notification (For Commerce - Now unifies as the single 'Nuevo Pedido Recibido' alert for MP)
+    if (before.paymentStatus !== after.paymentStatus && after.paymentStatus === "paid") {
+       const comercioDoc = await db.collection("comercios").doc(after.comercioId).get();
+       if (comercioDoc.exists) {
+         const comData = comercioDoc.data();
+         const ownerId = comData.ownerId;
+         const commerceName = (comData.name || "").toLowerCase();
+         const isGoMarket = commerceName.includes("go!") && commerceName.includes("market");
+
+         if (isGoMarket) {
+           // Notify ALL admins for GoMarket
+           const adminTokens = await getAdminTokens();
+           await sendPush(adminTokens, {
+             title: "🛒 ¡Nuevo Pedido en GoMarket!",
+             body: `Recibiste el pedido #${orderNum} de ${after.userName || "un cliente"}.`
+           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders` });
+         } else {
+           // Regular commerce owner notification
+           const ownerTokens = await getUserTokens(ownerId);
+           await sendPush(ownerTokens, {
+             title: "🔔 ¡Nuevo Pedido Recibido!",
+             body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`
+           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders` });
+         }
+       }
+    }
+    // Status change notifications
+    if (before.status !== after.status) {
+      switch (after.status) {
+        case "confirmed": {
+          // Notify client: "👨‍🍳 Preparando tu pedido"
+          const clientTokens = await getUserTokens(after.userId);
+          await sendPush(clientTokens, {
+            title: "✅ Pedido Confirmado",
+            body: "👨‍🍳 Preparando tu pedido. ¡Ya casi está!"
+          }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
+          break;
+        }
+        case "ready": {
+          // Notify client: "Un delivery está yendo a buscarlo"
+          const clientTokens2 = await getUserTokens(after.userId);
+          await sendPush(clientTokens2, {
+            title: "📦 Pedido Listo",
+            body: "🛵 Un delivery está yendo a buscarlo"
+          }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
+
+          // Manual Assignment only: Geohash & Distance Auto-Assignment algorithm is disabled.
+          // Delivery drivers always claim orders manually from their panel.
+
+          // Targeted Co-pickup Scan
+          const coPickupDrivers = new Set();
+          const coPickupTokens = [];
+
+          try {
+            // Find active orders (confirmed or ready) from the same commerce that have a driver assigned
+            const assignedOrdersSnap = await db.collection("orders")
+              .where("comercioId", "==", after.comercioId)
+              .where("status", "in", ["confirmed", "ready"])
+              .get();
+
+            for (const orderDoc of assignedOrdersSnap.docs) {
+              const oData = orderDoc.data();
+              if (oData.driverId && !coPickupDrivers.has(oData.driverId)) {
+                // Verify driver is online and has space (exactly 1 active simple order)
+                const driverDoc = await db.collection("users").doc(oData.driverId).get();
+                if (driverDoc.exists) {
+                  const dData = driverDoc.data();
+                  const isOnline = dData.isOnline === true;
+                  const isDel = dData.isDelivery === true || dData.isDelivery === "true" || dData.role === "delivery";
+                  
+                  if (isOnline && isDel) {
+                    const activeOrdersCountSnap = await db.collection("orders")
+                      .where("driverId", "==", oData.driverId)
+                      .where("status", "in", ["confirmed", "ready", "delivering"])
+                      .get();
+
+                    if (activeOrdersCountSnap.size === 1) {
+                      coPickupDrivers.add(oData.driverId);
+                      const userTokens = await getUserTokens(oData.driverId);
+                      coPickupTokens.push(...userTokens);
+
+                      // Send targeted push with tag 'co-pickup-${orderId}' as requested
+                      await sendPush(userTokens, {
+                        title: "🛵 ¡Co-Retiro Optimizado!",
+                        body: `Hay otro pedido listo en ${after.comercioName || 'el comercio'}. ¡Sumalo a tu ruta!`
+                      }, { tag: `co-pickup-${orderId}`, url: "#/delivery" });
+                    }
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            logger.error("Error in co-pickup targeted scan:", err);
+          }
+
+          // Fallback: Broadcast to all online drivers if no close driver is found
+          let orderType = "simple";
+          if (after.isFavor) {
+            orderType = after.favorType === "compra" ? "gofavor: compra" : "gofavor: mandado";
+          } else if (after.isMultiple) {
+            orderType = "multiple";
+          }
+
+          const driverTokens = await getOnlineDeliveryTokens();
+          // Exclude targeted co-pickup tokens from the general broadcast
+          const broadcastTokens = driverTokens.filter(t => !coPickupTokens.includes(t));
+          if (broadcastTokens.length > 0) {
+            await sendPush(broadcastTokens, {
+              title: `🛵 ¡Nuevo Pedido Disponible! (${orderType.toUpperCase()})`,
+              body: `Hay un nuevo pedido ${orderType.toUpperCase()} listo para retirar en ${after.comercioName || 'el comercio'}.`
+            }, { tag: "new-available-order", url: "#/delivery" });
+          }
+          break;
+        }
+        case "delivering": {
+          // Notify client: "El pedido está en camino" + Delivery Code
+          const clientTokens3 = await getUserTokens(after.userId);
+          const delCode = after.verificationCode || "----";
+          await sendPush(clientTokens3, {
+            title: "🛵 ¡Tu pedido está en camino!",
+            body: `El repartidor ya lleva tu pedido. Código de entrega: ${delCode}`
+          }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}`, persistent: "true" });
+          break;
+        }
+        case "completed": {
+          // 1. Notify client: "Pedido entregado"
+          const clientTokens4 = await getUserTokens(after.userId);
+          await sendPush(clientTokens4, {
+            title: "🎉 ¡Pedido Entregado!",
+            body: "El repartidor ya entregó tu pedido. ¡Que lo disfrutes!"
+          }, { tag: `order-${orderId}-delivered`, url: `#/pedido/${orderId}`, persistent: "true" });
+          break;
+        }
+        case "cancelled": {
+          // Notify client: "Pedido cancelado"
+          const clientTokens5 = await getUserTokens(after.userId);
+          await sendPush(clientTokens5, {
+            title: "❌ Pedido Cancelado",
+            body: `Lamentablemente, tu pedido #${orderNum} de ${after.comercioName} fue cancelado.`
+          }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
+          break;
+        }
+      }
+    }
+    
+    // Order modification notification (items or total changed)
+    if (before.status === after.status && 
+        (JSON.stringify(before.items) !== JSON.stringify(after.items) || before.total !== after.total)) {
+      const clientTokens = await getUserTokens(after.userId);
+      await sendPush(clientTokens, {
+        title: "📝 Pedido Modificado",
+        body: `${after.comercioName} modificó tu pedido #${orderNum}. Nuevo total: $${after.total}`
+      }, { tag: `order-${orderId}-modified`, url: `#/pedido/${orderId}` });
+    }
+
+  } catch (err) {
+    logger.error("Error in onOrderStatusChange:", err);
+  }
+});
+
+/**
+ * Helper: Distance calculation (Haversine)
+ */
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Helper: Check if it is raining in Magdalena via Open-Meteo API (Node 18+ Native Fetch)
+ */
+async function checkIfRainingInMagdalena() {
+  try {
+    const res = await fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=-35.0811&longitude=-57.5146&current=rain,weather_code"
+    );
+    if (!res.ok) {
+      logger.warn("Open-Meteo response not OK in Cloud Function");
+      return false;
+    }
+    const data = await res.json();
+    const rain = data?.current?.rain || 0;
+    const code = data?.current?.weather_code || 0;
+    const rainCodes = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82];
+    const isRaining = rain > 0 || rainCodes.includes(code);
+    logger.info(`[Backend Weather] Rain: ${rain}mm, Weather Code: ${code}. Raining: ${isRaining}`);
+    return isRaining;
+  } catch (err) {
+    logger.error("Error fetching weather in Cloud Function:", err);
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// BACKEND-DRIVEN CHECKOUT & ORDER CREATION (Pilar 1)
+// ═══════════════════════════════════════════════════
+exports.createOrder = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(token);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+
+  const uid = decodedToken.uid;
+  const { cart, address, addressNotes, deliveryCoords, paymentMethod, redeemedPoints, totalDelivery, bundleId, tip, couponCode, allowReplacement } = req.body;
+
+  if (!cart || !Array.isArray(cart) || cart.length === 0) {
+    return res.status(400).json({ error: "El carrito está vacío" });
+  }
+
+  try {
+    const isRaining = await checkIfRainingInMagdalena();
+
+    // Fetch active offers for the cart's commerce IDs (done before transaction to prevent Firestore errors)
+    const commerceIds = [...new Set(cart.map(item => item.comercioId))];
+    let activeOffers = [];
+    try {
+      // Bulletproof: Fetch all active offers to avoid composite index errors, then filter in memory
+      const offersQuerySnap = await db.collection("offers")
+        .where("active", "==", true)
+        .get();
+      const allActiveOffers = offersQuerySnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      activeOffers = allActiveOffers.filter(o => o.comercioId && commerceIds.includes(o.comercioId));
+      logger.info(`Fetched ${activeOffers.length} active offers for commerce IDs: ${commerceIds.join(", ")}`);
+    } catch (err) {
+      logger.error("Error fetching active offers for checkout:", err);
+    }
+
+    // Start transactional order creation
+    const result = await db.runTransaction(async (transaction) => {
+      // 1. Fetch user data to verify points
+      const userRef = db.collection("users").doc(uid);
+      const userSnap = await transaction.get(userRef);
+      if (!userSnap.exists) throw new Error("Usuario no encontrado");
+      const userData = userSnap.data();
+
+      // Fetch global settings for deliveryCost, deliveryRainSurcharge, etc.
+      const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
+      const globalSettings = globalSettingsSnap.exists ? globalSettingsSnap.data() : {};
+      const baseRainSurcharge = globalSettings.deliveryRainSurcharge !== undefined ? globalSettings.deliveryRainSurcharge : 300;
+      const activeRainSurcharge = isRaining ? baseRainSurcharge : 0;
+
+      const userPoints = userData.points || 0;
+      if (redeemedPoints > 0 && userPoints < redeemedPoints) {
+        throw new Error("Puntos insuficientes para redimir");
+      }
+
+      // Calculate GoPoints discount: 1 point = $1
+      const calculatedDiscount = redeemedPoints > 0 ? redeemedPoints : 0;
+
+      // Validate Coupon securely inside transaction
+      let couponData = null;
+      let couponRef = null;
+      if (couponCode) {
+        const cleanCouponCode = couponCode.toUpperCase().trim();
+        couponRef = db.collection("coupons").doc(cleanCouponCode);
+        const couponSnap = await transaction.get(couponRef);
+        if (!couponSnap.exists) {
+          throw new Error("El cupón ingresado no existe.");
+        }
+        couponData = couponSnap.data();
+        if (couponData.active !== true) {
+          throw new Error("El cupón ingresado no está activo.");
+        }
+        if (typeof couponData.remaining === 'number' && couponData.remaining <= 0) {
+          throw new Error("Este cupón ya no tiene usos disponibles.");
+        }
+        if (couponData.expirationDate) {
+          const expDate = new Date(couponData.expirationDate + "T23:59:59-03:00");
+          if (Date.now() > expDate.getTime()) {
+            throw new Error("Este cupón ha expirado.");
+          }
+        }
+
+        // Single-use per user check!
+        const redemptionRef = couponRef.collection("redemptions").doc(uid);
+        const redemptionSnap = await transaction.get(redemptionRef);
+        if (redemptionSnap.exists) {
+          throw new Error("Ya has utilizado este cupón anteriormente.");
+        }
+
+        // Validate merchant coupon: cart must contain at least one item from this merchant
+        if (couponData.ownerId && couponData.ownerId !== 'admin') {
+          const merchantId = couponData.ownerId;
+          const hasMerchantItems = cart.some(item => item.comercioId === merchantId);
+          if (!hasMerchantItems) {
+            throw new Error(`Este cupón es exclusivo para productos de ${couponData.comercioName || 'este comercio'}.`);
+          }
+        }
+      }
+
+      // 2. Fetch app settings to get lastOrderId
+      const settingsRef = db.collection("settings").doc("settings");
+      const settingsSnap = await transaction.get(settingsRef);
+      let lastId = settingsSnap.exists && settingsSnap.data().lastOrderId ? settingsSnap.data().lastOrderId : 0;
+
+      // Group items by commerce
+      const grouped = {};
+      cart.forEach(item => {
+        const cId = item.comercioId;
+        if (!grouped[cId]) {
+          grouped[cId] = {
+            comercioName: item.comercioName,
+            items: []
+          };
+        }
+        grouped[cId].items.push(item);
+      });
+
+      const commerceEntries = Object.entries(grouped);
+      const isBundle = commerceEntries.length > 1;
+      const sharedVerificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+      // Read commerce and product docs for validation
+      const commerceDataMap = {};
+      const productDocsMap = {};
+
+      for (const [cId, g] of commerceEntries) {
+        const cSnap = await transaction.get(db.collection("comercios").doc(cId));
+        if (!cSnap.exists) throw new Error(`Comercio ${g.comercioName} no encontrado`);
+        commerceDataMap[cId] = cSnap.data() || {};
+
+        for (const item of g.items) {
+          const prodRef = db.collection("comercios").doc(cId).collection("products").doc(item.product.id);
+          const pSnap = await transaction.get(prodRef);
+          if (!pSnap.exists) throw new Error(`Producto ${item.product.name} no encontrado`);
+          productDocsMap[prodRef.path] = pSnap;
+        }
+      }
+
+      // --- STOCK VALIDATION AND ATOMIC DECREMENT ---
+      const productStockDecrements = {};
+      for (const [cId, g] of commerceEntries) {
+        for (const item of g.items) {
+          const prodRef = db.collection("comercios").doc(cId).collection("products").doc(item.product.id);
+          const path = prodRef.path;
+          productStockDecrements[path] = (productStockDecrements[path] || 0) + item.qty;
+        }
+      }
+
+      for (const [path, reqQty] of Object.entries(productStockDecrements)) {
+        const pSnap = productDocsMap[path];
+        const pData = pSnap.data();
+        if (pData.stockMode === 'limited') {
+          const stockQty = typeof pData.stockQuantity === 'number' ? pData.stockQuantity : 0;
+          if (stockQty < reqQty) {
+            throw new Error(`Stock insuficiente para "${pData.name}". Disponible: ${stockQty}, Solicitado: ${reqQty}`);
+          }
+          const prodRef = db.doc(path);
+          transaction.update(prodRef, {
+            stockQuantity: admin.firestore.FieldValue.increment(-reqQty)
+          });
+        }
+      }
+      // ---------------------------------------------
+
+      // --- SECURE SHIPPING FEE VALIDATION ---
+      const basePriceVal = globalSettings.deliveryBasePrice !== undefined ? Number(globalSettings.deliveryBasePrice) : 350;
+      const pricePerKmVal = globalSettings.deliveryPricePerKm !== undefined ? Number(globalSettings.deliveryPricePerKm) : 120;
+      const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
+      const extraStopFeeVal = globalSettings.deliveryExtraStopFee !== undefined ? Number(globalSettings.deliveryExtraStopFee) : 200;
+
+      const individualFees = [];
+      const clientLat = deliveryCoords && (deliveryCoords.lat !== undefined ? deliveryCoords.lat : deliveryCoords.latitude);
+      const clientLng = deliveryCoords && (deliveryCoords.lng !== undefined ? deliveryCoords.lng : deliveryCoords.longitude);
+
+      if (clientLat !== undefined && clientLng !== undefined) {
+        for (const [cId, g] of commerceEntries) {
+          const cData = commerceDataMap[cId];
+          if (cData && cData.coords) {
+            const cLat = cData.coords.lat !== undefined ? cData.coords.lat : cData.coords.latitude;
+            const cLng = cData.coords.lng !== undefined ? cData.coords.lng : cData.coords.longitude;
+            if (cLat !== undefined && cLng !== undefined) {
+              const distance = getDistance(clientLat, clientLng, cLat, cLng);
+              let rawFee = basePriceVal + (distance * pricePerKmVal);
+              if (rawFee < minPriceVal) {
+                rawFee = minPriceVal;
+              }
+              const roundedFee = Math.ceil(rawFee / 10) * 10;
+              individualFees.push(roundedFee);
+            }
+          }
+        }
+      }
+
+      let calculatedDeliveryFee = 0;
+      if (individualFees.length > 0) {
+        const maxIndividualFee = Math.max(...individualFees);
+        calculatedDeliveryFee = maxIndividualFee + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
+      } else {
+        calculatedDeliveryFee = minPriceVal + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
+      }
+
+      const driverTip = Number(tip || 0);
+      const totalCalculatedDelivery = calculatedDeliveryFee + driverTip;
+
+      let finalDeliveryCost = Number(totalDelivery || 0);
+      if (finalDeliveryCost < 0.9 * totalCalculatedDelivery) {
+        logger.warn(`Shipping fee tampering detected! Client sent totalDelivery: ${finalDeliveryCost}, calculated: ${totalCalculatedDelivery}. Overwriting.`);
+        finalDeliveryCost = totalCalculatedDelivery;
+      }
+      // --------------------------------------
+
+      const createdOrders = [];
+      const appUsageFeeRate = globalSettings.appUsageFeeRate !== undefined ? globalSettings.appUsageFeeRate : 0.05;
+
+      // Calculate and create orders
+      for (let i = 0; i < commerceEntries.length; i++) {
+        const [cId, g] = commerceEntries[i];
+        lastId++;
+
+        const cData = commerceDataMap[cId];
+        const pDocs = g.items.map(item => productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path]);
+
+        // Securely calculate products subtotal applying active offers
+        const subProductsTotal = g.items.reduce((s, item, idx) => {
+          const pSnap = pDocs[idx];
+          const pData = pSnap.data();
+          const basePrice = (pData.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+
+          const offer = activeOffers.find(o => 
+            o.active && 
+            o.comercioId === cId && 
+            o.productIds && 
+            o.productIds.includes(item.product.id)
+          );
+
+          let finalItemTotal = basePrice * item.qty;
+          if (offer) {
+            if (offer.type === '2x1') {
+              const paidQty = Math.ceil(item.qty / 2);
+              finalItemTotal = basePrice * paidQty;
+            } else if (offer.type === 'percentage') {
+              finalItemTotal = (basePrice * item.qty) * ((100 - (offer.value || 0)) / 100);
+            }
+          }
+
+          return s + finalItemTotal;
+        }, 0);
+
+        const subAppUsageFee = subProductsTotal * appUsageFeeRate;
+        const commerceCommissionRate = cData.commissionRate !== undefined && cData.commissionRate !== null 
+          ? cData.commissionRate 
+          : 0.10;
+        const subCommission = subProductsTotal * commerceCommissionRate;
+
+        // Bundle specifics
+        const subDeliveryCost = i === 0 ? finalDeliveryCost : 0;
+        const subDiscount = i === 0 ? calculatedDiscount : 0;
+
+        let subCouponDiscount = 0;
+        if (couponData) {
+          const isMerchantCoupon = couponData.ownerId && couponData.ownerId !== 'admin';
+          const isMySubOrder = !isMerchantCoupon || (cId === couponData.ownerId);
+
+          if (isMySubOrder) {
+            const scope = couponData.scope || 'products';
+            const discountType = couponData.discountType || (couponData.type === 'free_delivery' ? 'percentage' : 'percentage');
+            const couponVal = Number(couponData.value || 0);
+
+            if (scope === 'shipping' || couponData.type === 'free_delivery') {
+              if (i === 0) {
+                const baseDeliveryFee = Math.max(finalDeliveryCost - driverTip, 0);
+                if (couponData.type === 'free_delivery') {
+                  subCouponDiscount = baseDeliveryFee;
+                } else if (discountType === 'percentage') {
+                  subCouponDiscount = baseDeliveryFee * (couponVal / 100);
+                } else if (discountType === 'fixed') {
+                  subCouponDiscount = Math.min(couponVal, baseDeliveryFee);
+                }
+              }
+            } else { // products
+              if (discountType === 'percentage') {
+                subCouponDiscount = subProductsTotal * (couponVal / 100);
+              } else if (discountType === 'fixed') {
+                subCouponDiscount = Math.min(couponVal, subProductsTotal);
+              }
+            }
+          }
+        }
+
+        const subTotal = Math.max(subProductsTotal + subDeliveryCost + subAppUsageFee - subDiscount - subCouponDiscount, 0);
+
+        const orderRef = db.collection("orders").doc();
+        const orderData = {
+          orderId: lastId,
+          bundleId: isBundle ? bundleId : null,
+          isBundle,
+          bundleIndex: i,
+          bundleCount: commerceEntries.length,
+          comercioId: cId,
+          comercioName: g.comercioName,
+          comercioCoords: cData.coords || null,
+          userId: uid,
+          userName: userData.displayName || "Cliente",
+          userPhone: userData.phone || "",
+          deliveryAddress: address,
+          addressNotes: addressNotes || '',
+          deliveryCoords: deliveryCoords || null,
+          verificationCode: sharedVerificationCode,
+          allowReplacement: allowReplacement === true || allowReplacement === 'true',
+          items: g.items.map((item, idx) => {
+            const pSnap = pDocs[idx];
+            const pData = pSnap.data();
+            const basePrice = (pData.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+
+            const offer = activeOffers.find(o => 
+              o.active && 
+              o.comercioId === cId && 
+              o.productIds && 
+              o.productIds.includes(item.product.id)
+            );
+
+            let finalUnitPrice = basePrice;
+            if (offer) {
+              if (offer.type === '2x1') {
+                const paidQty = Math.ceil(item.qty / 2);
+                finalUnitPrice = (basePrice * paidQty) / item.qty;
+              } else if (offer.type === 'percentage') {
+                finalUnitPrice = basePrice * ((100 - (offer.value || 0)) / 100);
+              }
+            }
+
+            return {
+              comercioId: cId,
+              comercioName: g.comercioName,
+              name: pData.name,
+              price: finalUnitPrice,
+              qty: item.qty,
+              options: item.options || []
+            };
+          }),
+          subtotal: subProductsTotal,
+          deliveryCost: subDeliveryCost,
+          tip: i === 0 ? Number(tip || 0) : 0,
+          isRaining: isRaining,
+          rainSurcharge: i === 0 ? activeRainSurcharge : 0,
+          appUsageFee: subAppUsageFee,
+          discountAmount: subDiscount,
+          pointsRedeemed: i === 0 ? redeemedPoints : 0,
+          couponCode: couponData ? couponCode.toUpperCase().trim() : null,
+          couponDiscount: subCouponDiscount,
+          couponAbsorbedBy: couponData ? (couponData.absorbedBy || 'platform') : null,
+          total: subTotal,
+          commissionAmount: subCommission,
+          status: 'pending',
+          paymentMethod,
+          paymentStatus: 'pending',
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        transaction.set(orderRef, orderData);
+        createdOrders.push({ docId: orderRef.id, orderId: lastId, commerceId: cId, total: subTotal });
+
+        // Combination tracking updates
+        const itemProductIds = g.items.map(item => item.product.id);
+        if (itemProductIds.length > 1) {
+          for (const item of g.items) {
+            const prodRef = db.collection("comercios").doc(cId).collection("products").doc(item.product.id);
+            const pSnap = productDocsMap[prodRef.path];
+            if (pSnap && pSnap.exists) {
+              const pData = pSnap.data();
+              const combos = pData.frequentCombos || {};
+              
+              itemProductIds.forEach(otherId => {
+                if (otherId !== item.product.id) {
+                  combos[otherId] = (combos[otherId] || 0) + 1;
+                }
+              });
+
+              transaction.update(prodRef, { frequentCombos: combos });
+            }
+          }
+        }
+      }
+
+      // Deduct redeemed points from user
+      if (redeemedPoints > 0) {
+        transaction.update(userRef, {
+          points: admin.firestore.FieldValue.increment(-redeemedPoints)
+        });
+      }
+
+      // Decrement coupon remaining count and record redemption (Single-Use)
+      if (couponData && couponRef) {
+        transaction.update(couponRef, {
+          remaining: admin.firestore.FieldValue.increment(-1),
+          usedCount: admin.firestore.FieldValue.increment(1)
+        });
+
+        const redemptionRef = couponRef.collection("redemptions").doc(uid);
+        transaction.set(redemptionRef, {
+          userId: uid,
+          usedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+
+      transaction.set(settingsRef, { lastOrderId: lastId }, { merge: true });
+      return createdOrders;
+    });
+
+    // Notify all comercios
+    for (const order of result) {
+      await db.collection("notifications").add({
+        comercioId: order.commerceId,
+        orderId: order.docId,
+        title: "¡Nuevo Pedido!",
+        message: `Pedido #${order.orderId} de ${decodedToken.name || "Cliente"}`,
+        type: "new_order",
+        status: "unread",
+        pushNotify: true,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    res.status(200).json({ success: true, orders: result });
+  } catch (error) {
+    logger.error("Create Order Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(token);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+
+  const uid = decodedToken.uid;
+  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, total } = req.body;
+
+  if (!pickupAddress || !deliveryAddress || !details) {
+    return res.status(400).json({ error: "Faltan campos obligatorios (direcciones o detalles)" });
+  }
+
+  try {
+    const result = await db.runTransaction(async (transaction) => {
+      // 1. Fetch user data
+      const userRef = db.collection("users").doc(uid);
+      const userSnap = await transaction.get(userRef);
+      if (!userSnap.exists) throw new Error("Usuario no encontrado");
+      const userData = userSnap.data();
+
+      // 2. Fetch settings to get lastOrderId
+      const settingsRef = db.collection("settings").doc("settings");
+      const settingsSnap = await transaction.get(settingsRef);
+      let lastId = settingsSnap.exists && settingsSnap.data().lastOrderId ? settingsSnap.data().lastOrderId : 0;
+      lastId++;
+
+      // Fetch global settings to securely recalculate fees
+      const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
+      const globalSettings = globalSettingsSnap.exists ? globalSettingsSnap.data() : {};
+
+      const orderRef = db.collection("orders").doc();
+      const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+      // Secure fee validation for GoFavor
+      const pLat = pickupCoords && (pickupCoords.lat !== undefined ? pickupCoords.lat : pickupCoords.latitude);
+      const pLng = pickupCoords && (pickupCoords.lng !== undefined ? pickupCoords.lng : pickupCoords.longitude);
+      const dLat = deliveryCoords && (deliveryCoords.lat !== undefined ? deliveryCoords.lat : deliveryCoords.latitude);
+      const dLng = deliveryCoords && (deliveryCoords.lng !== undefined ? deliveryCoords.lng : deliveryCoords.longitude);
+
+      let secureDeliveryCost = 0;
+      if (pLat !== undefined && pLng !== undefined && dLat !== undefined && dLng !== undefined) {
+         const distance = getDistance(pLat, pLng, dLat, dLng);
+         const basePriceVal = globalSettings.deliveryBasePrice !== undefined ? Number(globalSettings.deliveryBasePrice) : 350;
+         const pricePerKmVal = globalSettings.deliveryPricePerKm !== undefined ? Number(globalSettings.deliveryPricePerKm) : 120;
+         const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
+         
+         let rawFee = basePriceVal + (distance * pricePerKmVal);
+         if (rawFee < minPriceVal) {
+           rawFee = minPriceVal;
+         }
+         secureDeliveryCost = Math.ceil(rawFee / 10) * 10;
+      } else {
+         const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
+         secureDeliveryCost = minPriceVal;
+      }
+
+      let finalDeliveryCost = Number(deliveryCost);
+      if (finalDeliveryCost < 0.9 * secureDeliveryCost) {
+        logger.warn(`GoFavor Delivery fee tampering detected! Client: ${finalDeliveryCost}, calculated: ${secureDeliveryCost}. Overwriting.`);
+        finalDeliveryCost = secureDeliveryCost;
+      }
+
+      const securePurchaseFee = type === 'compra' 
+        ? (globalSettings.favorPurchaseFee !== undefined ? Number(globalSettings.favorPurchaseFee) : 800)
+        : 0;
+
+      let finalPurchaseFee = Number(purchaseFee || 0);
+      if (type === 'compra' && finalPurchaseFee < 0.9 * securePurchaseFee) {
+        logger.warn(`GoFavor Purchase fee tampering detected! Client: ${finalPurchaseFee}, calculated: ${securePurchaseFee}. Overwriting.`);
+        finalPurchaseFee = securePurchaseFee;
+      } else if (type !== 'compra') {
+        finalPurchaseFee = 0;
+      }
+
+      const appUsageFeeRate = globalSettings.appUsageFeeRate !== undefined ? Number(globalSettings.appUsageFeeRate) : 0.05;
+      const subtotalVal = finalDeliveryCost + finalPurchaseFee;
+      const secureAppUsageFee = Math.ceil((subtotalVal * appUsageFeeRate) / 10) * 10;
+
+      let finalAppUsageFee = Number(appUsageFee || 0);
+      if (finalAppUsageFee < 0.9 * secureAppUsageFee) {
+        logger.warn(`GoFavor App usage fee tampering detected! Client: ${finalAppUsageFee}, calculated: ${secureAppUsageFee}. Overwriting.`);
+        finalAppUsageFee = secureAppUsageFee;
+      }
+
+      const secureTotal = finalDeliveryCost + finalPurchaseFee + finalAppUsageFee;
+      let finalTotal = Number(total);
+      if (finalTotal < 0.9 * secureTotal) {
+         logger.warn(`GoFavor Total fee tampering detected! Client: ${finalTotal}, calculated: ${secureTotal}. Overwriting.`);
+         finalTotal = secureTotal;
+      }
+
+      const orderData = {
+        orderId: lastId,
+        isFavor: true,
+        favorType: type,
+        userId: uid,
+        userName: userData.displayName || userData.name || "Cliente",
+        userPhone: userData.phone || "",
+        pickupAddress: pickupAddress,
+        pickupCoords: pickupCoords || null,
+        deliveryAddress: deliveryAddress,
+        deliveryCoords: deliveryCoords || null,
+        details: details,
+        deliveryCost: finalDeliveryCost,
+        purchaseFee: finalPurchaseFee,
+        appUsageFee: finalAppUsageFee,
+        total: finalTotal,
+        status: 'pending',
+        paymentMethod: 'efectivo',
+        paymentStatus: 'pending',
+        verificationCode,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      transaction.set(orderRef, orderData);
+      transaction.set(settingsRef, { lastOrderId: lastId }, { merge: true });
+      return { docId: orderRef.id, orderId: lastId };
+    });
+
+    // Notify available drivers via notifications collection
+    await db.collection("notifications").add({
+      title: "¡Nuevo Favor Disponible!",
+      message: `Hay un nuevo ${type} disponible`,
+      type: "new_favor",
+      status: "unread",
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.status(200).json({ success: true, orderId: result.docId, orderNum: result.orderId });
+  } catch (error) {
+    logger.error("Create Favor Order Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Endpoint: Send customized, segmented push notifications to devices via Pub/Sub Topics (Admin only)
+ */
+exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(token);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+
+  const uid = decodedToken.uid;
+  try {
+    // 1. Verify user is an Admin
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists || userDoc.data().role !== "admin") {
+      return res.status(403).json({ error: "No tenés permisos para realizar esta acción" });
+    }
+
+    const { title, body, url, audience, imageUrl } = req.body;
+    if (!body) {
+      return res.status(400).json({ error: "El cuerpo de la notificación es obligatorio" });
+    }
+
+    const targetAudience = audience || "all";
+
+    // 2. Fetch target devices' tokens in matching segments (Instant direct delivery, bypassing topic delay)
+    let targetTokens = [];
+    try {
+      if (targetAudience === "all") {
+        const tokensSnap = await db.collectionGroup("fcmTokens").get();
+        targetTokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+      } else {
+        const roleQueryVal = targetAudience === "clients" ? "client" :
+                             targetAudience === "drivers" ? "driver" : "commerce";
+        
+        let usersSnap;
+        if (targetAudience === "clients") {
+          usersSnap = await db.collection("users").where("role", "in", ["client", "admin"]).get();
+        } else if (targetAudience === "drivers") {
+          usersSnap = await db.collection("users").where("role", "in", ["driver", "delivery"]).get();
+        } else {
+          usersSnap = await db.collection("users").where("role", "in", ["commerce", "comercio"]).get();
+        }
+
+        const userIds = usersSnap.docs.map(d => d.id);
+        if (userIds.length > 0) {
+          for (const uId of userIds) {
+            const tSnap = await db.collection("users").doc(uId).collection("fcmTokens").get();
+            tSnap.docs.forEach(d => {
+              if (d.data().token) {
+                targetTokens.push(d.data().token);
+              }
+            });
+          }
+        }
+      }
+    } catch (cErr) {
+      logger.warn("Target devices tokens query failed:", cErr);
+    }
+
+    // Deduplicate to avoid sending multiples to same device
+    targetTokens = [...new Set(targetTokens)];
+    const sentCount = targetTokens.length;
+
+    // 3. Create a broadcast record in Firestore for real-time Campaign Analytics (CTR tracking)
+    const broadcastRef = await db.collection("broadcasts").add({
+      title: title || "Go Delivery",
+      body: body,
+      imageUrl: imageUrl || "",
+      url: url || "/#/",
+      targetAudience: targetAudience,
+      sentCount: sentCount || 0,
+      clicks: 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // 4. Send to devices directly using the robust sendPush multicast utility (instant arrival!)
+    if (targetTokens.length > 0) {
+      await sendPush(targetTokens, {
+        title: title || "Go Delivery",
+        body: body
+      }, {
+        url: url || "/#/",
+        type: "custom_global_push",
+        broadcastId: broadcastRef.id,
+        imageUrl: imageUrl || ""
+      });
+      logger.info(`Global push sent successfully directly to ${targetTokens.length} devices.`);
+    }
+
+    res.status(200).json({ success: true, sentCount: sentCount || 0, broadcastId: broadcastRef.id });
+  } catch (error) {
+    logger.error("Send Global Push Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Endpoint: Increment analytics clicks (CTR) from Service Worker in background
+ */
+exports.trackBroadcastClick = onRequest({ cors: true }, async (req, res) => {
+  const { broadcastId } = req.query;
+  if (!broadcastId) {
+    return res.status(400).json({ error: "broadcastId is required" });
+  }
+
+  try {
+    await db.collection("broadcasts").doc(broadcastId).update({
+      clicks: admin.firestore.FieldValue.increment(1)
+    });
+    res.status(200).json({ success: true });
+  } catch (err) {
+    logger.error("Error tracking broadcast click:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Trigger: Automatically subscribe client PWA FCM tokens to Pub/Sub Topics based on role when registered
+ */
+exports.onFCMTokenRegistered = onDocumentCreated("users/{userId}/fcmTokens/{token}", async (event) => {
+  const token = event.params.token;
+  const userId = event.params.userId;
+
+  try {
+    const userDoc = await db.collection("users").doc(userId).get();
+    if (!userDoc.exists) return;
+
+    const userData = userDoc.data();
+    const role = (userData.role || "client").toString().toLowerCase();
+
+    // 1. All devices subscribe to the global channel
+    await admin.messaging().subscribeToTopic(token, "global_broadcast");
+    logger.info(`[Pub/Sub] Subscribed token to global_broadcast: ${token}`);
+
+    // 2. Role-specific subscriptions
+    if (role === "admin" || role === "client") {
+      await admin.messaging().subscribeToTopic(token, "clients_broadcast");
+      logger.info(`[Pub/Sub] Subscribed token to clients_broadcast: ${token}`);
+    } else if (role === "driver" || role === "repartidor") {
+      await admin.messaging().subscribeToTopic(token, "drivers_broadcast");
+      logger.info(`[Pub/Sub] Subscribed token to drivers_broadcast: ${token}`);
+    } else if (role === "commerce" || role === "comercio") {
+      await admin.messaging().subscribeToTopic(token, "stores_broadcast");
+      logger.info(`[Pub/Sub] Subscribed token to stores_broadcast: ${token}`);
+    }
+  } catch (err) {
+    logger.error("Error in onFCMTokenRegistered trigger:", err);
+  }
+});
+
+/**
+ * Trigger: Automatically send dynamic FCM Push Notifications to devices when P2P points are gifted or a challenge is completed.
+ */
+exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/{notificationId}", async (event) => {
+  const notification = event.data.data();
+  const userId = event.params.userId;
+  if (!notification) return;
+
+  // Protect from loop: Only trigger push notifications for direct P2P points transfer or weekly challenge completions
+  if (notification.type !== 'points_received' && notification.type !== 'challenge_completion') {
+    return;
+  }
+
+  try {
+    const tokens = await getUserTokens(userId);
+    if (tokens.length > 0) {
+      await sendPush(tokens, {
+        title: notification.title || "Go Delivery",
+        body: notification.body || ""
+      }, {
+        tag: `notif-${event.params.notificationId}`,
+        url: notification.url || "/#/",
+        type: notification.type
+      });
+      logger.info(`Push notification sent successfully to user ${userId} for dynamic alert: ${notification.title}`);
+    }
+  } catch (err) {
+    logger.error("Error in onNotificationCreated push trigger:", err);
+  }
+});
+
+
+

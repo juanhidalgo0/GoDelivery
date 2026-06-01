@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    const savedTheme = localStorage.getItem('gd-theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="description"
+    content="GoDelivery — Pedí lo que necesites, lo llevamos a tu puerta. Delivery de comercios locales." />
+  <meta name="theme-color" content="#E11D48" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>GoDelivery — Delivery a tu puerta</title>
+  <link rel="icon" type="image/png" href="/logo-pwa.png" />
+  <link rel="apple-touch-icon" href="/logo-pwa.png" />
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- Preconnect to Google Fonts for performance -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+
+  <!-- Critical CSS for Splash Screen (Instant Paint) -->
+  <style>
+    :root {
+      --color-primary: #E11D48;
+      --color-secondary: #1A1A1A;
+      --color-bg: #FFFFFF;
+      --font-display: 'Outfit', sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--color-bg);
+    }
+
+    /* Opaque Premium Black Background */
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9999999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #000000;
+      overflow: hidden;
+      transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), 
+                  transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), 
+                  filter 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+                  visibility 0.8s;
+      will-change: opacity, transform, filter;
+    }
+
+    #splash-screen.fade-out {
+      opacity: 0;
+      transform: scale(1.05);
+      filter: blur(12px);
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* Ambient Glowing Blobs - Premium soft 3D depth lights */
+    .splash-blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      z-index: 1;
+      pointer-events: none;
+      animation: blobFloat 14s ease-in-out infinite alternate;
+    }
+
+    .splash-blob-1 {
+      width: 380px;
+      height: 380px;
+      background: radial-gradient(circle, rgba(225, 29, 72, 0.03) 0%, rgba(225, 29, 72, 0) 70%);
+      top: -10%;
+      left: -10%;
+      animation-delay: 0s;
+    }
+
+    .splash-blob-2 {
+      width: 550px;
+      height: 550px;
+      background: radial-gradient(circle, rgba(15, 23, 42, 0.02) 0%, rgba(15, 23, 42, 0) 70%);
+      bottom: -15%;
+      right: -10%;
+      animation-delay: 2s;
+    }
+
+    .splash-blob-3 {
+      width: 320px;
+      height: 320px;
+      background: radial-gradient(circle, rgba(225, 29, 72, 0.02) 0%, rgba(225, 29, 72, 0) 70%);
+      top: 30%;
+      left: 50%;
+      animation-delay: 4.5s;
+    }
+
+    @keyframes blobFloat {
+      0% {
+        transform: translate(0, 0) scale(1);
+      }
+      50% {
+        transform: translate(45px, -35px) scale(1.15);
+      }
+      100% {
+        transform: translate(-35px, 45px) scale(0.9);
+      }
+    }
+
+    .splash-content {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.8s ease;
+      will-change: transform, opacity;
+    }
+
+    #splash-screen.fade-out .splash-content {
+      transform: translateY(-24px);
+      opacity: 0;
+    }
+
+    /* Logo Container - Minimalist & Breathing with subtle glow */
+    .splash-logo-container {
+      position: relative;
+      width: 104px;
+      height: 104px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: logoEntrance 0.9s cubic-bezier(0.34, 1.76, 0.64, 1) forwards;
+    }
+
+    .splash-logo-img {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      object-fit: cover;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+      border: 1.5px solid rgba(255, 255, 255, 0.2);
+      z-index: 2;
+      animation: logoBreathe 3s ease-in-out infinite 0.9s;
+    }
+
+    @keyframes logoEntrance {
+      0% {
+        transform: scale(0.4) rotate(-5deg);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+      }
+    }
+
+    @keyframes logoBreathe {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 15px 35px rgba(15, 23, 42, 0.08);
+      }
+      50% {
+        transform: scale(1.04);
+        box-shadow: 0 20px 45px rgba(225, 29, 72, 0.12), 0 15px 35px rgba(15, 23, 42, 0.06);
+      }
+    }
+
+    /* Elegant Opaque Branding Typography */
+    .splash-title {
+      font-family: var(--font-display);
+      font-size: 42px;
+      font-weight: 900;
+      margin: 0;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #E11D48 0%, #9F1239 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 4px 10px rgba(225, 29, 72, 0.05);
+      animation: titleEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+    }
+
+    .splash-subtitle {
+      font-family: var(--font-display);
+      font-size: 11px;
+      font-weight: 800;
+      color: #94A3B8;
+      margin: 8px 0 0 0;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      opacity: 0.85;
+      animation: titleEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+    }
+
+    @keyframes titleEntrance {
+      0% {
+        transform: translateY(15px);
+        opacity: 0;
+      }
+      100% {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    /* Spinner & Progress - Sleek Rosa/Slate 100 */
+    .splash-loader-container {
+      margin-top: 44px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      animation: fadeIn 0.8s ease 0.45s both;
+    }
+
+    .splash-spinner {
+      width: 40px;
+      height: 40px;
+      animation: rotateSpinner 2s linear infinite;
+    }
+
+    .splash-spinner .path-bg {
+      stroke: #F1F5F9;
+    }
+
+    .splash-spinner .path {
+      stroke: #E11D48;
+      stroke-linecap: round;
+      animation: dashSpinner 1.5s ease-in-out infinite;
+    }
+
+    @keyframes rotateSpinner {
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes dashSpinner {
+      0% {
+        stroke-dasharray: 1, 150;
+        stroke-dashoffset: 0;
+      }
+      50% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -35;
+      }
+      100% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -124;
+      }
+    }
+
+    /* Dynamic Loading Text - Premium Slate Legibility */
+    .loading-text-wrapper {
+      position: relative;
+      height: 20px;
+      width: 280px;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .loading-text {
+      position: absolute;
+      left: 0;
+      right: 0;
+      margin: 0 auto;
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 600;
+      color: #CBD5E1;
+      opacity: 0;
+      transform: translateY(12px);
+    }
+
+    .loading-text.text-1 {
+      animation: sequenceText 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+
+    .loading-text.text-2 {
+      animation: sequenceText 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      animation-delay: 2s;
+    }
+
+    .loading-text.text-3 {
+      animation: sequenceText 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      animation-delay: 4s;
+    }
+
+    @keyframes sequenceText {
+      0% {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      5%, 28% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      33%, 100% {
+        opacity: 0;
+        transform: translateY(-12px);
+      }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  </style>
+
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="/src/styles/index.css" />
+  <link rel="stylesheet" href="/src/styles/theme.css" />
+  <link rel="stylesheet" href="/src/styles/components.css" />
+  <link rel="stylesheet" href="/src/styles/pages.css" />
+  <link rel="stylesheet" href="/src/styles/tracking.css" />
+  <link rel="stylesheet" href="/src/styles/chat.css" />
+  <link rel="stylesheet" href="/src/styles/product-modal.css" />
+  <link rel="stylesheet" href="/src/styles/map-styles.css" />
+  <link rel="stylesheet" href="/src/styles/search.css" />
+  <link rel="stylesheet" href="/src/styles/onboarding.css" />
+
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+  <!-- Google Maps API -->
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places"></script>
+
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+  <script>
+    // Bridge for OAuth Redirects (Mercado Pago doesn't like #)
+    if (window.location.pathname === '/mp-connect') {
+      const params = window.location.search;
+      window.location.href = '/#' + window.location.pathname + params;
+    }
+  </script>
+</head>
+
+<body>
+  <div id="app">
+    <!-- App shell -->
+    <header id="app-header"></header>
+    <div id="active-order-banner-container"></div>
+
+
+    <main id="app-slider" class="main-slider">
+      <div id="page-home" class="slide-panel"></div>
+      <div id="page-commerce" class="slide-panel"></div>
+      <div id="page-delivery" class="slide-panel"></div>
+      <div id="page-cart" class="slide-panel"></div>
+      <div id="page-profile" class="slide-panel"></div>
+    </main>
+    <div id="app-overlay" class="slide-overlay"></div>
+
+
+
+    <!-- Splash / Loading -->
+    <div class="splash-screen" id="splash-screen">
+      <!-- Ambient Glowing Blobs -->
+      <div class="splash-blob splash-blob-1"></div>
+      <div class="splash-blob splash-blob-2"></div>
+      <div class="splash-blob splash-blob-3"></div>
+
+      <div class="splash-content">
+        <div class="splash-logo-container">
+          <img src="/logo-brand.jpg" alt="GoDelivery" class="splash-logo-img" />
+        </div>
+        
+        <h1 class="splash-title">GoDelivery</h1>
+        <p class="splash-subtitle">Delivery a tu puerta</p>
+        
+        <div class="splash-loader-container">
+          <!-- Premium Circular SVG Spinner with pure white color -->
+          <svg class="splash-spinner" viewBox="0 0 50 50">
+            <circle class="path-bg" cx="25" cy="25" r="20" fill="none" stroke-width="4.5"></circle>
+            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4.5"></circle>
+          </svg>
+          
+          <div class="loading-text-wrapper">
+            <span class="loading-text text-1">Iniciando aplicación...</span>
+            <span class="loading-text text-2">Conectando servicios...</span>
+            <span class="loading-text text-3">Preparando delicias...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <nav id="app-navbar"></nav>
+  </div>
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+  <!-- Modal container -->
+  <div id="modal-container"></div>
+  <div id="notifications-drawer-container"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>

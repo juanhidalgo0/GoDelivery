@@ -1,0 +1,119 @@
+/* GoDelivery — Smart Search Dropdown Styles */
+.search-suggestions-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: var(--color-surface); /* Ensure this is solid or near-solid */
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  z-index: 10001; /* Above header elements */
+  max-height: 400px;
+  overflow-y: auto;
+  display: none;
+  padding: 16px;
+}
+
+/* Ensure background is opaque in dark mode too */
+[data-theme="dark"] .search-suggestions-dropdown {
+  background: #1a1a1a;
+  border-color: rgba(255,255,255,0.1);
+}
+
+.search-suggestions-dropdown.active {
+  display: block;
+}
+
+.search-suggestion-group {
+  margin-bottom: 20px;
+}
+
+.search-suggestion-header {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 12px;
+}
+
+.search-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  text-decoration: none;
+  color: var(--color-text-primary);
+  transition: all 0.2s ease;
+  margin-bottom: 6px;
+  background: rgba(255,255,255,0.02);
+}
+
+.search-suggestion-item:hover,
+.search-suggestion-item.selected {
+  background: var(--color-bg-secondary);
+  transform: translateX(6px);
+  box-shadow: var(--shadow-sm);
+}
+
+.suggestion-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-light);
+}
+
+.suggestion-icon-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.suggestion-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.suggestion-title {
+  font-size: 15px;
+  font-weight: 800;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-subtitle {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+}
+
+.suggestion-highlight {
+  color: var(--color-primary);
+  font-weight: 900;
+  text-decoration: none;
+  background: rgba(var(--color-primary-rgb), 0.1);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.search-suggestion-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+
