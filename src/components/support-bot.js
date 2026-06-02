@@ -107,8 +107,8 @@ export function initSupportBot() {
   // Chat window template
   container.innerHTML = `
     <button class="support-bot-fab" id="support-bot-fab-btn">
-      ${icon('chatBubble', 26)}
-      <span id="user-support-unread-badge" style="display:none; position:absolute; top:-2px; right:-2px; width:16px; height:16px; background:var(--color-primary); border-radius:50%; border:2px solid white; animation: badgePulse 2s infinite;"></span>
+      <span id="support-bot-icon-container" style="display:flex; align-items:center; justify-content:center;">${icon('chatBubble', 26)}</span>
+      <span id="user-support-unread-badge" style="display:none; position:absolute; top:-4px; right:-4px; background:var(--color-primary); color:white; min-width:18px; height:18px; border-radius:50%; border:2px solid white; font-size:10px; font-weight:900; align-items:center; justify-content:center; animation: badgePulse 2s infinite; padding:1px; box-sizing:border-box;">0</span>
     </button>
 
     <div class="support-bot-window" id="support-bot-window-panel">
@@ -228,7 +228,20 @@ export function initSupportBot() {
 
       // Update badge if unread and window is closed
       if (data.unreadByUser && !isOpen) {
-        unreadBadge.style.display = 'block';
+        let unreadCount = 0;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].sender === 'admin') {
+            unreadCount++;
+          } else {
+            break;
+          }
+        }
+        if (unreadCount > 0) {
+          unreadBadge.textContent = unreadCount;
+          unreadBadge.style.display = 'flex';
+        } else {
+          unreadBadge.style.display = 'none';
+        }
       } else {
         unreadBadge.style.display = 'none';
       }
@@ -250,8 +263,11 @@ export function initSupportBot() {
         `;
 
         messagesBox.innerHTML = backToPresetButtonHTML + messages.map(msg => `
-          <div class="support-bot-message ${msg.sender === 'user' ? 'user' : 'bot'}">
-            ${msg.text}
+          <div class="support-bot-message ${msg.sender === 'user' ? 'user' : 'bot'}" style="${msg.image ? 'padding: 8px;' : ''}">
+            ${msg.image ? `
+              <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
+              ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px; font-weight:600;">${msg.text}</div>` : ''}
+            ` : msg.text}
           </div>
         `).join('');
 
@@ -593,10 +609,66 @@ export function initSupportBot() {
     }, 1200);
   };
 
+  const handleSendImage = async (file) => {
+    const user = getState().user;
+    if (!user) return;
+
+    try {
+      import('../components/toast.js').then(t => t.showToast('Enviando imagen...', 'info'));
+      const { compressImageToBase64 } = await import('../utils/image.js');
+      const base64Data = await compressImageToBase64(file, 800, 0.6);
+
+      const { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
+      const chatRef = doc(db, 'support_chats', user.uid);
+      const chatSnap = await getDoc(chatRef);
+
+      const newMessage = {
+        sender: 'user',
+        text: '📷 Foto enviada',
+        image: base64Data,
+        timestamp: Date.now()
+      };
+
+      if (!chatSnap.exists()) {
+        const ticketNum = Math.floor(100000 + Math.random() * 900000);
+        await setDoc(chatRef, {
+          userId: user.uid,
+          userName: user.displayName || 'Usuario',
+          email: user.email || '',
+          goId: user.goId || '',
+          ticketId: `#TK-${ticketNum}`,
+          status: 'pending_approval',
+          lastMessageText: '📷 Foto',
+          lastMessageTime: serverTimestamp(),
+          unreadByAdmin: true,
+          unreadByUser: false,
+          messages: [newMessage]
+        });
+      } else {
+        await updateDoc(chatRef, {
+          status: 'pending_approval',
+          goId: user.goId || chatSnap.data().goId || '',
+          lastMessageText: '📷 Foto',
+          lastMessageTime: serverTimestamp(),
+          unreadByAdmin: true,
+          unreadByUser: false,
+          messages: arrayUnion(newMessage)
+        });
+      }
+    } catch (err) {
+      console.error('Error sending support image:', err);
+    }
+  };
+
   const renderInputArea = (active, ticketId = '') => {
     if (active) {
       footerArea.innerHTML = `
         <div style="display:flex; padding: 10px 14px; background: var(--color-surface); border-top: 1px solid var(--color-border); gap:8px; align-items:center;">
+          <!-- Camera/Image Button -->
+          <button id="support-image-btn" style="background:none; border:none; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; transition:background 0.2s;">
+            ${icon('camera', 20)}
+          </button>
+          <input type="file" id="support-image-input" accept="image/*" style="display:none;" />
           <input type="text" id="support-bot-input" placeholder="Escribí tu mensaje..." style="flex:1; border: 1.5px solid var(--color-border); border-radius: 14px; padding: 8px 14px; font-size:13px; font-weight:700; outline:none; background:var(--color-bg); color:var(--color-text); transition:border-color 0.2s;" />
           <button id="support-bot-send" style="background:var(--color-primary); color:white; border:none; border-radius:14px; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 4px 12px rgba(var(--color-primary-rgb), 0.2);">
             ${icon('send', 18)}
@@ -606,10 +678,23 @@ export function initSupportBot() {
       // Re-bind listeners
       const sendBtn = footerArea.querySelector('#support-bot-send');
       const textInput = footerArea.querySelector('#support-bot-input');
+      const cameraBtn = footerArea.querySelector('#support-image-btn');
+      const fileInput = footerArea.querySelector('#support-image-input');
+
       sendBtn.onclick = handleSendMessage;
       textInput.onkeydown = (e) => {
         if (e.key === 'Enter') handleSendMessage();
       };
+
+      if (cameraBtn && fileInput) {
+        cameraBtn.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            handleSendImage(file);
+          }
+        };
+      }
     } else {
       footerArea.innerHTML = `
         <div style="background:var(--color-bg-secondary); border-top:1px solid var(--color-border); padding:16px 20px; text-align:center; font-size:12.5px; font-weight:800; color:var(--color-text-secondary); display:flex; flex-direction:column; gap:6px; align-items:center; justify-content:center; width:100%;">
@@ -657,6 +742,7 @@ export function initSupportBot() {
           userId: user.uid,
           userName: user.displayName || 'Usuario',
           email: user.email || '',
+          goId: user.goId || '',
           ticketId: `#TK-${ticketNum}`,
           status: 'pending_approval',
           lastMessageText: text,
@@ -668,6 +754,7 @@ export function initSupportBot() {
       } else {
         await updateDoc(chatRef, {
           status: 'pending_approval',
+          goId: user.goId || chatSnap.data().goId || '',
           lastMessageText: text,
           lastMessageTime: serverTimestamp(),
           unreadByAdmin: true,
@@ -693,10 +780,11 @@ export function initSupportBot() {
       return;
     }
 
+    const iconContainer = document.getElementById('support-bot-icon-container');
     isOpen = !isOpen;
     if (isOpen) {
       fab.classList.add('open');
-      fab.innerHTML = icon('close', 24);
+      if (iconContainer) iconContainer.innerHTML = icon('close', 24);
       panel.classList.add('show');
       unreadBadge.style.display = 'none';
 
@@ -706,7 +794,7 @@ export function initSupportBot() {
       });
     } else {
       fab.classList.remove('open');
-      fab.innerHTML = icon('chatBubble', 26);
+      if (iconContainer) iconContainer.innerHTML = icon('chatBubble', 26);
       panel.classList.remove('show');
     }
   };
@@ -731,7 +819,8 @@ export function initSupportBot() {
         panelEl.classList.remove('show');
         if (fabEl) {
           fabEl.classList.remove('open');
-          fabEl.innerHTML = icon('chatBubble', 26);
+          const iconContainer = document.getElementById('support-bot-icon-container');
+          if (iconContainer) iconContainer.innerHTML = icon('chatBubble', 26);
         }
         isOpen = false;
       }

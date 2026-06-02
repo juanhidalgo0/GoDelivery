@@ -214,11 +214,36 @@ export async function renderAdminUsers() {
       }
       showConfirm({
         title: 'ELIMINAR USUARIO',
-        message: 'Escribí ELIMINAR para confirmar:',
+        message: '¿Estás seguro de que deseas eliminar permanentemente a este usuario y todos sus datos asociados de la plataforma?',
+        danger: true,
+        confirmText: 'Sí, eliminar',
         onConfirm: async () => {
-          await deleteDoc(doc(db, 'users', uid));
-          showToast('Eliminado', 'info');
-          location.reload();
+          try {
+            // Delete user doc
+            await deleteDoc(doc(db, 'users', uid));
+            // Delete commerce doc if exists
+            await deleteDoc(doc(db, 'comercios', uid));
+
+            // Remove reactively from local array
+            const idx = users.findIndex(x => x.uid === uid);
+            if (idx !== -1) {
+              users.splice(idx, 1);
+            }
+
+            // Re-render list and update total badge
+            const searchVal = document.getElementById('users-search')?.value || '';
+            renderUsersList(users, searchVal, currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal());
+
+            const totalBadge = document.getElementById('users-total-badge');
+            if (totalBadge) {
+              totalBadge.textContent = `${users.length}`;
+            }
+
+            showToast('Usuario eliminado con éxito', 'success');
+          } catch (err) {
+            console.error('Error deleting user:', err);
+            showToast('Error al eliminar el usuario', 'error');
+          }
         }
       });
       return;

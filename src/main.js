@@ -254,7 +254,10 @@ async function init() {
           
           signInWithGoogle().then((user) => {
             if (user) {
-              window.location.reload();
+              // Clean up the URL query params so ref code is not persisted in address bar
+              const url = new URL(window.location.href);
+              url.searchParams.delete('ref');
+              window.history.replaceState({}, '', url.pathname + url.search + url.hash);
             } else {
               // Restore button state if login fails or is cancelled
               loginBtn.disabled = false;
@@ -376,12 +379,23 @@ async function init() {
       // Show Onboarding and Notifications if NOT on the Install Lock Screen
       const runStartupFlow = () => {
         if (isPreview) return; // Bypass onboarding, push notifications, and address modals in preview mode
+
+        const triggerReferralModal = () => {
+          import('./auth.js').then(m => m.checkAndShowReferralWelcome());
+        };
+
         import('./components/onboarding.js')
           .then(m => {
             m.showOnboarding(() => {
               initPushNotifications();
               if (user && !getState().deliveryAddress) {
-                import('./components/address-modal.js').then(m => m.ensureAddress());
+                import('./components/address-modal.js').then(m => {
+                  m.ensureAddress(() => {
+                    triggerReferralModal();
+                  });
+                });
+              } else {
+                triggerReferralModal();
               }
             });
           })
@@ -389,7 +403,13 @@ async function init() {
             console.error('Onboarding failed to load', err);
             initPushNotifications();
             if (user && !getState().deliveryAddress) {
-              import('./components/address-modal.js').then(m => m.ensureAddress());
+              import('./components/address-modal.js').then(m => {
+                m.ensureAddress(() => {
+                  triggerReferralModal();
+                });
+              });
+            } else {
+              triggerReferralModal();
             }
           });
       };
@@ -400,20 +420,156 @@ async function init() {
         runStartupFlow();
       }
 
-      // Proactive Geolocation Pre-fetch for "Instant" Map Experience (only if already granted)
+      // Proactive Geolocation Pre-fetch & Geofencing check
       if (!isPreview && navigator.geolocation && navigator.permissions) {
         navigator.permissions.query({ name: 'geolocation' }).then((res) => {
           if (res.state === 'granted') {
             navigator.geolocation.getCurrentPosition(
               (pos) => {
-                const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                import('./state.js').then(m => m.setState('deliveryCoords', coords));
+                const currentCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                
+                import('./state.js').then(stateMod => {
+                  const state = stateMod.getState();
+                  const savedCoords = state.deliveryCoords;
+                  const savedAddress = state.deliveryAddress;
+                  
+                  // Geofencing: Check if user is >500 meters away from configured address
+                  if (savedAddress && savedCoords && savedCoords.lat && savedCoords.lng) {
+                    const R = 6371e3; // metres
+                    const phi1 = currentCoords.lat * Math.PI/180;
+                    const phi2 = savedCoords.lat * Math.PI/180;
+                    const deltaPhi = (savedCoords.lat - currentCoords.lat) * Math.PI/180;
+                    const deltaLambda = (savedCoords.lng - currentCoords.longitude) * Math.PI/180;
+
+                    const a = Math.sin(deltaPhi/2) * Math.sin(deltaPhi/2) +
+                              Math.cos(phi1) * Math.cos(phi2) *
+                              Math.sin(deltaLambda/2) * Math.sin(deltaLambda/2);
+                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                    const distance = R * c; // in metres
+
+                    if (distance > 500) {
+                      showFloatingGeofenceBanner();
+                    }
+                  }
+                });
               },
               null,
               { enableHighAccuracy: false, maximumAge: 300000 }
             );
           }
         }).catch(() => {});
+      }
+
+      function showFloatingGeofenceBanner() {
+        if (document.getElementById('floating-geofence-banner')) return;
+
+        const banner = document.createElement('div');
+        banner.id = 'floating-geofence-banner';
+        banner.style.cssText = `
+          position: fixed;
+          bottom: calc(var(--navbar-height, 60px) + 16px + env(safe-area-inset-bottom, 0px));
+          left: 16px;
+          right: 16px;
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(255, 255, 255, 0.4);
+          border-radius: 20px;
+          padding: 14px 16px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+          z-index: 1800;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          transform: translateY(150%);
+          transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        `;
+        
+        if (document.documentElement.getAttribute('data-theme') === 'dark') {
+          banner.style.background = 'rgba(30, 41, 59, 0.95)';
+          banner.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+        }
+
+        banner.innerHTML = `
+          <div style="
+            width: 40px; 
+            height: 40px; 
+            border-radius: 50%; 
+            background: rgba(227, 27, 35, 0.1); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            flex-shrink: 0;
+            position: relative;
+          ">
+            <div style="
+              position: absolute;
+              width: 100%;
+              height: 100%;
+              border-radius: 50%;
+              background: rgba(227, 27, 35, 0.2);
+              animation: geoPulseEffect 2s infinite ease-out;
+            "></div>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary, #E31B23)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+          </div>
+          
+          <div style="flex: 1; min-width: 0; cursor: pointer;" id="floating-geofence-action">
+            <div style="font-weight: 800; font-size: 13.5px; color: var(--color-text, #0F172A); margin-bottom: 2px;">¿Estás en un lugar nuevo?</div>
+            <div style="font-size: 11.5px; color: var(--color-text-secondary, #64748B); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Toca para actualizar tu dirección de entrega</div>
+          </div>
+          
+          <button id="floating-geofence-close" style="
+            background: none; 
+            border: none; 
+            color: var(--color-text-secondary, #64748B); 
+            cursor: pointer; 
+            padding: 4px; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+          ">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        `;
+
+        document.body.appendChild(banner);
+
+        if (!document.getElementById('geofence-pulse-style')) {
+          const style = document.createElement('style');
+          style.id = 'geofence-pulse-style';
+          style.innerHTML = `
+            @keyframes geoPulseEffect {
+              0% { transform: scale(0.9); opacity: 1; }
+              100% { transform: scale(1.6); opacity: 0; }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+
+        requestAnimationFrame(() => {
+          banner.style.transform = 'translateY(0)';
+        });
+
+        const dismiss = () => {
+          banner.style.transform = 'translateY(150%)';
+          setTimeout(() => banner.remove(), 500);
+        };
+
+        banner.querySelector('#floating-geofence-close').onclick = (e) => {
+          e.stopPropagation();
+          dismiss();
+        };
+
+        banner.querySelector('#floating-geofence-action').onclick = () => {
+          dismiss();
+          import('./components/address-modal.js').then(m => {
+            m.showAddressPrompt();
+          });
+        };
       }
 
     } catch (err) {

@@ -1125,6 +1125,18 @@ async function showPointsEarnedModal(order) {
         </div>
       ` : ''}
 
+      ${order.referredRewardGranted ? `
+        <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%); border: 1.5px dashed rgba(245, 158, 11, 0.4); border-radius: 20px; padding: 16px; width:100%; box-sizing:border-box; text-align:left; display:flex; gap:12px; align-items:flex-start; margin-top: 4px;">
+          <span style="font-size:24px; animation: scale-pulse 2s infinite;">🎁</span>
+          <div>
+            <strong style="font-size:13px; color:#d97706; display:block; margin-bottom:2px;">¡Bono de Referido Acreditado!</strong>
+            <span style="font-size:11.5px; color:var(--color-text-secondary); line-height:1.45; display:block;">
+              Por haber ingresado con la invitación de tu amigo y completar tu primer pedido, te regalamos <strong>${order.referralBonusAmount || 500} GO Points extra</strong>. ¡Disfrutalos!
+            </span>
+          </div>
+        </div>
+      ` : ''}
+
       <button id="btn-close-points-modal" class="btn btn-primary btn-block" style="height: 50px; border-radius: 16px; font-size: 13.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; border: none; margin-top: 8px; box-shadow: 0 8px 24px rgba(var(--color-primary-rgb), 0.25);">
         ¡Genial, gracias!
       </button>

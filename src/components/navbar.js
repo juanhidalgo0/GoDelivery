@@ -17,8 +17,8 @@ export function renderNavbar() {
 
   const user = getState().user;
 
-  // Hide on admin/panel pages or tracking
-  if (hash.startsWith('/admin') || hash.startsWith('/pedido/')) {
+  // Hide on admin/panel pages or tracking (except support-chats)
+  if ((hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash.startsWith('/pedido/')) {
     navbar.innerHTML = '';
     navbar.style.display = 'none';
     const appContent = document.getElementById('app-content');
@@ -76,7 +76,9 @@ export function renderNavbar() {
         <a href="#/admin/support-chats" class="nav-item ${hashPath.startsWith('/admin/support-chats') ? 'active' : ''}">
           <span class="nav-item-icon">
             ${icon('chatBubble', 24)}
-            <span id="support-chats-badge" style="display:none; background: var(--color-primary); border: 2px solid var(--color-surface);" class="nav-item-badge"></span>
+            ${(getState().unreadSupportCount || 0) > 0 ? `
+              <span id="support-chats-badge" style="background: var(--color-primary); border: 2px solid var(--color-surface); animation: badgePulse 2s infinite;" class="nav-item-badge">${getState().unreadSupportCount}</span>
+            ` : ''}
           </span>
           <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Soporte</span>
         </a>
@@ -94,6 +96,7 @@ export function initNavbar() {
   subscribe('cart', () => renderNavbar());
   subscribe('user', () => renderNavbar());
   subscribe('commercePendingCount', () => renderNavbar());
+  subscribe('unreadSupportCount', () => renderNavbar());
   window.addEventListener('hashchange', () => renderNavbar());
 
   // Real-time unread support chats listener for admins
@@ -103,18 +106,10 @@ export function initNavbar() {
     if (user && isAdmin()) {
       const { collection, query, where, onSnapshot } = await import('firebase/firestore');
       const { db } = await import('../firebase.js');
+      const { setState: stateSetState } = await import('../state.js');
       const q = query(collection(db, 'support_chats'), where('unreadByAdmin', '==', true));
       unreadUnsub = onSnapshot(q, (snap) => {
-        const badge = document.getElementById('support-chats-badge');
-        if (badge) {
-          const count = snap.size;
-          if (count > 0) {
-            badge.textContent = count;
-            badge.style.display = 'block';
-          } else {
-            badge.style.display = 'none';
-          }
-        }
+        stateSetState('unreadSupportCount', snap.size);
       }, (err) => console.warn('Unread chats listener failed:', err));
     }
   });

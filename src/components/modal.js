@@ -3,7 +3,7 @@ import { icon } from '../utils/icons.js';
 
 let modalStack = [];
 
-export function showModal({ title, content, footer, onOpen, onClose, hideHeader = false, fullSwipe = false, height = '88dvh', fullscreen = false }) {
+export function showModal({ title, content, footer, onOpen, onClose, hideHeader = false, fullSwipe = false, height = '88dvh', fullscreen = false, persistent = false }) {
   const container = document.getElementById('modal-container');
   if (!container) return;
 
@@ -162,23 +162,25 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     el.addEventListener('touchend', onTouchEnd);
   };
 
-  addListeners(handle);
-  addListeners(headerDrag);
+  if (!persistent) {
+    addListeners(handle);
+    addListeners(headerDrag);
 
-  if (fullSwipe) {
-    addListeners(dialog);
-  } else {
-    // Top-portion fallback (increased to 140px for easier catch)
-    dialog.addEventListener('touchstart', (e) => {
-      const rect = dialog.getBoundingClientRect();
-      const relativeY = e.touches[0].clientY - rect.top;
-      if (relativeY < 140) onTouchStart(e);
-    }, { passive: true });
-    dialog.addEventListener('touchmove', onTouchMove, { passive: true });
-    dialog.addEventListener('touchend', onTouchEnd);
+    if (fullSwipe) {
+      addListeners(dialog);
+    } else {
+      // Top-portion fallback (increased to 140px for easier catch)
+      dialog.addEventListener('touchstart', (e) => {
+        const rect = dialog.getBoundingClientRect();
+        const relativeY = e.touches[0].clientY - rect.top;
+        if (relativeY < 140) onTouchStart(e);
+      }, { passive: true });
+      dialog.addEventListener('touchmove', onTouchMove, { passive: true });
+      dialog.addEventListener('touchend', onTouchEnd);
+    }
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   }
-
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   const closeBtn = document.getElementById(`${modalId}-close-btn`);
   if (closeBtn) closeBtn.addEventListener('click', close);
 

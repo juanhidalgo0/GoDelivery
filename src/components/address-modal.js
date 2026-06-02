@@ -293,7 +293,9 @@ export function showAddressPrompt(onSuccess, config = {}) {
             this.div = div;
           };
           userLocationMarker.draw = function () {
-            const point = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(coords.lat, coords.lng));
+            const projection = this.getProjection();
+            if (!projection) return;
+            const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(coords.lat, coords.lng));
             if (point && this.div) {
               this.div.style.left = (point.x - 7) + 'px';
               this.div.style.top = (point.y - 7) + 'px';

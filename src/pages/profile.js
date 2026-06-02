@@ -336,16 +336,16 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 </div>
               </div>
               
-              <div style="background: var(--color-bg-secondary); border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--color-border-light);">
-                <span style="font-family: var(--font-display); font-weight: 900; font-size: 14px; color: var(--color-text-primary); letter-spacing: 0.5px;">
+              <div style="background: var(--color-bg-secondary); border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--color-border-light); gap: 8px;">
+                <span style="font-family: var(--font-display); font-weight: 900; font-size: 13px; color: var(--color-text-primary); letter-spacing: 0.5px; white-space: nowrap;">
                   ${user.referralCode || 'GO-REF-XXXXX'}
                 </span>
-                <div style="display: flex; gap: 6px;">
-                  <button id="copy-ref-btn" class="btn btn-ghost" style="height: 32px; padding: 0 8px; font-size: 11px; font-weight: 800; border-radius: 6px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--color-border-light); color: var(--color-text-secondary);">
-                    ${icon('copy', 13)} Copiar
+                <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                  <button id="copy-ref-btn" class="btn btn-ghost" style="height: 30px; padding: 0 6px; font-size: 10px; font-weight: 800; border-radius: 6px; display: flex; align-items: center; gap: 3px; border: 1px solid var(--color-border-light); color: var(--color-text-secondary); white-space: nowrap;">
+                    ${icon('copy', 12)} Copiar
                   </button>
-                  <button id="share-ref-btn" class="btn btn-primary" style="height: 32px; padding: 0 8px; font-size: 11px; font-weight: 800; border-radius: 6px; display: flex; align-items: center; gap: 4px; border: none; color: white; background: var(--color-primary);">
-                    ${icon('share', 13)} Compartir
+                  <button id="share-ref-btn" class="btn btn-primary" style="height: 30px; padding: 0 6px; font-size: 10px; font-weight: 800; border-radius: 6px; display: flex; align-items: center; gap: 3px; border: none; color: white; background: var(--color-primary); white-space: nowrap;">
+                    ${icon('share', 12)} Compartir
                   </button>
                 </div>
               </div>

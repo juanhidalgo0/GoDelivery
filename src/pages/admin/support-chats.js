@@ -1,6 +1,6 @@
 // GoDelivery — Admin Live Support Chats Panel (Ticket Edition)
 import { db } from '../../firebase.js';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDocs, arrayUnion, serverTimestamp, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, updateDoc, deleteDoc, getDocs, arrayUnion, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
@@ -11,21 +11,8 @@ export async function renderAdminSupportChats() {
 
   // Render main structural framework
   content.innerHTML = `
-    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
+    <div class="panel-page" style="position:relative; display:flex; flex-direction:column; height:100%; background:var(--color-bg); overflow:hidden;">
       
-      <!-- Red Premium Header -->
-      <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
-        
-        <button onclick="location.hash='#/admin'" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2;">
-          ${icon('chevronLeft', 24)}
-        </button>
-        <div style="flex:1; position:relative; z-index:2;">
-          <h1 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; letter-spacing:-0.03em;">Mesa de Ayuda</h1>
-          <p style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:0.1em; margin-top:2px;">Chat de soporte en tiempo real</p>
-        </div>
-      </div>
-
       <!-- Main Layout -->
       <div style="flex:1; display:flex; overflow:hidden; background:var(--color-bg-secondary);">
         
@@ -51,20 +38,26 @@ export async function renderAdminSupportChats() {
         <div id="chat-conversation-area" style="flex:1; display:none; flex-direction:column; background:var(--color-bg);">
           <!-- Active User Header -->
           <div style="background:var(--color-surface); border-bottom:1px solid var(--color-border); padding:14px 20px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden;">
+            <!-- Mobile Back Button to list -->
+            <button id="chat-back-to-list-btn" style="background:none; border:none; color:var(--color-text); cursor:pointer; padding:0; display:none; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background:var(--color-bg-secondary); margin-right:4px;">
+              ${icon('chevronLeft', 24)}
+            </button>
+
             <div style="width:40px; height:40px; border-radius:50%; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:16px;" id="active-user-avatar">
               U
             </div>
-            <div style="flex:1; min-width:0;">
-              <div style="font-weight:900; font-size:15px; color:var(--color-text); display:flex; align-items:center; gap:8px;">
-                <span id="active-user-name">Selecciona un chat</span>
-                <span id="active-ticket-badge" style="font-size:10px; font-weight:900; background:var(--color-bg-secondary); border:1px solid var(--color-border); padding:2px 6px; border-radius:6px; color:var(--color-text-secondary);">#TK-0000</span>
+            <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:4px;">
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:nowrap; width:100%; overflow:hidden;">
+                <span id="active-user-name" style="font-weight:900; font-size:14.5px; color:var(--color-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">Selecciona un chat</span>
+                <span id="active-user-goid" style="font-size:9.5px; font-weight:900; background:var(--color-primary-lighter); border:1px solid var(--color-primary-light); padding:1px 6px; border-radius:6px; color:var(--color-primary); display:none; flex-shrink:0;">GO-1002</span>
+                <span id="active-ticket-badge" style="font-size:9.5px; font-weight:900; background:var(--color-bg-secondary); border:1px solid var(--color-border); padding:1px 6px; border-radius:6px; color:var(--color-text-secondary); flex-shrink:0;">#TK-0000</span>
               </div>
               <div style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="active-user-meta">Para empezar a responder</div>
             </div>
 
             <!-- Finish / Finalize Ticket Action -->
             <button id="finalize-ticket-btn" style="border:none; height:38px; border-radius:10px; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; gap:6px; font-weight:800; font-size:12px; cursor:pointer; padding:0 12px; transition: all 0.2s;">
-              ${icon('check', 14)} Finalizar Consulta
+              ${icon('check', 14)} <span class="hide-mobile">Finalizar Consulta</span>
             </button>
           </div>
 
@@ -78,6 +71,11 @@ export async function renderAdminSupportChats() {
           <!-- Bottom Reply Input -->
           <div id="admin-chat-footer" style="flex-shrink:0;">
             <div style="padding:12px 20px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:10px; align-items:center;">
+              <!-- Camera Button -->
+              <button id="admin-chat-image-btn" style="background:none; border:none; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; transition:background 0.2s;">
+                ${icon('camera', 20)}
+              </button>
+              <input type="file" id="admin-chat-image-input" accept="image/*" style="display:none;" />
               <input type="text" id="admin-chat-input" placeholder="Escribí tu respuesta..." style="flex:1; height:46px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 16px; font-weight:700; font-size:13.5px; outline:none; background:var(--color-bg); color:var(--color-text);" />
               <button id="admin-chat-send" style="width:46px; height:46px; border-radius:14px; border:none; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 6px 15px rgba(var(--color-primary-rgb),0.25);">
                 ${icon('send', 20)}
@@ -97,10 +95,25 @@ export async function renderAdminSupportChats() {
 
     <!-- Responsive Layout Style -->
     <style>
+      /* Force outer overlay and container to be non-scrollable for strict native app layout */
+      #app-overlay {
+        overflow: hidden !important;
+      }
+      .panel-page {
+        height: 100% !important;
+        overflow: hidden !important;
+      }
+
       @media (max-width: 768px) {
+        #app-overlay {
+          top: calc(98px + env(safe-area-inset-top, 0px)) !important;
+          bottom: var(--navbar-height, 60px) !important;
+          height: calc(100dvh - 98px - var(--navbar-height, 60px) - env(safe-area-inset-top, 0px)) !important;
+        }
         #chats-list-sidebar { width: 100% !important; max-width: none !important; }
-        #chat-conversation-area { position: fixed; inset: 72px 0 0 0; z-index: 150; }
+        #chat-conversation-area { position: absolute; inset: 0; z-index: 150; }
         #chat-placeholder-area { display: none !important; }
+        #chat-back-to-list-btn { display: flex !important; }
       }
     </style>
   `;
@@ -112,12 +125,25 @@ export async function renderAdminSupportChats() {
   const chatFooter = document.getElementById('admin-chat-footer');
   const deleteAllBtn = document.getElementById('delete-all-chats-btn');
   const finalizeBtn = document.getElementById('finalize-ticket-btn');
+  const backToListBtn = document.getElementById('chat-back-to-list-btn');
 
   const activeUserName = document.getElementById('active-user-name');
   const activeUserMeta = document.getElementById('active-user-meta');
   const activeUserAvatar = document.getElementById('active-user-avatar');
   const activeTicketBadge = document.getElementById('active-ticket-badge');
   const unreadCountBadge = document.getElementById('unread-count-badge');
+
+  if (backToListBtn) {
+    backToListBtn.onclick = () => {
+      selectedChatId = null;
+      chatArea.style.display = 'none';
+      if (placeholderArea) placeholderArea.style.display = 'flex';
+      document.querySelectorAll('.admin-chat-item-card').forEach(card => {
+        card.style.background = 'transparent';
+        card.style.borderColor = 'var(--color-border-light)';
+      });
+    };
+  }
 
   let allChats = [];
   let selectedChatId = null;
@@ -150,6 +176,28 @@ export async function renderAdminSupportChats() {
     activeUserMeta.textContent = `${chat.email || ''} | Rol: ${chat.userRole || 'Cliente'}`;
     activeUserAvatar.textContent = (chat.userName || 'U')[0].toUpperCase();
     
+    const goIdEl = document.getElementById('active-user-goid');
+    if (goIdEl) {
+      if (chat.goId) {
+        goIdEl.textContent = chat.goId;
+        goIdEl.style.display = 'inline-block';
+      } else {
+        goIdEl.style.display = 'none';
+        // Try fetching it dynamically
+        if (chat.userId) {
+          getDoc(doc(db, 'users', chat.userId)).then(uSnap => {
+            if (uSnap.exists()) {
+              const uData = uSnap.data();
+              if (uData.goId) {
+                goIdEl.textContent = uData.goId;
+                goIdEl.style.display = 'inline-block';
+              }
+            }
+          }).catch(() => {});
+        }
+      }
+    }
+
     if (chat.ticketId) {
       activeTicketBadge.textContent = chat.ticketId;
       activeTicketBadge.style.display = 'inline-block';
@@ -174,7 +222,7 @@ export async function renderAdminSupportChats() {
         return `
           <div style="display:flex; flex-direction:column; align-self: ${isUser ? 'flex-start' : 'flex-end'}; max-width:80%; margin-bottom:4px;">
             <div style="
-              padding:12px 16px; 
+              padding:${msg.image ? '8px' : '12px 16px'}; 
               border-radius:18px; 
               font-size:13px; 
               font-weight:600; 
@@ -183,7 +231,10 @@ export async function renderAdminSupportChats() {
               color:${isUser ? 'var(--color-text)' : 'white'};
               border-bottom-${isUser ? 'left' : 'right'}-radius:4px;
             ">
-              ${msg.text}
+              ${msg.image ? `
+                <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
+                ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px;">${msg.text}</div>` : ''}
+              ` : msg.text}
             </div>
           </div>
         `;
@@ -201,6 +252,11 @@ export async function renderAdminSupportChats() {
     } else {
       chatFooter.innerHTML = `
         <div style="padding:12px 20px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:10px; align-items:center;">
+          <!-- Camera Button -->
+          <button id="admin-chat-image-btn" style="background:none; border:none; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; transition:background 0.2s;">
+            ${icon('camera', 20)}
+          </button>
+          <input type="file" id="admin-chat-image-input" accept="image/*" style="display:none;" />
           <input type="text" id="admin-chat-input" placeholder="Escribí tu respuesta..." style="flex:1; height:46px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 16px; font-weight:700; font-size:13.5px; outline:none; background:var(--color-bg); color:var(--color-text);" />
           <button id="admin-chat-send" style="width:46px; height:46px; border-radius:14px; border:none; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 6px 15px rgba(var(--color-primary-rgb),0.25);">
             ${icon('send', 20)}
@@ -210,10 +266,23 @@ export async function renderAdminSupportChats() {
       // Rebind send listeners
       const input = chatFooter.querySelector('#admin-chat-input');
       const send = chatFooter.querySelector('#admin-chat-send');
+      const cameraBtn = chatFooter.querySelector('#admin-chat-image-btn');
+      const fileInput = chatFooter.querySelector('#admin-chat-image-input');
+
       send.onclick = handleSendResponse;
       input.onkeydown = (e) => {
         if (e.key === 'Enter') handleSendResponse();
       };
+
+      if (cameraBtn && fileInput) {
+        cameraBtn.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            handleSendAdminImage(file);
+          }
+        };
+      }
       input.focus();
     }
 
@@ -260,6 +329,36 @@ export async function renderAdminSupportChats() {
         input.focus();
       }
       if (send) send.disabled = false;
+    }
+  };
+
+  const handleSendAdminImage = async (file) => {
+    if (!selectedChatId) return;
+
+    try {
+      showToast('Comprimiendo y enviando imagen...', 'info');
+      const { compressImageToBase64 } = await import('../../utils/image.js');
+      const base64Data = await compressImageToBase64(file, 800, 0.6);
+
+      const responseMessage = {
+        sender: 'admin',
+        text: '📷 Foto enviada',
+        image: base64Data,
+        timestamp: Date.now()
+      };
+
+      await updateDoc(doc(db, 'support_chats', selectedChatId), {
+        status: 'approved',
+        unreadByUser: true,
+        unreadByAdmin: false,
+        lastMessageText: '📷 Foto',
+        lastMessageTime: serverTimestamp(),
+        messages: arrayUnion(responseMessage)
+      });
+      showToast('Imagen enviada con éxito', 'success');
+    } catch (err) {
+      console.error('Error sending support admin image:', err);
+      showToast('Error al enviar la imagen', 'danger');
     }
   };
 
@@ -335,6 +434,9 @@ export async function renderAdminSupportChats() {
     } else {
       unreadCountBadge.style.display = 'none';
     }
+
+    // Explicitly synchronize with global state so footer navbar badge remains 100% in sync
+    import('../../state.js').then(m => m.setState('unreadSupportCount', unreadCount)).catch(() => {});
 
     if (allChats.length === 0) {
       chatsList.innerHTML = `<div style="text-align:center; padding:30px; font-size:13px; color:var(--color-text-tertiary); font-weight:600;">No hay chats activos</div>`;

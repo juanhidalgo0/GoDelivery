@@ -145,18 +145,18 @@ export async function renderDeliveryPanel() {
           ${icon('chevronLeft', 28)}
         </a>
 
-        <div style="flex:1;min-width:0;position:relative;z-index:2;">
-          <h1 style="font-family:var(--font-display);font-weight:800;font-size:18px;color:white;margin:0;line-height:1.2;letter-spacing:-0.02em;">Panel Delivery</h1>
-          <p style="font-size:11px;color:rgba(255,255,255,0.85);font-weight:700;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.5px;">Repartidor ${user.deliveryId || 'Oficial'}</p>
+        <div style="flex:1;min-width:0;position:relative;z-index:2;padding-right:4px;">
+          <h1 style="font-family:var(--font-display);font-weight:800;font-size:17px;color:white;margin:0;line-height:1.2;letter-spacing:-0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Panel Delivery</h1>
+          <p style="font-size:10px;color:rgba(255,255,255,0.85);font-weight:700;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Repartidor ${user.deliveryId || 'Oficial'}</p>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;position:relative;z-index:2;">
-          <button class="header-action-btn tab-pill" data-tab="history" style="height:38px; padding:0 12px; border-radius:10px; border:none; background:rgba(255,255,255,0.15); color:white; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); min-width:auto;">
-            ${icon('history', 14)}
-            <span style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">Historial</span>
+        <div style="display:flex; gap:6px; align-items:center;position:relative;z-index:2;flex-shrink:0;">
+          <button class="header-action-btn tab-pill" data-tab="history" style="height:35px; padding:0 10px; border-radius:9px; border:none; background:rgba(255,255,255,0.15); color:white; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); min-width:auto;">
+            ${icon('history', 13)}
+            <span style="font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">Historial</span>
           </button>
-          <button class="header-action-btn tab-pill" data-tab="finances" style="height:38px; padding:0 12px; border-radius:10px; border:none; background:rgba(255,255,255,0.15); color:white; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); min-width:auto;">
-            ${icon('bank', 14)}
-            <span style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">Finanzas</span>
+          <button class="header-action-btn tab-pill" data-tab="finances" style="height:35px; padding:0 10px; border-radius:9px; border:none; background:rgba(255,255,255,0.15); color:white; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); min-width:auto;">
+            ${icon('bank', 13)}
+            <span style="font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">Finanzas</span>
           </button>
         </div>
       </div>
@@ -605,7 +605,7 @@ function loadTabContent(tab, container, user) {
 
                   <div style="display:flex; gap:8px; margin-bottom:20px;">
                     <div style="flex:1; background:var(--color-bg-secondary); padding:10px; border-radius:16px; border:1px solid var(--color-border-light);">
-                      <div style="font-size:8px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">${isFavor ? 'Costo Servicio' : 'Costo Comida'}</div>
+                      <div style="font-size:8px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">${isFavor ? 'Costo Servicio' : 'Costo Productos'}</div>
                       <div style="font-size:13px; font-weight:900; color:var(--color-primary);">${formatPrice(isFavor ? b.total : b.subtotal)}</div>
                     </div>
                     <div style="flex:1; background:var(--color-bg-secondary); padding:10px; border-radius:16px; border:1px solid var(--color-border-light);">
@@ -754,7 +754,7 @@ function loadTabContent(tab, container, user) {
           const qSuggested = query(
             collection(db, 'orders'),
             where('comercioId', 'in', activeUnpickedComercioIds),
-            where('status', 'in', ['ready', 'preparing', 'confirmed', 'pending'])
+            where('status', '==', 'ready')
           );
           
           suggestedUnsub = onSnapshot(qSuggested, (suggestedSnap) => {
@@ -2545,6 +2545,10 @@ function attachStatusBarListeners(user) {
   
   btn.onclick = () => {
     if (user.isOnline) {
+      if (activeOrdersCount > 0) {
+        showToast('⚠️ No podés desconectarte si tenés pedidos en curso', 'warning');
+        return;
+      }
       showConfirm({
         title: '¿Desconectarse?',
         message: 'Dejarás de recibir notificaciones de nuevos pedidos.',
@@ -2871,10 +2875,10 @@ export async function markAsDelivered(orderIdOrIds) {
     const sessionId = orders[0]?.deliverySessionId || user.currentSessionId;
     if (sessionId) {
       const sessionRef = doc(db, 'deliverySessions', sessionId);
-      batch.update(sessionRef, {
+      batch.set(sessionRef, {
         totalEarned: increment(totalDeliveryEarned),
         ordersCount: increment(ids.length) // Use actual IDs count
-      });
+      }, { merge: true });
     }
 
     // 6. Reward GoPoints to Customer(s) with Level Multiplier
@@ -2913,7 +2917,7 @@ export async function markAsDelivered(orderIdOrIds) {
         }
 
         // Process referral and weekly challenges
-        await processOrderCompletionRewards(batch, o.userId, uData);
+        await processOrderCompletionRewards(batch, o.userId, uData, o.id);
       }
     }
 
@@ -2926,8 +2930,8 @@ export async function markAsDelivered(orderIdOrIds) {
         showCustomerRatingModal(orders);
       }, 800);
     } catch (err) {
-      console.warn('Network issue, delivery marked completed locally:', err);
-      showToast('Entrega guardada localmente (se sincronizará al recuperar señal)', 'info');
+      console.error('Error committing delivery batch:', err);
+      showToast('Error al confirmar la entrega en el servidor. Por favor, reintentá.', 'error');
     }
   } catch (err) {
     console.error('markAsDelivered error:', err);

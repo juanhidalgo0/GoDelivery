@@ -788,7 +788,7 @@ async function renderRecurrentOrders(user, container) {
     
     const cardsHtml = orders.map(o => {
       const dateStr = o.createdAt ? new Date(o.createdAt.seconds * 1000).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '';
-      const itemsSummary = (o.items || []).map(item => `${item.qty}x ${item.product.name}`).join(', ');
+      const itemsSummary = (o.items || []).map(item => `${item.qty}x ${item.product?.name || item.name || 'Producto'}`).join(', ');
       
       return `
         <div class="recurrent-order-card" style="
@@ -892,9 +892,18 @@ async function renderRecurrentOrders(user, container) {
         // 1. Clear cart
         clearCart();
 
-        // 2. Add all products to cart
+        // 2. Add all products to cart safely
         selectedOrder.items.forEach(item => {
-          addToCart(item.product, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+          if (item.product) {
+            addToCart(item.product, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+          } else {
+            const fallbackProd = {
+              id: item.productId || item.id || 'fallback-id',
+              name: item.name || 'Producto',
+              price: item.price || 0
+            };
+            addToCart(fallbackProd, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+          }
         });
 
         // 3. Set address

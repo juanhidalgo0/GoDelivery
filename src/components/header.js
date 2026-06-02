@@ -14,7 +14,7 @@ export function renderHeader() {
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
-  const isSubPage = hash.startsWith('#/profile') || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart');
+  const isSubPage = hash.startsWith('#/profile') || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats');
   const slider = document.getElementById('app-slider');
 
   if (!isHome && !isSubPage) {
@@ -190,7 +190,7 @@ export function renderHeader() {
 
     header.innerHTML = `
       ${desktopHeaderHTML}
-      <div class="mobile-header-only" style="width:100%; padding-top: calc(8px + env(safe-area-inset-top, 0px));">
+      <div class="mobile-header-only" style="width:100%; padding-top: calc(34px + env(safe-area-inset-top, 0px));">
         <!-- Decorative Circles (clipped using dedicated wrapper to prevent clipping search dropdown) -->
         <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
           <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
@@ -264,16 +264,17 @@ export function renderHeader() {
     else if (hash.startsWith('#/category')) {
        title = decodeURIComponent(hash.split('/').pop());
     } else if (hash.startsWith('#/cart')) title = 'Mi Carrito';
+    else if (hash.startsWith('#/admin/support-chats')) title = 'Mesa de Ayuda';
 
     header.innerHTML = `
       ${desktopHeaderHTML}
-      <div class="mobile-header-only" style="width:100%; padding-top: calc(8px + env(safe-area-inset-top, 0px));">
+      <div class="mobile-header-only" style="width:100%; padding-top: calc(34px + env(safe-area-inset-top, 0px));">
         <div class="header-nav-sub" style="background: var(--color-primary); height: 64px; display: flex; align-items: center; padding: 0 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0; padding-top: 0; border: none;">
           <!-- Decorative Circles -->
           <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
           
           <div style="background: none; border: none; color: white; display: flex; align-items: center; gap: 12px; padding: 0; position: relative; z-index: 2;">
-            ${(hash === '#/profile' || hash.startsWith('#/profile/orders') || hash.startsWith('#/cart')) ? '' : `
+            ${(hash === '#/profile' || hash.startsWith('#/profile/orders') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats')) ? '' : `
               <button onclick="history.back()" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex;">
                 ${icon('chevronLeft', 28)}
               </button>

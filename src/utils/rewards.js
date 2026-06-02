@@ -9,7 +9,7 @@ import { showToast } from '../components/toast.js';
  * @param {string} customerUid - The customer's user UID
  * @param {object} customerData - The customer's user data document *before* current increment
  */
-export async function processOrderCompletionRewards(batch, customerUid, customerData) {
+export async function processOrderCompletionRewards(batch, customerUid, customerData, orderId = null) {
   try {
     const nextOrderCount = (customerData.completedOrdersCount || 0) + 1;
     console.log(`[Rewards] Processing rewards for customer ${customerUid}. Completed orders count will be: ${nextOrderCount}`);
@@ -47,6 +47,14 @@ export async function processOrderCompletionRewards(batch, customerUid, customer
           points: increment(refPoints),
           referredRewardGranted: true
         });
+
+        // Also update the order document to note that the referral bonus was granted!
+        if (orderId) {
+          batch.update(doc(db, 'orders', orderId), {
+            referredRewardGranted: true,
+            referralBonusAmount: refPoints
+          });
+        }
 
         // Log transaction for referrer
         const refTransRef = doc(collection(db, 'points_transactions'));

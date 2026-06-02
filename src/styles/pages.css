@@ -2951,6 +2951,12 @@ body.header-hidden .slide-overlay {
   overflow: hidden;
 }
 
+@media (max-width: 768px) {
+  #page-cart, .cart-container {
+    height: calc(100dvh - (98px + env(safe-area-inset-top, 0px)) - var(--navbar-height, 60px)) !important;
+  }
+}
+
 .cart-scroll-area {
   flex: 1;
   padding: var(--space-4);

@@ -108,6 +108,7 @@ async function ensureUserDoc(user) {
     if (sessionRefCode) {
       userData.referredBy = sessionRefCode;
       userData.referredRewardGranted = false;
+      userData.referralWelcomeShown = false;
     }
 
     if (user.email === 'test-delivery@godelivery.com') {
@@ -240,12 +241,13 @@ export function initAuth(callback) {
           let userData = {};
           if (snap.exists()) {
             userData = snap.data();
+
             if (Array.isArray(userData.favorites)) {
               localStorage.setItem('gd-favorites', JSON.stringify(userData.favorites));
             }
           } else {
-            console.log('Auth: [onSnapshot] Profile not found, creating...');
-            ensureUserDoc(user);
+            console.log('Auth: [onSnapshot] Profile was deleted by an admin, forcing sign out...');
+            signOut();
           }
           
           setState('user', { uid: user.uid, ...userData });
@@ -330,4 +332,56 @@ export function isOnline() {
 
 export function isLoggedIn() {
   return !!getState().user;
+}
+
+// Check and show onboarding referral welcome modal
+export function checkAndShowReferralWelcome() {
+  const currentUser = getState().user;
+  if (!currentUser || !currentUser.uid) return;
+
+  if (currentUser.referredBy && (currentUser.completedOrdersCount || 0) === 0 && currentUser.referralWelcomeShown === false) {
+    const userRef = doc(db, 'users', currentUser.uid);
+    // Mark as shown in Firestore immediately to prevent repeated triggers
+    setDoc(userRef, { referralWelcomeShown: true }, { merge: true }).catch(err => console.error(err));
+
+    // Show beautiful gamified modal
+    import('./components/modal.js').then(m => {
+      const referralPoints = getState().referralPoints || 500;
+      m.showModal({
+        title: '',
+        hideHeader: true,
+        height: 'auto',
+        persistent: true,
+        content: `
+          <div style="padding:32px 24px; font-family:var(--font-body); color:var(--color-text-primary); display:flex; flex-direction:column; gap:20px; text-align:center;">
+            <div style="font-size:64px; animation: scale-pulse 2s infinite;">🎁</div>
+            <h3 style="font-family:var(--font-display); font-size:22px; font-weight:950; margin:0; color:var(--color-primary); letter-spacing:-0.5px;">¡Tienes un Regalo Pendiente!</h3>
+            <p style="font-size:14px; color:var(--color-text-secondary); margin:0; line-height:1.5; font-weight:600;">
+              Ingresaste a GoDelivery mediante la invitación de un amigo.
+            </p>
+            <div style="background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); border-radius:18px; padding:16px; display:flex; align-items:center; justify-content:center; gap:10px; margin-top:8px;">
+              <span style="font-size:24px;">🎟️</span>
+              <div style="text-align:left;">
+                <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Bono al primer pedido</div>
+                <div style="font-size:18px; font-weight:900; color:#f59e0b; display:flex; align-items:center; gap:4px;">
+                  +${referralPoints} GO Points
+                </div>
+              </div>
+            </div>
+            <p style="font-size:11.5px; color:var(--color-text-tertiary); margin:0; line-height:1.4; font-weight:500;">
+              Cuando realices tu primera compra con éxito, te acreditaremos este bono de forma automática para que lo canjees por descuentos en tus próximos pedidos.
+            </p>
+            <button id="ref-intro-modal-close-btn" class="btn btn-primary" style="height:48px; border-radius:14px; font-weight:900; font-size:14px; width:100%; border:none; color:white; cursor:pointer; margin-top:12px; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.2);">
+              ¡ENTENDIDO, GRACIAS!
+            </button>
+          </div>
+        `
+      });
+
+      const closeBtn = document.getElementById('ref-intro-modal-close-btn');
+      if (closeBtn) {
+        closeBtn.onclick = () => m.closeModal();
+      }
+    });
+  }
 }
