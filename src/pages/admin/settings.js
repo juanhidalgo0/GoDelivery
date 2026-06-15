@@ -47,27 +47,61 @@ export async function renderAdminSettings() {
               </div>
               <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
             </button>
-            <div id="section-logistics" class="settings-section-body" style="display:none;padding:0 20px 20px;">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                <div>
-                  <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Base ($)</label>
-                  <input type="number" class="input" id="global-delivery-base" value="${getState().deliveryBasePrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+            <div id="section-logistics" class="settings-section-body" style="display:none;padding:0 20px 20px;display:flex;flex-direction:column;gap:18px;">
+              <!-- Delivery General -->
+              <div style="border-bottom:1px dashed var(--color-border-light);padding-bottom:14px;">
+                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Delivery General</h4>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Base ($)</label>
+                    <input type="number" class="input" id="global-delivery-base" value="${getState().deliveryBasePrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Mín. ($)</label>
+                    <input type="number" class="input" id="global-delivery-min" value="${getState().deliveryMinPrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Extra por KM ($)</label>
+                    <input type="number" class="input" id="global-delivery-km" value="${getState().deliveryPricePerKm || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Parada Extra ($)</label>
+                    <input type="number" class="input" id="global-delivery-extra-stop" value="${getState().deliveryExtraStopFee || 500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div style="grid-column: span 2;">
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Recargo por Lluvia ($)</label>
+                    <input type="number" class="input" id="global-delivery-rain-surcharge" value="${getState().deliveryRainSurcharge || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
                 </div>
-                <div>
-                  <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Mín. ($)</label>
-                  <input type="number" class="input" id="global-delivery-min" value="${getState().deliveryMinPrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+              </div>
+
+              <!-- Go Favores -->
+              <div style="border-bottom:1px dashed var(--color-border-light);padding-bottom:14px;">
+                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Go Favores</h4>
+                <div style="display:grid;grid-template-columns:1fr;gap:14px;">
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Gestión GoFavor ($)</label>
+                    <input type="number" class="input" id="global-favor-purchase-fee" value="${getState().favorPurchaseFee || 800}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
                 </div>
-                <div>
-                  <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Extra por KM ($)</label>
-                  <input type="number" class="input" id="global-delivery-km" value="${getState().deliveryPricePerKm || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                </div>
-                <div>
-                  <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Parada Extra ($)</label>
-                  <input type="number" class="input" id="global-delivery-extra-stop" value="${getState().deliveryExtraStopFee || 500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                </div>
-                <div style="grid-column: span 2;">
-                  <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Recargo por Lluvia ($)</label>
-                  <input type="number" class="input" id="global-delivery-rain-surcharge" value="${getState().deliveryRainSurcharge || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+              </div>
+
+              <!-- Viajes -->
+              <div>
+                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Viajes (Moto / Auto)</h4>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Base ($)</label>
+                    <input type="number" class="input" id="global-trip-base" value="${getState().tripBasePrice !== undefined ? getState().tripBasePrice : 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Mín. ($)</label>
+                    <input type="number" class="input" id="global-trip-min" value="${getState().tripMinPrice !== undefined ? getState().tripMinPrice : 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div style="grid-column: span 2;">
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Extra por KM ($)</label>
+                    <input type="number" class="input" id="global-trip-km" value="${getState().tripPricePerKm !== undefined ? getState().tripPricePerKm : 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -94,11 +128,7 @@ export async function renderAdminSettings() {
                   <input type="number" class="input" id="global-app-fee-rate" value="${(getState().appUsageFeeRate * 100).toFixed(0)}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                 </div>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                <div>
-                  <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Gestión GoFavor ($)</label>
-                  <input type="number" class="input" id="global-favor-purchase-fee" value="${getState().favorPurchaseFee || 800}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                </div>
+              <div style="display:grid;grid-template-columns:1fr;gap:14px;">
                 <div>
                   <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">WhatsApp Pagos</label>
                   <input type="text" class="input" id="global-whatsapp-payments" value="${getState().whatsappPayments || ''}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:14px;" />
@@ -204,11 +234,6 @@ export async function renderAdminSettings() {
             </div>
           </div>
 
-          <!-- Save Button -->
-          <button class="btn btn-primary btn-block" id="save-global-settings-btn" style="width:100%;height:56px;border-radius:18px;font-weight:900;font-size:15px;display:flex;align-items:center;justify-content:center;gap:10px;border:none;background:var(--color-primary);color:white;cursor:pointer;box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3);">
-            ${icon('check', 20)} Guardar Configuración
-          </button>
-
           <!-- 4. Image Optimization Section -->
           <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;overflow:hidden;">
             <button class="settings-section-toggle" data-target="section-img-optimize" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
@@ -262,6 +287,12 @@ export async function renderAdminSettings() {
             </div>
           </div>
         </div>
+
+          <!-- Save Button (at the bottom) -->
+          <button class="btn btn-primary btn-block" id="save-global-settings-btn" style="width:100%;height:56px;border-radius:18px;font-weight:900;font-size:15px;display:flex;align-items:center;justify-content:center;gap:10px;border:none;background:var(--color-primary);color:white;cursor:pointer;box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3);">
+            ${icon('check', 20)} Guardar Configuración
+          </button>
+
       </div>
     </div>
   `;
@@ -304,6 +335,9 @@ export async function renderAdminSettings() {
     const deliveryPricePerKm = parseFloat(document.getElementById('global-delivery-km').value) || 0;
     const deliveryExtraStopFee = parseFloat(document.getElementById('global-delivery-extra-stop').value) || 0;
     const deliveryRainSurcharge = parseFloat(document.getElementById('global-delivery-rain-surcharge').value) || 0;
+    const tripBasePrice = parseFloat(document.getElementById('global-trip-base').value) || 0;
+    const tripMinPrice = parseFloat(document.getElementById('global-trip-min').value) || 0;
+    const tripPricePerKm = parseFloat(document.getElementById('global-trip-km').value) || 0;
     const commissionRate = (parseFloat(document.getElementById('global-commission-rate').value) || 10) / 100;
     const appUsageFeeRate = (parseFloat(document.getElementById('global-app-fee-rate').value) || 5) / 100;
     const favorPurchaseFee = parseFloat(document.getElementById('global-favor-purchase-fee').value) || 0;
@@ -344,6 +378,7 @@ export async function renderAdminSettings() {
 
       await setDoc(doc(db, 'settings', 'global'), {
         deliveryBasePrice, deliveryMinPrice, deliveryPricePerKm, deliveryExtraStopFee, deliveryRainSurcharge,
+        tripBasePrice, tripMinPrice, tripPricePerKm,
         commissionRate, appUsageFeeRate, pointsPerDollar, dollarPerPoint, referralPoints, weeklyChallenges,
         favorPurchaseFee, whatsappPayments
       }, { merge: true });
@@ -356,6 +391,9 @@ export async function renderAdminSettings() {
       setState('deliveryPricePerKm', deliveryPricePerKm);
       setState('deliveryExtraStopFee', deliveryExtraStopFee);
       setState('deliveryRainSurcharge', deliveryRainSurcharge);
+      setState('tripBasePrice', tripBasePrice);
+      setState('tripMinPrice', tripMinPrice);
+      setState('tripPricePerKm', tripPricePerKm);
       setState('commissionRate', commissionRate);
       setState('appUsageFeeRate', appUsageFeeRate);
       setState('pointsPerDollar', pointsPerDollar);
@@ -383,29 +421,55 @@ export async function renderAdminSettings() {
         <div style="background: rgba(239,68,68,0.06); border: 1px dashed rgba(239,68,68,0.25); border-radius: 18px; padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start;">
           <div style="color: #ef4444; flex-shrink:0; margin-top:2px;">${icon('alertTriangle', 20)}</div>
           <div style="font-size: 13px; color: var(--color-text-secondary); line-height: 1.5;">
-            Estás por iniciar un <strong>Reseteo Nuclear</strong>. Se borrarán todos los pedidos, chats, notificaciones, liquidaciones, historial y sesiones de la plataforma.
+            Estás por iniciar un <strong>Reseteo Nuclear</strong>. Se borrarán todos los pedidos, chats, notificaciones, liquidaciones, historial, opiniones, y calificaciones de la plataforma.
           </div>
         </div>
         
-        <p style="font-size: 13px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin: 4px 0 0 0; letter-spacing: 0.05em;">Opciones de Conservación:</p>
+        <p style="font-size: 13px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin: 4px 0 0 0; letter-spacing: 0.05em;">Conservación de Datos:</p>
         
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <!-- Option 1: Users -->
-          <label for="reset-keep-users-${uid}" style="display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px; cursor: pointer; transition: all 0.2s;">
-            <input type="checkbox" id="reset-keep-users-${uid}" style="width: 18px; height: 18px; border-radius: 6px; margin-top: 2px; accent-color: var(--color-primary);" checked />
+          <div style="display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px;">
+            <div style="color: var(--color-success); margin-top: 2px;">${icon('check', 18)}</div>
             <div style="flex: 1;">
               <div style="font-weight: 800; font-size: 13.5px; color: var(--color-text-primary);">Conservar Usuarios Registrados</div>
-              <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; line-height: 1.35;">Mantiene sus cuentas en el sistema, pero blanquea a $0 todos sus saldos, deudas, comisiones y puntos acumulados. Si se desmarca, se eliminarán sus cuentas por completo de la base de datos.</div>
+              <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; line-height: 1.35;">Se conservan los perfiles de los usuarios en el sistema, pero se blanquean a 0 todos sus saldos, deudas y calificaciones.</div>
             </div>
-          </label>
+          </div>
 
-          <!-- Option 2: Merchants -->
-          <label for="reset-keep-merchants-${uid}" style="display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px; cursor: pointer; transition: all 0.2s;">
-            <input type="checkbox" id="reset-keep-merchants-${uid}" style="width: 18px; height: 18px; border-radius: 6px; margin-top: 2px; accent-color: var(--color-primary);" checked />
+          <div style="display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px;">
+            <div style="color: var(--color-success); margin-top: 2px;">${icon('check', 18)}</div>
             <div style="flex: 1;">
               <div style="font-weight: 800; font-size: 13.5px; color: var(--color-text-primary);">Conservar Comercios y Productos</div>
-              <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; line-height: 1.35;">Mantiene los perfiles de los comercios y sus respectivos catálogos de productos. Si se desmarca, se borrarán todos los comercios y productos de la base de datos de manera definitiva.</div>
+              <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; line-height: 1.35;">Se conservan los perfiles de los comercios y sus catálogos de productos, pero se eliminan todas sus opiniones y calificaciones recibidas.</div>
             </div>
+          </div>
+        </div>
+
+        <p style="font-size: 13px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin: 8px 0 0 0; letter-spacing: 0.05em;">Opciones Adicionales:</p>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <label style="display: flex; align-items: center; justify-content: space-between; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px; cursor: pointer;">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:12px;">
+              <span style="font-weight: 800; font-size: 13.5px; color: var(--color-text-primary);">Conservar Puntos de Usuarios</span>
+              <span style="font-size: 11px; color: var(--color-text-tertiary); line-height: 1.35;">Mantiene los puntos acumulados por cada usuario sin blanquearlos a 0.</span>
+            </div>
+            <input type="checkbox" id="keep-points-check" style="width: 20px; height: 20px; accent-color: var(--color-primary); cursor: pointer;" />
+          </label>
+
+          <label style="display: flex; align-items: center; justify-content: space-between; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px; cursor: pointer;">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:12px;">
+              <span style="font-weight: 800; font-size: 13.5px; color: var(--color-text-primary);">Conservar Anuncios en Curso</span>
+              <span style="font-size: 11px; color: var(--color-text-tertiary); line-height: 1.35;">No elimina los banners publicitarios (ads/customAds) activos.</span>
+            </div>
+            <input type="checkbox" id="keep-ads-check" style="width: 20px; height: 20px; accent-color: var(--color-primary); cursor: pointer;" />
+          </label>
+
+          <label style="display: flex; align-items: center; justify-content: space-between; padding: 14px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); border-radius: 16px; cursor: pointer;">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:12px;">
+              <span style="font-weight: 800; font-size: 13.5px; color: var(--color-text-primary);">Conservar Ofertas en Curso</span>
+              <span style="font-size: 11px; color: var(--color-text-tertiary); line-height: 1.35;">Conserva las ofertas promocionales y cupones configurados.</span>
+            </div>
+            <input type="checkbox" id="keep-offers-check" style="width: 20px; height: 20px; accent-color: var(--color-primary); cursor: pointer;" />
           </label>
         </div>
       </div>
@@ -428,8 +492,9 @@ export async function renderAdminSettings() {
         cancelBtn?.addEventListener('click', () => closeModal());
         
         confirmBtn?.addEventListener('click', async () => {
-          const keepUsers = document.getElementById(`reset-keep-users-${uid}`).checked;
-          const keepMerchants = document.getElementById(`reset-keep-merchants-${uid}`).checked;
+          const keepPoints = document.getElementById('keep-points-check')?.checked || false;
+          const keepAds = document.getElementById('keep-ads-check')?.checked || false;
+          const keepOffers = document.getElementById('keep-offers-check')?.checked || false;
 
           closeModal();
 
@@ -437,10 +502,10 @@ export async function renderAdminSettings() {
           setTimeout(() => {
             showConfirm({
               title: '⛔ CONFIRMACIÓN FINAL',
-              message: `Estás por realizar una limpieza irreversible del sistema.<br><br>• Conservar usuarios: <strong>${keepUsers ? 'SÍ (Saldos a $0)' : 'NO (Borrar cuentas)'}</strong><br>• Conservar comercios: <strong>${keepMerchants ? 'SÍ' : 'NO (Borrar perfiles y catálogos)'}</strong><br><br>¿Confirmás que querés proceder con esta acción nuclear?`,
-              confirmText: 'SÍ, BORRAR TODO',
+              message: `Estás por realizar una limpieza irreversible de toda la actividad y puntuaciones de la plataforma.<br><br>Se conservarán los usuarios, comercios, productos y las opciones adicionales seleccionadas.<br><br>¿Confirmás que querés proceder con esta acción nuclear?`,
+              confirmText: 'SÍ, BORRAR TODO Y RESETEAR',
               danger: true,
-              onConfirm: () => performHardReset(keepUsers, keepMerchants)
+              onConfirm: () => performHardReset({ keepPoints, keepAds, keepOffers })
             });
           }, 300);
         });
@@ -609,121 +674,49 @@ async function runImageOptimization() {
   }
 }
 
-async function performHardReset(keepUsers, keepMerchants) {
+async function performHardReset({ keepPoints = false, keepAds = false, keepOffers = false } = {}) {
   try {
     showToast('Iniciando Reseteo Nuclear...', 'info');
 
-    // 1. Transactional and auxiliary collections cleared always
-    const collectionsToClear = [
-      'orders', 'chats', 'support_chats', 'notifications', 'commissions',
-      'settlements', 'delivery_transactions', 'deliverySessions',
-      'visits', 'broadcasts', 'offers', 'coupons', 'customAds', 'ads'
-    ];
+    // 1. Get Firebase Auth ID Token
+    const { auth } = await import('../../firebase.js');
+    const { getIdToken } = await import('firebase/auth');
+    if (!auth.currentUser) {
+      showToast('Error: Usuario no autenticado', 'error');
+      return;
+    }
+    const idToken = await getIdToken(auth.currentUser);
 
-    for (const colName of collectionsToClear) {
-      showToast(`Limpiando ${colName}...`, 'info');
-      let snap = await getDocs(collection(db, colName));
+    // 2. Call Cloud Function performAdminHardReset
+    const response = await fetch(`https://us-central1-godelivery-magdalena.cloudfunctions.net/adminHardReset`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        idToken,
+        keepPoints,
+        keepAds,
+        keepOffers
+      })
+    });
 
-      while (!snap.empty) {
-        const docs = snap.docs;
-        for (let i = 0; i < docs.length; i += 500) {
-          const batch = writeBatch(db);
-          const chunk = docs.slice(i, i + 500);
-          chunk.forEach(d => batch.delete(d.ref));
-          await batch.commit();
-        }
-        snap = await getDocs(collection(db, colName));
-      }
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP error ${response.status}`);
     }
 
-    // 2. Clear global reset counters
-    showToast('Reseteando contadores globales...', 'info');
-    await setDoc(doc(db, 'settings', 'global'), {
-      lastOrderId: 0,
-      lastResetAt: serverTimestamp()
-    }, { merge: true });
-
-    // 3. Clear or delete users
-    if (keepUsers) {
-      showToast('Blanqueando saldos de usuarios...', 'info');
-      const usersSnap = await getDocs(collection(db, 'users'));
-      for (let i = 0; i < usersSnap.docs.length; i += 400) {
-        const batch = writeBatch(db);
-        const chunk = usersSnap.docs.slice(i, i + 400);
-        chunk.forEach(u => {
-          batch.update(u.ref, {
-            deliveryDebt: 0,
-            commerceBalance: 0,
-            points: 0,
-            completedOrdersCount: 0
-          });
-        });
-        await batch.commit();
-      }
-    } else {
-      showToast('Eliminando usuarios registrados...', 'info');
-      let usersSnap = await getDocs(collection(db, 'users'));
-      while (!usersSnap.empty) {
-        const docs = usersSnap.docs;
-        for (let i = 0; i < docs.length; i += 500) {
-          const batch = writeBatch(db);
-          const chunk = docs.slice(i, i + 500);
-          chunk.forEach(u => batch.delete(u.ref));
-          await batch.commit();
-        }
-        usersSnap = await getDocs(collection(db, 'users'));
-      }
-    }
-
-    // 4. Clear or delete merchants (comercios) and subcollections recursively
-    if (!keepMerchants) {
-      showToast('Eliminando comercios y catálogos...', 'info');
-      const comerciosSnap = await getDocs(collection(db, 'comercios'));
-      
-      for (const docComercio of comerciosSnap.docs) {
-        // Delete all products inside this commerce subcollection first
-        let prodsSnap = await getDocs(collection(db, 'comercios', docComercio.id, 'products'));
-        while (!prodsSnap.empty) {
-          const docs = prodsSnap.docs;
-          for (let i = 0; i < docs.length; i += 500) {
-            const batch = writeBatch(db);
-            const chunk = docs.slice(i, i + 500);
-            chunk.forEach(p => batch.delete(p.ref));
-            await batch.commit();
-          }
-          prodsSnap = await getDocs(collection(db, 'comercios', docComercio.id, 'products'));
-        }
-
-        // Also delete any merchant categories if they exist (comercios/{id}/categories)
-        let catsSnap = await getDocs(collection(db, 'comercios', docComercio.id, 'categories'));
-        while (!catsSnap.empty) {
-          const docs = catsSnap.docs;
-          for (let i = 0; i < docs.length; i += 500) {
-            const batch = writeBatch(db);
-            const chunk = docs.slice(i, i + 500);
-            chunk.forEach(c => batch.delete(c.ref));
-            await batch.commit();
-          }
-          catsSnap = await getDocs(collection(db, 'comercios', docComercio.id, 'categories'));
-        }
-        
-        // Delete the commerce document itself
-        const batch = writeBatch(db);
-        batch.delete(docComercio.ref);
-        await batch.commit();
-      }
-    }
-
-    // 5. Clear client-side cache
-    showToast('Limpiando caché local de sesión...', 'info');
+    // 3. Clear client-side cache and flag Firestore Offline Persistence (IndexedDB) for cleanup on reload
+    showToast('Limpiando caché local y preparando reinicio...', 'info');
     localStorage.clear();
     sessionStorage.clear();
+    localStorage.setItem('gd_clear_persistence', 'true');
 
-    showToast('¡Sistema reseteado a cero con éxito!', 'success');
-    setTimeout(() => window.location.reload(), 1500);
+    showToast('¡Sistema reseteado a cero con éxito! Reiniciando...', 'success');
+    setTimeout(() => window.location.reload(), 1000);
   } catch (err) {
     console.error('Hard Reset error:', err);
-    showToast('Error crítico en el Hard Reset', 'error');
+    showToast(`Error crítico en el Hard Reset: ${err.message}`, 'error');
   }
 }
 

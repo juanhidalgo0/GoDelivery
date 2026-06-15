@@ -9,7 +9,7 @@ let pwaCheckDone = false;
 export function ensureAppInstalled() {
   if (checkIfInstalled()) return;
   
-  if (window.location.search.includes('test=true')) return;
+  if (window.location.search.includes('test=true') || window.location.search.includes('preview=true') || window.location.hash.includes('preview=true')) return;
   
   // No forzar en desktop si no es necesario, pero permitir que el usuario lo vea
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);

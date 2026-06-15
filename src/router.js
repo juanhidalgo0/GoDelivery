@@ -167,7 +167,7 @@ async function handleRoute() {
       overlay.classList.add('active');
       
       // Sub-pages like /profile/* should be full screen (except support-chats)
-      if (hash.startsWith('/profile/') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || (hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash === '/notifications' || hash.startsWith('/comercio/')) {
+      if (hash.startsWith('/profile/') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || (hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/delivery/')) {
         overlay.classList.add('panel-fullscreen');
       } else {
         overlay.classList.remove('panel-fullscreen');

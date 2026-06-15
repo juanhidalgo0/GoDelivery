@@ -1,9 +1,10 @@
 // GoDelivery — Comercio Panel Dashboard
 import { db } from '../../firebase.js';
-import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
+import { isAdmin } from '../../auth.js';
 
 let notificationSound = new Audio('/assets/sounds/notification.mp3');
 let ordersUnsub = null;
@@ -24,11 +25,11 @@ export async function renderComercioDashboard() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg);">
       <!-- Premium Fixed Header -->
-      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:16px;padding:16px 20px;background:var(--header-bg);border-bottom:1px solid var(--header-border);flex-shrink:0;color:var(--color-text);">
-        <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:14px;background:var(--color-bg-secondary);color:var(--color-text);border:1px solid var(--color-border);flex-shrink:0;text-decoration:none;transition:all 0.2s;">${icon('back', 20)}</a>
+      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:16px;padding:16px 20px;background:var(--color-primary);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
+        <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);flex-shrink:0;text-decoration:none;transition:all 0.2s;">${icon('back', 20)}</a>
         <div style="flex:1;min-width:0;">
-          <h1 style="font-family:var(--font-display);font-weight:900;font-size:20px;color:inherit;margin:0;line-height:1.1;letter-spacing:-0.03em;">Panel de Gestión</h1>
-          <p id="panel-commerce-name" style="font-size:12px;color:var(--color-primary);font-weight:800;margin:4px 0 0;text-transform:uppercase;letter-spacing:0.02em;">Cargando...</p>
+          <h1 style="font-family:var(--font-display);font-weight:900;font-size:20px;color:inherit;margin:0;line-height:1.1;letter-spacing:-0.03em;">${isAdmin() ? 'Adm: Panel de Gestión' : 'Panel de Gestión'}</h1>
+          <p id="panel-commerce-name" style="font-size:12px;color:rgba(255,255,255,0.85);font-weight:800;margin:4px 0 0;text-transform:uppercase;letter-spacing:0.02em;">Cargando...</p>
         </div>
       </div>
 
@@ -42,14 +43,6 @@ export async function renderComercioDashboard() {
         </div>
 
         <div id="panel-menu" style="display:flex;flex-direction:column;gap:8px;">
-          <a href="#/mi-comercio/${comercioId}/orders" class="admin-menu-item">
-            <div class="admin-menu-icon" style="background:var(--color-primary-lighter); color:var(--color-primary);">${icon('shoppingBag', 24)}</div>
-            <div class="admin-menu-text">
-              <div class="admin-menu-title">Gestión de Pedidos</div>
-              <div class="admin-menu-desc">Ver y confirmar pedidos de clientes</div>
-            </div>
-            <span style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</span>
-          </a>
 
           <a href="#/mi-comercio/${comercioId}/products" class="admin-menu-item">
             <div class="admin-menu-icon">${icon('package', 24)}</div>
@@ -60,13 +53,11 @@ export async function renderComercioDashboard() {
             <span style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</span>
           </a>
 
-
-
-          <a href="#/mi-comercio/${comercioId}/finances" class="admin-menu-item">
-            <div class="admin-menu-icon" style="background:var(--color-accent-light); color:var(--color-text);">${icon('zap', 24)}</div>
+          <a href="#/mi-comercio/${comercioId}/sabores" class="admin-menu-item">
+            <div class="admin-menu-icon" style="background:rgba(236, 72, 153, 0.1); color:#ec4899;">${icon('sparkles', 24)}</div>
             <div class="admin-menu-text">
-              <div class="admin-menu-title">Comisiones y Finanzas</div>
-              <div class="admin-menu-desc">Historial detallado de comisiones y pagos</div>
+              <div class="admin-menu-title">Gestor de Sabores</div>
+              <div class="admin-menu-desc">Activar/desactivar sabores de helado</div>
             </div>
             <span style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</span>
           </a>
@@ -92,8 +83,8 @@ export async function renderComercioDashboard() {
           <a href="#/mi-comercio/${comercioId}/metrics" class="admin-menu-item">
             <div class="admin-menu-icon" style="background:rgba(59, 130, 246, 0.1); color:#3b82f6;">${icon('trendingUp', 24)}</div>
             <div class="admin-menu-text">
-              <div class="admin-menu-title">Métricas y BI</div>
-              <div class="admin-menu-desc">Análisis de ventas, productos estrella y horas pico</div>
+              <div class="admin-menu-title">Ventas y Dashboard</div>
+              <div class="admin-menu-desc">Ventas (Hoy/Semana/Mes), stock, productos y clientes fieles</div>
             </div>
             <span style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</span>
           </a>
@@ -138,8 +129,28 @@ export async function renderComercioDashboard() {
     if (snap.exists()) {
       commerceData = snap.data();
       const nameContainer = document.getElementById('panel-commerce-name');
-      if (nameContainer) nameContainer.textContent = commerceData.name;
+      if (nameContainer) nameContainer.textContent = isAdmin() ? `Adm: ${commerceData.name}` : commerceData.name;
       
+      // Update Gestor de Sabores link text based on commerce category
+      const flavorsLink = document.querySelector(`a[href="#/mi-comercio/${comercioId}/sabores"]`);
+      if (flavorsLink) {
+        const isHeladeria = (commerceData.category || '').toLowerCase().includes('helad');
+        if (isHeladeria) {
+          flavorsLink.querySelector('.admin-menu-icon').innerHTML = icon('sparkles', 24);
+          flavorsLink.querySelector('.admin-menu-title').textContent = 'Gestor de Sabores';
+          flavorsLink.querySelector('.admin-menu-desc').textContent = 'Activar/desactivar sabores de helado';
+        } else {
+          const iconContainer = flavorsLink.querySelector('.admin-menu-icon');
+          if (iconContainer) {
+            iconContainer.style.background = 'rgba(249, 115, 22, 0.1)';
+            iconContainer.style.color = '#f97316';
+            iconContainer.innerHTML = icon('list', 24);
+          }
+          flavorsLink.querySelector('.admin-menu-title').textContent = 'Gustos y Variedades';
+          flavorsLink.querySelector('.admin-menu-desc').textContent = 'Activar/desactivar gustos de empanadas, pizzas y comida';
+        }
+      }
+
       // Update data again to refresh commission display
       if (!isInitialLoad && document.getElementById('finances-summary-container')) {
         getDocs(q).then(s => updateDashboardData(s.docs.map(d => ({id:d.id, ...d.data()})), comercioId, commerceData));
@@ -189,26 +200,16 @@ function updateDashboardData(orders, comercioId, commerceData) {
   const financesContainer = document.getElementById('finances-summary-container');
   if (financesContainer) {
     financesContainer.innerHTML = `
-      <div class="profile-section page-enter" style="margin-top: 24px;">
-        <h3 class="profile-section-title" style="font-family:var(--font-display); font-weight:800; margin-bottom:16px; opacity:0.9;">Resumen Financiero</h3>
-        <div class="admin-card" style="padding: 20px; background:linear-gradient(145deg, var(--color-surface), var(--color-bg-secondary)); border:1px solid var(--color-border-light);">
-          <div style="display:flex; gap:16px; align-items:center; margin-bottom:20px;">
-            <div style="width:52px; height:52px; border-radius:16px; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('info', 28)}</div>
-            <div>
-              <div style="font-weight:900; font-size:17px; color:var(--color-text); margin-bottom:2px;">Comisión de Plataforma: ${commissionRate}%</div>
-              <p style="font-size:13px; color:var(--color-text-secondary); line-height:1.4;">
-                Se aplica únicamente sobre el total de productos vendidos.
-              </p>
+      <div class="profile-section page-enter" style="margin-top: 16px;">
+        <div class="admin-card" style="padding: 16px 18px; background:linear-gradient(145deg, var(--color-surface), var(--color-bg-secondary)); border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between; gap:12px; box-shadow:var(--shadow-xs);">
+          <div style="display:flex; align-items:center; gap:14px; min-width:0;">
+            <div style="width:44px; height:44px; border-radius:12px; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('info', 22)}</div>
+            <div style="min-width:0; text-align:left;">
+              <div style="font-size:10px; color:var(--color-text-tertiary); text-transform:uppercase; font-weight:700; letter-spacing:0.05em; margin-bottom:1px;">Comisión (${commissionRate}%) • Pendiente</div>
+              <div style="font-family:var(--font-display); font-weight:900; font-size:21px; color:var(--color-primary); line-height:1.1;">${formatCurrency(pendingCommissions)}</div>
             </div>
           </div>
-          
-          <div style="background:rgba(255,255,255,0.03); padding:16px; border-radius:16px; border:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-size:12px; color:var(--color-text-tertiary); text-transform:uppercase; font-weight:700; letter-spacing:0.05em; margin-bottom:2px;">Pendiente de pago</div>
-              <div style="font-family:var(--font-display); font-weight:900; font-size:24px; color:var(--color-primary);">${formatCurrency(pendingCommissions)}</div>
-            </div>
-            <a href="#/mi-comercio/${comercioId}/finances" style="width:44px; height:44px; border-radius:12px; background:var(--color-bg-secondary); color:var(--color-text); display:flex; align-items:center; justify-content:center; text-decoration:none; border:1px solid var(--color-border-light);">${icon('chevronRight', 20)}</a>
-          </div>
+          <a href="#/mi-comercio/${comercioId}/finances" style="width:42px; height:42px; border-radius:12px; background:var(--color-bg-secondary); color:var(--color-text); display:flex; align-items:center; justify-content:center; text-decoration:none; border:1px solid var(--color-border-light); flex-shrink:0;">${icon('chevronRight', 20)}</a>
         </div>
       </div>
     `;

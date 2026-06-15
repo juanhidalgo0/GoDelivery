@@ -6,7 +6,7 @@ import { isDelivery } from '../auth.js';
 import { setBanner, clearBanner } from './banner-manager.js';
 import { AudioManager } from '../utils/audio-manager.js';
 import { FABStack } from '../utils/fab-stack.js';
-import { takeOrder, markAsDelivered } from '../pages/delivery-panel.js';
+
 import { showDeliveryMapModal } from './delivery-map-modal.js';
 
 let availableUnsub = null;
@@ -66,13 +66,15 @@ export function initDeliveryMonitor() {
       title: '¿Tomar este pedido?',
       message: 'Te asignarás como repartidor y deberás retirarlo lo antes posible.',
       confirmText: 'Sí, tomar pedido',
-      onConfirm: () => {
+      onConfirm: async () => {
+        const { takeOrder } = await import('../pages/delivery-panel.js');
         takeOrder(e.detail.orderId, getState().user);
       }
     });
   });
 
   window.addEventListener('confirm-order-delivery', async (e) => {
+    const { markAsDelivered } = await import('../pages/delivery-panel.js');
     markAsDelivered(e.detail.orderId);
   });
 }
@@ -89,10 +91,15 @@ function startMonitoring(user) {
 
   availableUnsub = onSnapshot(qAvailable, (snap) => {
     console.log(`DeliveryMonitor: Received update for available orders. Count: ${snap.docs.length}`);
+    const mode = user.deliveryMode || 'both';
     const orders = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(o => !o.driverId)
       .filter(o => {
+        if (mode === 'trip' && !o.isTrip) return false;
+        if (mode === 'delivery' && o.isTrip) return false;
+        
+        if (o.isTrip) return true;
         if (o.isFavor) return true;
         if (o.status === 'ready') return true;
         if (['pending', 'confirmed'].includes(o.status) && o.isMultiOrder) return true;
@@ -107,8 +114,13 @@ function startMonitoring(user) {
         const order = { id: change.doc.id, ...change.doc.data() };
         if (!order.driverId && !lastKnownConfirmedIds.has(order.id)) {
           lastKnownConfirmedIds.add(order.id);
-          const qualifies = order.isFavor || order.status === 'ready' || (['pending', 'confirmed'].includes(order.status) && order.isMultiOrder);
+          
+          if (mode === 'trip' && !order.isTrip) return;
+          if (mode === 'delivery' && order.isTrip) return;
+          
+          const qualifies = order.isFavor || order.isTrip || order.status === 'ready' || (['pending', 'confirmed'].includes(order.status) && order.isMultiOrder);
           if (qualifies && currentActiveCount === 0) {
+            isDeliveryMutedGlobally = false; // Reset mute state so alarm rings again for the new order!
             notifyNewOrder(order);
           }
         }
@@ -137,6 +149,17 @@ function startMonitoring(user) {
 }
 
 let currentActiveCount = 0;
+let isDeliveryMutedGlobally = false;
+const DELIVERY_ALARM_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3';
+
+// Register global alarm mute listener for delivery exactly once
+if (typeof window !== 'undefined') {
+  window.addEventListener('mute-delivery-alarm', () => {
+    isDeliveryMutedGlobally = true;
+    AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
+    console.log('🔇 Delivery pending order alarm muted globally.');
+  });
+}
 
 function stopMonitoring() {
   if (availableUnsub) availableUnsub();
@@ -147,6 +170,9 @@ function stopMonitoring() {
   currentActiveOrder = null;
   clearBanner('delivery');
   clearDeliveryIndicator();
+  AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
+  const pill = document.getElementById('delivery-mute-alarm-pill');
+  if (pill) pill.remove();
 }
 
 function notifyNewOrder(order) {
@@ -166,7 +192,7 @@ function notifyNewOrder(order) {
     navigator.serviceWorker.ready.then(reg => {
       let body = `¡Nuevo pedido! ${order.comercioName} tiene un pedido listo para retirar.`;
       if (order.isFavor) {
-        const favorTypeLabel = order.favorType === 'compra' ? 'COMPRA' : 'MANDADO';
+        const favorTypeLabel = order.favorType === 'compra' ? 'MANDADO' : 'ENCOMIENDA';
         body = `🛵 ¡Nuevo GoFavor disponible! Hay un nuevo GoFavor (${favorTypeLabel}) listo para tomar.`;
       }
 
@@ -183,6 +209,70 @@ function notifyNewOrder(order) {
   }
 }
 
+function updateMutePill() {
+  const availableCount = currentAvailableOrders.length;
+  let pill = document.getElementById('delivery-mute-alarm-pill');
+
+  if (availableCount > 0 && !isDeliveryMutedGlobally && currentActiveCount === 0) {
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'delivery-mute-alarm-pill';
+      pill.style.cssText = `
+        position: fixed;
+        bottom: 84px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1.5px solid rgba(34, 197, 94, 0.35);
+        border-radius: 30px;
+        padding: 12px 24px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        z-index: 1000;
+        cursor: pointer;
+        color: white;
+        font-family: var(--font-display);
+        font-weight: 900;
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        box-shadow: 0 10px 30px rgba(34, 197, 94, 0.35);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        opacity: 0;
+      `;
+      document.body.appendChild(pill);
+
+      pill.onclick = () => {
+        AudioManager.hapticLight();
+        isDeliveryMutedGlobally = true;
+        window.dispatchEvent(new CustomEvent('mute-delivery-alarm'));
+        updateMutePill();
+      };
+    }
+
+    pill.innerHTML = `
+      <span class="animate-pulse" style="display:inline-block; width:8px; height:8px; background:#22c55e; border-radius:50%; box-shadow:0 0 10px #22c55e;"></span>
+      ${icon('bell', 16)}
+      <span>SILENCIAR ALARMA PENDIENTE</span>
+    `;
+
+    requestAnimationFrame(() => {
+      pill.style.transform = 'translateX(-50%) translateY(0)';
+      pill.style.opacity = '1';
+    });
+  } else {
+    if (pill) {
+      pill.style.transform = 'translateX(-50%) translateY(20px)';
+      pill.style.opacity = '0';
+      setTimeout(() => {
+        pill.remove();
+      }, 400);
+    }
+  }
+}
+
 function updateBannerState() {
   // Group orders by bundleId to count batches, not individual orders
   const batches = new Set();
@@ -190,6 +280,15 @@ function updateBannerState() {
     batches.add(o.bundleId || o.id);
   });
   const availableCount = batches.size;
+
+  // Sound loop alarm logic for delivery drivers
+  if (availableCount > 0 && currentActiveCount === 0 && !isDeliveryMutedGlobally) {
+    AudioManager.startLoop(DELIVERY_ALARM_SOUND_URL, 0.95);
+  } else {
+    AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
+  }
+
+  updateMutePill();
 
   if (currentActiveOrder) {
     updateActiveDeliveryFAB(currentActiveOrder, currentActiveCount);

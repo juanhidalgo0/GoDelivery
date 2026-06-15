@@ -24,6 +24,10 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   const chatRef = doc(db, 'chats', chatId);
   const messagesRef = collection(chatRef, 'messages');
 
+  let unsub = () => {};
+  let orderUnsub = () => {};
+  let chatDocUnsub = () => {};
+
   // Build chat UI shell INSTANTLY
   const chatContainer = document.createElement('div');
   chatContainer.className = 'chat-container';
@@ -56,6 +60,10 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     fullSwipe: false,
     height: '85dvh',
     onClose: () => {
+      if (unsub) unsub();
+      if (orderUnsub) orderUnsub();
+      if (chatDocUnsub) chatDocUnsub();
+      updateTypingStatus(chatRef, user.uid, false);
       isChatOpening = false;
     }
   });
@@ -67,7 +75,7 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   // Real-time messages listener
   const q = query(messagesRef, orderBy('timestamp', 'asc'));
   let isInitialLoad = true;
-  const unsub = onSnapshot(q, (snap) => {
+  unsub = onSnapshot(q, (snap) => {
     const messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     // Play sound for incoming message
@@ -97,8 +105,8 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   });
 
   // Background Tasks (Status & Init)
-  let orderUnsub = () => { };
-  let chatDocUnsub = () => { };
+  orderUnsub = () => { };
+  chatDocUnsub = () => { };
   (async () => {
     let isReadOnly = false;
     try {
@@ -165,8 +173,9 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
             </div>
             <div class="chat-input-bar">
               <button class="chat-emoji-btn" id="emoji-btn-${chatId}">${icon('smile', 22)}</button>
-              <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar comprobante">${icon('camera', 22)}</button>
-              <input type="file" id="chat-file-${chatId}" style="display:none" accept="image/*" />
+              <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen">${icon('camera', 22)}</button>
+              <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" />
+              <input type="file" id="chat-file-camera-${chatId}" style="display:none" accept="image/*" capture="environment" />
               <input type="text" id="chat-input-${chatId}" class="chat-input" placeholder="Escribí un mensaje..." autocomplete="off" />
               <button class="chat-send-btn" id="chat-send-${chatId}">${icon('send', 20)}</button>
             </div>
@@ -212,18 +221,7 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     }
   })();
 
-  // Cleanup on modal close
-  if (modalInstance) {
-    const origClose = modalInstance.close;
-    modalInstance.close = () => {
-      unsub();
-      orderUnsub();
-      chatDocUnsub();
-      updateTypingStatus(chatRef, user.uid, false);
-      isChatOpening = false;
-      origClose();
-    };
-  }
+
 
   // Lightbox Implementation
   window.openLightbox = (url) => {
@@ -254,7 +252,8 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
 function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName) {
   const input = document.getElementById(`chat-input-${chatId}`);
   const sendBtn = document.getElementById(`chat-send-${chatId}`);
-  const fileInput = document.getElementById(`chat-file-${chatId}`);
+  const fileInputGallery = document.getElementById(`chat-file-gallery-${chatId}`);
+  const fileInputCamera = document.getElementById(`chat-file-camera-${chatId}`);
   const attachBtn = document.getElementById(`chat-attach-${chatId}`);
 
   const emojiBtn = document.getElementById(`emoji-btn-${chatId}`);
@@ -385,10 +384,41 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
 
   const displayName = senderDisplayName || user.displayName || 'Usuario';
 
-  attachBtn?.addEventListener('click', () => fileInput.click());
+  attachBtn?.addEventListener('click', () => {
+    showModal({
+      title: 'Enviar imagen',
+      content: `
+        <div style="padding: 24px 20px; display: flex; flex-direction: column; gap: 16px;">
+          <button id="btn-use-camera-${chatId}" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+            ${icon('camera', 20)} Tomar Foto (Cámara)
+          </button>
+          <button id="btn-use-gallery-${chatId}" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); color: var(--color-text-primary); font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer;">
+            ${icon('image', 20)} Seleccionar de Galería
+          </button>
+        </div>
+      `,
+      height: 'auto',
+      onOpen: () => {
+        const btnCamera = document.getElementById(`btn-use-camera-${chatId}`);
+        const btnGallery = document.getElementById(`btn-use-gallery-${chatId}`);
+        
+        if (btnCamera) {
+          btnCamera.onclick = () => {
+            closeModal();
+            fileInputCamera?.click();
+          };
+        }
+        if (btnGallery) {
+          btnGallery.onclick = () => {
+            closeModal();
+            fileInputGallery?.click();
+          };
+        }
+      }
+    });
+  });
 
-  fileInput?.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
+  const handleFileSelect = async (file) => {
     if (!file) return;
 
     const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
@@ -427,6 +457,14 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
       console.error('Upload error:', err);
       await updateDoc(docRef, { text: 'Error al subir imagen', status: 'error' });
     }
+  };
+
+  fileInputGallery?.addEventListener('change', (e) => {
+    handleFileSelect(e.target.files[0]);
+  });
+
+  fileInputCamera?.addEventListener('change', (e) => {
+    handleFileSelect(e.target.files[0]);
   });
 
   // Set up Quick Reply Pills

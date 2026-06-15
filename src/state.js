@@ -18,6 +18,9 @@ const state = {
   deliveryMinPrice: 1500,
   deliveryExtraStopFee: 500,
   deliveryRainSurcharge: 300, // Default $300 rain surcharge
+  tripBasePrice: 1500,
+  tripPricePerKm: 300,
+  tripMinPrice: 1500,
   isRaining: false,
   dynamicDeliveryFees: JSON.parse(localStorage.getItem('gd-cached-fees') || '{}'),
   dynamicDistances: JSON.parse(localStorage.getItem('gd-cached-distances') || '{}'),
@@ -77,6 +80,9 @@ export async function initSettings() {
       state.deliveryMinPrice = data.deliveryMinPrice !== undefined ? data.deliveryMinPrice : 1500;
       state.deliveryExtraStopFee = data.deliveryExtraStopFee !== undefined ? data.deliveryExtraStopFee : 500;
       state.deliveryRainSurcharge = data.deliveryRainSurcharge !== undefined ? data.deliveryRainSurcharge : 300;
+      state.tripBasePrice = data.tripBasePrice !== undefined ? data.tripBasePrice : 1500;
+      state.tripPricePerKm = data.tripPricePerKm !== undefined ? data.tripPricePerKm : 300;
+      state.tripMinPrice = data.tripMinPrice !== undefined ? data.tripMinPrice : 1500;
       state.commissionRate = data.commissionRate !== undefined ? data.commissionRate : 0.10;
       state.appUsageFeeRate = data.appUsageFeeRate !== undefined ? data.appUsageFeeRate : 0.05;
 
@@ -97,6 +103,9 @@ export async function initSettings() {
       notify('deliveryMinPrice');
       notify('deliveryExtraStopFee');
       notify('deliveryRainSurcharge');
+      notify('tripBasePrice');
+      notify('tripPricePerKm');
+      notify('tripMinPrice');
       notify('commissionRate');
       notify('appUsageFeeRate');
       notify('pointsPerDollar');
@@ -354,9 +363,22 @@ export function setDeliveryAddress(address, notes = '', coords = null, houseNumb
   notify('addressNotes');
   notify('deliveryCoords');
   notify('houseNumber');
+
+  // Sync to Firestore if logged in
+  if (address && state.user && state.user.uid) {
+    const userRef = doc(db, 'users', state.user.uid);
+    updateDoc(userRef, {
+      lastAddress: {
+        address,
+        notes,
+        coords,
+        houseNumber
+      }
+    }).catch(err => console.error('Error saving lastAddress to user profile:', err));
+  }
 }
 
-export function saveUserAddress(name, address, notes, coords) {
+export async function saveUserAddress(name, address, notes, coords) {
   const newAddr = {
     id: Date.now().toString(),
     name,
@@ -367,9 +389,19 @@ export function saveUserAddress(name, address, notes, coords) {
   state.savedAddresses.push(newAddr);
   localStorage.setItem('gd-saved-addresses', JSON.stringify(state.savedAddresses));
   notify('savedAddresses');
+
+  // Sync to Firestore
+  if (state.user && state.user.uid) {
+    const userRef = doc(db, 'users', state.user.uid);
+    try {
+      await updateDoc(userRef, { savedAddresses: state.savedAddresses });
+    } catch (e) {
+      console.error('Error syncing savedAddresses:', e);
+    }
+  }
 }
 
-export function updateUserAddress(id, name, address, notes, coords) {
+export async function updateUserAddress(id, name, address, notes, coords) {
   state.savedAddresses = state.savedAddresses.map(a => {
     if (a.id === id) {
       return { id, name, address, notes, coords };
@@ -378,12 +410,32 @@ export function updateUserAddress(id, name, address, notes, coords) {
   });
   localStorage.setItem('gd-saved-addresses', JSON.stringify(state.savedAddresses));
   notify('savedAddresses');
+
+  // Sync to Firestore
+  if (state.user && state.user.uid) {
+    const userRef = doc(db, 'users', state.user.uid);
+    try {
+      await updateDoc(userRef, { savedAddresses: state.savedAddresses });
+    } catch (e) {
+      console.error('Error syncing updated savedAddresses:', e);
+    }
+  }
 }
 
-export function removeSavedAddress(id) {
+export async function removeSavedAddress(id) {
   state.savedAddresses = state.savedAddresses.filter(a => a.id !== id);
   localStorage.setItem('gd-saved-addresses', JSON.stringify(state.savedAddresses));
   notify('savedAddresses');
+
+  // Sync to Firestore
+  if (state.user && state.user.uid) {
+    const userRef = doc(db, 'users', state.user.uid);
+    try {
+      await updateDoc(userRef, { savedAddresses: state.savedAddresses });
+    } catch (e) {
+      console.error('Error syncing removed savedAddresses:', e);
+    }
+  }
 }
 
 // ── Favorites Helpers ──

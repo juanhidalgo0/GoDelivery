@@ -16,6 +16,7 @@
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 #app-header {
@@ -28,6 +29,7 @@
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .header-top {
@@ -172,7 +174,7 @@
 .main-slider {
   display: flex;
   width: 100vw;
-  height: calc(100vh - 60px - var(--navbar-height));
+  height: calc(100vh - var(--header-height) - var(--navbar-height));
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
@@ -198,7 +200,7 @@
 
 .slide-overlay {
   position: fixed;
-  top: 60px;
+  top: var(--header-height);
   left: 0;
   right: 0;
   bottom: var(--navbar-height);
@@ -213,6 +215,15 @@
 .slide-overlay.active {
   display: block;
 }
+
+/* Fix double scroll/padding in slide-overlay */
+.slide-overlay #app-content {
+  min-height: 100% !important;
+  height: auto !important;
+  padding-bottom: 24px !important;
+  box-sizing: border-box !important;
+}
+
 
 /* When header/navbar are hidden (panel pages), overlay fills full viewport */
 #app-header:empty+#active-order-banner-container+#app-slider+.slide-overlay.active,
@@ -729,7 +740,8 @@ body.header-hidden .slide-overlay {
 .comercio-card-badge {
   position: absolute;
   top: var(--space-3);
-  right: var(--space-3);
+  left: var(--space-3);
+  right: auto;
   padding: 4px 10px;
   border-radius: var(--radius-full);
   font-size: 10px;
@@ -918,14 +930,14 @@ body.header-hidden .slide-overlay {
   -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--footer-border);
 
-  height: var(--navbar-height);
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  height: calc(var(--navbar-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   z-index: var(--z-navbar);
-  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.05);
 }
 
 .nav-item {
@@ -1264,7 +1276,7 @@ body.header-hidden .slide-overlay {
 
 .comercio-header-back {
   position: absolute;
-  top: var(--space-5);
+  top: calc(var(--space-5) + env(safe-area-inset-top, 0px));
   left: var(--space-3);
   width: 40px;
   height: 40px;
@@ -1406,10 +1418,10 @@ body.header-hidden .slide-overlay {
   height: 48px !important;
   border-radius: 50% !important;
   overflow: hidden !important;
-  background: white !important;
-  padding: 2px !important;
+  background: transparent !important;
+  padding: 0px !important;
   z-index: 5 !important;
-  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  border: 2px solid white !important;
   box-shadow: var(--shadow-md) !important;
 }
 
@@ -1417,7 +1429,7 @@ body.header-hidden .slide-overlay {
   position: static !important;
   width: 100% !important;
   height: 100% !important;
-  border-radius: 0px !important;
+  border-radius: 50% !important;
   object-fit: cover !important;
   background: transparent !important;
   padding: 0px !important;
@@ -1446,8 +1458,8 @@ body.header-hidden .slide-overlay {
 
 .comercio-card-footer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: var(--space-1);
   margin-top: var(--space-3);
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border-light);
@@ -1458,10 +1470,9 @@ body.header-hidden .slide-overlay {
   color: var(--color-text-secondary);
   font-weight: var(--font-weight-medium);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 4px;
   line-height: 1.3;
-  flex: 1;
 }
 
 .product-card {
@@ -3301,3 +3312,281 @@ body.header-hidden .slide-overlay {
   right: -60px;
   animation-delay: 4s;
 }
+
+@keyframes blobFloat {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.95);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* ==========================================================================
+   Advanced Premium Animations (Inicio, Header, Footer & Global Interactions)
+   ========================================================================== */
+
+/* Bell Notification Jiggle */
+@keyframes bellJiggle {
+  0%, 100% { transform: rotate(0); }
+  15% { transform: rotate(10deg); }
+  30% { transform: rotate(-10deg); }
+  45% { transform: rotate(6deg); }
+  60% { transform: rotate(-6deg); }
+  75% { transform: rotate(3deg); }
+  85% { transform: rotate(-3deg); }
+}
+
+.desktop-notifications-box:hover button, 
+.mobile-header-only a[href="#/notifications"]:hover {
+  animation: bellJiggle 0.7s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* Header & Search Bar Glows */
+.desktop-search-bar {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.desktop-search-bar:focus-within {
+  transform: translateY(-1px) scale(1.012);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.06), 0 0 0 2px rgba(225, 29, 72, 0.15) !important;
+}
+
+/* Category Cards Interactive Lift */
+.category-card-large {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease, border-color 0.3s ease !important;
+}
+.category-card-large:hover {
+  transform: translateY(-8px) scale(1.02) !important;
+  box-shadow: 0 20px 35px rgba(225, 29, 72, 0.12), 0 0 20px rgba(225, 29, 72, 0.08) !important;
+  border-color: rgba(225, 29, 72, 0.25) !important;
+}
+.category-card-large:hover img {
+  transform: scale(1.07) !important;
+}
+
+/* Small Categories Row Slider Interactive Effects */
+.category-card-small {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+.category-card-small:hover {
+  transform: translateY(-4px) scale(1.04);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary-light) !important;
+}
+
+/* Interactive Filter Pills */
+.filter-pill-btn {
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+.filter-pill-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  border-color: var(--color-primary) !important;
+  color: var(--color-primary) !important;
+  box-shadow: 0 4px 12px rgba(225, 29, 72, 0.08);
+}
+.filter-pill-btn:active {
+  transform: scale(0.95);
+}
+
+/* Comercio Cards Elite Animations */
+.comercio-card {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease, border-color 0.3s ease !important;
+}
+.comercio-card:hover {
+  transform: translateY(-8px) scale(1.01) !important;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(0, 0, 0, 0.01) !important;
+  border-color: rgba(225, 29, 72, 0.2) !important;
+}
+.comercio-card:hover .comercio-card-logo {
+  transform: scale(1.06) rotate(-3deg) !important;
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.12) !important;
+}
+.comercio-card:hover img {
+  transform: scale(1.03) !important;
+}
+.comercio-card:hover span[style*="background:var(--color-primary)"] {
+  transform: scale(1.08) rotate(4deg);
+  box-shadow: 0 4px 15px rgba(225, 29, 72, 0.25) !important;
+}
+.card-favorite-btn-floating {
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+.card-favorite-btn-floating:hover {
+  transform: scale(1.18);
+  color: var(--color-primary) !important;
+  box-shadow: 0 6px 16px rgba(225, 29, 72, 0.18) !important;
+}
+
+/* Footer Link Slide-Underline */
+.footer-column ul li a {
+  position: relative;
+  transition: color 0.25s ease, transform 0.25s ease !important;
+  display: inline-block;
+}
+.footer-column ul li a:hover {
+  color: #FFFFFF !important;
+  transform: translateX(4px);
+}
+.footer-column ul li a::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 1.5px;
+  background-color: #FFFFFF;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.footer-column ul li a:hover::after {
+  transform: scaleX(1);
+}
+
+/* ==========================================================================
+   Mobile-First Elite Visual Optimizations & Touch Interactivity
+   ========================================================================== */
+
+/* Glassmorphic Mobile Bottom Navbar */
+#app-navbar, .bottom-nav {
+  background: rgba(255, 255, 255, 0.76) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border-top: 1px solid rgba(226, 232, 240, 0.5) !important;
+  box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.04) !important;
+}
+
+[data-theme="dark"] #app-navbar, [data-theme="dark"] .bottom-nav {
+  background: rgba(10, 15, 29, 0.76) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Elastic Tap / Touch Active Feedback on Mobile devices */
+@media (hover: none) {
+  .comercio-card:active,
+  .category-card-large:active,
+  .category-card-small:active,
+  .gofavores-card:active,
+  .btn:active,
+  .btn-primary:active,
+  .nav-item:active {
+    transform: scale(0.96) !important;
+    transition: transform 0.15s cubic-bezier(0.25, 1, 0.5, 1) !important;
+    opacity: 0.9;
+  }
+}
+
+/* Category Slider Mobile Optimizations */
+.category-row-small {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.category-row-small .category-card-small {
+  scroll-snap-align: start;
+}
+
+/* Floating Action Button (FAB) breathing animation on mobile */
+@keyframes fabFloatBreath {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 8px 24px rgba(225, 29, 72, 0.25);
+  }
+  50% {
+    transform: translateY(-5px) scale(1.03);
+    box-shadow: 0 16px 32px rgba(225, 29, 72, 0.35);
+  }
+}
+
+.floating-cart-btn, .fab-btn {
+  animation: fabFloatBreath 4s ease-in-out infinite !important;
+}
+
+/* Mobile Header Entrance and Polish */
+.mobile-header-only {
+  animation: slideDown 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Drawer indicator for half modals */
+.half-modal-drawer-bar {
+  width: 36px;
+  height: 5px;
+  background: var(--color-border-light);
+  border-radius: 10px;
+  margin: 8px auto 16px;
+  opacity: 0.8;
+}
+
+/* ── Random Products Slider & Cards ── */
+.random-products-slider-wrapper {
+  position: relative;
+  margin-top: 2px;
+  margin-bottom: 14px;
+}
+.random-products-slider {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 6px 16px 16px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.random-products-slider::-webkit-scrollbar {
+  display: none;
+}
+.random-product-card {
+  flex: 0 0 240px;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: 22px;
+  padding: 12px;
+  transition: all 0.3s cubic-bezier(0.165, 0.84, 0.44, 1);
+  box-shadow: var(--shadow-xs);
+  position: relative;
+}
+.random-product-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+  border-color: rgba(var(--color-primary-rgb), 0.2);
+}
+.random-product-card:active {
+  transform: scale(0.97);
+}
+
+/* ── Comercios Horizontal Slider ── */
+.comercios-slider {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 6px 16px 16px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+}
+.comercios-slider::-webkit-scrollbar {
+  display: none;
+}
+.comercios-slider .comercio-card {
+  flex: 0 0 320px;
+  margin-bottom: 0 !important;
+}
+.comercios-slider-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+

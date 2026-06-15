@@ -20,8 +20,10 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Ignore non-GET requests and specific domains
+  const url = new URL(event.request.url);
+  // Ignore non-GET, external APIs, and specific domains
   if (event.request.method !== 'GET' || 
+      url.origin !== self.location.origin ||
       event.request.url.includes('firestore.googleapis.com') || 
       event.request.url.includes('firebase') ||
       event.request.url.includes('google')) {

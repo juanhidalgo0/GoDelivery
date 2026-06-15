@@ -7,10 +7,15 @@ import { initSearchSuggestions } from './search-suggestions.js';
 import { showModal, closeModal } from './modal.js';
 import { db } from '../firebase.js';
 import { collection, query, limit, onSnapshot, orderBy, updateDoc, doc } from 'firebase/firestore';
+import { isIOS } from './install-prompt.js';
 
 export function renderHeader() {
   const header = document.getElementById('app-header');
   if (!header) return;
+
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIosDevice = isIOS();
+  const topPadding = (isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)';
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
@@ -190,7 +195,7 @@ export function renderHeader() {
 
     header.innerHTML = `
       ${desktopHeaderHTML}
-      <div class="mobile-header-only" style="width:100%; padding-top: calc(34px + env(safe-area-inset-top, 0px));">
+      <div class="mobile-header-only" style="width:100%; padding-top: ${topPadding};">
         <!-- Decorative Circles (clipped using dedicated wrapper to prevent clipping search dropdown) -->
         <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
           <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
@@ -268,7 +273,7 @@ export function renderHeader() {
 
     header.innerHTML = `
       ${desktopHeaderHTML}
-      <div class="mobile-header-only" style="width:100%; padding-top: calc(34px + env(safe-area-inset-top, 0px));">
+      <div class="mobile-header-only" style="width:100%; padding-top: ${topPadding};">
         <div class="header-nav-sub" style="background: var(--color-primary); height: 64px; display: flex; align-items: center; padding: 0 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0; padding-top: 0; border: none;">
           <!-- Decorative Circles -->
           <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
@@ -364,7 +369,25 @@ export function renderHeader() {
           await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
         } catch (err) {}
       }
-      if (url) window.location.hash = url;
+      if (url) {
+        // Validate route exists in orders/chats if it contains order ID
+        const orderMatch = url.match(/#\/pedido\/([^/]+)/);
+        if (orderMatch && orderMatch[1]) {
+          const orderId = orderMatch[1];
+          try {
+            const { getDoc, doc } = await import('firebase/firestore');
+            const oDoc = await getDoc(doc(db, 'orders', orderId));
+            if (!oDoc.exists()) {
+              console.warn('[HeaderNotifications] Order does not exist. Skipping navigation.');
+              return;
+            }
+          } catch (err) {
+            console.error('[HeaderNotifications] Failed to verify order existence:', err);
+            return;
+          }
+        }
+        window.location.hash = url;
+      }
     };
   });
 
@@ -384,6 +407,14 @@ export function renderHeader() {
       }
     };
   }
+
+  // Dynamically set --header-height based on actual rendered header height
+  requestAnimationFrame(() => {
+    const hdr = document.getElementById('app-header');
+    if (hdr && hdr.offsetHeight > 0) {
+      document.documentElement.style.setProperty('--header-height', `${hdr.offsetHeight}px`);
+    }
+  });
 }
 
 function formatNotifTime(ts) {

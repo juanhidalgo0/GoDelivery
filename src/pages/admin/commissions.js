@@ -821,7 +821,7 @@ async function settleDriver(driverId) {
       <button class="btn btn-primary" id="confirm-settle-btn" style="width:100%; height:60px; border-radius:18px; background:var(--color-success); color:white; border:none; font-weight:900; font-size:17px; cursor:pointer; box-shadow:0 10px 25px rgba(0,214,127,0.3); display:flex; align-items:center; justify-content:center; gap:12px;">
         ${icon('checkCircle', 22)} CONFIRMAR PAGO
       </button>
-      <button class="btn" onclick="closeModal()" style="width:100%; height:52px; border-radius:18px; background:transparent; border:none; color:var(--color-text-tertiary); font-weight:800; font-size:14px; cursor:pointer;">Cancelar</button>
+      <button class="btn" id="cancel-settle-btn" style="width:100%; height:52px; border-radius:18px; background:transparent; border:none; color:var(--color-text-tertiary); font-weight:800; font-size:14px; cursor:pointer;">Cancelar</button>
     </div>
   `;
 
@@ -830,6 +830,7 @@ async function settleDriver(driverId) {
   const input = modalEl.querySelector('#settle-amount-input');
   modalEl.querySelector('#liquidate-all-btn').onclick = () => { input.value = driver.debt; };
   modalEl.querySelector('#liquidate-clear-btn').onclick = () => { input.value = 0; input.focus(); };
+  modalEl.querySelector('#cancel-settle-btn').onclick = () => closeModal();
 
   modalEl.querySelector('#confirm-settle-btn').onclick = async () => {
     const amountToSettle = parseFloat(input.value) || 0;

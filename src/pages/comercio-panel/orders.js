@@ -2,6 +2,7 @@ import { db } from '../../firebase.js';
 import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, serverTimestamp, addDoc, getDocs, orderBy, setDoc } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
+import { isAdmin } from '../../auth.js';
 import { formatPrice, formatDate } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
@@ -124,6 +125,8 @@ export async function renderComercioOrders(manualId = null) {
       const comData = (cached && cached.id === comercioId) ? cached : null;
       
       let isPaused = comData ? comData.isPaused : false;
+      const comercioName = comData ? comData.name : 'Cargando...';
+      const headerTitle = isAdmin() ? `Adm: ${comercioName}` : 'Gestión de Pedidos';
 
       // Render instantly with what we have
       headerContainer.innerHTML = `
@@ -141,7 +144,7 @@ export async function renderComercioOrders(manualId = null) {
               ${icon('restaurant', 20)}
             </div>
             <div class="orders-header-info">
-              <h1 class="orders-header-title">Gestión de Pedidos</h1>
+              <h1 class="orders-header-title">${headerTitle}</h1>
               <div class="orders-header-status-row">
                 <span class="orders-live-dot ${isPaused ? 'paused' : ''}"></span>
                 <p class="orders-header-subtitle">${isPaused ? 'Pausado' : 'En vivo'}</p>
@@ -149,15 +152,18 @@ export async function renderComercioOrders(manualId = null) {
             </div>
           </div>
 
-          <div class="orders-header-actions" style="position: relative; z-index: 2;">
+          <div class="orders-header-actions" style="position: relative; z-index: 2; display: flex; gap: 8px;">
+            <a href="#/comercio/${comercioId}" class="hdr-icon-btn" title="Ver Tienda Online" style="display: flex; align-items: center; justify-content: center; text-decoration: none;">
+              ${icon('eye', 18)}
+            </a>
             <button class="hdr-icon-btn" id="new-manual-order-btn" title="Nuevo Pedido">
               ${icon('plus', 18)}
             </button>
             <button class="hdr-icon-btn" id="go-to-history" title="Historial">
               ${icon('history', 18)}
             </button>
-            <a href="#/mi-comercio/${comercioId}/settings" class="hdr-icon-btn" title="Configuración">
-              ${icon('settings', 18)}
+            <a href="#/mi-comercio/${comercioId}" class="hdr-icon-btn" title="Panel General" style="display: flex; align-items: center; justify-content: center; text-decoration: none;">
+              ${icon('grid', 18)}
             </a>
           </div>
         </div>
@@ -169,6 +175,10 @@ export async function renderComercioOrders(manualId = null) {
         if (comSnap.exists()) {
           const freshData = { id: comSnap.id, ...comSnap.data() };
           import('../../state.js').then(m => m.setState('currentComercio', freshData));
+          if (isAdmin()) {
+            const titleEl = headerContainer.querySelector('.orders-header-title');
+            if (titleEl) titleEl.textContent = `Adm: ${freshData.name || 'Comercio'}`;
+          }
           if (freshData.isPaused !== isPaused) {
             const dot = headerContainer.querySelector('.orders-live-dot');
             const sub = headerContainer.querySelector('.orders-header-subtitle');
@@ -264,7 +274,13 @@ export async function renderComercioOrders(manualId = null) {
   const q = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
   ordersUnsub = onSnapshot(q, (snap) => {
     const newOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      .sort((a, b) => {
+        const aSched = !!a.isScheduled;
+        const bSched = !!b.isScheduled;
+        if (aSched && !bSched) return -1;
+        if (!aSched && bSched) return 1;
+        return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+      });
 
     // Detect new pending orders to show toast (Only after initial load)
     if (!isInitial) {
@@ -338,11 +354,19 @@ function renderFilteredOrders(orders, filter, comercioId, isHistory) {
 }
 
 function renderOrderCard(o, isHistory = false) {
-  const statusLabel = getStatusLabel(o.status);
+  const statusLabel = o.isScheduled ? 'Programado' : getStatusLabel(o.status);
   const formatH = (ts) => ts ? ts.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---';
 
+  const scheduledBadge = o.isScheduled ? `
+    <div class="scheduled-badge-violet" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
+      📅 Programado: ${o.scheduledTime}
+    </div>
+  ` : '';
+
+  const cardClass = o.isScheduled ? 'scheduled' : o.status;
+
   return `
-    <div class="order-card-pro simplified-card ${o.status}" data-id="${o.id}">
+    <div class="order-card-pro simplified-card ${cardClass}" data-id="${o.id}">
       <div class="card-side-indicator"></div>
       <div class="card-main-content">
         <div class="card-top-row">
@@ -354,9 +378,10 @@ function renderOrderCard(o, isHistory = false) {
           <div class="customer-info-minimal">
             <strong>${o.userName || 'Cliente'}</strong>
             <span class="order-exact-time">${icon('clock', 10)} ${formatH(o.createdAt)}</span>
+            ${scheduledBadge}
           </div>
           <div class="card-right-section">
-            <div class="price-main">${formatPrice(o.total)}</div>
+            <div class="price-main">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</div>
             <div class="expand-indicator">${icon('chevronDown', 14)}</div>
           </div>
         </div>
@@ -374,17 +399,57 @@ function attachOrderListeners(container, orders, comercioId) {
   });
 }
 
+function getFlavorIcon(comercio) {
+  if (!comercio) return '🍕';
+  const categories = comercio.categories || (comercio.category ? [comercio.category] : []);
+  const name = (comercio.name || '').toLowerCase();
+  
+  const isHeladeria = categories.some(c => c.toLowerCase().includes('helad')) || name.includes('helad');
+  if (isHeladeria) {
+    return '🍨';
+  }
+  
+  const isPizzeria = categories.some(c => c.toLowerCase().includes('pizz')) || name.includes('pizz');
+  if (isPizzeria) {
+    return '🍕';
+  }
+  
+  return '🍕';
+}
+
 function showOrderDetailModal(initialOrder) {
   const modalEl = document.createElement('div');
   modalEl.className = `order-detail-modal-root status-${initialOrder.status}`;
 
   let modalUnsub = null;
+  let isDetailsExpanded = false;
+  let commerceData = null;
+
+  const cached = getState().currentComercio;
+  if (cached && cached.id === initialOrder.comercioId) {
+    commerceData = cached;
+  }
+
+  if (!commerceData) {
+    getDoc(doc(db, 'comercios', initialOrder.comercioId)).then(snap => {
+      if (snap.exists()) {
+        commerceData = { id: snap.id, ...snap.data() };
+        const currentOrderDoc = doc(db, 'orders', initialOrder.id);
+        getDoc(currentOrderDoc).then(oSnap => {
+          if (oSnap.exists() && modalEl.parentNode) {
+            renderContent({ id: oSnap.id, ...oSnap.data() });
+          }
+        });
+      }
+    });
+  }
 
   const renderContent = (o) => {
     const formatH = (ts) => ts ? ts.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---';
     const isHistory = o.status === 'completed' || o.status === 'cancelled';
     const unreadCount = getUnreadCount(o.id, 'client-commerce');
-    const shortUserId = o.userId ? o.userId.slice(-6) : '---';
+    const shortUserId = o.goId || (o.userId ? `#${o.userId.slice(-6)}` : '---');
+    const flavorIcon = getFlavorIcon(commerceData);
 
     modalEl.className = `order-detail-modal-root status-${o.status}`;
     modalEl.innerHTML = `
@@ -415,7 +480,7 @@ function showOrderDetailModal(initialOrder) {
               <div class="customer-avatar-premium">${o.userName?.charAt(0) || 'U'}</div>
               <div class="customer-text-premium">
                 <strong>${o.userName || 'Cliente'}</strong>
-                <div class="customer-id-premium">ID: #${shortUserId}</div>
+                <div class="customer-id-premium">ID: ${shortUserId}</div>
               </div>
               ${!isHistory ? `
               <button class="chat-btn-mini chat-order-btn" data-id="${o.id}" data-client="${o.userName}" data-num="${o.orderId}">
@@ -426,31 +491,63 @@ function showOrderDetailModal(initialOrder) {
             </div>
           </div>
 
-          <div class="detail-section productos-section">
-            <div class="section-title-premium">Productos</div>
-            <div class="detail-items-list-premium">
-              ${o.items?.map(i => `<div class="detail-item-premium"><div class="item-qty-badge">${i.qty}x</div><div class="item-name">${i.name}</div><div class="item-price">${formatPrice(i.price * i.qty)}</div></div>`).join('')}
-            </div>
-            <div style="margin-top:12px; background:${o.allowReplacement ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)'}; border:1px solid ${o.allowReplacement ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'}; border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:8px;">
-              <span style="font-size:16px;">${o.allowReplacement ? '🔄' : '⚠️'}</span>
-              <div style="display:flex; flex-direction:column; gap:1px;">
-                <span style="font-size:11px; font-weight:800; color:${o.allowReplacement ? '#22C55E' : '#EF4444'}; text-transform:uppercase; letter-spacing:0.03em;">
-                  ${o.allowReplacement ? 'Permite Reemplazos' : 'No permite Reemplazos'}
-                </span>
-                <span style="font-size:10px; color:var(--color-text-secondary); font-weight:500;">
-                  ${o.allowReplacement ? 'El cliente autoriza a cambiar productos faltantes por similares.' : 'Contactar al cliente antes de realizar cambios de productos.'}
+          ${o.isScheduled ? `
+            <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 12px; padding: 12px; margin-top: 10px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 18px;">📅</span>
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                <span style="font-size: 11px; font-weight: 800; color: #d97706; text-transform: uppercase; letter-spacing: 0.03em;">Pedido Programado</span>
+                <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 700;">
+                  Entregar el ${o.scheduledDate} a las ${o.scheduledTime} hs
                 </span>
               </div>
             </div>
-          </div>
+          ` : ''}
 
-          <div class="detail-section">
-            <div class="section-title-premium">Entrega</div>
-            <div class="detail-address-box-premium">
-              <div class="address-icon-wrap">${icon('mapPin', 20)}</div>
-              <div class="address-text-content">
-                <span class="address-label">Dirección destino</span>
-                <span class="address-text">${o.deliveryAddress || o.address || 'Retiro en local'}</span>
+          <div class="detail-section productos-section">
+            <div class="section-title-premium">Productos</div>
+            <div class="detail-items-list-premium">
+              ${o.items?.map(i => `
+                <div class="detail-item-premium">
+                  <div class="item-qty-badge">${i.qty}x</div>
+                  <div class="item-name" style="text-align: left;">
+                    <div>${i.name}</div>
+                    ${i.options && i.options.length > 0 ? `
+                      <div style="font-size:11.5px; color:var(--color-primary); font-weight:700; margin-top:3px; line-height:1.35; font-family:var(--font-display);">
+                        ${flavorIcon} Sabores: ${i.options.map(o => `${o.qty > 1 ? `${o.qty}x ` : ''}${o.name}`).join(', ')}
+                      </div>
+                    ` : ''}
+                  </div>
+                  <div class="item-price">${formatPrice(i.price * i.qty)}</div>
+                </div>
+              `).join('')}
+            </div>
+            
+            <button class="toggle-details-btn ${isDetailsExpanded ? 'active' : ''}" id="toggle-order-details-btn">
+              ${icon('chevronDown', 14)} <span>${isDetailsExpanded ? 'Ocultar entrega y reemplazos' : 'Mostrar entrega y reemplazos'}</span>
+            </button>
+            
+            <div class="collapsible-details ${isDetailsExpanded ? 'expanded' : ''}" id="order-collapsible-details">
+              <div style="background:${o.allowReplacement ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)'}; border:1px solid ${o.allowReplacement ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'}; border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <span style="font-size:16px;">${o.allowReplacement ? '🔄' : '⚠️'}</span>
+                <div style="display:flex; flex-direction:column; gap:1px;">
+                  <span style="font-size:11px; font-weight:800; color:${o.allowReplacement ? '#22C55E' : '#EF4444'}; text-transform:uppercase; letter-spacing:0.03em;">
+                    ${o.allowReplacement ? 'Permite Reemplazos' : 'No permite Reemplazos'}
+                  </span>
+                  <span style="font-size:10px; color:var(--color-text-secondary); font-weight:500;">
+                    ${o.allowReplacement ? 'El cliente autoriza a cambiar productos faltantes por similares.' : 'Contactar al cliente antes de realizar cambios de productos.'}
+                  </span>
+                </div>
+              </div>
+
+              <div class="detail-section">
+                <div class="section-title-premium">Entrega</div>
+                <div class="detail-address-box-premium">
+                  <div class="address-icon-wrap">${icon('mapPin', 20)}</div>
+                  <div class="address-text-content">
+                    <span class="address-label">Dirección destino</span>
+                    <span class="address-text">${o.deliveryAddress || o.address || 'Retiro en local'}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -459,11 +556,8 @@ function showOrderDetailModal(initialOrder) {
 
       <div class="detail-footer-dock-premium">
         <div class="price-summary-card-premium">
-          <div class="summary-row"><span>Subtotal</span><span>${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</span></div>
-          <div class="summary-row"><span>Envío</span><span>${formatPrice(o.deliveryCost || 0)}</span></div>
-          ${o.appUsageFee ? `<div class="summary-row"><span>Tarifa de servicio</span><span>${formatPrice(o.appUsageFee)}</span></div>` : ''}
-          <div class="summary-divider"></div>
-          <div class="summary-row total-row"><span>Total</span><span class="total-amount">${formatPrice(o.total)}</span></div>
+          <div class="collapsible-summary-rows" id="order-collapsible-summary-rows" style="display: none;"></div>
+          <div class="summary-row total-row"><span>Total Productos (A Cobrar)</span><span class="total-amount">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</span></div>
         </div>
 
         ${!isHistory ? `
@@ -493,6 +587,26 @@ function showOrderDetailModal(initialOrder) {
     `;
 
     // Attach modal listeners dynamically
+    modalEl.querySelector('#toggle-order-details-btn')?.addEventListener('click', () => {
+      isDetailsExpanded = !isDetailsExpanded;
+      const collapsibleDetails = modalEl.querySelector('#order-collapsible-details');
+      const collapsibleSummary = modalEl.querySelector('#order-collapsible-summary-rows');
+      const toggleBtn = modalEl.querySelector('#toggle-order-details-btn');
+      const btnText = toggleBtn?.querySelector('span');
+
+      if (isDetailsExpanded) {
+        collapsibleDetails?.classList.add('expanded');
+        collapsibleSummary?.classList.add('expanded');
+        toggleBtn?.classList.add('active');
+        if (btnText) btnText.textContent = 'Ocultar entrega y reemplazos';
+      } else {
+        collapsibleDetails?.classList.remove('expanded');
+        collapsibleSummary?.classList.remove('expanded');
+        toggleBtn?.classList.remove('active');
+        if (btnText) btnText.textContent = 'Mostrar entrega y reemplazos';
+      }
+    });
+
     modalEl.querySelector('#close-detail-modal')?.addEventListener('click', () => {
       if (modalUnsub) modalUnsub();
       closeModal();
@@ -584,6 +698,9 @@ function showOrderDetailModal(initialOrder) {
         message: '¿El pedido ya está preparado para entregar o enviar?',
         onConfirm: async () => {
           await updateDoc(doc(db, 'orders', o.id), { status: 'ready', readyAt: serverTimestamp() });
+          if (o.confirmedAt) {
+            await updateCommerceAveragePrepTime(o.comercioId, o.confirmedAt);
+          }
           if (modalUnsub) modalUnsub();
           closeModal(); showToast('Listo', 'success');
         }
@@ -637,6 +754,16 @@ function showOrderDetailModal(initialOrder) {
     modalEl.querySelector('.modify-order-btn')?.addEventListener('click', () => {
       showModifyOrderModal(o);
     });
+
+    if (!o.goId && o.userId) {
+      getDoc(doc(db, 'users', o.userId)).then(snap => {
+        if (snap.exists()) {
+          const u = snap.data();
+          const badgeEl = modalEl.querySelector('.customer-id-premium');
+          if (badgeEl && u.goId) badgeEl.textContent = `ID: ${u.goId}`;
+        }
+      }).catch(() => {});
+    }
   };
 
   // Render initial content
@@ -729,9 +856,6 @@ async function showModifyOrderModal(order) {
 
   function renderModifyUI() {
     const subtotal = customMode ? (parseFloat(customPrice) || 0) : items.reduce((s, i) => s + i.price * i.qty, 0);
-    const appFee = order.appUsageFee || 0;
-    const discount = order.discountAmount || 0;
-    const total = subtotal + (order.deliveryCost || 0) + appFee - discount;
     modalEl.innerHTML = `
       ${getOrderStyles()}
       <div style="padding:24px; flex:1; overflow-y:auto; scrollbar-width:none;">
@@ -777,16 +901,13 @@ async function showModifyOrderModal(order) {
           <textarea id="mod-change-details" class="mod-input" placeholder="Ej: Se reemplazó Coca-Cola 2L por Pepsi 2.25L sin cargo extra." style="width:100%; height:64px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:10px 12px; font-size:13px; font-weight:600; outline:none; resize:none; font-family:inherit; background:var(--color-bg-secondary); color:var(--color-text-primary); margin-top:8px;">${changeDetails}</textarea>
         </div>
       </div>
-      <div class="mod-footer"><div class="mod-total-display"><div class="label">Total Final:</div><div class="amount">${formatPrice(total)}</div></div><button id="save-modify-btn" class="mod-save-btn">Guardar</button></div>
+      <div class="mod-footer"><div class="mod-total-display"><div class="label">Total Productos:</div><div class="amount">${formatPrice(subtotal)}</div></div><button id="save-modify-btn" class="mod-save-btn">Guardar</button></div>
     `;
 
     const updateTotalPriceDisplay = () => {
       const subtotal = customMode ? (parseFloat(customPrice) || 0) : items.reduce((s, i) => s + i.price * i.qty, 0);
-      const appFee = order.appUsageFee || 0;
-      const discount = order.discountAmount || 0;
-      const total = subtotal + (order.deliveryCost || 0) + appFee - discount;
       const amountEl = modalEl.querySelector('.mod-total-display .amount');
-      if (amountEl) amountEl.textContent = formatPrice(total);
+      if (amountEl) amountEl.textContent = formatPrice(subtotal);
     };
 
     modalEl.querySelector('#mod-items-tab')?.addEventListener('click', () => { customMode = false; renderModifyUI(); });
@@ -1278,6 +1399,7 @@ function getOrderStyles() {
       --status-delivering: #8b5cf6;
       --status-completed: #10b981;
       --status-cancelled: #e11d48;
+      --status-scheduled: #8b5cf6;
     }
 
     /* ── PAGE LAYOUT ─────────────────────────────── */
@@ -1286,7 +1408,7 @@ function getOrderStyles() {
     /* ── STICKY HEADER ───────────────────────────── */
     .orders-sticky-header {
       display:flex; align-items:center; justify-content:space-between;
-      gap:16px; padding:16px 20px;
+      gap:16px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px;
       background:var(--color-primary);
       flex-shrink:0;
       box-shadow: 0 4px 15px rgba(225, 29, 72, 0.12);
@@ -1413,6 +1535,7 @@ function getOrderStyles() {
     .ready     .card-side-indicator { background:var(--status-ready); }
     .delivering.card-side-indicator { background:var(--status-delivering); }
     .completed .card-side-indicator { background:var(--status-completed); }
+    .scheduled .card-side-indicator { background:var(--status-scheduled); }
 
     .card-main-content { flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:8px; }
     .card-top-row { display:flex; align-items:center; gap:8px; }
@@ -1423,6 +1546,7 @@ function getOrderStyles() {
     .confirmed .card-status-badge { background:rgba(59,130,246,0.1); color:var(--status-confirmed); }
     .ready .card-status-badge { background:rgba(13,148,136,0.1); color:var(--status-ready); }
     .delivering .card-status-badge { background:rgba(139,92,246,0.1); color:var(--status-delivering); }
+    .scheduled .card-status-badge { background:rgba(139,92,246,0.1); color:var(--status-scheduled); }
 
     .simplified-card-body { display:flex; justify-content:space-between; align-items:center; }
     .customer-info-minimal strong { font-size:16px; color:var(--color-text-primary); }
@@ -1432,6 +1556,7 @@ function getOrderStyles() {
     .confirmed .price-main { color:var(--status-confirmed); }
     .ready .price-main { color:var(--status-ready); }
     .delivering .price-main { color:var(--status-delivering); }
+    .scheduled .price-main { color:var(--status-scheduled); }
 
     /* Modal Fixes */
     .order-detail-modal-root { display:flex; flex-direction:column; height:100%; background:var(--color-bg-page); color:var(--color-text-primary); overflow:hidden; }
@@ -1550,6 +1675,57 @@ function getOrderStyles() {
     .badge-delivering { background:#ede9fe; color:#7c3aed; box-shadow:0 0 0 1px rgba(124,58,237,0.2); }
     .badge-completed { background:#d1fae5; color:#059669; box-shadow:0 0 0 1px rgba(5,150,105,0.2); }
     .badge-cancelled { background:#ffe4e6; color:#e11d48; box-shadow:0 0 0 1px rgba(225,29,72,0.2); }
+
+    /* Collapsible details styles */
+    .collapsible-details {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, margin 0.3s ease;
+      opacity: 0;
+    }
+    .collapsible-details.expanded {
+      max-height: 500px;
+      opacity: 1;
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+    .collapsible-summary-rows {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+      opacity: 0;
+    }
+    .collapsible-summary-rows.expanded {
+      max-height: 200px;
+      opacity: 1;
+    }
+    .toggle-details-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: var(--color-bg-secondary);
+      border: 1px solid var(--color-border-light);
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      margin-top: 10px;
+      transition: all 0.2s ease;
+      width: 100%;
+    }
+    .toggle-details-btn:hover {
+      background: var(--color-border-light);
+      color: var(--color-text-primary);
+    }
+    .toggle-details-btn svg {
+      transition: transform 0.3s ease;
+    }
+    .toggle-details-btn.active svg {
+      transform: rotate(180deg);
+    }
 
     @media (max-width: 400px) {
       .orders-header-title { font-size: 15px; }
@@ -1980,3 +2156,26 @@ function getOrderStyles() {
 }
 
 function playNotificationSound() { try { const sound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'); sound.volume = 0.9; sound.play().catch(e => { }); } catch (err) { } }
+
+async function updateCommerceAveragePrepTime(comercioId, orderConfirmedAt) {
+  if (!orderConfirmedAt) return;
+  try {
+    const { doc, getDoc, updateDoc } = await import('firebase/firestore');
+    const confTime = orderConfirmedAt.seconds ? orderConfirmedAt.seconds * 1000 : new Date(orderConfirmedAt).getTime();
+    const durationMin = Math.round((Date.now() - confTime) / 60000);
+    
+    if (durationMin < 1 || durationMin > 180) return;
+    
+    const commerceRef = doc(db, 'comercios', comercioId);
+    const commerceSnap = await getDoc(commerceRef);
+    if (commerceSnap.exists()) {
+      const data = commerceSnap.data();
+      const currentAvg = typeof data.averagePrepTime === 'number' ? data.averagePrepTime : 15;
+      const alpha = 0.2;
+      const newAvg = Math.max(5, Math.min(90, Math.round((alpha * durationMin) + ((1 - alpha) * currentAvg))));
+      await updateDoc(commerceRef, { averagePrepTime: newAvg });
+    }
+  } catch (err) {
+    console.warn('Error updating commerce average prep time:', err);
+  }
+}

@@ -1,5 +1,22 @@
 {
   "projects": {
-    "default": "godelivery-magdalena"
-  }
+    "default": "motocreditos-addc1"
+  },
+  "targets": {
+    "motocreditos-addc1": {
+      "hosting": {
+        "licencias": [
+          "goportal-licencias"
+        ]
+      }
+    },
+    "godelivery-magdalena": {
+      "hosting": {
+        "app": [
+          "godelivery-magdalena"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

@@ -221,7 +221,7 @@ function openAdEditor(ad) {
       </div>
 
       <div class="form-group">
-        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Imagen del Banner (16:9)</label>
+        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Imagen del Banner (16:9 — Recomendado: 1200x675 px)</label>
         <div style="display:flex; gap:10px;">
           <input type="text" id="promo-banner" value="${promo.banner ? '(Imagen recortada)' : (ad.banner || '')}" style="flex:1; height:54px; border-radius:16px; border:1px solid var(--color-border); padding:0 16px; font-weight:600; font-size:14px; outline:none;" placeholder="https://..." readonly />
           <button id="btn-crop-promo-banner" style="height:54px; padding:0 16px; border-radius:16px; border:1px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text); font-weight:800; font-size:13px; display:flex; align-items:center; gap:6px; cursor:pointer;">
@@ -490,7 +490,7 @@ function openCustomAdEditor(ad = null) {
       </div>
 
       <div class="form-group">
-        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Imagen del Banner (16:9)</label>
+        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Imagen del Banner (16:9 — Recomendado: 1200x675 px)</label>
         <div style="display:flex; gap:10px;">
           <input type="text" id="custom-banner" value="${isEdit && ad.banner ? '(Imagen cargada)' : ''}" style="flex:1; height:54px; border-radius:16px; border:1px solid var(--color-border); padding:0 16px; font-weight:600; font-size:14px; outline:none;" placeholder="Subí una imagen..." readonly />
           <button id="btn-crop-custom-banner" style="height:54px; padding:0 16px; border-radius:16px; border:1px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text); font-weight:800; font-size:13px; display:flex; align-items:center; gap:6px; cursor:pointer;">

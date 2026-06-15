@@ -104,16 +104,33 @@ export async function renderAdminSupportChats() {
         overflow: hidden !important;
       }
 
+      /* Fix mobile height collapsing */
+      .slide-overlay #app-content {
+        height: 100% !important;
+        min-height: 100% !important;
+        padding-bottom: 0 !important;
+        overflow: hidden !important;
+      }
+
       @media (max-width: 768px) {
         #app-overlay {
-          top: calc(98px + env(safe-area-inset-top, 0px)) !important;
+          top: var(--header-height, 64px) !important;
           bottom: var(--navbar-height, 60px) !important;
-          height: calc(100dvh - 98px - var(--navbar-height, 60px) - env(safe-area-inset-top, 0px)) !important;
+          height: calc(100dvh - var(--header-height, 64px) - var(--navbar-height, 60px)) !important;
         }
         #chats-list-sidebar { width: 100% !important; max-width: none !important; }
         #chat-conversation-area { position: absolute; inset: 0; z-index: 150; }
         #chat-placeholder-area { display: none !important; }
         #chat-back-to-list-btn { display: flex !important; }
+        
+        /* Ensure the active user header is properly padded and aligned on mobile */
+        #chat-conversation-area > div:first-child {
+          padding: 12px 16px !important;
+          min-height: 64px !important;
+          display: flex !important;
+          align-items: center !important;
+          box-sizing: border-box !important;
+        }
       }
     </style>
   `;

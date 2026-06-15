@@ -1,5 +1,5 @@
 // GoDelivery — Cart Page
-import { getState, setState, getCartByComercio, getCartTotal, getCartCount, updateCartQty, removeFromCart, clearCart, subscribe } from '../state.js';
+import { getState, setState, getCartByComercio, getCartTotal, getCartCount, updateCartQty, removeFromCart, clearCart, subscribe, setDeliveryAddress } from '../state.js';
 import { formatPrice } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 window.showToast = showToast; // Global access for inline modal events
@@ -16,6 +16,14 @@ import { ConfettiCelebrator } from '../utils/confetti.js';
 let currentCartStep = 1;
 let isSubmitting = false;
 let selectedPaymentMethod = 'efectivo';
+let selectedIsScheduled = false;
+let selectedSchedDate = '';
+let selectedSchedTime = '';
+
+function escapeHtmlAttr(str) {
+  if (!str) return '';
+  return str.replace(/"/g, '&quot;');
+}
 
 export async function renderCart(content) {
   if (!content) content = document.getElementById('page-cart') || document.getElementById('app-content');
@@ -27,16 +35,24 @@ export async function renderCart(content) {
   // Start calculating dynamic fees in background
   calculateAllFees();
 
-  // Load weather status dynamically
-  isRainingInMagdalena().then(isRaining => {
-    setState('isRaining', isRaining);
-  });
+  const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
 
-  try {
-    const oSnap = await getDocs(query(collection(db, 'offers'), where('active', '==', true)));
-    setState({ activeOffers: oSnap.docs.map(d => ({ id: d.id, ...d.data() })) });
-  } catch (e) {
-    console.error('Error loading offers', e);
+  // Load weather status dynamically
+  if (!isPreview) {
+    isRainingInMagdalena().then(isRaining => {
+      setState('isRaining', isRaining);
+    });
+  } else {
+    setState('isRaining', false);
+  }
+
+  if (!isPreview) {
+    try {
+      const oSnap = await getDocs(query(collection(db, 'offers'), where('active', '==', true)));
+      setState({ activeOffers: oSnap.docs.map(d => ({ id: d.id, ...d.data() })) });
+    } catch (e) {
+      console.error('Error loading offers', e);
+    }
   }
 
   renderCartContent(content);
@@ -106,13 +122,12 @@ export async function calculateAllFees(proactiveCommerceId = null) {
 
   if (!userCoords) return;
 
-  const newFees = { ...state.dynamicDeliveryFees };
+  const newFees = {};
   const newDistances = {};
 
   let changed = false;
 
   for (const cid of comercioIds) {
-    if (newFees[cid] !== undefined) continue;
 
     try {
       const cSnap = await getDoc(doc(db, 'comercios', cid));
@@ -249,7 +264,7 @@ function renderCartContent(content) {
                 }
 
                 return `
-                  <div class="cart-item" data-cart-item-id="${item.cartItemId}" data-comercio-id="${comercioId}" style="display:flex; align-items:center; gap:var(--space-3); position:relative; padding-bottom:var(--space-3); border-bottom:1px solid var(--color-border-light);">
+                  <div class="cart-item" data-cart-item-id="${escapeHtmlAttr(item.cartItemId)}" data-comercio-id="${comercioId}" style="display:flex; align-items:center; gap:var(--space-3); position:relative; padding-bottom:var(--space-3); border-bottom:1px solid var(--color-border-light);">
                     <img src="${item.product.image || '/logo.png'}" alt="${item.product.name}" style="width:50px; height:50px; border-radius:var(--radius-md); object-fit:cover; flex-shrink:0; background:var(--color-bg-secondary);" />
                     <div style="flex:1; min-width:0;">
                       <div style="font-weight:700; font-size:14px; color:var(--color-text-primary); display:flex; align-items:center; gap:4px;">
@@ -267,10 +282,15 @@ function renderCartContent(content) {
                         </div>
                       ` : ''}
                     </div>
-                    <div class="qty-controls" style="background:var(--color-bg-secondary); border-radius:var(--radius-md); border:1px solid var(--color-border-light); padding:2px;">
-                      <button class="qty-btn cart-qty-btn" data-action="minus" data-id="${item.cartItemId}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px;">−</button>
-                      <span class="qty-value" style="font-size:13px; min-width:24px; color:var(--color-text-primary);">${item.qty}</span>
-                      <button class="qty-btn cart-qty-btn" data-action="plus" data-id="${item.cartItemId}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px;">+</button>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div class="qty-controls" style="background:var(--color-bg-secondary); border-radius:var(--radius-md); border:1px solid var(--color-border-light); padding:2px; display:flex; align-items:center;">
+                        <button class="qty-btn cart-qty-btn" data-action="minus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px;">−</button>
+                        <span class="qty-value" style="font-size:13px; min-width:24px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
+                        <button class="qty-btn cart-qty-btn" data-action="plus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px;">+</button>
+                      </div>
+                      <button class="cart-item-remove" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="background:rgba(239,68,68,0.08); border:none; color:var(--color-danger); width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Eliminar producto">
+                        ${icon('trash', 14)}
+                      </button>
                     </div>
                   </div>
                 `;
@@ -1286,6 +1306,8 @@ async function openCheckoutConfirmationModal() {
   const commerceEntries = Object.entries(grouped);
   const isMultiOrder = commerceEntries.length > 1;
 
+  // Using module-level selectedIsScheduled, selectedSchedDate, selectedSchedTime
+
   // Recalculate fees and pricing exactly matching cart UI
   const totalProducts = getCartTotal();
   const dynamicFees = state.dynamicDeliveryFees || {};
@@ -1504,6 +1526,20 @@ async function openCheckoutConfirmationModal() {
           </div>
         ` : ''}
       </div>
+      
+      <!-- Saved Addresses Quick Selector -->
+      ${(state.savedAddresses && state.savedAddresses.length > 0) ? `
+        <div style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; margin-top: 4px; scrollbar-width: none; -ms-overflow-style: none;">
+          ${state.savedAddresses.map(addr => {
+            const isCurrent = addr.address === address;
+            return `
+              <button class="quick-addr-chip" data-id="${addr.id}" style="flex-shrink: 0; padding: 6px 12px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${isCurrent ? 'var(--color-primary-light)' : 'var(--color-bg)'}; color: ${isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; cursor: pointer; transition: all 0.2s; white-space: nowrap;">
+                ${addr.name}
+              </button>
+            `;
+          }).join('')}
+        </div>
+      ` : ''}
     </div>
 
     <!-- OPCIÓN DE REEMPLAZO DE PRODUCTOS (Reemplazar producto) -->
@@ -1520,6 +1556,39 @@ async function openCheckoutConfirmationModal() {
         <input type="checkbox" id="confirm-allow-replacement" checked>
         <span class="confirm-slider"></span>
       </label>
+    </div>
+
+    <!-- PROGRAMACIÓN DE ENTREGA -->
+    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); flex-shrink: 0;">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
+          📅 ¿Cuándo querés recibirlo?
+        </span>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 4px;">
+        <button type="button" id="sched-now-btn" style="flex: 1; height: 38px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${selectedIsScheduled ? 'var(--color-border-light)' : 'var(--color-primary)'}; background: ${selectedIsScheduled ? 'var(--color-bg)' : 'var(--color-primary-light)'}; color: ${selectedIsScheduled ? 'var(--color-text-secondary)' : 'var(--color-primary)'}; cursor: pointer; transition: all 0.2s;">
+          Entregar ahora
+        </button>
+        <button type="button" id="sched-later-btn" style="flex: 1; height: 38px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${selectedIsScheduled ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${selectedIsScheduled ? 'var(--color-primary-light)' : 'var(--color-bg)'}; color: ${selectedIsScheduled ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; cursor: pointer; transition: all 0.2s;">
+          Programar más tarde
+        </button>
+      </div>
+      
+      <!-- CONTROLES DE FECHA Y HORA -->
+      <div id="sched-selectors-container" style="display: ${selectedIsScheduled ? 'flex' : 'none'}; flex-direction: column; gap: 10px; margin-top: 6px; padding-top: 10px; border-top: 1px dashed var(--color-border-light);">
+        <div style="display: flex; gap: 8px;">
+          <div style="flex: 1.2; display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 9px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Día</label>
+            <select id="sched-date-select" style="height: 38px; border-radius: 8px; border: 1.5px solid var(--color-border-light); padding: 0 8px; font-size: 12px; font-weight: 700; color: var(--color-text-primary); background: var(--color-surface); outline: none;">
+            </select>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 9px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Hora</label>
+            <select id="sched-time-select" style="height: 38px; border-radius: 8px; border: 1.5px solid var(--color-border-light); padding: 0 8px; font-size: 12px; font-weight: 700; color: var(--color-text-primary); background: var(--color-surface); outline: none;">
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- RESUMEN DE PAGO -->
@@ -1636,6 +1705,151 @@ async function openCheckoutConfirmationModal() {
     isSubmitting = false;
   };
 
+  // Scheduling Listeners
+  const nowBtn = modalContent.querySelector('#sched-now-btn');
+  const laterBtn = modalContent.querySelector('#sched-later-btn');
+  const schedContainer = modalContent.querySelector('#sched-selectors-container');
+
+  const populateSchedulingOptions = () => {
+    const dateSelect = modalContent.querySelector('#sched-date-select');
+    const timeSelect = modalContent.querySelector('#sched-time-select');
+    if (!dateSelect || !timeSelect) return;
+
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+
+    const formatDateVal = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    dateSelect.innerHTML = `
+      <option value="${formatDateVal(today)}">Hoy (${today.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })})</option>
+      <option value="${formatDateVal(tomorrow)}">Mañana (${tomorrow.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })})</option>
+    `;
+
+    const updateTimes = () => {
+      const isToday = dateSelect.value === formatDateVal(today);
+      let startHour = 0;
+      let startMinute = 0;
+
+      if (isToday) {
+        const minTime = new Date(Date.now() + 45 * 60 * 1000);
+        startHour = minTime.getHours();
+        startMinute = Math.ceil(minTime.getMinutes() / 15) * 15;
+        if (startMinute >= 60) {
+          startHour += 1;
+          startMinute = 0;
+        }
+      }
+
+      let optionsHTML = '';
+      for (let h = startHour; h < 24; h++) {
+        const mStart = (h === startHour) ? startMinute : 0;
+        for (let m = mStart; m < 60; m += 15) {
+          const hh = String(h).padStart(2, '0');
+          const mm = String(m).padStart(2, '0');
+          optionsHTML += `<option value="${hh}:${mm}">${hh}:${mm} hs</option>`;
+        }
+      }
+      if (!optionsHTML) {
+        optionsHTML = `<option value="">Sin horarios disponibles</option>`;
+      }
+      timeSelect.innerHTML = optionsHTML;
+    };
+
+    dateSelect.onchange = updateTimes;
+    updateTimes();
+  };
+
+  if (nowBtn && laterBtn) {
+    nowBtn.onclick = () => {
+      selectedIsScheduled = false;
+      nowBtn.style.borderColor = 'var(--color-primary)';
+      nowBtn.style.background = 'var(--color-primary-light)';
+      nowBtn.style.color = 'var(--color-primary)';
+      laterBtn.style.borderColor = 'var(--color-border-light)';
+      laterBtn.style.background = 'var(--color-bg)';
+      laterBtn.style.color = 'var(--color-text-secondary)';
+      schedContainer.style.display = 'none';
+    };
+
+    laterBtn.onclick = () => {
+      selectedIsScheduled = true;
+      laterBtn.style.borderColor = 'var(--color-primary)';
+      laterBtn.style.background = 'var(--color-primary-light)';
+      laterBtn.style.color = 'var(--color-primary)';
+      nowBtn.style.borderColor = 'var(--color-border-light)';
+      nowBtn.style.background = 'var(--color-bg)';
+      nowBtn.style.color = 'var(--color-text-secondary)';
+      schedContainer.style.display = 'flex';
+      populateSchedulingOptions();
+    };
+  }
+
+  if (selectedIsScheduled) {
+    populateSchedulingOptions();
+  }
+
+  // Handle Saved Addresses Quick Selector
+  const quickAddrChips = modalContent.querySelectorAll('.quick-addr-chip');
+  quickAddrChips.forEach(chip => {
+    chip.onclick = async () => {
+      const addrId = chip.getAttribute('data-id');
+      const saved = state.savedAddresses.find(a => a.id === addrId);
+      if (saved) {
+        close();
+        
+        // Show loading blocker overlay
+        const loadingBlocker = showModal({
+          title: '',
+          hideHeader: true,
+          height: 'auto',
+          content: (() => {
+            const el = document.createElement('div');
+            el.style.cssText = 'padding: 32px 24px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: var(--color-bg); border-radius: 20px;';
+            el.innerHTML = `
+              <div class="animate-spin" style="width: 48px; height: 48px; border: 4px solid var(--color-primary); border-top-color: transparent; border-radius: 50%; display: inline-block;"></div>
+              <span style="font-weight: 800; font-size: 16px; color: var(--color-text-primary);">Recalculando tarifas de envío...</span>
+              <span style="font-size: 12px; color: var(--color-text-tertiary);">Por favor, aguardá un instante</span>
+            `;
+            return el;
+          })()
+        });
+
+        // Set pointer-events to none on overlay to block closing during recalculation
+        const overlayEl = document.getElementById(`${loadingBlocker.id}-overlay`);
+        if (overlayEl) {
+          overlayEl.style.pointerEvents = 'none';
+        }
+
+        try {
+          // Set delivery address in state
+          setDeliveryAddress(saved.address, saved.notes || '', saved.coords || null);
+          
+          // Clear cached fees to force recalculation for the new address
+          setState({ dynamicDeliveryFees: {}, dynamicDistances: {} });
+          
+          // Recalculate all shipping fees for the new address
+          await calculateAllFees();
+        } catch (e) {
+          console.error("Error recalculating fees for quick saved address:", e);
+        } finally {
+          // Close the loading blocker modal
+          if (loadingBlocker && typeof loadingBlocker.close === 'function') {
+            loadingBlocker.close();
+          }
+        }
+        
+        // Re-open this confirmation modal recursively!
+        openCheckoutConfirmationModal();
+      }
+    };
+  });
+
   // Handle Change Address
   const changeAddressBtn = modalContent.querySelector('#confirm-change-address-btn');
   changeAddressBtn.onclick = () => {
@@ -1698,6 +1912,15 @@ async function openCheckoutConfirmationModal() {
       showToast('No es posible confirmar el pedido sin repartidores online', 'error');
       return;
     }
+    const finalAddressNotes = getState().addressNotes || '';
+    if (!finalAddressNotes.trim()) {
+      showToast('La referencia de ubicación es obligatoria.', 'warning');
+      close();
+      import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
+        openCheckoutConfirmationModal();
+      }));
+      return;
+    }
     submitBtn.disabled = true;
     cancelBtn.disabled = true;
     changeAddressBtn.disabled = true;
@@ -1716,6 +1939,24 @@ async function openCheckoutConfirmationModal() {
       const allowReplacementEl = modalContent.querySelector('#confirm-allow-replacement');
       const allowReplacement = allowReplacementEl ? allowReplacementEl.checked : true;
 
+      let schedDateVal = null;
+      let schedTimeVal = null;
+      if (selectedIsScheduled) {
+        const dateSelect = modalContent.querySelector('#sched-date-select');
+        const timeSelect = modalContent.querySelector('#sched-time-select');
+        schedDateVal = dateSelect ? dateSelect.value : '';
+        schedTimeVal = timeSelect ? timeSelect.value : '';
+
+        if (!schedDateVal || !schedTimeVal || schedTimeVal === 'Sin horarios disponibles') {
+          showToast('Por favor selecciona una fecha y hora válidas para programar.', 'warning');
+          submitBtn.disabled = false;
+          cancelBtn.disabled = false;
+          changeAddressBtn.disabled = false;
+          submitBtn.innerHTML = originalText;
+          return;
+        }
+      }
+
       const response = await fetch('https://us-central1-godelivery-magdalena.cloudfunctions.net/createOrder', {
         method: 'POST',
         headers: {
@@ -1733,7 +1974,10 @@ async function openCheckoutConfirmationModal() {
           tip: selectedTip,
           bundleId,
           couponCode: appliedCoupon ? appliedCoupon.code : null,
-          allowReplacement
+          allowReplacement,
+          isScheduled: selectedIsScheduled,
+          scheduledDate: schedDateVal,
+          scheduledTime: schedTimeVal
         })
       });
 
@@ -1745,8 +1989,24 @@ async function openCheckoutConfirmationModal() {
       const resData = await response.json();
       const result = resData.orders; // Returns [{ docId, orderId, commerceId, total }]
 
-      // Update newly created order documents with addressNotes directly from the client side
-      const finalAddressNotes = getState().addressNotes || '';
+      // Save last address to Firestore
+      if (auth.currentUser) {
+        const { doc, updateDoc } = await import('firebase/firestore');
+        const { db } = await import('../firebase.js');
+        const userRef = doc(db, 'users', auth.currentUser.uid);
+        try {
+          await updateDoc(userRef, {
+            lastAddress: {
+              address: finalAddress,
+              notes: finalAddressNotes || '',
+              coords: finalCoords || null
+            }
+          });
+        } catch (err) {
+          console.error('Error saving lastAddress to user profile:', err);
+        }
+      }
+
       if (finalAddressNotes) {
         const { doc, updateDoc } = await import('firebase/firestore');
         const { db } = await import('../firebase.js');
@@ -1875,6 +2135,11 @@ async function handleCartClick(e) {
     const address = getState().deliveryAddress;
     const user = getState().user;
 
+    if (!user) {
+      showToast('Debes iniciar sesión para hacer un pedido', 'warning');
+      return;
+    }
+
     if (!address) {
       import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
         checkoutBtn.click();
@@ -1882,8 +2147,27 @@ async function handleCartClick(e) {
       return;
     }
 
-    if (!user) {
-      showToast('Debes iniciar sesión para hacer un pedido', 'warning');
+    const notes = getState().addressNotes;
+    if (!notes || notes.trim() === '') {
+      showToast('La referencia de ubicación es obligatoria.', 'warning');
+      import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
+        checkoutBtn.click();
+      }));
+      return;
+    }
+
+    if (!user.phone || user.phone.trim() === '') {
+      const { showConfirm } = await import('../components/modal.js');
+      showConfirm({
+        title: '📱 Teléfono Requerido',
+        message: 'Para realizar un pedido en la plataforma es obligatorio configurar un celular de contacto para que el comercio y el repartidor se comuniquen.',
+        confirmText: 'Configurar ahora',
+        cancelText: 'Volver',
+        onConfirm: () => {
+          sessionStorage.setItem('open-phone-edit', 'true');
+          location.hash = '#/profile';
+        }
+      });
       return;
     }
 
@@ -1902,6 +2186,9 @@ async function handleCartClick(e) {
     checkoutBtn.innerHTML = `${icon('loader', 18, 'animate-spin')} VERIFICANDO...`;
 
     try {
+      selectedIsScheduled = false;
+      selectedSchedDate = '';
+      selectedSchedTime = '';
       await openCheckoutConfirmationModal();
     } catch (err) {
       console.error('Error opening confirmation modal:', err);

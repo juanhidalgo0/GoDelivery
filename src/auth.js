@@ -2,7 +2,7 @@
 import { auth, googleProvider, db } from './firebase.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc, getDocs, collection, query, where, serverTimestamp, runTransaction, onSnapshot } from 'firebase/firestore';
-import { setState, getState, clearUserState } from './state.js';
+import { setState, getState, clearUserState, setDeliveryAddress } from './state.js';
 import { showToast } from './components/toast.js';
 
 // Sign in with Email/Password (for testing)
@@ -60,9 +60,18 @@ export async function signInWithGoogle() {
 // Sign out
 export async function signOut() {
   try {
+    if (userDocUnsub) {
+      userDocUnsub();
+      userDocUnsub = null;
+    }
     await fbSignOut(auth);
     clearUserState();
+    sessionStorage.clear();
     showToast('Sesión cerrada', 'info');
+    setTimeout(() => {
+      window.location.hash = '#/';
+      window.location.reload();
+    }, 400);
   } catch (error) {
     console.error('Sign out error:', error);
     showToast('Error al cerrar sesión', 'error');
@@ -92,15 +101,24 @@ async function ensureUserDoc(user) {
     const refRand = Math.random().toString(36).substring(2, 7).toUpperCase();
     const referralCode = `GO-REF-${refRand}`;
 
+    const userAgent = navigator.userAgent || '';
+    let deviceOS = 'web';
+    if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+      deviceOS = 'ios';
+    } else if (/Android/.test(userAgent)) {
+      deviceOS = 'android';
+    }
+
     const userData = {
       displayName: user.displayName || (user.email === 'test-delivery@godelivery.com' ? 'Test Delivery' : 'Test User'),
       email: user.email || '',
       photoURL: user.photoURL || '',
-      role: (isFirst || ADMIN_EMAILS.includes(user.email)) ? 'admin' : (user.email === 'test-delivery@godelivery.com' ? 'delivery' : 'user'),
+      role: (isFirst || ADMIN_EMAILS.includes(user.email)) ? 'admin' : (user.email === 'test-delivery@godelivery.com' ? 'admin' : 'user'),
       clientId,
       referralCode,
       createdAt: serverTimestamp(),
-      phone: ''
+      phone: '',
+      deviceOS
     };
 
     // Check if the user was referred by someone
@@ -126,10 +144,24 @@ async function ensureUserDoc(user) {
     setState('user', { uid: user.uid, ...userData });
   } else {
     const data = userSnap.data();
+    const updates = {};
+
+    const userAgent = navigator.userAgent || '';
+    let deviceOS = 'web';
+    if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+      deviceOS = 'ios';
+    } else if (/Android/.test(userAgent)) {
+      deviceOS = 'android';
+    }
+    if (data.deviceOS !== deviceOS) {
+      updates.deviceOS = deviceOS;
+      data.deviceOS = deviceOS;
+    }
+
     // Backfill clientId for existing users without one
     if (!data.clientId) {
       const clientId = await getNextClientId();
-      await setDoc(userRef, { clientId }, { merge: true });
+      updates.clientId = clientId;
       data.clientId = clientId;
     }
     
@@ -137,28 +169,31 @@ async function ensureUserDoc(user) {
     if (!data.referralCode) {
       const refRand = Math.random().toString(36).substring(2, 7).toUpperCase();
       const refCode = `GO-REF-${refRand}`;
-      await setDoc(userRef, { referralCode: refCode }, { merge: true });
+      updates.referralCode = refCode;
       data.referralCode = refCode;
     }
     
     // Auto-promote if email is in whitelist
     if (ADMIN_EMAILS.includes(data.email) && data.role !== 'admin') {
-      await setDoc(userRef, { role: 'admin' }, { merge: true });
+      updates.role = 'admin';
       data.role = 'admin';
     }
 
     // Auto-promote test delivery account
-    if (data.email === 'test-delivery@godelivery.com' && !data.isDelivery) {
-      await setDoc(userRef, { 
-        role: 'delivery', 
-        isDelivery: true, 
-        deliveryStatus: 'approved',
-        deliveryId: 'DL-TEST'
-      }, { merge: true });
-      data.role = 'delivery';
+    if (data.email === 'test-delivery@godelivery.com' && (data.role !== 'admin' || !data.isDelivery)) {
+      updates.role = 'admin';
+      updates.isDelivery = true;
+      updates.deliveryStatus = 'approved';
+      updates.deliveryId = 'DL-TEST';
+
+      data.role = 'admin';
       data.isDelivery = true;
       data.deliveryStatus = 'approved';
       data.deliveryId = 'DL-TEST';
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await setDoc(userRef, updates, { merge: true });
     }
     
     setState('user', { uid: user.uid, ...data });
@@ -213,12 +248,16 @@ export function initAuth(callback) {
     const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
 
     if (isPreview && !user) {
+      const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || window.location.search);
+      const queryEmail = urlParams.get('email') || 'kioscopaulos7@gmail.com';
+      const queryName = urlParams.get('name') || 'Vista Previa Kiosco';
       user = {
         uid: 'preview-user',
-        displayName: 'Vista Previa Kiosco',
-        email: 'kioscopaulos7@gmail.com',
+        displayName: decodeURIComponent(queryName),
+        email: queryEmail,
         photoURL: '',
-        role: 'user',
+        role: 'admin',
+        isAdmin: true,
         isReadOnly: true
       };
     }
@@ -235,15 +274,45 @@ export function initAuth(callback) {
           return;
         }
 
+        // Ensure user document exists in Firestore before starting the listener
+        await ensureUserDoc(user);
+
         const userRef = doc(db, 'users', user.uid);
         // Start real-time listener for user profile
         userDocUnsub = onSnapshot(userRef, (snap) => {
           let userData = {};
           if (snap.exists()) {
             userData = snap.data();
+            
+            // Auto-promote to admin if email is whitelisted
+            if (ADMIN_EMAILS.includes(userData.email || user.email) && userData.role !== 'admin') {
+              import('firebase/firestore').then(async ({ updateDoc }) => {
+                try {
+                  await updateDoc(userRef, { role: 'admin' });
+                } catch (e) {
+                  console.warn('Error upgrading user role to admin:', e);
+                }
+              });
+              userData.role = 'admin';
+            }
 
             if (Array.isArray(userData.favorites)) {
               localStorage.setItem('gd-favorites', JSON.stringify(userData.favorites));
+            }
+
+            if (Array.isArray(userData.savedAddresses)) {
+              localStorage.setItem('gd-saved-addresses', JSON.stringify(userData.savedAddresses));
+              setState('savedAddresses', userData.savedAddresses);
+            }
+
+            // Restore lastAddress if no active delivery address is present in localStorage
+            if (userData.lastAddress && !localStorage.getItem('gd-address')) {
+              setDeliveryAddress(
+                userData.lastAddress.address,
+                userData.lastAddress.notes || '',
+                userData.lastAddress.coords || null,
+                userData.lastAddress.houseNumber || ''
+              );
             }
           } else {
             console.log('Auth: [onSnapshot] Profile was deleted by an admin, forcing sign out...');

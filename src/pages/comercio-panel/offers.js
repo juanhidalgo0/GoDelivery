@@ -41,15 +41,15 @@ export async function renderComercioOffers() {
 
     content.innerHTML = `
       <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
-        <div style="background:var(--color-surface); border-bottom:1px solid var(--color-border); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0;">
-          <button onclick="location.hash='#/mi-comercio/${comercioId}/orders'" style="width:40px; height:40px; border-radius:12px; background:var(--color-bg-secondary); border:1px solid var(--color-border); display:flex; align-items:center; justify-content:center; color:var(--color-text);">
+        <div style="background:var(--color-primary); border-bottom:1px solid rgba(255,255,255,0.1); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; color:white; box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+          <button onclick="location.hash='#/mi-comercio/${comercioId}'" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25); display:flex; align-items:center; justify-content:center; color:white; cursor:pointer;">
             ${icon('arrowLeft', 20)}
           </button>
           <div style="flex:1;">
-            <h1 id="comercio-page-title" style="font-family:var(--font-display); font-size:20px; font-weight:900; margin:0;">Mis Ofertas</h1>
-            <p id="comercio-page-subtitle" style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-top:2px;">Promociones de ${comercioName}</p>
+            <h1 id="comercio-page-title" style="font-family:var(--font-display); font-size:20px; font-weight:900; margin:0; color:white;">${isAdmin() ? 'Adm: Mis Ofertas' : 'Mis Ofertas'}</h1>
+            <p id="comercio-page-subtitle" style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.85); text-transform:uppercase; margin-top:2px;">${isAdmin() ? `Adm: Promociones de ${comercioName}` : `Promociones de ${comercioName}`}</p>
           </div>
-          <button id="comercio-create-offer-btn" style="width:40px; height:40px; border-radius:12px; background:var(--color-primary); color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:var(--shadow-sm);">
+          <button id="comercio-create-offer-btn" style="width:40px; height:40px; border-radius:12px; background:white; color:var(--color-primary); border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:var(--shadow-sm); font-weight:bold;">
             ${icon('plus', 20)}
           </button>
         </div>
@@ -89,8 +89,8 @@ export async function renderComercioOffers() {
         tabCoupons.style.color = 'var(--color-text-tertiary)';
         tabCoupons.style.boxShadow = 'none';
         
-        titleEl.textContent = 'Mis Ofertas';
-        subtitleEl.textContent = `Promociones de ${comercioName}`;
+        titleEl.textContent = isAdmin() ? 'Adm: Mis Ofertas' : 'Mis Ofertas';
+        subtitleEl.textContent = isAdmin() ? `Adm: Promociones de ${comercioName}` : `Promociones de ${comercioName}`;
         createBtn.onclick = () => openOfferEditor();
         loadOffers();
       } else {
@@ -101,8 +101,8 @@ export async function renderComercioOffers() {
         tabOffers.style.color = 'var(--color-text-tertiary)';
         tabOffers.style.boxShadow = 'none';
 
-        titleEl.textContent = 'Mis Cupones';
-        subtitleEl.textContent = `Cupones creados por ${comercioName}`;
+        titleEl.textContent = isAdmin() ? 'Adm: Mis Cupones' : 'Mis Cupones';
+        subtitleEl.textContent = isAdmin() ? `Adm: Cupones creados por ${comercioName}` : `Cupones creados por ${comercioName}`;
         createBtn.onclick = () => openCouponEditor();
         loadComercioCoupons();
       }

@@ -367,15 +367,11 @@ export async function renderAdminBroadcasts() {
           let finalImageUrl = imageUrl;
 
           if (uploadedImageBase64) {
-            btn.innerHTML = `${icon('loader', 16, 'animate-spin')} Subiendo imagen...`;
-            const { ref, uploadString, getDownloadURL } = await import('firebase/storage');
-            const { storage } = await import('../../firebase.js');
-            const fileRef = ref(storage, `broadcasts-banners/${Date.now()}.webp`);
-            await uploadString(fileRef, uploadedImageBase64, 'data_url');
-            finalImageUrl = await getDownloadURL(fileRef);
+            // Direct base64 transfer to cloud function to handle upload securely on the backend
+            finalImageUrl = uploadedImageBase64;
           } else if (imageUrl === 'Imagen cargada desde dispositivo 📤') {
             finalImageUrl = '';
-          } else if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+          } else if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://') && !imageUrl.startsWith('data:')) {
             finalImageUrl = '';
           }
 

@@ -1,4 +1,4 @@
-import { getState, subscribe, getUserLevel } from '../state.js';
+import { getState, setState, subscribe, getUserLevel } from '../state.js';
 import { signInWithGoogle, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from '../auth.js';
 import { db } from '../firebase.js';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
@@ -63,11 +63,60 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               Continuar con Google
             </button>
+            <div style="margin-top: 24px; text-align: center;">
+              <button id="reviewer-login-btn" style="background: none; border: none; color: var(--color-text-tertiary); font-size: 11px; font-weight: 750; text-decoration: underline; cursor: pointer; opacity: 0.8; transition: opacity 0.2s;">
+                Acceso para revisores (Google Play)
+              </button>
+            </div>
           </div>
         </div>
       `;
 
       document.getElementById('google-login-btn')?.addEventListener('click', signInWithGoogle);
+      
+      document.getElementById('reviewer-login-btn')?.addEventListener('click', () => {
+        const modalEl = document.createElement('div');
+        modalEl.style.cssText = 'padding: 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
+        modalEl.innerHTML = `
+          <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
+          <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales proporcionadas para revisar la aplicación.</p>
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+            <input type="email" id="test-email" placeholder="Correo electrónico" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
+            <input type="password" id="test-password" placeholder="Contraseña" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
+          </div>
+          <button id="btn-submit-test-login" style="margin-top: 16px; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.2);">
+            Iniciar Sesión
+          </button>
+        `;
+        
+        import('../components/modal.js').then(m => {
+          m.showModal({
+            title: '',
+            content: modalEl,
+            height: 'auto',
+            hideHeader: true,
+            onOpen: () => {
+              modalEl.querySelector('#btn-submit-test-login').onclick = async () => {
+                const email = modalEl.querySelector('#test-email').value.trim();
+                const password = modalEl.querySelector('#test-password').value.trim();
+                if (!email || !password) return;
+                
+                modalEl.querySelector('#btn-submit-test-login').disabled = true;
+                modalEl.querySelector('#btn-submit-test-login').textContent = 'Iniciando...';
+                
+                const { signInWithTestAccount } = await import('../auth.js');
+                const success = await signInWithTestAccount(email, password);
+                if (success) {
+                  m.closeModal();
+                } else {
+                  modalEl.querySelector('#btn-submit-test-login').disabled = false;
+                  modalEl.querySelector('#btn-submit-test-login').textContent = 'Iniciar Sesión';
+                }
+              };
+            }
+          });
+        });
+      });
       return;
     }
 
@@ -164,13 +213,13 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     }
 
     content.innerHTML = `
-      <div class="profile-page page-enter" style="display:flex; flex-direction:column; height:100%; background:var(--color-bg); overflow:hidden;">
+      <div class="profile-page page-enter" style="background:var(--color-bg);">
         
         <style>
-          .profile-scroll-container::-webkit-scrollbar {
+          #page-profile::-webkit-scrollbar {
             display: none !important;
           }
-          .profile-scroll-container {
+          #page-profile {
             scrollbar-width: none !important;
             -ms-overflow-style: none !important;
           }
@@ -194,6 +243,9 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           .profile-page .settings-list {
             gap: 0px !important;
           }
+          #profile-avatar-container:hover .avatar-edit-overlay {
+            opacity: 1 !important;
+          }
           @keyframes pulse-orange {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
             70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
@@ -201,16 +253,23 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           }
         </style>
 
-        <div style="flex:1; overflow-y:auto; -webkit-overflow-scrolling: touch; padding-bottom: 12px;" class="profile-scroll-container">
           
           <!-- User Profile Info -->
           <div style="padding:16px 20px; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; gap:14px;">
-            <div style="position:relative;">
+            <div style="position:relative; cursor:pointer;" id="profile-avatar-container" title="Cambiar foto de perfil">
               <img src="${user.photoURL || '/logo.png'}" alt="${user.displayName}" style="width:58px; height:58px; border-radius:18px; object-fit:cover; border:2.5px solid var(--color-bg-secondary); box-shadow:var(--shadow-md);" referrerpolicy="no-referrer" />
-              <div style="position:absolute; bottom:-3px; right:-3px; width:22px; height:22px; border-radius:8px; background:${level.color}; display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface);">
+              <div class="avatar-edit-overlay" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); border-radius:18px; display:flex; align-items:center; justify-content:center; color:white; opacity:0; transition:opacity 0.2s;">
+                ${icon('camera', 16)}
+              </div>
+              <!-- Camera badge indicator always visible in top-right -->
+              <div style="position:absolute; top:-4px; right:-4px; width:20px; height:20px; border-radius:50%; background:var(--color-primary); display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface); z-index:2; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                ${icon('camera', 10)}
+              </div>
+              <div style="position:absolute; bottom:-3px; right:-3px; width:22px; height:22px; border-radius:8px; background:${level.color}; display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface); z-index:2;">
                 ${icon(level.icon || 'award', 11)}
               </div>
             </div>
+            <input type="file" id="profile-avatar-input" accept="image/*" style="display:none;" />
             <div style="flex:1; min-width:0;">
               <h2 style="font-family:var(--font-display); font-weight:900; font-size:18px; color:var(--color-text); margin:0; letter-spacing:-0.03em;">${user.displayName || 'Usuario'}</h2>
               <p style="font-size:12px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.email || ''} • <strong style="color:var(--color-text-primary); font-family:monospace; letter-spacing:0.5px;">${user.goId || '...'}</strong></p>
@@ -400,28 +459,40 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               ${icon('chevronRight', 16, 'settings-chevron')}
             </a>
 
-            <div class="settings-row" id="edit-address-btn">
+            <div class="settings-row" id="edit-display-name-btn" style="cursor:pointer;">
+              <div class="settings-icon-box" style="background:rgba(225, 29, 72, 0.1); color:var(--color-primary);">
+                ${icon('user', 20)}
+              </div>
+              <div style="flex:1;">
+                <span class="settings-label">Nombre Visible</span>
+                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.displayName || 'Establecer nombre'}</p>
+              </div>
+              ${icon('edit', 16, 'settings-chevron')}
+            </div>
+
+            <div class="settings-row" id="edit-address-btn" style="cursor:pointer;">
               <div class="settings-icon-box" style="background:rgba(34, 197, 94, 0.1); color:#10b981;">
                 ${icon('mapPin', 20)}
               </div>
               <div style="flex:1;">
-                <span class="settings-label">Dirección de Entrega</span>
+                <span class="settings-label">Tus Direcciones</span>
                 <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${deliveryAddress || 'No establecida'}</p>
               </div>
               ${icon('edit', 16, 'settings-chevron')}
             </div>
 
-            <div class="settings-row" id="toggle-theme-btn" style="cursor:pointer;">
-              <div class="settings-icon-box" style="background:rgba(14, 165, 233, 0.1); color:#0ea5e9;">
-                ${icon('moon', 20)}
+            <div class="settings-row" id="edit-phone-btn" style="cursor:pointer;">
+              <div class="settings-icon-box" style="background:rgba(37, 99, 235, 0.1); color:#2563eb;">
+                ${icon('phone', 20)}
               </div>
               <div style="flex:1;">
-                <span class="settings-label">Modo Oscuro</span>
+                <span class="settings-label">Número de contacto</span>
+                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.phone ? `+54 ${user.phone}` : 'No configurado'}</p>
               </div>
-              <div class="theme-toggle-switch" style="position:relative; width:46px; height:24px; background:${localStorage.getItem('gd-theme') === 'dark' ? 'var(--color-primary)' : 'var(--color-bg-secondary)'}; border-radius:12px; transition:all 0.3s ease;">
-                <div class="theme-toggle-handle" style="position:absolute; top:2px; left:${localStorage.getItem('gd-theme') === 'dark' ? '24px' : '2px'}; width:20px; height:20px; background:var(--color-surface); border-radius:50%; box-shadow:0 1.5px 3px rgba(0,0,0,0.2); transition:all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);"></div>
-              </div>
+              ${icon('edit', 16, 'settings-chevron')}
             </div>
+
+
 
             <div class="settings-row" id="help-terms-btn" style="cursor:pointer;">
               <div class="settings-icon-box" style="background:rgba(139, 92, 246, 0.1); color:#8b5cf6;">
@@ -458,15 +529,60 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           </button>
 
           <p style="text-align:center; margin-top:8px; font-size:10px; color:var(--color-text-tertiary); font-weight:600;">GoDelivery v2.4.0 — Made with ❤️</p>
-        </div>
-
       </div>
     `;
 
     // Listeners
-    document.getElementById('edit-address-btn')?.addEventListener('click', () => showAddressPrompt());
+    document.getElementById('edit-display-name-btn')?.addEventListener('click', () => {
+      AudioManager.hapticLight();
+      showEditDisplayNameModal(user);
+    });
+    document.getElementById('edit-address-btn')?.addEventListener('click', () => {
+      AudioManager.hapticLight();
+      showManageAddressesModal();
+    });
+    document.getElementById('edit-phone-btn')?.addEventListener('click', () => {
+      AudioManager.hapticLight();
+      showEditPhoneModal(user);
+    });
     document.getElementById('install-app-row')?.addEventListener('click', () => showInstallUI());
     document.getElementById('help-terms-btn')?.addEventListener('click', () => showHelpAndTermsModal());
+
+    document.getElementById('profile-avatar-container')?.addEventListener('click', () => {
+      AudioManager.hapticLight();
+      document.getElementById('profile-avatar-input')?.click();
+    });
+
+    document.getElementById('profile-avatar-input')?.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        try {
+          const { openCropper } = await import('../utils/cropper.js');
+          const cropped = await openCropper(file, { aspectRatio: 1, circular: true });
+          
+          const { showToast } = await import('../components/toast.js');
+          showToast('Actualizando foto de perfil...', 'info');
+          
+          const { db } = await import('../firebase.js');
+          const { doc, updateDoc } = await import('firebase/firestore');
+          
+          await updateDoc(doc(db, 'users', user.uid), {
+            photoURL: cropped
+          });
+          
+          const currentUser = getState().user;
+          setState('user', { ...currentUser, photoURL: cropped });
+          
+          showToast('Foto de perfil actualizada con éxito', 'success');
+        } catch (err) {
+          if (err !== 'Cancelled') {
+            console.error('Error updating profile picture:', err);
+            const { showToast } = await import('../components/toast.js');
+            showToast('Error al actualizar la foto de perfil', 'error');
+          }
+        }
+      }
+    });
 
     // Módulo 1.1 & 1.2: Referral and Challenges Listeners
     document.getElementById('copy-ref-btn')?.addEventListener('click', async () => {
@@ -510,29 +626,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       showTransferGoPointsModal(user);
     });
 
-    const toggleBtn = document.getElementById('toggle-theme-btn');
-    if (toggleBtn) {
-      toggleBtn.onclick = () => {
-        AudioManager.hapticLight();
-        const currentTheme = localStorage.getItem('gd-theme') || 'light';
-        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-        
-        localStorage.setItem('gd-theme', newTheme);
-        document.documentElement.setAttribute('data-theme', newTheme);
-        
-        const toggleSwitch = toggleBtn.querySelector('.theme-toggle-switch');
-        const toggleHandle = toggleBtn.querySelector('.theme-toggle-handle');
-        if (toggleSwitch && toggleHandle) {
-          if (newTheme === 'dark') {
-            toggleSwitch.style.background = 'var(--color-primary)';
-            toggleHandle.style.left = '24px';
-          } else {
-            toggleSwitch.style.background = 'var(--color-bg-secondary)';
-            toggleHandle.style.left = '2px';
-          }
-        }
-      };
-    }
+
 
     document.getElementById('gopoints-badge-card')?.addEventListener('click', async () => {
       const { showModal } = await import('../components/modal.js');
@@ -743,6 +837,11 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     document.getElementById('reapply-delivery-btn')?.addEventListener('click', () => showDeliveryApplicationModal(user));
 
     updateInstallVisibility?.();
+
+    if (sessionStorage.getItem('open-phone-edit') === 'true') {
+      sessionStorage.removeItem('open-phone-edit');
+      showEditPhoneModal(user);
+    }
   } catch (err) {
     console.error('Error rendering profile content:', err);
     content.innerHTML = '<div class="empty-state">Ocurrió un error al cargar el perfil.</div>';
@@ -1421,6 +1520,333 @@ async function showTransferGoPointsModal(currentUser) {
           execBtn.innerHTML = `${icon('check', 16)} Confirmar Transferencia`;
         }
       });
+    }
+  });
+}
+
+async function showEditDisplayNameModal(user) {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { doc, updateDoc } = await import('firebase/firestore');
+  const { showToast } = await import('../components/toast.js');
+
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px;">
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Nombre Visible *</label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="text" id="profile-name-input" value="${user.displayName || ''}" placeholder="Tu nombre público" style="flex:1; height:48px; border-radius:12px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; transition:border-color 0.2s;" />
+          <button id="profile-google-name-btn" class="btn btn-outline" style="height:48px; font-size:12px; font-weight:800; border-radius:12px; white-space:nowrap; padding:0 14px; border:1.5px solid var(--color-border-light); cursor:pointer; background:var(--color-bg-secondary); color:var(--color-text-primary);">
+            ${icon('google', 14)} Usar Google
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: 'Editar Nombre Visible',
+    height: 'auto',
+    content: modalContent,
+    footer: `
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
+        <button id="profile-name-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
+        <button id="profile-name-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Guardar</button>
+      </div>
+    `,
+    onOpen: () => {
+      const input = document.getElementById('profile-name-input');
+      const googleBtn = document.getElementById('profile-google-name-btn');
+      const cancelBtn = document.getElementById('profile-name-cancel-btn');
+      const saveBtn = document.getElementById('profile-name-save-btn');
+
+      if (input) input.focus();
+
+      if (googleBtn) {
+        googleBtn.onclick = () => {
+          import('../firebase.js').then(({ auth }) => {
+            const googleName = auth.currentUser?.displayName;
+            if (googleName) {
+              input.value = googleName;
+              showToast('Nombre de Google recuperado', 'success');
+            } else {
+              showToast('No se encontró nombre en la cuenta de Google', 'warning');
+            }
+          });
+        };
+      }
+
+      if (cancelBtn) {
+        cancelBtn.onclick = () => closeModal();
+      }
+
+      if (saveBtn) {
+        saveBtn.onclick = async () => {
+          const val = input.value.trim();
+          if (!val) {
+            showToast('El nombre visible no puede estar vacío', 'warning');
+            return;
+          }
+
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' Guardando...';
+
+          try {
+            await updateDoc(doc(db, 'users', user.uid), {
+              displayName: val
+            });
+            showToast('Nombre visible actualizado con éxito', 'success');
+            closeModal();
+          } catch (err) {
+            console.error('Error saving user display name:', err);
+            showToast('Error al guardar el nombre', 'danger');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = 'Guardar';
+          }
+        };
+      }
+    }
+  });
+}
+
+async function showEditPhoneModal(user) {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { doc, updateDoc } = await import('firebase/firestore');
+  const { showToast } = await import('../components/toast.js');
+
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px;">
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Número de Whatsapp *</label>
+        <div style="display:flex; gap:8px;">
+          <div style="height:48px; padding:0 12px; border:2px solid var(--color-border-light); border-radius:12px; display:flex; align-items:center; background:var(--color-bg-secondary); color: var(--color-text-primary);">
+             <span style="font-size:14px; font-weight:700;">🇦🇷 +54</span>
+          </div>
+          <input type="tel" id="profile-phone-input" value="${user.phone || ''}" placeholder="Celular sin el 0" style="flex:1; height:48px; border-radius:12px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; transition:border-color 0.2s;" />
+        </div>
+        <p style="font-size:11px; color:var(--color-text-tertiary); margin:4px 0 0; line-height:1.4;">Este número es obligatorio para que los comercios y repartidores puedan contactarte.</p>
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: 'Editar Número de Contacto',
+    height: 'auto',
+    content: modalContent,
+    footer: `
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
+        <button id="profile-phone-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
+        <button id="profile-phone-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Guardar</button>
+      </div>
+    `,
+    onOpen: () => {
+      const input = document.getElementById('profile-phone-input');
+      const cancelBtn = document.getElementById('profile-phone-cancel-btn');
+      const saveBtn = document.getElementById('profile-phone-save-btn');
+
+      if (input) input.focus();
+
+      if (cancelBtn) cancelBtn.onclick = () => closeModal();
+
+      if (saveBtn) {
+        saveBtn.onclick = async () => {
+          const val = input.value.trim();
+          if (!val) {
+            showToast('El celular de contacto es obligatorio', 'warning');
+            return;
+          }
+
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' Guardando...';
+
+          try {
+            const { db } = await import('../firebase.js');
+            await updateDoc(doc(db, 'users', user.uid), {
+              phone: val
+            });
+            const currentUser = getState().user;
+            setState('user', { ...currentUser, phone: val });
+            showToast('Número de contacto actualizado', 'success');
+            closeModal();
+          } catch (error) {
+            console.error('Error updating phone:', error);
+            showToast('Error al actualizar el número', 'error');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = 'Guardar';
+          }
+        };
+      }
+    }
+  });
+}
+
+async function showManageAddressesModal() {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { showAddressPrompt } = await import('../components/address-modal.js');
+  const { setDeliveryAddress, getState, subscribe } = await import('../state.js');
+
+  const modalEl = document.createElement('div');
+  modalEl.style.cssText = 'padding: 20px 16px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 20px; max-height: 70dvh; overflow-y: auto;';
+
+  const renderList = () => {
+    const activeAddress = getState().deliveryAddress;
+    const saved = getState().savedAddresses || [];
+
+    modalEl.innerHTML = `
+      <!-- Dirección en uso -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Dirección en uso</span>
+        ${activeAddress ? `
+          <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(34, 197, 94, 0.06); border:1.5px solid #22c55e; border-radius:16px; padding:14px 16px; gap:12px;">
+            <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+              <div style="width:36px; height:36px; border-radius:10px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('mapPin', 20)}
+              </div>
+              <div style="min-width:0; flex:1;">
+                <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Activa</div>
+                <div style="font-size:11.5px; color:var(--color-text-secondary); margin-top:2px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.4;">${activeAddress}</div>
+              </div>
+            </div>
+            <div style="color:#22c55e; display:flex; flex-shrink:0;">
+              ${icon('checkCircle', 20)}
+            </div>
+          </div>
+        ` : `
+          <div style="border:1.5px dashed var(--color-border); border-radius:16px; padding:16px; text-align:center; font-size:13px; color:var(--color-text-tertiary); font-weight:700;">
+            No has seleccionado ninguna dirección activa.
+          </div>
+        `}
+      </div>
+
+      <!-- Direcciones Guardadas -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Mis direcciones guardadas</span>
+        
+        <div id="saved-addresses-modal-list" style="display:flex; flex-direction:column; gap:10px;">
+          ${saved.length > 0 ? saved.map(addr => {
+            const isCurrent = activeAddress === addr.address;
+            const isHome = addr.name.toLowerCase().includes('casa');
+            const isWork = addr.name.toLowerCase().includes('trabajo') || addr.name.toLowerCase().includes('oficina');
+            const addrIcon = isHome ? 'home' : (isWork ? 'store' : 'mapPin');
+            
+            return `
+              <div class="saved-address-item" data-id="${addr.id}" style="display:flex; align-items:center; justify-content:space-between; background:var(--color-bg-secondary); border:1.5px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-border-light)'}; border-radius:16px; padding:14px 16px; gap:12px; cursor:pointer; transition:all 0.2s;">
+                <div class="select-address-trigger" style="display:flex; align-items:center; gap:12px; min-width:0; flex:1; height:100%;">
+                  <div style="width:36px; height:36px; border-radius:10px; background:${isCurrent ? 'rgba(var(--color-primary-rgb), 0.1)' : 'rgba(120,120,120,0.06)'}; color:${isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    ${icon(addrIcon, 18)}
+                  </div>
+                  <div style="min-width:0; flex:1;">
+                    <div style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                      ${addr.name}
+                      ${isCurrent ? `<span style="background:var(--color-primary); color:white; font-size:8px; font-weight:900; padding:1px 5px; border-radius:4px; text-transform:uppercase; letter-spacing:0.02em;">En uso</span>` : ''}
+                    </div>
+                    <div style="font-size:11.5px; color:var(--color-text-secondary); margin-top:2px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.4;">${addr.address}</div>
+                  </div>
+                </div>
+                
+                <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
+                  <button class="edit-addr-modal-btn btn-ghost" data-id="${addr.id}" style="width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border); color:var(--color-text-secondary); cursor:pointer; background:var(--color-surface);">
+                    ${icon('edit', 16)}
+                  </button>
+                  <button class="delete-addr-modal-btn btn-ghost" data-id="${addr.id}" style="width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #ef4444; color:#ef4444; cursor:pointer; background:var(--color-surface);">
+                    ${icon('trash', 16)}
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('') : `
+            <div style="border:1.5px dashed var(--color-border-light); border-radius:16px; padding:24px; text-align:center; font-size:13px; color:var(--color-text-tertiary); font-weight:600;">
+              No tenés direcciones guardadas aún.
+            </div>
+          `}
+        </div>
+      </div>
+
+      <!-- Agregar Nueva -->
+      <button id="add-new-address-modal-btn" class="btn btn-outline" style="width:100%; height:50px; border-radius:14px; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; background:var(--color-surface); border:1.5px solid var(--color-border-light); color:var(--color-text-primary);">
+        ${icon('plus', 16)} Agregar nueva dirección
+      </button>
+    `;
+
+    // Attach listeners
+    modalEl.querySelectorAll('.select-address-trigger').forEach(trigger => {
+      trigger.onclick = async (e) => {
+        e.stopPropagation();
+        const parent = trigger.closest('.saved-address-item');
+        const id = parent.dataset.id;
+        const addr = saved.find(a => a.id === id);
+        if (addr) {
+          const { showConfirm } = await import('../components/modal.js');
+          showConfirm({
+            title: '📍 Cambiar dirección activa',
+            message: `¿Deseas establecer "${addr.name}" como tu dirección activa en uso?`,
+            confirmText: 'Establecer',
+            onConfirm: () => {
+              setDeliveryAddress(addr.address, addr.notes || '', addr.coords, '');
+              showToast(`Dirección seleccionada: ${addr.name}`, 'success');
+              renderList();
+            }
+          });
+        }
+      };
+    });
+
+    modalEl.querySelectorAll('.edit-addr-modal-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const addr = saved.find(a => a.id === id);
+        if (addr) {
+          showAddressPrompt(null, { editAddress: addr });
+        }
+      };
+    });
+
+    modalEl.querySelectorAll('.delete-addr-modal-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const addr = saved.find(a => a.id === id);
+        if (addr) {
+          const { showConfirm } = await import('../components/modal.js');
+          showConfirm({
+            title: '🗑️ Eliminar dirección',
+            message: `¿Estás seguro de que deseas eliminar la dirección "${addr.name}"?`,
+            confirmText: 'Eliminar',
+            danger: true,
+            onConfirm: async () => {
+              const { removeSavedAddress } = await import('../state.js');
+              await removeSavedAddress(id);
+              showToast('Dirección eliminada', 'success');
+              renderList();
+            }
+          });
+        }
+      };
+    });
+
+    const addBtn = modalEl.querySelector('#add-new-address-modal-btn');
+    if (addBtn) {
+      addBtn.onclick = () => {
+        showAddressPrompt();
+      };
+    }
+  };
+
+  let unsubSaved = null;
+  let unsubDelivery = null;
+
+  showModal({
+    title: 'Mis Direcciones',
+    height: 'auto',
+    content: modalEl,
+    onOpen: () => {
+      renderList();
+      unsubSaved = subscribe('savedAddresses', () => renderList());
+      unsubDelivery = subscribe('deliveryAddress', () => renderList());
+    },
+    onClose: () => {
+      if (unsubSaved) unsubSaved();
+      if (unsubDelivery) unsubDelivery();
     }
   });
 }

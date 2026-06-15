@@ -20,7 +20,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
 
   modalWrapper.innerHTML = `
     <div class="modal-overlay" id="${modalId}-overlay" style="
-      position:fixed; inset:0; background:rgba(0,0,0,${isFullscreen ? '1' : '0.65'}); backdrop-filter:${isFullscreen ? 'none' : 'blur(10px)'}; -webkit-backdrop-filter:${isFullscreen ? 'none' : 'blur(10px)'};
+      position:fixed; inset:0; background:rgba(0,0,0,${isFullscreen ? '1' : '0.35'}); backdrop-filter:${isFullscreen ? 'none' : 'blur(10px)'}; -webkit-backdrop-filter:${isFullscreen ? 'none' : 'blur(10px)'};
       animation: fadeIn 0.25s ease-out;
       will-change: background;
     ">
@@ -128,7 +128,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     // Dynamic overlay fade
     const progress = Math.min(Math.max(0, diff) / 450, 1);
     overlay.style.opacity = 1 - (progress * 0.8);
-    overlay.style.background = `rgba(0,0,0,${0.65 * (1 - progress * 0.5)})`;
+    overlay.style.background = `rgba(0,0,0,${0.35 * (1 - progress * 0.5)})`;
   };
 
   const onTouchEnd = () => {
@@ -147,7 +147,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     } else {
       dialog.style.transform = 'translateY(0)';
       overlay.style.opacity = '1';
-      overlay.style.background = 'rgba(0,0,0,0.65)';
+      overlay.style.background = 'rgba(0,0,0,0.35)';
     }
   };
 

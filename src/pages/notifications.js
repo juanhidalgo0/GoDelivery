@@ -169,7 +169,26 @@ function renderItems() {
       try {
         await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
       } catch (e) {}
-      if (url) window.location.hash = url;
+      
+      if (url) {
+        // Validate route exists in orders/chats if it contains order ID
+        const orderMatch = url.match(/#\/pedido\/([^/]+)/);
+        if (orderMatch && orderMatch[1]) {
+          const orderId = orderMatch[1];
+          try {
+            const { getDoc, doc } = await import('firebase/firestore');
+            const oDoc = await getDoc(doc(db, 'orders', orderId));
+            if (!oDoc.exists()) {
+              console.warn('[Notifications] Order does not exist. Skipping navigation.');
+              return;
+            }
+          } catch (err) {
+            console.error('[Notifications] Failed to verify order existence:', err);
+            return;
+          }
+        }
+        window.location.hash = url;
+      }
     };
   });
 }

@@ -37,9 +37,17 @@ export function openCropper(imageSource, options = {}) {
     showModal({
       title: 'Ajustar imagen',
       content: `
-        <div class="cropper-container" style="max-height: 400px; overflow: hidden; background: #000; border-radius: var(--radius-lg);">
+        <div class="cropper-container ${options.circular ? 'circular-cropper' : ''}" style="max-height: 400px; overflow: hidden; background: #000; border-radius: var(--radius-lg);">
           <img id="cropper-image" src="${imageObjectUrl}" style="max-width: 100%; display: block;" />
         </div>
+        ${options.circular ? `
+        <style>
+          .circular-cropper .cropper-view-box,
+          .circular-cropper .cropper-face {
+            border-radius: 50% !important;
+          }
+        </style>
+        ` : ''}
         <div class="cropper-toolbar" style="display: flex; justify-content: center; gap: var(--space-4); margin-top: var(--space-4);">
           <button class="btn btn-sm btn-ghost" id="crop-rotate-l" title="Rotar izquierda">${icon('rotateCcw', 18)}</button>
           <button class="btn btn-sm btn-ghost" id="crop-rotate-r" title="Rotar derecha">${icon('rotateCw', 18)}</button>

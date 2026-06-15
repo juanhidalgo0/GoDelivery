@@ -25,9 +25,9 @@ export async function isRainingInMagdalena() {
     // 61, 63, 65 (Rain: Slight, moderate, heavy intensity)
     // 66, 67 (Freezing Rain: Light, heavy intensity)
     // 80, 81, 82 (Rain showers: Slight, moderate, violent)
-    const rainCodes = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82];
+    const rainCodes = [53, 55, 57, 61, 63, 65, 66, 67, 80, 81, 82];
 
-    const isRaining = rain > 0 || rainCodes.includes(code);
+    const isRaining = rain >= 0.5 || rainCodes.includes(code);
     console.log(`[Weather] Rain: ${rain}mm, Weather Code: ${code}. Raining: ${isRaining}`);
     return isRaining;
   } catch (err) {

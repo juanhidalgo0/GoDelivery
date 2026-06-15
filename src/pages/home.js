@@ -1,7 +1,7 @@
 // GoDelivery — Home Page
 import { db } from '../firebase.js';
 import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import { formatPrice, isShopOpen } from '../utils/format.js';
+import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js';
 import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
 import { icon, categoryIcon, CATEGORY_ICON_MAP, CATEGORY_PHOSPHOR_MAP } from '../utils/icons.js';
@@ -16,111 +16,151 @@ export async function renderHome(content) {
 
   const loggedIn = isLoggedIn();
 
-  // Show skeleton first
   content.innerHTML = `
     <div class="home-page" style="padding-top: 8px; position: relative; overflow: hidden;">
       <!-- Ambient Background Blobs (Soft Glows) -->
       <div class="home-blob home-blob-1"></div>
       <div class="home-blob home-blob-2"></div>
-      
-      <!-- Premium Category Grid (Restaurantes & GoMarket) -->
-      <div class="category-grid" style="margin-top: 16px; margin-bottom: 24px;">
-        <a href="#/category/Comida" class="category-card-large">
-          <img src="/images/categories/restaurants.png" alt="Restaurantes" />
-          <span class="card-title">Restaurantes</span>
-        </a>
-        <a href="#/category/GoMarket" class="category-card-large">
-          <img src="/images/categories/gomarket.png" alt="GoMarket" />
-          <span class="card-title">GoMarket</span>
-        </a>
-        
-        <!-- GoFavor Premium Card for Desktop -->
-        <a href="#/gofavores" class="category-card-large gofavor-card-desktop" style="display: none; background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark)); flex-direction: column; justify-content: center; align-items: center; padding: 20px !important; text-align: center; gap: 8px; border: 1px solid rgba(255,255,255,0.15) !important; text-decoration: none; position: relative; overflow: hidden; border-radius: 24px;">
-          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-          <div style="position: absolute; bottom: -10px; left: -10px; width: 40px; height: 40px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-          
-          <div style="width: 52px; height: 52px; border-radius: 50%; background: black; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 6px 16px rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.25); overflow: hidden; z-index: 2;">
-            <img src="${getState().goMarketLogo || '/logo.png'}" style="width: 100%; height: 100%; object-fit: cover;" />
+           <!-- Quick Services Row (GoFavor & Pedir Viaje) -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 16px 0; margin-bottom: 4px;">
+        <!-- GoFavor Quick Card -->
+        <a href="#/gofavores" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); border-radius: 18px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; height: 68px; box-shadow: 0 8px 20px rgba(225, 0, 54, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+          <!-- Ambient light reflection -->
+          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+          <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+            ${icon('package', 18)}
           </div>
-          
-          <div style="z-index: 2;">
-            <span style="background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 8px; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; display: inline-block; margin-bottom: 4px; color: white;">Servicio Oficial</span>
-            <h3 style="font-family: var(--font-display); font-size: 21px; font-weight: 950; margin: 0; color: white; letter-spacing: -0.02em; line-height: 1.1;">GoFavor</h3>
-            <p style="font-size: 11.5px; font-weight: 700; color: rgba(255,255,255,0.9); margin: 2px 0 0; line-height: 1.2;">¿Necesitás algo más? <br/>Pedilo acá y nosotros vamos.</p>
+          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+            <h4 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.12);">GoFavor</h4>
+            <span style="font-size: 9.5px; color: rgba(255, 255, 255, 0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">Mandados y envíos</span>
+          </div>
+        </a>
+
+        <!-- Pedir Viaje Quick Card -->
+        <a href="#/viajes" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); border-radius: 18px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; height: 68px; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+          <!-- Ambient light reflection -->
+          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+          <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+            ${icon('car', 18)}
+          </div>
+          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+            <h4 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.12);">Pedir Viaje</h4>
+            <span style="font-size: 9.5px; color: rgba(255, 255, 255, 0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">Viajá seguro y cómodo</span>
           </div>
         </a>
       </div>
-
-      <!-- Recurrent Orders (1-Click Repeat) Section -->
-      <div id="recurrent-orders-section" style="margin-top: 12px; margin-bottom: 24px; padding: 0 16px; display: none;"></div>
-
-      <!-- Small Categories Slider Section -->
-      <div class="categories-slider-wrapper" style="position: relative; margin-top: 10px; display: flex; align-items: center; width: 100%;">
-        <button id="cat-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-          ${icon('chevronLeft', 20)}
-        </button>
-        <div class="category-row-small" id="categories-row-small" style="flex: 1; display: flex; gap: 12px; overflow-x: auto; scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none; padding: 12px 4px;">
-          <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-          <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-          <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-          <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-          <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-          <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-        </div>
-        <button id="cat-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-          ${icon('chevronRight', 20)}
-        </button>
-      </div>
-
-      <!-- Brands Slider -->
-      <div id="brands-slider-container" style="margin-top: 12px; margin-bottom: 24px;"></div>
-
-      <!-- Promoted Section -->
-      <div id="promoted-section" style="margin-top: 12px; margin-bottom: 24px;"></div>
+ 
+       <!-- Premium Category Grid (Comida & GoMarket) -->
+       <div class="category-grid" style="margin-top: 10px; margin-bottom: 14px;">
+         <a href="#/category/Comida" class="category-card-large glow-hover spring-hover">
+           <div style="position: absolute; top: 12px; left: 12px; background: rgba(225, 29, 72, 0.9); backdrop-filter: blur(4px); color: white; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; z-index: 2; box-shadow: var(--shadow-sm); text-transform: uppercase;">
+             Tus antojos, rápido
+           </div>
+           <img src="/images/categories/restaurants.png" alt="Comida" />
+           <span class="card-title">Comida</span>
+         </a>
+         <a href="#/category/GoMarket" id="gomarket-card" class="category-card-large glow-hover spring-hover">
+           <div style="position: absolute; top: 12px; left: 12px; background: rgba(13, 148, 136, 0.9); backdrop-filter: blur(4px); color: white; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; z-index: 2; box-shadow: var(--shadow-sm); text-transform: uppercase;">
+             Tu súper en minutos
+           </div>
+           <img src="/images/categories/gomarket.png" alt="GoMarket" />
+           <span class="card-title">GoMarket</span>
+         </a>
+       </div>
+       
+       <!-- Small Categories Slider Section -->
+       <div class="categories-slider-wrapper" style="position: relative; margin-top: 2px; display: flex; align-items: center; width: 100%;">
+         <button id="cat-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+           ${icon('chevronLeft', 20)}
+         </button>
+         <div class="category-row-small" id="categories-row-small" style="flex: 1; display: flex; gap: 12px; overflow-x: auto; scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none; padding: 6px 16px 12px;">
+           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+         </div>
+         <button id="cat-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+           ${icon('chevronRight', 20)}
+         </button>
+       </div>
+ 
+       <!-- Brands Slider -->
+       <div id="brands-slider-container" style="margin-top: 2px; margin-bottom: 14px;"></div>
+ 
+       <!-- Random Products Slider -->
+       <div id="random-products-slider-container" style="margin-top: 2px; margin-bottom: 14px;"></div>
+ 
+       <!-- Promoted Section -->
+      <div id="promoted-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
 
       <!-- Offers Section -->
-      <div id="offers-section" style="margin-top: 12px; margin-bottom: 24px;"></div>
+      <div id="offers-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
 
-      <!-- GoFavor Banner (Red Edition - Mobile Only) -->
-      <a href="#/gofavores" class="gofavor-banner-mobile" style="margin: 20px 16px; padding: 26px; border-radius: 32px; background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark)); color: white; display: flex; align-items: center; gap: 20px; box-shadow: 0 12px 35px rgba(var(--color-primary-rgb), 0.3); position: relative; overflow: hidden; cursor: pointer; text-decoration:none; border: 1px solid rgba(255,255,255,0.1);">
-        <div style="position: absolute; top: -40px; right: -40px; width: 140px; height: 140px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-        <div style="position: absolute; bottom: -20px; left: 100px; width: 60px; height: 60px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-        
-        <div style="width: 68px; height: 68px; border-radius: 50%; background: black; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 8px 25px rgba(0,0,0,0.25); border: 2px solid rgba(255,255,255,0.2); overflow: hidden;">
-          <img src="${getState().goMarketLogo || '/logo.png'}" style="width: 100%; height: 100%; object-fit: cover;" />
-        </div>
-        
-        <div style="flex: 1; position: relative; z-index: 2;">
-          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px;">
-            <span style="background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 10px; font-size: 10.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em;">Servicio Oficial</span>
-          </div>
-          <h3 style="font-family: var(--font-display); font-size: 26px; font-weight: 950; margin: 0; letter-spacing: -0.04em;">GoFavor</h3>
-          <p style="font-size: 14.5px; font-weight: 700; opacity: 0.95; margin: 2px 0 0; line-height: 1.3; letter-spacing: -0.01em;">¿Necesitás algo más? <br/>Pedilo acá y nosotros vamos.</p>
-        </div>
-        
-        <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-          ${icon('zap', 22)}
-        </div>
-      </a>
+
 
       <!-- Main Content -->
-      <div class="home-section" style="margin-top: 24px;">
-        <h2 class="home-section-title" style="display:flex; align-items:center; gap:8px; font-size:15px; font-weight:900; text-transform:uppercase; letter-spacing:0.05em; color:var(--color-text-tertiary); margin-bottom:16px; padding:0 16px;">
-          ${icon('store', 16)} Todos los comercios
-        </h2>
-        <div class="comercios-grid" id="comercios-grid" style="padding: 0 16px;">
-          ${renderSkeletonCards(4)}
+      <div class="home-section" style="margin-top: 18px; padding-top: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; padding: 0 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <h2 class="home-section-title" style="display:flex; align-items:center; gap:10px; font-size:16px; font-weight:950; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-text-primary); margin:0;">
+              <span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:10px; background:rgba(225, 29, 72, 0.08); color:var(--color-primary);">${icon('store', 16)}</span> Todos los comercios
+            </h2>
+            <a href="#/category/Todos" style="font-size:12px; font-weight:800; color:var(--color-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:4px 8px; border-radius:8px; background:rgba(225,29,72,0.05); transition:all 0.2s;">Ver todos &rarr;</a>
+          </div>
+          
+          <!-- Interactive Filter Pills Row (PedidosYa Style) -->
+          <div class="filter-pills-row" style="display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding-bottom: 4px; -webkit-overflow-scrolling: touch;">
+            <button id="filter-btn-open" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 800; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
+              🟢 Abiertos ahora
+            </button>
+            <button id="filter-btn-shipping" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 800; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
+              🛵 Envío Gratis
+            </button>
+            <button id="filter-btn-rating" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 800; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
+              ★ Más valorados (+4.5)
+            </button>
+          </div>
         </div>
+        
+        <div class="comercios-slider-wrapper">
+          <button id="com-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+            ${icon('chevronLeft', 20)}
+          </button>
+          <div class="comercios-slider" id="comercios-grid">
+            ${renderSkeletonCards(4)}
+          </div>
+          <button id="com-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+            ${icon('chevronRight', 20)}
+          </button>
+        </div>
+      </div>
+
+      <!-- Suggestion & Bug Report Banner Section -->
+      <div id="bug-report-banner" style="margin: 12px 16px 0; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: var(--shadow-xs);">
+        <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+          <span style="color: var(--color-primary); display: flex; flex-shrink: 0;">${icon('info', 16)}</span>
+          <span style="font-size: 11.5px; font-weight: 750; color: var(--color-text-secondary); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">¿Sugerencias o algún error en la app?</span>
+        </div>
+        <button id="report-bug-btn" style="height: 28px; border-radius: 8px; font-size: 11px; font-weight: 900; padding: 0 10px; background: rgba(225, 29, 72, 0.08); color: var(--color-primary); display: flex; align-items: center; gap: 4px; border: none; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0;">
+          ${icon('send', 10, '', 'var(--color-primary)')} Reportar
+        </button>
       </div>
       
       ${getFooterHTML()}
     </div>
   `;
 
+  // Filters state
+  const currentFilters = { openOnly: false, freeShippingOnly: false, topRatedOnly: false };
+
   // Load data
   let categories = [];
   let comercios = [];
+  let offers = [];
   let activeCategory = 'Todos';
+  let unsubComercios = null;
 
   try {
     // Load platform categories (TTL = 1 hour / 3600000 ms)
@@ -137,26 +177,9 @@ export async function renderHome(content) {
       }
     }
 
-    // Load active comercios (TTL = 15 minutes / 900000 ms)
-    const comSnap = await getDocsOptimized(query(collection(db, 'comercios'), where('isActive', '==', true)), 'activeComercios', 900000);
-    comercios = comSnap.docs.map(doc => {
-      const data = doc.data();
-      const name = (data.name || '').toLowerCase();
-      if (name.includes('go!') && name.includes('market')) {
-        return { id: doc.id, ...data, logo: '/logo.png' };
-      }
-      return { id: doc.id, ...data };
-    });
-
-    // Render brands slider
-    renderBrandsSlider(comercios);
-
-    // Render promoted section (Ads)
-    await renderPromotedSection(comercios);
-
     // Load active offers (TTL = 5 minutes / 300000 ms)
     const offersSnap = await getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 300000);
-    let offers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    offers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     // Fetch product details for offers in parallel
     offers = await Promise.all(offers.map(async (o) => {
@@ -173,27 +196,52 @@ export async function renderHome(content) {
       return o;
     }));
 
-    if (offers.length === 0 && comercios.length > 0) {
-      offers = [
-        {
-          id: 'mock-offer-1',
-          comercioId: comercios[0].id,
-          comercioName: comercios[0].name,
-          title: '¡Promo especial de bienvenida!',
-          type: 'percentage',
-          value: 15,
-          banner: comercios[0].banner || comercios[0].logo,
-          productIds: [],
-          active: true
-        }
-      ];
-    }
-    renderOffersSection(offers, comercios);
-
     // Add GoMarket to categories if it exists as a concept
     if (!categories.some(c => c.name === 'GoMarket')) {
       categories.push({ id: 'gomarket', name: 'GoMarket', icon: 'shoppingBag', order: 0 });
     }
+
+    // Set up real-time listener for active comercios
+    unsubComercios = onSnapshot(query(collection(db, 'comercios'), where('isActive', '==', true)), async (comSnap) => {
+      comercios = comSnap.docs.map(doc => {
+        const data = doc.data();
+        return { id: doc.id, ...data };
+      });
+
+      // Render brands slider
+      renderBrandsSlider(comercios);
+
+      // Render random products slider
+      renderRandomProductsSlider(comercios);
+
+      // Render promoted section (Ads)
+      renderPromotedSection(comercios);
+
+      renderOffersSection(offers, comercios);
+
+      // Render categories
+      renderCategories(categories, activeCategory);
+      
+      // Render list of comercios
+      const searchVal = document.getElementById('header-search')?.value || '';
+      renderComercios(comercios, activeCategory, searchVal, currentFilters);
+
+      // Dynamic link and banner for GoMarket
+      try {
+        const goMarket = comercios.find(c => {
+          const n = (c.name || '').toLowerCase();
+          return n.includes('go!') && n.includes('market');
+        });
+        if (goMarket) {
+          const goMarketCard = content.querySelector('#gomarket-card');
+          if (goMarketCard) {
+            goMarketCard.href = `#/comercio/${goMarket.id}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Error linking GoMarket:', err);
+      }
+    });
 
   } catch (e) {
     console.error('Error loading home data:', e);
@@ -202,18 +250,10 @@ export async function renderHome(content) {
       const defaultNames = ['Súper', 'Farmacia', 'Kiosco', 'Almacén', 'Carnicería', 'Verdulería', 'Librería', 'Ferretería', 'Mascotas'];
       categories = defaultNames.map((name, i) => ({ id: name, name, icon: '', order: i }));
     }
+    renderCategories(categories, activeCategory);
   }
 
-  // Render categories
-  renderCategories(categories, activeCategory);
-  renderComercios(comercios, activeCategory, '');
 
-  // Render recurrent orders if logged in
-  const user = getState().user;
-  const recurrentContainer = document.getElementById('recurrent-orders-section');
-  if (recurrentContainer) {
-    renderRecurrentOrders(user, recurrentContainer);
-  }
 
   // Dynamic link for GoMarket
   try {
@@ -222,9 +262,10 @@ export async function renderHome(content) {
       return n.includes('go!') && n.includes('market');
     });
     if (goMarket) {
-      content.querySelectorAll('a[href="#/category/GoMarket"]').forEach(link => {
-        link.href = `#/comercio/${goMarket.id}`;
-      });
+      const goMarketCard = content.querySelector('#gomarket-card');
+      if (goMarketCard) {
+        goMarketCard.href = `#/comercio/${goMarket.id}`;
+      }
     }
   } catch (err) {
     console.warn('Error linking GoMarket:', err);
@@ -236,9 +277,77 @@ export async function renderHome(content) {
   const searchInput = document.getElementById('header-search');
   if (searchInput) {
     searchInput.addEventListener('input', (e) => {
-      renderComercios(comercios, activeCategory, e.target.value);
+      renderComercios(comercios, activeCategory, e.target.value, currentFilters);
     });
   }
+
+  // Interactive Filter Pills Handler
+  const filterOpenBtn = document.getElementById('filter-btn-open');
+  const filterShippingBtn = document.getElementById('filter-btn-shipping');
+  const filterRatingBtn = document.getElementById('filter-btn-rating');
+
+  const updateFilterStyles = () => {
+    if (filterOpenBtn) {
+      filterOpenBtn.style.background = currentFilters.openOnly ? 'var(--color-primary)' : 'var(--color-surface)';
+      filterOpenBtn.style.color = currentFilters.openOnly ? 'white' : 'var(--color-text-secondary)';
+      filterOpenBtn.style.borderColor = currentFilters.openOnly ? 'var(--color-primary)' : 'var(--color-border)';
+    }
+    if (filterShippingBtn) {
+      filterShippingBtn.style.background = currentFilters.freeShippingOnly ? 'var(--color-primary)' : 'var(--color-surface)';
+      filterShippingBtn.style.color = currentFilters.freeShippingOnly ? 'white' : 'var(--color-text-secondary)';
+      filterShippingBtn.style.borderColor = currentFilters.freeShippingOnly ? 'var(--color-primary)' : 'var(--color-border)';
+    }
+    if (filterRatingBtn) {
+      filterRatingBtn.style.background = currentFilters.topRatedOnly ? 'var(--color-primary)' : 'var(--color-surface)';
+      filterRatingBtn.style.color = currentFilters.topRatedOnly ? 'white' : 'var(--color-text-secondary)';
+      filterRatingBtn.style.borderColor = currentFilters.topRatedOnly ? 'var(--color-primary)' : 'var(--color-border)';
+    }
+  };
+
+  if (filterOpenBtn) {
+    filterOpenBtn.onclick = (e) => {
+      e.preventDefault();
+      currentFilters.openOnly = !currentFilters.openOnly;
+      updateFilterStyles();
+      renderComercios(comercios, activeCategory, searchInput?.value || '', currentFilters);
+    };
+  }
+  if (filterShippingBtn) {
+    filterShippingBtn.onclick = (e) => {
+      e.preventDefault();
+      currentFilters.freeShippingOnly = !currentFilters.freeShippingOnly;
+      updateFilterStyles();
+      renderComercios(comercios, activeCategory, searchInput?.value || '', currentFilters);
+    };
+  }
+  if (filterRatingBtn) {
+    filterRatingBtn.onclick = (e) => {
+      e.preventDefault();
+      currentFilters.topRatedOnly = !currentFilters.topRatedOnly;
+      updateFilterStyles();
+      renderComercios(comercios, activeCategory, searchInput?.value || '', currentFilters);
+    };
+  }
+
+  // Bug Report button handler
+  const reportBugBtn = document.getElementById('report-bug-btn');
+  if (reportBugBtn) {
+    reportBugBtn.addEventListener('click', async () => {
+      const user = getState().user;
+      if (!user) {
+        const { showToast } = await import('../components/toast.js');
+        showToast('Iniciá sesión para reportar un error.', 'warning');
+        return;
+      }
+      showBugReportModal();
+    });
+  }
+
+  return {
+    cleanup: () => {
+      if (unsubComercios) unsubComercios();
+    }
+  };
 }
 
 function renderBrandsSlider(comercios) {
@@ -261,19 +370,36 @@ function renderBrandsSlider(comercios) {
     return;
   }
 
+  // Shuffle brands randomly every hour using deterministic seed
+  const hourSeed = new Date().getFullYear() + '-' + new Date().getMonth() + '-' + new Date().getDate() + '-' + new Date().getHours();
+  const seedHash = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return hash;
+  };
+  brands.sort((a, b) => seedHash(a.id + '-' + hourSeed) - seedHash(b.id + '-' + hourSeed));
+
   container.innerHTML = `
-    <div style="overflow-x: auto; display: flex; gap: 14px; padding: 4px 16px; -webkit-overflow-scrolling: touch;">
+    <div style="padding: 0 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px;">
+      <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-primary); margin: 0;">Marcas destacadas</h3>
+      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Los locales más elegidos por la comunidad</span>
+    </div>
+    <div style="overflow-x: auto; display: flex; gap: 14px; padding: 6px 16px 12px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${brands.map(brand => `
         <a href="#/comercio/${brand.id}" style="flex: 0 0 64px; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 6px;">
-          <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center; transition: transform 0.2s ease;">
+          <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;">
             <img src="${brand.logo}" alt="${brand.name}" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
           </div>
+          <span style="font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 68px; text-align: center;">${brand.name}</span>
         </a>
       `).join('')}
     </div>
     <style>
       #brands-slider-container div::-webkit-scrollbar { display: none; }
-      #brands-slider-container div a div:active { transform: scale(0.92); }
+      #brands-slider-container div a:active { transform: scale(0.92); }
     </style>
   `;
 }
@@ -336,6 +462,13 @@ async function renderPromotedSection(comercios) {
     });
   });
 
+  // Find GoMarket logo dynamically from Firestore
+  const gmCom = comercios.find(c => {
+    const n = (c.name || '').toLowerCase();
+    return n.includes('go!') && n.includes('market');
+  });
+  const gmLogo = gmCom ? gmCom.logo : '/logo.png';
+
   // Add custom ads
   activeCustomAds.forEach(ad => {
     unifiedPromoted.push({
@@ -345,7 +478,7 @@ async function renderPromotedSection(comercios) {
       banner: ad.banner,
       label: ad.label || 'Oficial',
       link: ad.link || '',
-      logo: '/logo.png',
+      logo: gmLogo,
       rating: null,
       deliveryTime: null,
       deliveryFee: null,
@@ -389,8 +522,13 @@ async function renderPromotedSection(comercios) {
   const finalPromoted = [...shuffledPriority, ...shuffledNormal];
 
   container.innerHTML = `
-    <h2 class="home-section-title" style="padding: 0 16px; margin-bottom: 12px; font-size: 20px; font-weight: 800; color: var(--color-text-primary);">Descubrí estas opciones</h2>
-    <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch;">
+    <div style="padding: 0 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 2px;">
+      <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 950; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-primary); margin: 0; display: flex; align-items: center; gap: 10px;">
+        <span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:10px; background:rgba(245, 158, 11, 0.08); color:#f59e0b;">${icon('star', 16)}</span> Recomendados para vos
+      </h2>
+      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; margin-left: 38px;">Selección exclusiva de locales destacados</span>
+    </div>
+    <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${finalPromoted.map(p => {
         const isCustom = p.isCustom;
         const targetHref = p.link || 'javascript:void(0)';
@@ -457,6 +595,12 @@ async function renderPromotedSection(comercios) {
       #promoted-section div a:active { transform: scale(0.98); transition: transform 0.2s; }
     </style>
   `;
+
+  const slider = container.querySelector('div:nth-child(2)');
+  if (slider) {
+    if (slider._autoplayCleanup) slider._autoplayCleanup();
+    slider._autoplayCleanup = initAutoplay(slider, 5000, 300);
+  }
 }
 
 function renderOffersSection(offers, comercios) {
@@ -472,8 +616,13 @@ function renderOffersSection(offers, comercios) {
   const shuffledOffers = seededShuffle(offers, getHourSeed());
 
   container.innerHTML = `
-    <h2 class="home-section-title" style="padding: 0 16px; margin-bottom: 12px; font-size: 20px; font-weight: 800; color: var(--color-text-primary);">Ofertas y Promociones</h2>
-    <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch;">
+    <div style="padding: 0 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 2px;">
+      <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 950; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-primary); margin: 0; display: flex; align-items: center; gap: 10px;">
+        <span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:10px; background:rgba(16, 185, 129, 0.08); color:#10b981;">${icon('tag', 16)}</span> Ofertas y promociones
+      </h2>
+      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; margin-left: 38px;">Ahorrá hoy con los mejores descuentos de la zona</span>
+    </div>
+    <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${shuffledOffers.map(o => {
         const c = comercios.find(com => com.id === o.comercioId);
         if (!c) return '';
@@ -538,6 +687,12 @@ function renderOffersSection(offers, comercios) {
       .offer-nav-card:active { transform: scale(0.97); }
     </style>
   `;
+
+  const slider = container.querySelector('div:nth-child(2)');
+  if (slider) {
+    if (slider._autoplayCleanup) slider._autoplayCleanup();
+    slider._autoplayCleanup = initAutoplay(slider, 4500, 260);
+  }
 }
 
 const CATEGORY_IMAGE_MAP = {
@@ -624,9 +779,13 @@ function renderCategories(categories, active) {
   }
 }
 
-function renderComercios(comercios, category, search) {
+async function renderComercios(comercios, category, search, filters) {
   const grid = document.getElementById('comercios-grid');
   if (!grid) return;
+
+  const state = getState();
+  const userCoords = state.deliveryCoords;
+  const { getQuickDistance, calculateDynamicFee } = await import('../utils/geo.js');
 
   let filtered = comercios.filter(c => {
     const isGoMarket = (c.name || '').toLowerCase().includes('go!') && (c.name || '').toLowerCase().includes('market');
@@ -643,6 +802,33 @@ function renderComercios(comercios, category, search) {
       (c.name || '').toLowerCase().includes(s) ||
       (c.category || '').toLowerCase().includes(s)
     );
+  }
+
+  if (filters) {
+    if (filters.openOnly) {
+      filtered = filtered.filter(c => {
+        try {
+          return isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen) && !c.isPaused;
+        } catch (e) {
+          return false;
+        }
+      });
+    }
+    if (filters.topRatedOnly) {
+      filtered = filtered.filter(c => (c.ratingAverage || 0) >= 4.5);
+    }
+    if (filters.freeShippingOnly) {
+      filtered = filtered.filter(c => {
+        if (userCoords && c.coords) {
+          const distanceKm = getQuickDistance(userCoords.lat, userCoords.lng, c.coords.lat, c.coords.lng);
+          if (distanceKm !== null) {
+            const fee = calculateDynamicFee(distanceKm);
+            return fee === 0;
+          }
+        }
+        return true;
+      });
+    }
   }
 
   // Sort by ratingAverage descending, then ratingCount descending as fallback
@@ -662,17 +848,36 @@ function renderComercios(comercios, category, search) {
       <div class="empty-state" style="grid-column: 1/-1;">
         <div class="empty-state-icon">${icon('store', 40)}</div>
         <div class="empty-state-title">No hay comercios</div>
-        <div class="empty-state-text">${search ? 'Probá con otra búsqueda' : 'Aún no hay comercios en esta categoría'}</div>
+        <div class="empty-state-text">${search ? 'Probá con otra búsqueda o filtros' : 'Aún no hay comercios en esta categoría con estos filtros'}</div>
       </div>
     `;
     return;
   }
 
   try {
-    grid.innerHTML = filtered.map((c, i) => {
+    const state = getState();
+    const userCoords = state.deliveryCoords;
+    const { getQuickDistance, calculateDynamicFee } = await import('../utils/geo.js');
+
+    // Synchronously calculate distances and fees
+    const resolvedCards = filtered.map((c) => {
+      let distanceKm = null;
+      let deliveryFee = null;
+
+      if (userCoords && c.coords) {
+        distanceKm = getQuickDistance(userCoords.lat, userCoords.lng, c.coords.lat, c.coords.lng);
+        if (distanceKm !== null) {
+          deliveryFee = calculateDynamicFee(distanceKm);
+        }
+      }
+
+      return { comercio: c, distanceKm, deliveryFee };
+    });
+
+    grid.innerHTML = resolvedCards.map(({ comercio: c, distanceKm, deliveryFee }, i) => {
       let isOpen = true;
       try {
-        isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []));
+        isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
       } catch (e) {
         console.warn('Error checking isShopOpen for', c.name, e);
       }
@@ -682,44 +887,116 @@ function renderComercios(comercios, category, search) {
       const statusText = isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
       const href = isPaused ? 'javascript:void(0)' : `#/comercio/${c.id}`;
 
+      // Use c.banner properly
+      const bannerSrc = c.banner || '';
+
       return `
-        <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} page-enter stagger-${Math.min(i + 1, 6)}">
-          <div class="comercio-card-banner">
-            ${c.banner ? `<img src="${c.banner}" alt="${c.name}" loading="lazy" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
-            <div class="comercio-card-badge ${statusClass}">
-              ${statusText}
-            </div>
+        <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} page-enter stagger-${Math.min(i + 1, 6)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom:18px; position:relative;">
+          <!-- Floating Favorite Heart Button (Moved out of banner to prevent clipping) -->
+          <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10;" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
+            ${icon('heart', 18)}
+          </div>
+
+          <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
+            ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
+            
             <div class="comercio-card-logo-container">
               ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
             </div>
-          </div>
-          <div class="comercio-card-body">
-            <div class="comercio-card-name">${c.name}</div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;">
-              <div class="comercio-card-category">${c.category || 'Comercio'}</div>
-              <div style="font-size:12px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:3px;">
-                ⭐ ${c.ratingAverage !== undefined && c.ratingAverage > 0 ? c.ratingAverage.toFixed(1) : 'Nuevo'} 
-                ${c.ratingCount ? `<span style="font-size:10px; color:var(--color-text-tertiary); font-weight:600;">(${c.ratingCount})</span>` : ''}
-              </div>
+
+            <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
+            <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isOpen && !isPaused ? '#00B174' : '#3F372B'}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15); text-transform:none; letter-spacing:normal;">
+              ${statusText === 'Abierto' ? 'Abierto ahora' : statusText}
             </div>
-            <div class="comercio-card-footer">
-              <span class="comercio-card-schedule">
-                ${icon('clock', 12)} 
-                ${(() => {
-                  const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
-                  if (scheds.length === 0) return 'Sin horario';
-                  return scheds.map(s => `${s.open}-${s.close}`).join(', ');
-                })()}
+            
+            <!-- Rating Box on top-right -->
+            <div style="position:absolute; top:12px; right:12px; background:white; padding:6px 12px; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.08); z-index:2; border:1px solid rgba(0,0,0,0.03);">
+              <div style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:3.5px; line-height:1.2;">
+                <span style="color:#f59e0b; font-size:13px;">★</span>
+                <span>${c.ratingAverage !== undefined && c.ratingAverage > 0 ? c.ratingAverage.toFixed(1) : 'Nuevo'}</span>
+              </div>
+              ${c.ratingCount ? `<span style="font-size:9.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:1px;">(${c.ratingCount})</span>` : ''}
+            </div>
+          </div>
+          
+          <div class="comercio-card-body" style="padding: 16px; padding-top: 18px; display:flex; flex-direction:column; gap:2px; text-align:left; position:relative;">
+            <!-- Title -->
+            <div class="comercio-card-name" style="font-family:var(--font-display); font-size:18px; font-weight:800; color:var(--color-text-primary); margin:0; line-height:1.2;">${c.name}</div>
+            
+            <!-- Category & Distance -->
+            <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; display:flex; align-items:center; gap:5px; margin-top:2px;">
+              <span>${c.category || 'Comercio'}</span>
+              ${distanceKm !== null ? `<span>•</span> <span>${distanceKm.toFixed(1)} km</span>` : ''}
+            </div>
+            
+            <!-- Bottom Row: Separate Bordered Pills & Arrow Button in a Single Row -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; width:100%;">
+              <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;">
+                <!-- Pill 1: Shipping dynamic cost -->
+                <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
+                  ${icon('bike', 15, '', 'var(--color-primary)')}
+                  <span>${deliveryFee !== null ? `Envío $${deliveryFee}` : 'Envío gratis'}</span>
+                </span>
+                
+                <!-- Pill 2: Duration -->
+                <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-text-secondary); white-space:nowrap; flex-shrink:0;">
+                  ${icon('clock', 14)}
+                  <span>
+                    ${(() => {
+                      const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
+                      if (scheds.length === 0) return 'Sin horario';
+                      if (isOpen && !isPaused) {
+                        return formatDeliveryTime(distanceKm, c.averagePrepTime);
+                      }
+                      return scheds.map(s => `${s.open}-${s.close}`).join(', ');
+                    })()}
+                  </span>
+                </span>
+              </div>
+              
+              <!-- Ver Comercio Button with Arrow -->
+              <span style="background:var(--color-primary); color:white; width:36px; height:36px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:none; flex-shrink:0; transition:all 0.2s; box-shadow:0 4px 12px rgba(225, 29, 72, 0.15);">
+                ${icon('chevronRight', 16, '', 'white')}
               </span>
-              ${c.address ? `<span style="font-size:var(--font-xs);color:var(--color-text-tertiary);display:flex;align-items:center;gap:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${icon('mapPin', 12)} ${c.address}</span>` : ''}
             </div>
           </div>
         </a>
       `;
     }).join('');
+
+    // Comercios slider navigation arrows logic
+    const prevBtn = document.getElementById('com-prev-btn');
+    const nextBtn = document.getElementById('com-next-btn');
+    if (prevBtn && nextBtn) {
+      const updateArrows = () => {
+        if (grid.scrollLeft > 5) {
+          prevBtn.style.display = 'flex';
+        } else {
+          prevBtn.style.display = 'none';
+        }
+        if (grid.scrollLeft + grid.clientWidth < grid.scrollWidth - 5) {
+          nextBtn.style.display = 'flex';
+        } else {
+          nextBtn.style.display = 'none';
+        }
+      };
+      grid.addEventListener('scroll', updateArrows);
+      setTimeout(updateArrows, 200);
+      prevBtn.onclick = () => {
+        grid.scrollBy({ left: -320, behavior: 'smooth' });
+      };
+      nextBtn.onclick = () => {
+        grid.scrollBy({ left: 320, behavior: 'smooth' });
+      };
+      
+      if (grid._autoplayCleanup) {
+        grid._autoplayCleanup();
+      }
+      grid._autoplayCleanup = initAutoplay(grid, 4000, 320);
+    }
   } catch (err) {
     console.error('Error rendering comercios:', err);
-    grid.innerHTML = '<p style="grid-column:1/-1; text-align:center; padding:20px; color:var(--color-text-tertiary);">Error al cargar comercios</p>';
+    grid.innerHTML = '<p style="text-align:center; padding:20px; color:var(--color-text-tertiary);">Error al cargar comercios</p>';
   }
 }
 
@@ -763,19 +1040,19 @@ const getHourSeed = () => {
 };
 
 async function renderRecurrentOrders(user, container) {
-  if (!user) {
+  const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
+  if (!user || isPreview) {
     container.style.display = 'none';
     return;
   }
 
   try {
-    const { collection, query, where, orderBy, limit, getDocs } = await import('firebase/firestore');
+    const { collection, query, where, orderBy, getDocs } = await import('firebase/firestore');
     const q = query(
       collection(db, 'orders'),
       where('userId', '==', user.uid),
       where('status', '==', 'completed'),
-      orderBy('createdAt', 'desc'),
-      limit(3)
+      orderBy('createdAt', 'desc')
     );
 
     const snap = await getDocs(q);
@@ -784,77 +1061,123 @@ async function renderRecurrentOrders(user, container) {
       return;
     }
 
-    const orders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const allOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Group completed orders by commerce and items signature to identify unique favorite orders
+    const groups = {};
+    allOrders.forEach(o => {
+      const itemsKey = (o.items || [])
+        .map(i => `${i.productId || i.id || ''}:${i.qty}`)
+        .sort()
+        .join('|');
+      const groupKey = `${o.comercioId}_${itemsKey}`;
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          count: 0,
+          latestOrder: o
+        };
+      }
+      groups[groupKey].count++;
+    });
+
+    // Filter groups repeating at least 3 times, sort by popularity desc, then by date desc
+    const recurrentOrders = Object.values(groups)
+      .filter(g => g.count >= 3)
+      .sort((a, b) => {
+        if (b.count !== a.count) {
+          return b.count - a.count;
+        }
+        const dateA = a.latestOrder.createdAt?.seconds || 0;
+        const dateB = b.latestOrder.createdAt?.seconds || 0;
+        return dateB - dateA;
+      })
+      .slice(0, 3)
+      .map(g => ({
+        ...g.latestOrder,
+        repeatCount: g.count
+      }));
+
+    if (recurrentOrders.length === 0) {
+      container.style.display = 'none';
+      return;
+    }
     
-    const cardsHtml = orders.map(o => {
+    const cardsHtml = recurrentOrders.map(o => {
       const dateStr = o.createdAt ? new Date(o.createdAt.seconds * 1000).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '';
       const itemsSummary = (o.items || []).map(item => `${item.qty}x ${item.product?.name || item.name || 'Producto'}`).join(', ');
-      
+      const repeatBadge = `<span style="font-size: 8.5px; font-weight: 900; color: var(--color-primary); background: rgba(225, 29, 72, 0.08); padding: 3px 6px; border-radius: 6px; text-transform: uppercase; letter-spacing:0.02em;">Repetido ${o.repeatCount}x</span>`;
+
       return `
-        <div class="recurrent-order-card" style="
+        <div class="recurrent-order-card card-interactive glow-hover" style="
           min-width: 250px;
           max-width: 280px;
           background: var(--color-surface);
-          border: 1.5px solid var(--color-border-light);
-          border-radius: 20px;
-          padding: 14px 16px;
+          border: 1px solid var(--color-border-light);
+          border-radius: 24px;
+          padding: 16px;
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 10px;
           scroll-snap-align: start;
           box-shadow: var(--shadow-sm);
           position: relative;
           overflow: hidden;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         ">
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-            <span style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">
-              Fav. del ${dateStr}
-            </span>
-            <span style="font-size: 12px; font-weight: 900; color: var(--color-success);">
-              ${formatPrice(o.total || 0)}
+            <div style="display:flex; align-items:center; gap:6px;">
+              ${repeatBadge}
+              <span style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">
+                ${dateStr}
+              </span>
+            </div>
+            <span style="font-size: 13px; font-weight: 950; color: var(--color-success); background: var(--color-success-light); padding: 2px 8px; border-radius: 8px;">
+              ${formatPrice(o.subtotal || 0)}
             </span>
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 2px;">
-            <h4 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em;">
               ${o.comercioName || 'Comercio'}
             </h4>
-            <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.3; height: 30px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;">
+            <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; height: 32px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; font-weight: 550;">
               ${itemsSummary}
             </p>
           </div>
 
           <button class="btn btn-primary repeat-1-click-btn" data-order-id="${o.id}" style="
-            height: 34px;
-            font-size: 11.5px;
-            font-weight: 900;
-            border-radius: 10px;
+            height: 38px;
+            font-size: 12.5px;
+            font-weight: 950;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 8px;
             border: none;
             color: white;
             background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-            box-shadow: 0 4px 10px rgba(var(--color-primary-rgb), 0.2);
+            box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.25);
             cursor: pointer;
             margin-top: 4px;
+            transition: all 0.2s;
           ">
-            ${icon('zap', 13)} Repetir 1-Click
+            ${icon('zap', 14)} Repetir 1-Click
           </button>
         </div>
       `;
     }).join('');
 
     container.innerHTML = `
-      <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-tertiary); margin: 0 0 10px 0; display: flex; align-items: center; gap: 6px;">
-        ${icon('history', 15)} ¿Querés repetir tu favorito?
+      <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-tertiary); margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; padding-left: 4px;">
+        <span style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 8px; background: rgba(225, 29, 72, 0.08); color: var(--color-primary);">${icon('history', 15)}</span> ¿Querés repetir tu favorito?
       </h3>
       <div style="
         display: flex;
-        gap: 12px;
+        gap: 14px;
         overflow-x: auto;
-        padding-bottom: 8px;
+        padding: 4px 4px 12px;
         scroll-snap-type: x mandatory;
         scrollbar-width: none;
         -ms-overflow-style: none;
@@ -880,46 +1203,77 @@ async function renderRecurrentOrders(user, container) {
     container.querySelectorAll('.repeat-1-click-btn').forEach(btn => {
       btn.onclick = async () => {
         const oId = btn.getAttribute('data-order-id');
-        const selectedOrder = orders.find(ord => ord.id === oId);
+        const selectedOrder = recurrentOrders.find(ord => ord.id === oId);
         if (!selectedOrder) return;
 
-        const { clearCart, addToCart, setState } = await import('../state.js');
-        const { showToast } = await import('../components/toast.js');
-        const { AudioManager } = await import('../utils/audio-manager.js');
+        // Visual feedback / Loading state
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="ph-duotone ph-spinner animate-spin"></i> Cargando...`;
 
-        AudioManager.hapticLight();
-        
-        // 1. Clear cart
-        clearCart();
+        try {
+          const { clearCart, addToCart, setState } = await import('../state.js');
+          const { showToast } = await import('../components/toast.js');
+          const { AudioManager } = await import('../utils/audio-manager.js');
+          const { getDocs, collection } = await import('firebase/firestore');
 
-        // 2. Add all products to cart safely
-        selectedOrder.items.forEach(item => {
-          if (item.product) {
-            addToCart(item.product, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
-          } else {
-            const fallbackProd = {
-              id: item.productId || item.id || 'fallback-id',
-              name: item.name || 'Producto',
-              price: item.price || 0
-            };
-            addToCart(fallbackProd, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+          AudioManager.hapticLight();
+          
+          // Fetch products from the commerce to resolve correct IDs (backward compatibility)
+          const productsSnap = await getDocs(collection(db, 'comercios', selectedOrder.comercioId, 'products'));
+          const commerceProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          // 1. Clear cart
+          clearCart();
+
+          // 2. Add all products to cart safely resolving IDs
+          selectedOrder.items.forEach(item => {
+            let resolvedProduct = null;
+            const itemId = item.productId || item.id;
+            
+            if (itemId) {
+              resolvedProduct = commerceProducts.find(p => p.id === itemId);
+            }
+            if (!resolvedProduct && item.name) {
+              resolvedProduct = commerceProducts.find(p => (p.name || '').toLowerCase().trim() === (item.name || '').toLowerCase().trim());
+            }
+
+            if (resolvedProduct) {
+              addToCart(resolvedProduct, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+            } else if (item.product) {
+              addToCart(item.product, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+            } else {
+              const fallbackProd = {
+                id: itemId || 'fallback-id',
+                name: item.name || 'Producto',
+                price: item.price || 0
+              };
+              addToCart(fallbackProd, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+            }
+          });
+
+          // 3. Set address
+          if (selectedOrder.deliveryAddress) {
+            setState('deliveryAddress', selectedOrder.deliveryAddress);
           }
-        });
+          if (selectedOrder.deliveryCoords) {
+            setState('deliveryCoords', selectedOrder.deliveryCoords);
+          }
 
-        // 3. Set address
-        if (selectedOrder.deliveryAddress) {
-          setState('deliveryAddress', selectedOrder.deliveryAddress);
+          showToast('¡Carrito cargado con tu favorito!', 'success');
+          
+          // 4. Redirect
+          setTimeout(() => {
+            window.location.hash = '#/cart';
+          }, 300);
+        } catch (err) {
+          console.error('Error loading recurrent order items:', err);
+          const { showToast } = await import('../components/toast.js');
+          showToast('Error al cargar los productos favoritos.', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
         }
-        if (selectedOrder.deliveryCoords) {
-          setState('deliveryCoords', selectedOrder.deliveryCoords);
-        }
-
-        showToast('¡Carrito cargado con tu favorito!', 'success');
-        
-        // 4. Redirect
-        setTimeout(() => {
-          window.location.hash = '#/cart';
-        }, 300);
       };
     });
 
@@ -928,6 +1282,356 @@ async function renderRecurrentOrders(user, container) {
     container.style.display = 'none';
   }
 }
+
+async function showBugReportModal() {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { showToast } = await import('../components/toast.js');
+  
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'padding: 24px 22px; display: flex; flex-direction: column; gap: 20px; color: var(--color-text-primary); background: var(--color-surface); border-top-left-radius: 28px; border-top-right-radius: 28px; border: 1px solid var(--color-border-light);';
+  
+  modalContent.innerHTML = `
+    <div style="width: 44px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto; flex-shrink: 0; opacity: 0.7;"></div>
+    <div style="text-align: center;">
+      <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; margin: 0; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--color-primary);">
+        🐞 Encontraste un problema?
+      </h3>
+      <p style="font-size: 13px; color: var(--color-text-secondary); margin: 8px 0 0; line-height: 1.5; font-weight: 600; max-width: 320px; margin-left: auto; margin-right: auto;">
+        Describí el error detalladamente. Tu reporte llegará al equipo de soporte de GoDelivery al instante.
+      </p>
+    </div>
+    
+    <textarea id="bug-desc-input" placeholder="¿Qué error encontraste? ¿Cómo podemos reproducirlo?..." style="width: 100%; height: 130px; padding: 16px; border: 1.5px solid var(--color-border-light); border-radius: 16px; font-size: 14px; font-weight: 600; outline: none; background: var(--color-bg-secondary); color: var(--color-text-primary); resize: none; font-family: inherit; line-height: 1.5; box-sizing: border-box; transition: all 0.25s;" onfocus="this.style.borderColor='var(--color-primary)'; this.style.boxShadow='0 0 0 3px rgba(225, 29, 72, 0.1)';" onblur="this.style.borderColor='var(--color-border-light)'; this.style.boxShadow='none';"></textarea>
+    
+    <div>
+      <label style="display: block; font-size: 11px; font-weight: 800; color: var(--color-text-secondary); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.05em;">Captura de pantalla (Opcional)</label>
+      <button id="bug-image-btn" style="width: 100%; height: 50px; border: 2px dashed var(--color-border-light); border-radius: 16px; background: var(--color-bg-secondary); color: var(--color-text-secondary); font-weight: 800; font-size: 13.5px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.25s; box-sizing: border-box;" onmouseover="this.style.borderColor='var(--color-primary)'; this.style.color='var(--color-primary)';" onmouseout="this.style.borderColor='var(--color-border-light)'; this.style.color='var(--color-text-secondary)';">
+        ${icon('camera', 18)} Adjuntar Imagen
+      </button>
+      <input type="file" id="bug-image-input" accept="image/*" style="display: none;" />
+      <div id="bug-image-preview-container" style="display: none; margin-top: 10px; position: relative; width: 90px; height: 90px; border-radius: 14px; overflow: hidden; border: 2px solid var(--color-border-light); box-shadow: var(--shadow-sm);">
+        <img id="bug-image-preview" style="width: 100%; height: 100%; object-fit: cover;" />
+        <button id="bug-image-remove" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; width: 22px; height: 22px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900; transition: background 0.2s;" onmouseover="this.style.background='var(--color-danger)'" onmouseout="this.style.background='rgba(0,0,0,0.7)'">×</button>
+      </div>
+    </div>
+    
+    <div style="display: flex; gap: 12px; margin-top: 6px;">
+      <button id="bug-cancel-btn" style="flex: 1; height: 50px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); border: 1.5px solid var(--color-border-light); background: transparent; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='var(--color-bg-secondary)'" onmouseout="this.style.background='transparent'">Cancelar</button>
+      <button id="bug-submit-btn" style="flex: 2; height: 50px; border-radius: 16px; font-weight: 900; font-size: 14px; background: var(--color-primary); color: white; border: none; box-shadow: 0 6px 18px rgba(225, 29, 72, 0.25); cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 8px 22px rgba(225, 29, 72, 0.35)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 6px 18px rgba(225, 29, 72, 0.25)';">Enviar Reporte</button>
+    </div>
+  `;
+
+  const { close } = showModal({
+    title: '',
+    hideHeader: true,
+    height: 'auto',
+    content: modalContent
+  });
+
+  const bugDescInput = modalContent.querySelector('#bug-desc-input');
+  const imageBtn = modalContent.querySelector('#bug-image-btn');
+  const imageInput = modalContent.querySelector('#bug-image-input');
+  const previewContainer = modalContent.querySelector('#bug-image-preview-container');
+  const previewImg = modalContent.querySelector('#bug-image-preview');
+  const removeImgBtn = modalContent.querySelector('#bug-image-remove');
+  const cancelBtn = modalContent.querySelector('#bug-cancel-btn');
+  const submitBtn = modalContent.querySelector('#bug-submit-btn');
+
+  let base64ImageData = null;
+
+  imageBtn.onclick = () => imageInput.click();
+  imageInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      try {
+        const { compressImageToBase64 } = await import('../utils/image.js');
+        base64ImageData = await compressImageToBase64(file, 800, 0.6);
+        previewImg.src = base64ImageData;
+        previewContainer.style.display = 'block';
+        imageBtn.style.display = 'none';
+      } catch (err) {
+        console.error('Error compressing bug image:', err);
+        showToast('Error al procesar la imagen.', 'error');
+      }
+    }
+  };
+
+  removeImgBtn.onclick = () => {
+    base64ImageData = null;
+    imageInput.value = '';
+    previewContainer.style.display = 'none';
+    imageBtn.style.display = 'flex';
+  };
+
+  cancelBtn.onclick = () => close();
+
+  submitBtn.onclick = async () => {
+    const text = bugDescInput.value.trim();
+    if (!text) {
+      showToast('Por favor, describí el error antes de enviar.', 'warning');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `Enviando...`;
+
+    try {
+      const user = getState().user;
+      const ticketNum = Math.floor(100000 + Math.random() * 900000);
+      const ticketId = `#TK-${ticketNum}`;
+      const bugMsg = `[REPORTE DE BUG/ERROR] ${text}`;
+
+      const newMessage = {
+        sender: 'user',
+        text: bugMsg,
+        timestamp: Date.now()
+      };
+
+      if (base64ImageData) {
+        newMessage.image = base64ImageData;
+        newMessage.text = `📷 Foto enviada: ${bugMsg}`;
+      }
+
+      const { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
+      const chatRef = doc(db, 'support_chats', user.uid);
+      const chatSnap = await getDoc(chatRef);
+
+      if (!chatSnap.exists()) {
+        await setDoc(chatRef, {
+          userId: user.uid,
+          userName: user.displayName || 'Usuario',
+          email: user.email || '',
+          goId: user.goId || '',
+          ticketId: ticketId,
+          status: 'pending_approval',
+          lastMessageText: `🐞 Reporte de Bug: ${text.substring(0, 30)}...`,
+          lastMessageTime: serverTimestamp(),
+          unreadByAdmin: true,
+          unreadByUser: false,
+          messages: [newMessage]
+        });
+      } else {
+        await updateDoc(chatRef, {
+          status: 'pending_approval',
+          goId: user.goId || chatSnap.data().goId || '',
+          ticketId: ticketId,
+          lastMessageText: `🐞 Reporte de Bug: ${text.substring(0, 30)}...`,
+          lastMessageTime: serverTimestamp(),
+          unreadByAdmin: true,
+          unreadByUser: false,
+          messages: arrayUnion(newMessage)
+        });
+      }
+
+      showToast('¡Reporte enviado con éxito! Abriendo chat de soporte...', 'success');
+      close();
+
+      setTimeout(() => {
+        const fabBtn = document.getElementById('support-bot-fab-btn');
+        if (fabBtn && !fabBtn.classList.contains('open')) {
+          fabBtn.click();
+        }
+      }, 800);
+    } catch (err) {
+      console.error('Error submitting bug report:', err);
+      showToast('Ocurrió un error al enviar el reporte.', 'error');
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `Enviar Reporte`;
+    }
+  };
+}
+
+async function renderRandomProductsSlider(comercios) {
+  const container = document.getElementById('random-products-slider-container');
+  if (!container) return;
+
+  if (!comercios || comercios.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  // 1. Get a set of selected comercios (always include GoMarket, and add up to 4 other random shops)
+  const activeShops = comercios.filter(c => c.isActive !== false);
+  if (activeShops.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const goMarket = activeShops.find(c => {
+    const n = (c.name || '').toLowerCase();
+    return n.includes('go!') && n.includes('market');
+  });
+
+  const selectedShops = [];
+  if (goMarket) {
+    selectedShops.push(goMarket);
+  }
+
+  // Pick remaining shops randomly
+  const remainingShops = activeShops.filter(c => c.id !== (goMarket ? goMarket.id : ''));
+  const shuffledShops = [...remainingShops].sort(() => 0.5 - Math.random());
+  const maxShops = 4;
+  for (let i = 0; i < Math.min(shuffledShops.length, maxShops); i++) {
+    selectedShops.push(shuffledShops[i]);
+  }
+
+  // 2. Fetch products in parallel for selected shops
+  let allProducts = [];
+  try {
+    const promises = selectedShops.map(async (shop) => {
+      try {
+        const q = query(collection(db, 'comercios', shop.id, 'products'));
+        // 5-minute TTL cache
+        const pSnap = await getDocsOptimized(q, `products_slider_${shop.id}`, 300000);
+        return pSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            comercioId: shop.id,
+            comercioName: shop.name,
+            comercioLogo: shop.logo || '/logo.png',
+            isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
+            ...data
+          };
+        });
+      } catch (err) {
+        console.warn(`Error loading products for shop ${shop.id} in slider:`, err);
+        return [];
+      }
+    });
+
+    const results = await Promise.all(promises);
+    allProducts = results.flat().filter(p => p.isActive !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0));
+  } catch (err) {
+    console.error('Error fetching random slider products:', err);
+  }
+
+  if (allProducts.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  // Shuffle products and take up to 10
+  const shuffledProds = allProducts.sort(() => 0.5 - Math.random()).slice(0, 10);
+
+  container.innerHTML = `
+    <div style="padding: 0 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 2px;">
+      <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 950; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-primary); margin: 0; display: flex; align-items: center; gap: 10px;">
+        <span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:10px; background:rgba(225, 29, 72, 0.08); color:var(--color-primary);">${icon('sparkles', 16)}</span> Ofertas Imperdibles
+      </h2>
+      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; margin-left: 38px;">Productos seleccionados para vos hoy</span>
+    </div>
+    <div class="random-products-slider-wrapper">
+      <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+        ${icon('chevronLeft', 20)}
+      </button>
+      <div class="random-products-slider" id="random-products-slider">
+        ${shuffledProds.map(p => `
+          <a href="#/comercio/${p.comercioId}?product=${p.id}" class="random-product-card">
+            <div style="position: relative; width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: var(--color-bg-secondary);">
+              <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" />
+              <!-- Shop logo badge overlay -->
+              <div style="position: absolute; bottom: 8px; left: 8px; display: flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 8px; box-shadow: var(--shadow-sm); border: 1px solid var(--color-border-light); max-width: 90%;">
+                <img src="${p.comercioLogo}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: contain;" />
+                <span style="font-size: 8px; font-weight: 850; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.comercioName}</span>
+              </div>
+              ${p.isGoMarket ? `
+                <div style="position: absolute; top: 8px; right: 8px; background: rgba(13, 148, 136, 0.9); backdrop-filter: blur(4px); color: white; padding: 2px 6px; border-radius: 6px; font-size: 8.5px; font-weight: 900; box-shadow: var(--shadow-sm); text-transform: uppercase;">
+                  GoMarket
+                </div>
+              ` : ''}
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 0 4px;">
+              <span style="font-weight: 850; font-size: 13.5px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 32px; line-height: 1.2;">${p.name}</span>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
+                <span style="font-weight: 950; font-size: 14.5px; color: var(--color-primary);">${formatPrice(p.price)}</span>
+                <span style="background: var(--color-primary-light); color: var(--color-primary); width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px;">
+                  ${icon('plus', 10, '', 'var(--color-primary)')}
+                </span>
+              </div>
+            </div>
+          </a>
+        `).join('')}
+      </div>
+      <button id="prod-prev-btn-next" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+        ${icon('chevronRight', 20)}
+      </button>
+    </div>
+  `;
+
+  // Arrow controls for random products slider
+  const slider = container.querySelector('#random-products-slider');
+  const prevBtn = container.querySelector('#prod-prev-btn');
+  const nextBtn = container.querySelector('#prod-prev-btn-next');
+  if (slider && prevBtn && nextBtn) {
+    const updateArrows = () => {
+      if (slider.scrollLeft > 5) {
+        prevBtn.style.display = 'flex';
+      } else {
+        prevBtn.style.display = 'none';
+      }
+      if (slider.scrollLeft + slider.clientWidth < slider.scrollWidth - 5) {
+        nextBtn.style.display = 'flex';
+      } else {
+        nextBtn.style.display = 'none';
+      }
+    };
+    slider.addEventListener('scroll', updateArrows);
+    setTimeout(updateArrows, 200);
+    prevBtn.onclick = () => {
+      slider.scrollBy({ left: -260, behavior: 'smooth' });
+    };
+    nextBtn.onclick = () => {
+      slider.scrollBy({ left: 260, behavior: 'smooth' });
+    };
+
+    if (slider._autoplayCleanup) {
+      slider._autoplayCleanup();
+    }
+    slider._autoplayCleanup = initAutoplay(slider, 3500, 260);
+  }
+
+  container.style.display = 'block';
+}
+
+function initAutoplay(sliderEl, intervalMs = 3500, stepPx = 280) {
+  if (!sliderEl) return;
+  
+  let timerId = null;
+  let isInterrupted = false;
+
+  const start = () => {
+    if (timerId) clearInterval(timerId);
+    timerId = setInterval(() => {
+      if (isInterrupted) return;
+      
+      const maxScroll = sliderEl.scrollWidth - sliderEl.clientWidth;
+      if (sliderEl.scrollLeft >= maxScroll - 5) {
+        sliderEl.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        sliderEl.scrollBy({ left: stepPx, behavior: 'smooth' });
+      }
+    }, intervalMs);
+  };
+
+  const stop = () => {
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+  };
+
+  sliderEl.addEventListener('mouseenter', () => { isInterrupted = true; });
+  sliderEl.addEventListener('mouseleave', () => { isInterrupted = false; });
+  sliderEl.addEventListener('touchstart', () => { isInterrupted = true; }, { passive: true });
+  sliderEl.addEventListener('touchend', () => {
+    setTimeout(() => { isInterrupted = false; }, 2000);
+  }, { passive: true });
+
+  start();
+  return stop;
+}
+
 
 
 

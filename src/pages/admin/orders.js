@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { formatPrice, formatDate } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
@@ -15,6 +15,17 @@ const STATUS_CONFIG = {
   completed: { label: 'ENTREGADO', color: '#27AE60', bg: 'rgba(39, 174, 96, 0.1)' },
   cancelled: { label: 'CANCELADO', color: '#E74C3C', bg: 'rgba(231, 76, 60, 0.1)' }
 };
+
+function getComercioDisplayName(o) {
+  if (o.isTrip) return 'Go Viaje';
+  if (o.isFavor) {
+    if (o.favorType === 'gocash') return 'Go Cash';
+    if (o.favorType === 'mandado') return 'Go Favor: Mandado';
+    if (o.favorType === 'compra') return 'Go Favor: Compra';
+    return 'Go Favor';
+  }
+  return o.comercioName || 'Vendedor Desconocido';
+}
 
 export async function renderAdminOrders() {
   const content = document.getElementById('app-content');
@@ -125,6 +136,15 @@ function loadAllOrders() {
     snap.forEach(doc => {
       try { allOrders.push({ id: doc.id, ...doc.data() }); } catch(e) {}
     });
+
+    // Sort scheduled orders to the top
+    allOrders.sort((a, b) => {
+      const aSched = !!a.isScheduled;
+      const bSched = !!b.isScheduled;
+      if (aSched && !bSched) return -1;
+      if (!aSched && bSched) return 1;
+      return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+    });
     
     renderOrdersList();
   }, (err) => {
@@ -142,6 +162,7 @@ function renderOrdersList() {
 
   let filtered = allOrders.filter(o => 
     (o.comercioName || '').toLowerCase().includes(searchText) ||
+    (getComercioDisplayName(o)).toLowerCase().includes(searchText) ||
     (o.userName || '').toLowerCase().includes(searchText) ||
     (o.orderId || '').toString().includes(searchText) ||
     (o.total || '').toString().includes(searchText) ||
@@ -175,6 +196,12 @@ function renderOrdersList() {
     const sKey = getStatusKey(o.status);
     const config = STATUS_CONFIG[sKey] || STATUS_CONFIG.pending;
     
+    const scheduledBadge = o.isScheduled ? `
+      <div style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
+        📅 Programado: ${o.scheduledTime}
+      </div>
+    ` : '';
+
     return `
       <div class="order-card-v4" onclick="window.showOrderDetail('${o.id}')" style="--st-color:${config.color}; --st-bg:${config.bg};">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -185,6 +212,7 @@ function renderOrdersList() {
             <div>
               <div style="font-weight:900; font-size:16px; color:var(--color-text);">#${o.orderId || '---'}</div>
               <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">${formatDate(o.createdAt)}</div>
+              ${scheduledBadge}
             </div>
           </div>
           <div class="s-pill-v4">${config.label}</div>
@@ -193,7 +221,7 @@ function renderOrdersList() {
         <div style="display:grid; grid-template-columns:1.2fr 0.8fr; gap:15px; margin-bottom:16px;">
           <div>
             <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.05em;">Vendedor</div>
-            <div style="font-weight:800; font-size:14px; color:var(--color-text);">${o.comercioName || 'Desconocido'}</div>
+            <div style="font-weight:800; font-size:14px; color:var(--color-text);">${getComercioDisplayName(o)}</div>
           </div>
           <div style="text-align:right;">
             <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.05em;">Total</div>
@@ -297,19 +325,19 @@ window.showOrderDetail = async (id) => {
        <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px;">
          <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Cliente</div>
          <div style="font-weight:800; font-size:13px; margin-bottom:2px;">${o.userName}</div>
-         <div style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.userId?.slice(-8) || '---'}</div>
+         <div id="audit-client-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.goId || 'Cargando...'}</div>
        </div>
        <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px;">
          <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Repartidor</div>
          <div style="font-weight:800; font-size:13px; margin-bottom:2px; color:var(--color-primary);">${o.driverName || 'Sin asignar'}</div>
-         <div style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.driverId?.slice(-8) || '---'}</div>
+         <div id="audit-driver-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
        </div>
     </div>
 
     <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:20px; margin-bottom:20px;">
        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
          <span style="font-size:12px; font-weight:700; opacity:0.6;">Comercio:</span>
-         <span style="font-size:12px; font-weight:800;">${o.comercioName}</span>
+         <span style="font-size:12px; font-weight:800;">${getComercioDisplayName(o)}</span>
        </div>
        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
          <span style="font-size:12px; font-weight:700; opacity:0.6;">Ubicación:</span>
@@ -336,13 +364,86 @@ window.showOrderDetail = async (id) => {
     title: 'Estación de Auditoría',
     content: detailHtml,
     footer: `
-      <button id="close-audit-modal" class="btn btn-primary" style="width:100%; height:54px; border-radius:18px; font-weight:900;">
-        CERRAR AUDITORÍA
-      </button>
+      <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
+        ${o.status !== 'cancelled' ? `
+          <button id="admin-cancel-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#E74C3C; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+            ${icon('xCircle', 20)} CANCELAR PEDIDO
+          </button>
+        ` : ''}
+        <button id="close-audit-modal" class="btn btn-primary" style="width:100%; height:54px; border-radius:18px; font-weight:900;">
+          CERRAR AUDITORÍA
+        </button>
+      </div>
     `
   });
 
   document.getElementById('close-audit-modal').onclick = () => closeModal();
+
+  document.getElementById('admin-cancel-order-btn')?.addEventListener('click', async () => {
+    const { showConfirm } = await import('../../components/modal.js');
+    showConfirm({
+      title: '🚨 Cancelar Pedido (Admin)',
+      message: `¿Estás seguro de que deseas cancelar el pedido #${o.orderId || '---'} de forma forzada? Esta acción devolverá los puntos al cliente (si aplica) y marcará el pedido como cancelado globalmente.`,
+      danger: true,
+      onConfirm: async () => {
+        const { showToast } = await import('../../components/toast.js');
+        try {
+          const { runTransaction, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
+          await runTransaction(db, async (transaction) => {
+            const orderRef = fDoc(db, 'orders', o.id);
+            const orderSnap = await transaction.get(orderRef);
+            if (!orderSnap.exists()) throw "El pedido no existe.";
+
+            const orderData = orderSnap.data();
+
+            transaction.update(orderRef, {
+              status: 'cancelled',
+              cancelledAt: serverTimestamp(),
+              cancelledBy: 'admin'
+            });
+
+            if (orderData.pointsRedeemed > 0 && orderData.userId) {
+              const userRef = fDoc(db, 'users', orderData.userId);
+              transaction.update(userRef, {
+                points: increment(orderData.pointsRedeemed)
+              });
+            }
+          });
+
+          closeModal();
+          showToast('Pedido cancelado correctamente por el Administrador', 'success');
+        } catch (err) {
+          console.error('[Admin Cancel] Error:', err);
+          showToast('Error al cancelar el pedido: ' + err, 'danger');
+        }
+      }
+    });
+  });
+
+  // Load client GO-ID dynamically
+  if (o.userId) {
+    getDoc(doc(db, 'users', o.userId)).then(snap => {
+      if (snap.exists()) {
+        const u = snap.data();
+        const clientBadge = document.getElementById('audit-client-goid');
+        if (clientBadge) clientBadge.textContent = `ID: ${u.goId || 'Sin ID'}`;
+      }
+    }).catch(() => {});
+  } else {
+    const clientBadge = document.getElementById('audit-client-goid');
+    if (clientBadge) clientBadge.textContent = 'ID: ---';
+  }
+
+  // Load driver DL-ID dynamically
+  if (o.driverId) {
+    getDoc(doc(db, 'users', o.driverId)).then(snap => {
+      if (snap.exists()) {
+        const u = snap.data();
+        const driverBadge = document.getElementById('audit-driver-goid');
+        if (driverBadge) driverBadge.textContent = `ID: ${u.deliveryId || u.goId || 'Sin ID'}`;
+      }
+    }).catch(() => {});
+  }
 
   detailHtml.querySelectorAll('.btn-chat-audit').forEach(btn => {
     btn.onclick = async () => {

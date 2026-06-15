@@ -7,9 +7,16 @@ import { icon } from '../utils/icons.js';
 export function showNotificationPrompt(onAccept) {
   if (Notification.permission !== 'default') return;
 
-  // 1. Only show in standalone PWA mode
+  // 1. If not running in standalone PWA mode, request permission directly using the native prompt
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  if (!isStandalone) return;
+  if (!isStandalone) {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted' && onAccept) {
+        onAccept();
+      }
+    });
+    return;
+  }
 
   // 3. Don't show if the install lock or onboarding is active
   if (document.getElementById('pwa-install-lock') || document.getElementById('onboarding-container')) return;

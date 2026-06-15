@@ -129,12 +129,14 @@
    Desktop Premium Styling Overrides (min-width: 1024px)
    ========================================================================== */
 @media (min-width: 1024px) {
-  /* Shell Adjustments */
-  #app-navbar {
+  /* Only apply if not preview */
+  :root:not(.preview-mode) #app-navbar,
+  html:not(.preview-mode) #app-navbar {
     display: none !important;
   }
   
-  #app-header {
+  :root:not(.preview-mode) #app-header,
+  html:not(.preview-mode) #app-header {
     background: var(--color-primary) !important;
     backdrop-filter: blur(24px) !important;
     -webkit-backdrop-filter: blur(24px) !important;
@@ -150,17 +152,23 @@
     margin: 0 !important;
   }
 
-  [data-theme="dark"] #app-header {
+  [data-theme="dark"] :root:not(.preview-mode) #app-header,
+  [data-theme="dark"] html:not(.preview-mode) #app-header {
     background: var(--color-primary) !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
     box-shadow: 0 8px 32px rgba(var(--color-primary-rgb), 0.35) !important;
   }
 
-  body.header-hidden #app-header {
+  :root:not(.preview-mode) body.header-hidden #app-header,
+  html:not(.preview-mode) body.header-hidden #app-header {
     display: none !important;
   }
   
-  html, body, #app {
+  :root:not(.preview-mode) html,
+  :root:not(.preview-mode) body,
+  :root:not(.preview-mode) #app,
+  html:not(.preview-mode) body,
+  html:not(.preview-mode) #app {
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
@@ -168,7 +176,8 @@
     overflow-x: hidden !important;
   }
 
-  .main-slider {
+  :root:not(.preview-mode) .main-slider,
+  html:not(.preview-mode) .main-slider {
     height: calc(100vh - 80px) !important;
     background: #F8FAFC !important;
     display: block !important;
@@ -179,7 +188,8 @@
     padding: 0 !important;
   }
 
-  .slide-panel {
+  :root:not(.preview-mode) .slide-panel,
+  html:not(.preview-mode) .slide-panel {
     display: none !important;
     width: 100vw !important;
     max-width: none !important;
@@ -189,7 +199,8 @@
     background: #F8FAFC !important;
   }
   
-  .slide-panel.active {
+  :root:not(.preview-mode) .slide-panel.active,
+  html:not(.preview-mode) .slide-panel.active {
     display: block !important;
   }
 

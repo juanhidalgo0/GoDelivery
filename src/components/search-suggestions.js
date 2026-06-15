@@ -23,14 +23,15 @@ async function loadSearchData() {
         const pathParts = doc.ref.path.split('/');
         const comercioId = pathParts[1];
         const comercio = allComercios.find(c => c.id === comercioId);
+        if (!comercio) return null;
         return { 
           id: doc.id, 
           type: 'product', 
           comercioId, 
-          comercioName: comercio ? comercio.name : 'Comercio', 
+          comercioName: comercio.name, 
           ...data 
         };
-      }).filter(p => p.isActive !== false);
+      }).filter(p => p !== null && p.isActive !== false);
     } catch (err) {
       console.warn('CollectionGroup failed, fetching individually', err);
       const promises = allComercios.map(async (c) => {
@@ -44,7 +45,7 @@ async function loadSearchData() {
         }));
       });
       const results = await Promise.all(promises);
-      allProducts = results.flat().filter(p => p.isActive !== false);
+      allProducts = results.flat().filter(p => p.isActive !== false && allComercios.some(c => c.id === p.comercioId));
     }
 
     isLoaded = true;
@@ -165,7 +166,7 @@ function renderSuggestions(searchTerm, container) {
       <div class="search-suggestion-group">
         <div class="search-suggestion-header">Productos</div>
         ${filteredProducts.map(p => `
-          <a href="#/comercio/${p.comercioId}" class="search-suggestion-item">
+          <a href="#/comercio/${p.comercioId}?product=${p.id}" class="search-suggestion-item">
             <div class="suggestion-icon-box">
               ${p.image ? `<img src="${p.image}" alt="" />` : icon('package', 18)}
             </div>

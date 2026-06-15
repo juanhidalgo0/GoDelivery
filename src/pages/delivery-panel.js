@@ -137,7 +137,7 @@ export async function renderDeliveryPanel() {
   const headerSlot = document.getElementById('delivery-header-slot');
   if (headerSlot) {
     headerSlot.innerHTML = `
-      <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;background:var(--color-primary);border-bottom:none;box-shadow:0 4px 12px rgba(0,0,0,0.1);position:relative;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:12px;padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px;background:var(--color-primary);border-bottom:none;box-shadow:0 4px 12px rgba(0,0,0,0.1);position:relative;overflow:hidden;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
         
@@ -149,15 +149,16 @@ export async function renderDeliveryPanel() {
           <h1 style="font-family:var(--font-display);font-weight:800;font-size:17px;color:white;margin:0;line-height:1.2;letter-spacing:-0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Panel Delivery</h1>
           <p style="font-size:10px;color:rgba(255,255,255,0.85);font-weight:700;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Repartidor ${user.deliveryId || 'Oficial'}</p>
         </div>
-        <div style="display:flex; gap:6px; align-items:center;position:relative;z-index:2;flex-shrink:0;">
-          <button class="header-action-btn tab-pill" data-tab="history" style="height:35px; padding:0 10px; border-radius:9px; border:none; background:rgba(255,255,255,0.15); color:white; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); min-width:auto;">
-            ${icon('history', 13)}
-            <span style="font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">Historial</span>
-          </button>
-          <button class="header-action-btn tab-pill" data-tab="finances" style="height:35px; padding:0 10px; border-radius:9px; border:none; background:rgba(255,255,255,0.15); color:white; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); min-width:auto;">
-            ${icon('bank', 13)}
-            <span style="font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">Finanzas</span>
-          </button>
+        <div style="display:flex; gap:8px; align-items:center;position:relative;z-index:2;flex-shrink:0;">
+          <a href="#/delivery/history" title="Historial de Pedidos" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+            ${icon('history', 22)}
+          </a>
+          <a href="#/delivery/finances" title="Finanzas y Cuentas" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+            ${icon('bank', 22)}
+          </a>
+          <a href="#/delivery/config" title="Configuración de Perfil" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+            ${icon('settings', 22)}
+          </a>
         </div>
       </div>
     `;
@@ -214,6 +215,14 @@ export async function renderDeliveryPanel() {
       attachStatusBarListeners(newUser);
     }
     
+    if (!newUser.isOnline) {
+      if (inactivityTimer) {
+        clearInterval(inactivityTimer);
+        inactivityTimer = null;
+      }
+      stopHeartbeat();
+    }
+
     // Middle content sync
     const contentArea = document.getElementById('delivery-content');
     if (contentArea) {
@@ -253,7 +262,8 @@ export async function renderDeliveryPanel() {
       const batches = new Set();
       allOrders.forEach(o => {
         if (o.driverId) return;
-        if (o.isFavor) batches.add(o.id);
+        if (o.isTrip) batches.add(o.id);
+        else if (o.isFavor) batches.add(o.id);
         else if (o.bundleId) batches.add(o.bundleId);
         else if (o.status === 'ready') batches.add(o.id);
       });
@@ -331,15 +341,22 @@ function loadTabContent(tab, container, user) {
       const listUnsub = onSnapshot(q, (snap) => {
         const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         
-        // 1. Separate favors, and group ready orders by commerce
+        // 1. Separate favors/trips, and group ready orders by commerce
         const favors = [];
+        const trips = [];
         const readyOrdersByCommerce = new Map(); // comercioId -> Array of orders
         const otherOrders = []; // e.g. orders with bundleId
 
         allOrders.forEach(o => {
           if (o.driverId) return;
           
-          if (o.isFavor) {
+          const mode = user.deliveryMode || 'both';
+          if (mode === 'trip' && !o.isTrip) return;
+          if (mode === 'delivery' && o.isTrip) return;
+          
+          if (o.isTrip) {
+            trips.push(o);
+          } else if (o.isFavor) {
             favors.push(o);
           } else if (o.bundleId) {
             otherOrders.push(o); // Keep existing backend bundles
@@ -389,6 +406,25 @@ function loadTabContent(tab, container, user) {
             id: o.id,
             isBundle: false,
             isFavor: true,
+            order: o,
+            createdAt: o.createdAt,
+            deliveryAddress: o.deliveryAddress,
+            total: o.total,
+            subtotal: o.subtotal || 0,
+            deliveryCost: o.deliveryCost || 0,
+            appUsageFee: o.appUsageFee || 0,
+            commissionAmount: o.commissionAmount || 0,
+            discountAmount: o.discountAmount || 0,
+            couponDiscount: o.couponDiscount || 0
+          });
+        });
+
+        // 3b. Add trips
+        trips.forEach(o => {
+          batches.set(o.id, {
+            id: o.id,
+            isBundle: false,
+            isTrip: true,
             order: o,
             createdAt: o.createdAt,
             deliveryAddress: o.deliveryAddress,
@@ -480,8 +516,21 @@ function loadTabContent(tab, container, user) {
           });
         });
 
+        const isBatchScheduled = (b) => {
+          if (b.isBundle) {
+            return b.orders && b.orders.some(o => o.isScheduled);
+          }
+          return b.order ? !!b.order.isScheduled : false;
+        };
+
         const sortedBatches = Array.from(batches.values())
-          .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+          .sort((a, b) => {
+            const aSched = isBatchScheduled(a);
+            const bSched = isBatchScheduled(b);
+            if (aSched && !bSched) return -1;
+            if (!aSched && bSched) return 1;
+            return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+          });
 
         // Toast for new available orders (Only after initial load and only if driver has no active orders)
         if (!isInitial && activeOrdersCount === 0) {
@@ -541,22 +590,16 @@ function loadTabContent(tab, container, user) {
             .expandable-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: rgba(var(--color-primary-rgb), 0.3); }
             .expandable-card.collapsed .card-details-area { display: none; }
             .expandable-card.collapsed { padding-bottom: 16px !important; }
-            .expand-icon { transition: transform 0.3s ease; }
-            .expandable-card:not(.collapsed) .expand-icon { transform: rotate(180deg); }
-            .expand-label::after { content: 'VER DETALLES'; }
-            .expandable-card:not(.collapsed) .expand-label::after { content: 'OCULTAR'; }
             
-            .expand-badge {
-              position: absolute; bottom: 0; right: 0;
-              background: rgba(var(--color-primary-rgb), 0.1);
-              color: var(--color-primary);
-              font-size: 8px; font-weight: 900;
-              padding: 4px 10px; border-top-left-radius: 12px;
-              display: flex; align-items: center; gap: 4px;
-              text-transform: uppercase; letter-spacing: 0.05em;
-              transition: all 0.3s;
+            .expand-icon-span { transition: transform 0.3s ease; display: inline-flex; align-items: center; justify-content: center; }
+            .expandable-card:not(.collapsed) .expand-icon-span { transform: rotate(180deg); }
+            .expand-text-span::after { content: 'Ver detalles'; }
+            .expandable-card:not(.collapsed) .expand-text-span::after { content: 'Ocultar detalles'; }
+            
+            .expand-indicator-btn:hover {
+              background: rgba(var(--color-primary-rgb), 0.1) !important;
+              transform: scale(1.01);
             }
-            .expandable-card:not(.collapsed) .expand-badge { background: var(--color-primary); color: white; }
           `;
           document.head.appendChild(s);
         }
@@ -566,7 +609,9 @@ function loadTabContent(tab, container, user) {
             ${sortedBatches.map(b => {
               const isBundle = b.isBundle;
               const isFavor = b.isFavor;
+              const isTrip = b.isTrip;
               const favorType = b.order?.favorType;
+              const tripType = b.order?.tripType;
               
               let title = b.comercioName || b.order?.comercioName || 'Comercio';
               if (isBundle) {
@@ -576,44 +621,60 @@ function loadTabContent(tab, container, user) {
                   title = `Lote Multi-Local (${b.orders.length} locales)`;
                 }
               } else if (isFavor) {
-                title = favorType === 'mandado' ? 'GoFavor: Mandado / Envío' : 'GoFavor: Compra Especial';
+                if (favorType === 'gocash') {
+                  title = 'Go Cash';
+                } else {
+                  title = favorType === 'mandado' ? 'GoFavor: Encomienda' : 'GoFavor: Mandado';
+                }
+              } else if (isTrip) {
+                title = tripType === 'moto' ? 'Viaje en Moto solicitado' : 'Viaje en Auto solicitado';
               }
               
-              const displayId = isBundle ? b.id.slice(0, 8) : (b.order.orderId || b.order.id.slice(0, 6));
-              
-              // Check if all orders in bundle are confirmed
+              const isScheduled = isBundle ? b.orders.some(o => o.isScheduled) : (b.order ? !!b.order.isScheduled : false);
+              const scheduledTime = isBundle ? (b.orders.find(o => o.isScheduled)?.scheduledTime || '') : (b.order?.scheduledTime || '');
+              const scheduledDate = isBundle ? (b.orders.find(o => o.isScheduled)?.scheduledDate || '') : (b.order?.scheduledDate || '');
+
+              const scheduledBadge = isScheduled ? `
+                <div style="background: #8b5cf6; color: white; border-radius: 12px; padding: 6px 12px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; box-shadow: 0 4px 10px rgba(139, 92, 246, 0.2);">
+                  <span style="display: flex; align-items: center;">${icon('calendar', 14, '', 'white')}</span> <span style="letter-spacing: 0.02em;">PROGRAMADO: ${scheduledDate} a las <span style="text-decoration: underline; font-weight: 900;">${scheduledTime} HS</span></span>
+                </div>
+              ` : '';
+
               const anyPending = isBundle ? b.orders.some(o => o.status === 'pending') : false;
-              const allReady = isBundle ? b.orders.every(o => o.status === 'ready') : (isFavor || b.order.status === 'ready');
+              const allReady = isBundle ? b.orders.every(o => o.status === 'ready') : (isFavor || isTrip || b.order.status === 'ready');
 
               return `
-                <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 16px; border: 1px solid var(--color-border-light); background: var(--color-bg-card); padding: 20px; border-radius: 24px; position:relative; overflow:hidden; ${anyPending ? 'opacity: 0.8;' : ''}">
-                  <div style="position:absolute; top:0; left:0; width:6px; height:100%; background:${isFavor ? (favorType === 'mandado' ? '#22c55e' : '#ef4444') : 'var(--color-primary)'};"></div>
+                <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
+                  <div style="position:absolute; top:0; left:0; width:6px; height:100%; background:${isTrip ? '#3b82f6' : (isFavor ? (favorType === 'gocash' ? '#6366f1' : (favorType === 'mandado' ? '#22c55e' : '#ef4444')) : '#00D67F')};"></div>
                   
-                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
                     <div style="flex:1;">
-                      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                        <span style="font-size:10px; font-weight:900; color:${isFavor ? 'white' : 'var(--color-primary)'}; background:${isFavor ? (favorType === 'mandado' ? '#22c55e' : '#ef4444') : 'rgba(var(--color-primary-rgb),0.1)'}; padding:2px 8px; border-radius:8px; text-transform:uppercase;">${isFavor ? 'GO FAVOR' : 'DISPONIBLE'}</span>
-                        <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary);">${new Date(b.createdAt?.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap: wrap;">
+                        <span style="font-size:10px; font-weight:900; color:white; background:${isTrip ? '#3b82f6' : (isFavor ? (favorType === 'gocash' ? '#6366f1' : (favorType === 'mandado' ? '#22c55e' : '#ef4444')) : '#00D67F')}; padding:3px 10px; border-radius:8px; text-transform:uppercase; letter-spacing: 0.03em;">${isTrip ? 'VIAJE' : (isFavor ? (favorType === 'gocash' ? 'GO CASH' : 'GO FAVOR') : 'DISPONIBLE')}</span>
+                        <span style="font-size:10.5px; font-weight:800; color:var(--color-text-tertiary);">${new Date(b.createdAt?.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <strong style="font-size:18px; font-weight:950; letter-spacing:-0.5px; display:block; color:var(--color-text-primary);">${title}</strong>
+                      <strong style="font-size:19px; font-weight:950; letter-spacing:-0.5px; display:block; color:var(--color-text-primary); line-height: 1.25;">${title}</strong>
+                      ${scheduledBadge}
                     </div>
                     <div style="text-align:right;">
-                      <div style="font-size:22px; font-weight:950; color:var(--color-text-primary); letter-spacing:-1px;">${formatPrice(b.total)}</div>
-                      <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">A Cobrar</div>
+                      <div style="font-size:24px; font-weight:950; color:var(--color-text-primary); letter-spacing:-1px; line-height: 1.1;">${formatPrice(b.total)}</div>
+                      <div style="font-size:9.5px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; margin-top: 3px; letter-spacing: 0.02em;">A Cobrar</div>
                     </div>
                   </div>
-
-                  <div style="display:flex; gap:8px; margin-bottom:20px;">
-                    <div style="flex:1; background:var(--color-bg-secondary); padding:10px; border-radius:16px; border:1px solid var(--color-border-light);">
-                      <div style="font-size:8px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">${isFavor ? 'Costo Servicio' : 'Costo Productos'}</div>
-                      <div style="font-size:13px; font-weight:900; color:var(--color-primary);">${formatPrice(isFavor ? b.total : b.subtotal)}</div>
+ 
+                  <div style="display:flex; gap:12px; margin-top:16px; margin-bottom:20px;">
+                    <!-- Costo Productos / Servicio -->
+                    <div style="flex:1; background: #ef4444; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(239, 68, 68, 0.15); border: none;">
+                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${(isFavor || isTrip) ? 'Costo Servicio' : 'Costo Productos'}</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice((isFavor || isTrip) ? b.total : b.subtotal)}</div>
                     </div>
-                    <div style="flex:1; background:var(--color-bg-secondary); padding:10px; border-radius:16px; border:1px solid var(--color-border-light);">
-                      <div style="font-size:8px; font-weight:800; color:var(--color-success); text-transform:uppercase; margin-bottom:2px;">Ganancia Tuya</div>
-                      <div style="font-size:13px; font-weight:900; color:var(--color-success);">${formatPrice(b.deliveryCost)}</div>
+                    <!-- Ganancia Tuya -->
+                    <div style="flex:1; background: #10b981; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(16, 185, 129, 0.15); border: none;">
+                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">Ganancia Tuya</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice(b.deliveryCost)}</div>
                     </div>
                   </div>
-
+ 
                   ${(b.discountAmount || 0) > 0 ? `
                     <div style="background:rgba(34, 197, 94, 0.05); border:1px solid rgba(34, 197, 94, 0.2); border-radius:16px; padding:12px 16px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
                       <div style="font-size:11px; font-weight:800; color:var(--color-success); display:flex; align-items:center; gap:6px;">
@@ -625,7 +686,7 @@ function loadTabContent(tab, container, user) {
                       ${icon('info', 12)} Descuento absorbido por GO Delivery. Se descontará de tu deuda de la app.
                     </div>
                   ` : ''}
-
+ 
                   ${(b.couponDiscount || 0) > 0 ? `
                     <div style="background:rgba(168, 85, 247, 0.04); border:1px dashed rgba(168, 85, 247, 0.25); border-radius:16px; padding:12px 16px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
                       <div style="font-size:11px; font-weight:800; color:#a855f7; display:flex; align-items:center; gap:6px;">
@@ -642,9 +703,28 @@ function loadTabContent(tab, container, user) {
                       </button>
                     </div>
                   ` : ''}
+ 
+                  <div class="expand-indicator-btn" style="margin-top: 4px; margin-bottom: 12px; padding: 10px; background: rgba(var(--color-primary-rgb), 0.05); border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 11px; font-weight: 850; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.2s; border: 1px dashed rgba(var(--color-primary-rgb), 0.25);">
+                    <span class="expand-text-span"></span>
+                    <span class="expand-icon-span" style="display: flex; align-items: center; transition: transform 0.3s ease;">${icon('caretDown', 14)}</span>
+                  </div>
 
                   <div class="card-details-area">
-                    ${isFavor ? `
+                    ${isTrip ? `
+                      <div style="margin-bottom:16px; padding:14px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light);">
+                        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px; letter-spacing:0.02em;">Detalles del trayecto</div>
+                        <div style="font-size:13px; font-weight:700; color:var(--color-text-primary); display:flex; flex-direction:column; gap:8px;">
+                          <div>
+                            <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9px; display:block; margin-bottom:2px;">Origen / Buscar en:</span>
+                            <div style="display:flex; align-items:center; gap:6px;">${icon('mapPin', 14)} ${b.order.pickupAddress}</div>
+                          </div>
+                          <div style="margin-top:4px;">
+                            <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9px; display:block; margin-bottom:2px;">Destino / Llevar a:</span>
+                            <div style="display:flex; align-items:center; gap:6px;">${icon('navigation', 14)} ${b.order.deliveryAddress}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ` : isFavor ? `
                       <div style="margin-bottom:16px; padding:12px; background:var(--color-bg-secondary); border-radius:14px; border:1px solid var(--color-border-light);">
                         <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">DETALLES DEL FAVOR</div>
                         <p style="font-size:13px; font-weight:600; color:var(--color-text-secondary); margin-bottom:12px; line-height:1.4;">${b.order.details}</p>
@@ -673,12 +753,12 @@ function loadTabContent(tab, container, user) {
                         </div>
                       </div>
                     ` : '')}
-
+ 
                     <button class="btn btn-primary btn-block take-batch-btn" 
                             data-id="${b.id}" 
                             ${!allReady ? 'disabled' : ''}
                             style="height: 54px; border-radius:18px; font-weight:950; font-size:15px; text-transform:uppercase; letter-spacing:0.02em; gap:10px; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.2); ${!allReady ? 'opacity:0.5; filter:grayscale(1); box-shadow:none;' : ''}">
-                      ${!allReady ? 'Esperando locales...' : `${icon('checkCircle', 20)} TOMAR PEDIDO`}
+                      ${!allReady ? 'Esperando locales...' : `${icon('checkCircle', 20)} TOMAR VIAJE / PEDIDO`}
                     </button>
                   </div>
                 </div>
@@ -824,16 +904,22 @@ function loadTabContent(tab, container, user) {
         const pickupsByCommerce = new Map(); // comercioId -> { comercioName, address, isFavor, orders: [] }
 
         orders.forEach(o => {
-          let key = o.comercioId || (o.isFavor ? `favor_${o.id}` : `order_${o.id}`);
-          if (!pickupsByCommerce.has(key)) {
-            pickupsByCommerce.set(key, {
-              comercioName: o.comercioName || (o.favorType === 'mandado' ? 'Punto de Retiro' : 'Comercio a Comprar'),
-              address: o.pickupAddress || o.comercioAddress || '',
-              isFavor: !!o.isFavor,
-              orders: []
-            });
+          if (o.favorType === 'gocash') {
+            // Go Cash orders do not have a pickup stop, only drop-off.
+            // Mark as pickedUpAt in local UI state so the drop-off delivery button is enabled immediately.
+            o.pickedUpAt = o.acceptedAt || new Date();
+          } else {
+            let key = o.comercioId || (o.isFavor ? `favor_${o.id}` : `order_${o.id}`);
+            if (!pickupsByCommerce.has(key)) {
+              pickupsByCommerce.set(key, {
+                comercioName: o.comercioName || (o.favorType === 'mandado' ? 'Punto de Retiro' : 'Comercio a Comprar'),
+                address: o.pickupAddress || o.comercioAddress || '',
+                isFavor: !!o.isFavor,
+                orders: []
+              });
+            }
+            pickupsByCommerce.get(key).orders.push(o);
           }
-          pickupsByCommerce.get(key).orders.push(o);
 
           // Drop-off stops (unique per address)
           if (!deliveries.has(o.deliveryAddress)) {
@@ -948,6 +1034,9 @@ function loadTabContent(tab, container, user) {
                 
                 ${stops.map((stop, idx) => {
                   const isActive = !stop.pickedUp && (idx === 0 || stops[idx-1].pickedUp);
+                  const stopKey = (stop.type + '_' + (stop.type === 'PICKUP' ? stop.docId : stop.address)).replace(/[^a-zA-Z0-9]/g, '_');
+                  container._expandedStops = container._expandedStops || new Set();
+                  const isExpanded = container._expandedStops.has(stopKey);
                   return `
                   <div class="stop-item" style="position:relative; margin-bottom:36px; animation: slide-up 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; animation-delay: ${idx * 0.1}s; opacity:0;">
                     <!-- Timeline Dot -->
@@ -984,11 +1073,18 @@ function loadTabContent(tab, container, user) {
                         <div style="margin-top: -4px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
                           ${stop.orders.map(o => `
                             <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.03); border: 1.5px solid var(--color-border-light); padding: 12px; border-radius: 16px;">
-                              <div style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 750;">
-                                <span style="color: var(--color-text-tertiary); font-size: 11px; text-transform: uppercase;">Pago:</span>
-                                <span style="color: ${o.paymentMethod === 'mercadopago' ? '#009EE3' : '#22C55E'}; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 4px;">
-                                  ${o.paymentMethod === 'mercadopago' ? '💳 Transferencia' : '💵 Efectivo'}
-                                </span>
+                              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12.5px; font-weight: 750;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                  <span style="color: var(--color-text-tertiary); font-size: 11px; text-transform: uppercase;">Pago:</span>
+                                  <span style="color: ${o.paymentMethod === 'mercadopago' ? '#009EE3' : '#22C55E'}; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 4px;">
+                                    ${o.paymentMethod === 'mercadopago' ? '💳 Transferencia' : '💵 Efectivo'}
+                                  </span>
+                                </div>
+                                ${o.isScheduled ? `
+                                  <span style="background: rgba(139, 92, 246, 0.12); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 9.5px; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 2px;">
+                                    📅 ${o.scheduledTime}
+                                  </span>
+                                ` : ''}
                               </div>
                               ${o.addressNotes ? `
                                 <div style="display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.4;">
@@ -1005,9 +1101,15 @@ function loadTabContent(tab, container, user) {
                         </div>
                       ` : ''}
 
-                      <!-- Detailed Financial Breakdown -->
-                      <div style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; margin-bottom:20px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
-                        ${stop.type === 'PICKUP' ? `
+                      <!-- Collapsible Stop Details -->
+                      ${stop.type === 'PICKUP' ? `
+                        <!-- Toggle Button -->
+                        <button class="toggle-stop-details-btn ${isExpanded ? 'active' : ''}" data-key="${stopKey}" style="margin-bottom: ${isExpanded ? '12px' : '0'};">
+                          ${icon('chevronDown', 14)}
+                          <span>${isExpanded ? 'Ocultar detalle de pedido' : 'Mostrar detalle de pedido'}</span>
+                        </button>
+
+                        <div class="collapsible-stop-details ${isExpanded ? 'expanded' : ''}" id="details-${stopKey}" style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
                           ${stop.orders.length > 1 ? `
                             <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3); display:flex; flex-direction:column; gap:8px;">
                               <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:2px;">Detalle del Lote (${stop.orders.length} pedidos)</div>
@@ -1066,9 +1168,17 @@ function loadTabContent(tab, container, user) {
                               </div>
                             ` : ''}
                           `}
-                        ` : `
+                        </div>
+                      ` : `
+                        <!-- Toggle Button -->
+                        <button class="toggle-stop-details-btn ${isExpanded ? 'active' : ''}" data-key="${stopKey}" style="margin-bottom: ${isExpanded ? '12px' : '0'};">
+                          ${icon('chevronDown', 14)}
+                          <span>${isExpanded ? 'Ocultar detalle de entrega' : 'Mostrar detalle de entrega'}</span>
+                        </button>
+
+                        <div class="collapsible-stop-details ${isExpanded ? 'expanded' : ''}" id="details-${stopKey}" style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
                           <!-- Premium Order Details/Items list for Drop-off -->
-                          <div style="background:rgba(var(--color-primary-rgb),0.02); border-radius:18px; padding:14px; border:1px dashed var(--color-border-light); margin-bottom:14px; display:flex; flex-direction:column; gap:8px;">
+                          <div style="background:rgba(var(--color-primary-rgb),0.02); border-radius:18px; padding:14px; border:1px dashed var(--color-border-light); display:flex; flex-direction:column; gap:8px;">
                             <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Detalle de la Entrega</div>
                             ${stop.orders.map(o => `
                               <div style="padding-bottom:4px; margin-bottom:4px; ${stop.orders.length > 1 ? 'border-bottom:1px solid rgba(var(--color-border-light-rgb),0.3);' : ''}">
@@ -1098,7 +1208,7 @@ function loadTabContent(tab, container, user) {
                           <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Desglose de Cobro</div>
                           ${stop.orders.map(o => `
                             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
-                              <span style="color:var(--color-text-secondary); opacity:0.8;">Pedido #${o.orderId} (${o.isFavor ? (o.favorType === 'mandado' ? 'Mandado' : 'Compra') : (o.comercioName || 'Pedido')})</span>
+                              <span style="color:var(--color-text-secondary); opacity:0.8;">Pedido #${o.orderId} (${o.isFavor ? (o.favorType === 'gocash' ? 'Go Cash' : (o.favorType === 'mandado' ? 'Mandado' : 'Compra')) : (o.comercioName || 'Pedido')})</span>
                               <span style="color:var(--color-text-primary);">${formatPrice(o.subtotal || 0)}</span>
                             </div>
                           `).join('')}
@@ -1166,18 +1276,19 @@ function loadTabContent(tab, container, user) {
                               ${icon('edit', 14)} Cargar valor de productos
                             </button>
                           ` : ''}
-                        `}
-                      </div>
+                        </div>
+                      `}
 
                       <!-- Actions -->
                       <div style="display:flex; gap:12px; align-items:center; height:54px;">
                         ${stop.type === 'PICKUP' ? `
                           <button class="btn mark-picked-up-btn" 
                                   data-id="${stop.docId}" 
+                                  data-istrip="${stop.isFavor ? 'false' : stop.orders.some(o => o.isTrip)}"
                                   ${stop.pickedUp ? 'disabled' : ''}
                                   style="height:100%; font-size:14px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:10px; white-space:nowrap; letter-spacing:0.02em;">
-                            ${stop.pickedUp ? icon('check', 18) : icon('package', 18)} 
-                            ${stop.pickedUp ? 'RETIRADO' : 'RETIRAR'}
+                            ${stop.pickedUp ? icon('check', 18) : (stop.orders.some(o => o.isTrip) ? icon('user', 18) : icon('package', 18))} 
+                            ${stop.pickedUp ? (stop.orders.some(o => o.isTrip) ? 'EN VIAJE' : 'RETIRADO') : (stop.orders.some(o => o.isTrip) ? 'PASAJERO A BORDO' : 'RETIRAR')}
                           </button>
                         ` : ''}
                         
@@ -1185,9 +1296,10 @@ function loadTabContent(tab, container, user) {
                           <button class="btn mark-delivered-btn" 
                                   data-ids="${stop.orders.map(o => o.id).join(',')}" 
                                   data-codes="${stop.orders.map(o => o.verificationCode).join(',')}"
+                                  data-istrip="${stop.orders.some(o => o.isTrip)}"
                                   ${!stop.orders.every(o => !!o.pickedUpAt) ? 'disabled' : ''}
                                   style="height:100%; font-size:14px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:var(--color-success); box-shadow: ${!stop.orders.every(o => !!o.pickedUpAt) ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!stop.orders.every(o => !!o.pickedUpAt) ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:10px; white-space:nowrap; letter-spacing:0.02em;">
-                            ${icon('checkCircle', 18)} ENTREGAR
+                            ${icon('checkCircle', 18)} ${stop.orders.some(o => o.isTrip) ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
                           </button>
                         ` : ''}
 
@@ -1211,6 +1323,47 @@ function loadTabContent(tab, container, user) {
             </div>
             
             <style>
+              .collapsible-stop-details {
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, margin 0.3s ease;
+                opacity: 0;
+              }
+              .collapsible-stop-details.expanded {
+                max-height: 1000px;
+                opacity: 1;
+                margin-top: 10px;
+                margin-bottom: 12px;
+              }
+              .toggle-stop-details-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                background: var(--color-bg-secondary);
+                border: 1px solid var(--color-border-light);
+                padding: 10px 14px;
+                border-radius: 16px;
+                font-size: 12px;
+                font-weight: 800;
+                color: var(--color-text-secondary);
+                cursor: pointer;
+                margin-top: 10px;
+                margin-bottom: 12px;
+                transition: all 0.2s ease;
+                width: 100%;
+              }
+              .toggle-stop-details-btn:hover {
+                background: var(--color-border-light);
+                color: var(--color-text-primary);
+              }
+              .toggle-stop-details-btn svg {
+                transition: transform 0.3s ease;
+              }
+              .toggle-stop-details-btn.active svg {
+                transform: rotate(180deg);
+              }
+
               @keyframes pulse-border {
                 0%, 100% { border-color: rgba(245, 158, 11, 0.4); box-shadow: 0 10px 25px rgba(245, 158, 11, 0.05); }
                 50% { border-color: rgba(245, 158, 11, 0.8); box-shadow: 0 10px 25px rgba(245, 158, 11, 0.15); }
@@ -1227,6 +1380,29 @@ function loadTabContent(tab, container, user) {
         `;
 
         // Attach action event listeners
+        container.querySelectorAll('.toggle-stop-details-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            const collapsible = container.querySelector(`#details-${key}`);
+            const btnText = btn.querySelector('span');
+            const isPickup = key.startsWith('PICKUP');
+            
+            if (container._expandedStops.has(key)) {
+              container._expandedStops.delete(key);
+              collapsible?.classList.remove('expanded');
+              btn.classList.remove('active');
+              btn.style.marginBottom = '0';
+              if (btnText) btnText.textContent = isPickup ? 'Mostrar detalle de pedido' : 'Mostrar detalle de entrega';
+            } else {
+              container._expandedStops.add(key);
+              collapsible?.classList.add('expanded');
+              btn.classList.add('active');
+              btn.style.marginBottom = '12px';
+              if (btnText) btnText.textContent = isPickup ? 'Ocultar detalle de pedido' : 'Ocultar detalle de entrega';
+            }
+          });
+        });
+
         container.querySelectorAll('.add-suggested-order-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             showConfirm({
@@ -1244,10 +1420,11 @@ function loadTabContent(tab, container, user) {
 
         container.querySelectorAll('.mark-picked-up-btn').forEach(btn => {
           btn.addEventListener('click', () => {
+            const isTrip = btn.dataset.istrip === 'true';
             showConfirm({
-              title: '¿Confirmar Retiro?',
-              message: 'Asegurate de haber recibido todos los productos del local.',
-              confirmText: 'Sí, retirar',
+              title: isTrip ? '¿Confirmar Inicio de Viaje?' : '¿Confirmar Retiro?',
+              message: isTrip ? 'Confirmá que el pasajero ya está a bordo para iniciar el trayecto.' : 'Asegurate de haber recibido todos los productos del local.',
+              confirmText: isTrip ? 'Iniciar Viaje' : 'Sí, retirar',
               onConfirm: () => {
                 btn.disabled = true;
                 btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Actualizando...';
@@ -1261,6 +1438,21 @@ function loadTabContent(tab, container, user) {
           btn.addEventListener('click', () => {
             const ids = btn.dataset.ids.split(',');
             const codes = btn.dataset.codes.split(',');
+            const isTrip = btn.dataset.istrip === 'true';
+
+            if (isTrip) {
+              showConfirm({
+                title: '🚕 ¿Finalizar Viaje?',
+                message: 'Confirmá que llegaste al destino y que el pasajero descendió del vehículo.',
+                confirmText: 'SÍ, FINALIZAR VIAJE',
+                onConfirm: async () => {
+                  showToast('Finalizando viaje...', 'info');
+                  await markAsDelivered(ids);
+                  showToast('Viaje completado con éxito', 'success');
+                }
+              });
+              return;
+            }
             
             // Go straight to verification modal, no double confirmation
             const masterCode = codes[0]; 
@@ -1404,7 +1596,7 @@ function loadTabContent(tab, container, user) {
                     ${isFromCurrentSession ? `<div style="position:absolute; top:8px; right:16px; background:#10b981; color:white; font-size:7px; font-weight:900; padding:2px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.05em;">Sesión</div>` : ''}
                     <div style="flex:1; min-width:0;">
                       <div style="font-size:15px; font-weight:800; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:3px;">
-                        ${isBundle ? `Lote · ${group.length} pedidos` : (main.isFavor ? (main.favorType === 'mandado' ? 'GoFavor: Mandado' : 'GoFavor: Compra') : (main.comercioName || 'Pedido'))}
+                        ${isBundle ? `Lote · ${group.length} pedidos` : (main.isFavor ? (main.favorType === 'gocash' ? 'Go Cash' : (main.favorType === 'mandado' ? 'GoFavor: Encomienda' : 'GoFavor: Mandado')) : (main.comercioName || 'Pedido'))}
                       </div>
                       <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--color-text-tertiary); font-weight:600;">
                         <span style="color:${main.status === 'completed' ? '#10b981' : '#ef4444'};">${main.status === 'completed' ? '✓ Entregado' : '✕ Cancelado'}</span>
@@ -1509,109 +1701,113 @@ function loadTabContent(tab, container, user) {
         });
       });
     } else if (tab === 'finances') {
+      let sessionOrdersUnsub = null;
       const q = query(doc(db, 'users', user.uid));
-      tabUnsub = onSnapshot(q, async (snap) => {
+      const userUnsub = onSnapshot(q, async (snap) => {
         const userData = snap.data();
         const debt = userData?.deliveryDebt || 0;
         const currentSessionId = userData?.currentSessionId;
         const online = getState().user?.isOnline;
 
         container.innerHTML = `
-          <div class="delivery-finances-v4 page-enter" style="display:flex; flex-direction:column; gap:20px; padding:4px 0 20px; height:100%; overflow:hidden;">
-            <div style="background:var(--color-bg-card); border:1.5px solid ${online ? 'rgba(16,185,129,0.3)' : 'var(--color-border-light)'}; border-radius:32px; padding:28px; position:relative; overflow:hidden; box-shadow:0 12px 30px rgba(0,0,0,0.06); transition:all 0.4s ease;">
-              ${online ? `<div style="position:absolute; top:-20px; right:-20px; width:140px; height:140px; background:radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%);"></div>` : ''}
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-                <div style="display:flex; align-items:center; gap:12px;">
-                  <div style="width:12px; height:12px; border-radius:50%; background:${online ? '#10b981' : 'var(--color-text-tertiary)'}; ${online ? 'box-shadow:0 0 12px #10b981; animation: pulse 2s infinite;' : ''}"></div>
-                  <span style="font-size:12px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em;">${online ? 'Sesión en Vivo' : 'Última Sesión'}</span>
+          <div class="delivery-finances-v4 page-enter" style="display:flex; flex-direction:column; gap:12px; padding:0 0 10px; width:100%; box-sizing:border-box;">
+            <!-- Active Session Card -->
+            <div style="background:var(--color-bg-card); border:1.5px solid ${online ? 'rgba(16,185,129,0.3)' : 'var(--color-border-light)'}; border-radius:24px; padding:18px 20px; position:relative; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,0.04); transition:all 0.4s ease;">
+              ${online ? `<div style="position:absolute; top:-20px; right:-20px; width:120px; height:120px; background:radial-gradient(circle, rgba(16,185,129,0.12) 0%, transparent 70%);"></div>` : ''}
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div style="width:10px; height:10px; border-radius:50%; background:${online ? '#10b981' : 'var(--color-text-tertiary)'}; ${online ? 'box-shadow:0 0 10px #10b981; animation: pulse 2s infinite;' : ''}"></div>
+                  <span style="font-size:11px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">${online ? 'Sesión en Vivo' : 'Última Sesión'}</span>
                 </div>
-                <span style="font-size:10px; font-weight:900; padding:6px 14px; border-radius:12px; background:${online ? 'rgba(16,185,129,0.12)' : 'var(--color-bg-secondary)'}; color:${online ? '#10b981' : 'var(--color-text-tertiary)'}; text-transform:uppercase; letter-spacing:0.05em; border:1px solid ${online ? 'rgba(16,185,129,0.2)' : 'var(--color-border-light)'};">${online ? 'Activa' : 'Finalizada'}</span>
+                <span style="font-size:9px; font-weight:900; padding:4px 10px; border-radius:8px; background:${online ? 'rgba(16,185,129,0.1)' : 'var(--color-bg-secondary)'}; color:${online ? '#10b981' : 'var(--color-text-tertiary)'}; text-transform:uppercase; letter-spacing:0.03em; border:1px solid ${online ? 'rgba(16,185,129,0.15)' : 'var(--color-border-light)'};">${online ? 'Activa' : 'Finalizada'}</span>
               </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; opacity:0.7; letter-spacing:0.02em;">Ganancia</div>
-                  <div style="font-size:38px; font-weight:950; color:${online ? '#10b981' : 'var(--color-text-primary)'}; letter-spacing:-1.5px; line-height:1;" id="session-total-earned">$ 0</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; opacity:0.7;">Ganancia</div>
+                  <div style="font-size:30px; font-weight:950; color:${online ? '#10b981' : 'var(--color-text-primary)'}; letter-spacing:-1px; line-height:1.1;" id="session-total-earned">$ 0</div>
                 </div>
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; opacity:0.7; letter-spacing:0.02em;">Pedidos</div>
-                  <div style="font-size:38px; font-weight:950; color:var(--color-text-primary); letter-spacing:-1.5px; line-height:1;" id="session-orders-count">0</div>
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; opacity:0.7;">Pedidos</div>
+                  <div style="font-size:30px; font-weight:950; color:var(--color-text-primary); letter-spacing:-1px; line-height:1.1;" id="session-orders-count">0</div>
                 </div>
-              </div>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
-              ${['Hoy', 'Semana', 'Mes'].map(label => `
-                <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:24px; padding:18px 12px; text-align:center; box-shadow:var(--shadow-sm); transition:all 0.3s;">
-                  <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px; letter-spacing:0.1em; opacity:0.8;">${label}</div>
-                  <div style="font-size:16px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;" id="stats-${label.toLowerCase() === 'semana' ? 'week' : (label.toLowerCase() === 'hoy' ? 'day' : 'month')}">$ 0</div>
-                </div>
-              `).join('')}
-            </div>
-            <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:32px; padding:24px; display:flex; flex-direction:column; gap:12px; box-shadow:0 8px 25px rgba(0,0,0,0.04);">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <div style="color:var(--color-primary);">${icon('creditCard', 22)}</div>
-                <h4 style="margin:0; font-size:15px; font-weight:900; color:var(--color-text-primary);">Alias de Transferencia (Obligatorio)</h4>
-              </div>
-              <p style="margin:0; font-size:12px; color:var(--color-text-secondary); line-height:1.4; font-weight:550;">
-                Configurá tu ALIAS para recibir transferencias de los clientes. Es de carácter obligatorio para poder recibir y tomar pedidos.
-              </p>
-              <div style="display:flex; gap:10px; margin-top:4px;">
-                <input type="text" id="delivery-alias-input" value="${userData?.transferAlias || ''}" placeholder="Ej: alias.repartidor.mp" style="flex:1; height:46px; border-radius:12px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; transition:border-color 0.2s;" />
-                <button id="save-delivery-alias-btn" style="height:46px; padding:0 18px; border-radius:12px; border:none; background:var(--color-primary); color:white; font-weight:900; font-size:12px; cursor:pointer; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); transition:all 0.2s;">
-                  GUARDAR
-                </button>
               </div>
             </div>
 
-            <div style="display:flex; flex-direction:column; gap:14px;">
-              <button id="view-sessions-history-btn" style="width:100%; height:58px; border-radius:20px; background:var(--color-bg-card); border:1.5px solid var(--color-border-light); color:var(--color-text-primary); font-weight:900; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:12px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
-                <div style="color:var(--color-primary); opacity:0.8;">${icon('history', 20)}</div> 
-                Historial de Sesiones
-              </button>
-              <button id="open-balance-mgmt-btn" style="width:100%; height:58px; border-radius:20px; background:var(--color-bg-card); border:1.5px solid ${debt > 0 ? 'rgba(239,68,68,0.2)' : 'var(--color-border-light)'}; color:var(--color-text-primary); font-weight:900; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; padding:0 24px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
-                <div style="display:flex; align-items:center; gap:12px;">
-                  <div style="color:${debt > 0 ? '#ef4444' : '#10b981'}; opacity:0.8;">${icon('bank', 20)}</div>
+            <!-- Stats Grid -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+              ${['Hoy', 'Semana', 'Mes'].map(label => `
+                <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:16px; padding:10px 8px; text-align:center; box-shadow:var(--shadow-sm); transition:all 0.3s;">
+                  <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.05em; opacity:0.8;">${label}</div>
+                  <div style="font-size:15px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;" id="stats-${label.toLowerCase() === 'semana' ? 'week' : (label.toLowerCase() === 'hoy' ? 'day' : 'month')}">$ 0</div>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- Operations Stack -->
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <!-- Gestor de Balance -->
+              <button id="open-balance-mgmt-btn" style="width:100%; height:48px; border-radius:16px; background:var(--color-bg-card); border:1.5px solid ${debt > 0 ? 'rgba(239,68,68,0.2)' : 'var(--color-border-light)'}; color:var(--color-text-primary); font-weight:900; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; padding:0 16px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.02); flex-shrink:0;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div style="color:${debt > 0 ? '#ef4444' : '#10b981'}; opacity:0.8; display:flex; align-items:center;">${icon('bank', 16)}</div>
                   Gestión de Balance
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span style="font-size:16px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#10b981'}; letter-spacing:-0.03em;">${formatPrice(debt)}</span>
-                  ${icon('chevronRight', 16, 'opacity:0.3')}
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="font-size:14.5px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#10b981'}; letter-spacing:-0.02em;">${formatPrice(debt)}</span>
+                  ${icon('chevronRight', 14, 'opacity:0.3')}
                 </div>
               </button>
+
+              <!-- Inline Sessions History List -->
+              <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:20px; padding:14px 16px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <h4 style="margin:0; font-size:12.5px; font-weight:900; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                    ${icon('history', 15)} Historial de Sesiones
+                  </h4>
+                  <button id="view-sessions-history-btn" style="background:none; border:none; color:var(--color-primary); font-size:10.5px; font-weight:800; cursor:pointer; padding:0; outline:none;">Ver todas</button>
+                </div>
+                
+                <div id="recent-sessions-list" style="display:flex; flex-direction:column; gap:6px;">
+                  <div class="skeleton" style="height:36px; border-radius:10px;"></div>
+                  <div class="skeleton" style="height:36px; border-radius:10px;"></div>
+                  <div class="skeleton" style="height:36px; border-radius:10px;"></div>
+                </div>
+              </div>
             </div>
           </div>
         `;
 
         // Load Session Stats
         if (currentSessionId) {
-          const { getDocs, query: fQuery, collection: fCollection, where: fWhere } = await import('firebase/firestore');
-          try {
-            // Live count from orders for absolute accuracy
-            const ordersSnap = await getDocs(fQuery(
-              fCollection(db, 'orders'),
-              fWhere('driverId', '==', user.uid),
-              fWhere('status', '==', 'completed'),
-              fWhere('deliverySessionId', '==', currentSessionId)
-            ));
-            
-            const totalEarned = ordersSnap.docs.reduce((sum, d) => sum + (d.data().deliveryCost || 0), 0);
-            const count = ordersSnap.size;
-            
-            if (document.getElementById('session-total-earned')) document.getElementById('session-total-earned').textContent = formatPrice(totalEarned);
-            if (document.getElementById('session-orders-count')) document.getElementById('session-orders-count').textContent = count;
-          } catch(e) {
-            console.error('Error fetching live session stats:', e);
-            // Fallback to session document
+          if (!sessionOrdersUnsub || sessionOrdersUnsub.sessionId !== currentSessionId) {
+            if (sessionOrdersUnsub) {
+              sessionOrdersUnsub.unsub();
+            }
             try {
-              const { getDoc, doc: fDoc } = await import('firebase/firestore');
-              const sessSnap = await getDoc(fDoc(db, 'deliverySessions', currentSessionId));
-              if (sessSnap.exists()) {
-                const sd = sessSnap.data();
-                if (document.getElementById('session-total-earned')) document.getElementById('session-total-earned').textContent = formatPrice(sd.totalEarned || 0);
-                if (document.getElementById('session-orders-count')) document.getElementById('session-orders-count').textContent = sd.ordersCount || 0;
-              }
-            } catch(e2) {}
+              const { onSnapshot: fOnSnapshot, query: fQuery, collection: fCollection, where: fWhere } = await import('firebase/firestore');
+              const unsub = fOnSnapshot(fQuery(
+                fCollection(db, 'orders'),
+                fWhere('driverId', '==', user.uid),
+                fWhere('status', '==', 'completed'),
+                fWhere('deliverySessionId', '==', currentSessionId)
+              ), (ordersSnap) => {
+                const totalEarned = ordersSnap.docs.reduce((sum, d) => sum + (d.data().deliveryCost || 0) + (d.data().purchaseFee || 0) + (d.data().tip || d.data().tipAmount || 0), 0);
+                const count = ordersSnap.size;
+                
+                if (document.getElementById('session-total-earned')) document.getElementById('session-total-earned').textContent = formatPrice(totalEarned);
+                if (document.getElementById('session-orders-count')) document.getElementById('session-orders-count').textContent = count;
+              }, (err) => {
+                console.error('Error in live orders snapshot:', err);
+              });
+              sessionOrdersUnsub = { sessionId: currentSessionId, unsub };
+            } catch (e) {
+              console.error('Error starting live session listener:', e);
+            }
           }
         } else {
+          if (sessionOrdersUnsub) {
+            sessionOrdersUnsub.unsub();
+            sessionOrdersUnsub = null;
+          }
           // Fetch the latest session summary
           (async () => {
              const { getDocs, query, collection, where, limit } = await import('firebase/firestore');
@@ -1637,7 +1833,7 @@ function loadTabContent(tab, container, user) {
                      where('status', '==', 'completed')
                    ));
                    if (!liveSnap.empty) {
-                     displayTotal = liveSnap.docs.reduce((s, o) => s + (o.data().deliveryCost || 0), 0);
+                     displayTotal = liveSnap.docs.reduce((s, o) => s + (o.data().deliveryCost || 0) + (o.data().purchaseFee || 0) + (o.data().tip || o.data().tipAmount || 0), 0);
                      displayCount = liveSnap.size;
                    }
                  }
@@ -1651,6 +1847,7 @@ function loadTabContent(tab, container, user) {
 
         // Load Global Stats
         loadProfessionalStats(user.uid);
+        loadRecentSessionsList(user.uid);
 
         // Listeners
         document.getElementById('view-sessions-history-btn')?.addEventListener('click', () => {
@@ -1661,39 +1858,461 @@ function loadTabContent(tab, container, user) {
           showBalanceManagementModal(user, debt);
         });
 
-        const aliasInput = document.getElementById('delivery-alias-input');
-        const saveAliasBtn = document.getElementById('save-delivery-alias-btn');
-        if (saveAliasBtn && aliasInput) {
-          saveAliasBtn.onclick = async () => {
-            const aliasVal = aliasInput.value.trim();
-            if (!aliasVal) {
-              showToast('Por favor, ingresá un alias válido', 'error');
-              return;
-            }
-            saveAliasBtn.disabled = true;
-            saveAliasBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' ...';
-            try {
-              const { doc: fDoc, updateDoc: fUpdateDoc } = await import('firebase/firestore');
-              await fUpdateDoc(fDoc(db, 'users', user.uid), {
-                transferAlias: aliasVal
-              });
-              setState('user', { ...getState().user, transferAlias: aliasVal });
-              showToast('¡Alias guardado con éxito!', 'success');
-            } catch (err) {
-              console.error('Error saving alias:', err);
-              showToast('Error al guardar el alias', 'error');
-            } finally {
-              saveAliasBtn.disabled = false;
-              saveAliasBtn.innerHTML = 'GUARDAR';
-            }
-          };
-        }
+
       });
+
+      tabUnsub = () => {
+        userUnsub();
+        if (sessionOrdersUnsub) {
+          sessionOrdersUnsub.unsub();
+        }
+      };
+    } else if (tab === 'config') {
+      const isTripApproved = user.tripStatus === 'approved';
+      const isTripPending = user.tripStatus === 'pending';
+      const isTripRejected = user.tripStatus === 'rejected';
+
+      // Default values for Trip Vehicle
+      const defaultTripModel = user.tripVehicleModel || user.tripApplication?.vehicleModel || user.vehicleModel || '';
+      const defaultTripColor = user.tripVehicleColor || user.tripApplication?.vehicleColor || user.vehicleColor || '';
+      const defaultTripPatent = user.tripVehiclePatent || user.tripApplication?.vehicleDetails || user.vehicleDetails || user.patente || '';
+
+      // Default values for Delivery Vehicle
+      const defaultDelivType = user.deliveryVehicleType || 'Moto';
+      const defaultDelivModel = user.deliveryVehicleModel || '';
+      const defaultDelivColor = user.deliveryVehicleColor || '';
+      const defaultDelivPatent = user.deliveryVehiclePatent || '';
+
+      let configHtml = `
+        <div style="display:flex; flex-direction:column; gap:20px; font-family:var(--font-body); color:var(--color-text-primary); max-width:550px; margin:0 auto; padding-bottom:40px;">
+          
+          <!-- Card 1: Datos del Repartidor -->
+          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
+            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
+              ${icon('user', 20)} Datos del Repartidor
+            </h3>
+            
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Alias de Transferencia (Obligatorio) *</label>
+              <input type="text" id="config-alias-input" value="${user.transferAlias || ''}" placeholder="Ej: alias.mp" style="width:100%; height:48px; border-radius:12px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; transition:border-color 0.2s;" />
+            </div>
+          </div>
+      `;
+
+      if (!isTripApproved) {
+        // Render simple Trip Application Block for normal riders (without vehicle details)
+        configHtml += `
+          <!-- Card 2: Postulación para Viajes -->
+          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
+            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
+              ${icon('car', 20)} Habilitar Viajes (Pasajeros)
+            </h3>
+            <p style="font-size:12.5px; color:var(--color-text-secondary); margin:0; line-height:1.45; font-weight:500;">
+              Para poder trasladar pasajeros y realizar Viajes en GoDelivery, debés postularte adjuntando la documentación de tu vehículo.
+            </p>
+            <div style="margin-top:4px;">
+              ${isTripPending ? `
+                <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:10px;">
+                  <span style="font-size:20px; animation:scale-pulse 2s infinite;">⏳</span>
+                  <div>
+                    <strong style="font-size:13px; color:var(--color-text-primary); display:block;">Solicitud de Chofer pendiente</strong>
+                    <span style="font-size:11.5px; color:var(--color-text-secondary);">Estamos revisando tus documentos. Te notificaremos pronto.</span>
+                  </div>
+                </div>
+              ` : isTripRejected ? `
+                <div style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.2); border-radius:16px; padding:12px 16px; display:flex; flex-direction:column; gap:8px;">
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:20px; color:#ef4444;">❌</span>
+                    <div>
+                      <strong style="font-size:13px; color:var(--color-text-primary); display:block;">Solicitud rechazada</strong>
+                      <span style="font-size:11.5px; color:var(--color-text-secondary);">Tu postulación no cumple con los requisitos mínimos.</span>
+                    </div>
+                  </div>
+                  <button id="reapply-trip-btn" class="btn btn-outline btn-block" style="height:38px; border-radius:10px; font-weight:800; font-size:12px;">Volver a postularse...</button>
+                </div>
+              ` : `
+                <button id="apply-trip-btn" class="btn btn-primary btn-block" style="height:48px; border-radius:14px; font-weight:900; font-size:13.0px; background:#3b82f6; border:none; color:white; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 12px rgba(59,130,246,0.2);">
+                  ${icon('car', 16)} Postularse para Realizar Viajes
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      } else {
+        // Render Full Chofer Configuration (Modes, Trips Vehicle, Deliveries Vehicle)
+        configHtml += `
+          <!-- Card 2: Tipo de Trabajo -->
+          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
+            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
+              ${icon('settings', 20)} Tipo de Trabajo
+            </h3>
+
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Qué querés recibir? *</label>
+              <select id="config-deliverymode-select" style="width:100%; height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; font-family:inherit;">
+                <option value="delivery" ${user.deliveryMode === 'delivery' ? 'selected' : ''}>Solo Envíos (Pedidos y Favores)</option>
+                <option value="trip" ${user.deliveryMode === 'trip' ? 'selected' : ''}>Solo Viajes (Traslado de Pasajeros)</option>
+                <option value="both" ${(!user.deliveryMode || user.deliveryMode === 'both') ? 'selected' : ''}>Ambos (Envíos y Viajes)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Card 3: Configuración de tus Vehículos -->
+          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:20px; box-shadow:var(--shadow-sm);">
+            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
+              ${icon('car', 20)} Configuración de tus Vehículos
+            </h3>
+
+            <!-- VIAJES VEHICLE -->
+            <div style="padding:14px; border:1px solid rgba(59,130,246,0.15); background:rgba(59,130,246,0.02); border-radius:20px; display:flex; flex-direction:column; gap:12px;">
+              <h4 style="margin:0; font-size:12.5px; font-weight:900; color:#3b82f6; display:flex; align-items:center; gap:6px;">
+                ${icon('user', 14)} Vehículo para Viajes (Pasajeros)
+              </h4>
+              
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Modelo / Marca</label>
+                  <input type="text" id="config-trip-vehiclemodel-input" value="${defaultTripModel}" placeholder="Ej: Fiat Cronos" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Color</label>
+                  <input type="text" id="config-trip-vehiclecolor-input" value="${defaultTripColor}" placeholder="Ej: Blanco" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+                </div>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Número de Patente</label>
+                <input type="text" id="config-trip-vehiclepatent-input" value="${defaultTripPatent}" placeholder="Ej: AB123CD" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+              </div>
+            </div>
+
+            <!-- DELIVERIES VEHICLE -->
+            <div style="padding:14px; border:1px solid rgba(16,185,129,0.15); background:rgba(16,185,129,0.02); border-radius:20px; display:flex; flex-direction:column; gap:12px;">
+              <h4 style="margin:0; font-size:12.5px; font-weight:900; color:#10b981; display:flex; align-items:center; gap:6px;">
+                ${icon('bike', 14)} Vehículo para Envíos (Pedidos)
+              </h4>
+
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Tipo de Vehículo</label>
+                <select id="config-delivery-vehicletype-select" style="width:100%; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none; font-family:inherit;">
+                  <option value="Moto" ${defaultDelivType === 'Moto' ? 'selected' : ''}>Moto</option>
+                  <option value="Bici" ${defaultDelivType === 'Bici' ? 'selected' : ''}>Bicicleta</option>
+                  <option value="Auto" ${defaultDelivType === 'Auto' ? 'selected' : ''}>Auto</option>
+                </select>
+              </div>
+              
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Modelo / Marca</label>
+                  <input type="text" id="config-delivery-vehiclemodel-input" value="${defaultDelivModel}" placeholder="Ej: Honda Wave" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Color</label>
+                  <input type="text" id="config-delivery-vehiclecolor-input" value="${defaultDelivColor}" placeholder="Ej: Rojo" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+                </div>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Número de Patente (Opcional)</label>
+                <input type="text" id="config-delivery-vehiclepatent-input" value="${defaultDelivPatent}" placeholder="Ej: AA123BC" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      configHtml += `
+          <!-- Save button -->
+          <button id="config-save-btn" class="btn btn-primary btn-block" style="height:56px; border-radius:20px; font-weight:900; font-size:15px; background:#E11D48; border:none; color:white; box-shadow:0 8px 20px rgba(225, 29, 72, 0.2); cursor:pointer;">
+            Guardar Configuración
+          </button>
+        </div>
+      `;
+
+      container.innerHTML = configHtml;
+
+      // Apply button Click
+      const applyBtn = document.getElementById('apply-trip-btn');
+      const reapplyBtn = document.getElementById('reapply-trip-btn');
+      const handleApplyClick = () => showTripApplicationModal(user);
+      if (applyBtn) applyBtn.onclick = handleApplyClick;
+      if (reapplyBtn) reapplyBtn.onclick = handleApplyClick;
+
+      // Save Config Click
+      document.getElementById('config-save-btn').onclick = async () => {
+        const aliasVal = document.getElementById('config-alias-input').value.trim();
+
+        if (!aliasVal) {
+          showToast('El alias es obligatorio', 'warning');
+          return;
+        }
+
+        const saveBtn = document.getElementById('config-save-btn');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = icon('loader', 20, 'animate-spin') + ' Guardando...';
+
+        try {
+          const { doc: fDoc, updateDoc: fUpdateDoc } = await import('firebase/firestore');
+          const userRef = fDoc(db, 'users', user.uid);
+          
+          const updateFields = {
+            transferAlias: aliasVal
+          };
+
+          if (isTripApproved) {
+            const modeVal = document.getElementById('config-deliverymode-select').value;
+            
+            const tripModel = document.getElementById('config-trip-vehiclemodel-input').value.trim();
+            const tripColor = document.getElementById('config-trip-vehiclecolor-input').value.trim();
+            const tripPatent = document.getElementById('config-trip-vehiclepatent-input').value.trim();
+
+            const delivType = document.getElementById('config-delivery-vehicletype-select').value;
+            const delivModel = document.getElementById('config-delivery-vehiclemodel-input').value.trim();
+            const delivColor = document.getElementById('config-delivery-vehiclecolor-input').value.trim();
+            const delivPatent = document.getElementById('config-delivery-vehiclepatent-input').value.trim();
+
+            updateFields.deliveryMode = modeVal;
+            
+            updateFields.tripVehicleModel = tripModel;
+            updateFields.tripVehicleColor = tripColor;
+            updateFields.tripVehiclePatent = tripPatent;
+            
+            updateFields.deliveryVehicleType = delivType;
+            updateFields.deliveryVehicleModel = delivModel;
+            updateFields.deliveryVehicleColor = delivColor;
+            updateFields.deliveryVehiclePatent = delivPatent;
+
+            // Retain compatibility (copy trip vehicle details to standard vehicle properties)
+            updateFields.vehicleModel = tripModel;
+            updateFields.vehicleColor = tripColor;
+            updateFields.vehicleDetails = tripPatent;
+            updateFields.patente = tripPatent;
+          }
+
+          await fUpdateDoc(userRef, updateFields);
+
+          setState('user', { 
+            ...getState().user, 
+            ...updateFields
+          });
+
+          showToast('¡Configuración guardada con éxito!', 'success');
+        } catch (err) {
+          console.error('Error saving config:', err);
+          showToast('Error al guardar la configuración', 'error');
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = 'Guardar Configuración';
+        }
+      };
+
+      tabUnsub = () => {};
     }
   } catch (err) {
     console.error('Error loading delivery tab:', err);
     container.innerHTML = `<div class="empty-state-mini">Error al cargar datos</div>`;
   }
+}
+
+async function showTripApplicationModal(user) {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+  const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+  const { storage } = await import('../firebase.js');
+
+  const modalEl = document.createElement('div');
+  modalEl.style.cssText = 'padding: 24px; background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; overflow-y: auto;';
+  
+  modalEl.innerHTML = `
+    <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 8px;">
+      <div style="width: 52px; height: 52px; background: rgba(59, 130, 246, 0.1); color: #3b82f6; border-radius: 16px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);">
+        ${icon('car', 32)}
+      </div>
+      <h3 style="font-family: var(--font-display); font-size: 19px; font-weight: 900; color: var(--color-text-primary); margin: 0;">Postulación de Chofer</h3>
+      <p style="font-size: 12.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; max-width: 280px;">
+        Completá este formulario profesional para habilitar el traslado de pasajeros en GoDelivery.
+      </p>
+    </div>
+
+    <form id="trip-app-form" style="display: flex; flex-direction: column; gap: 14px; padding-bottom: 20px;">
+      
+      <!-- Full Name -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Nombre Completo *</label>
+        <input type="text" id="tapp-fullname" required placeholder="Ej: Juan Pérez" value="${user.displayName || ''}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Phone -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Teléfono de Contacto *</label>
+        <input type="tel" id="tapp-phone" required placeholder="Ej: 2215551234" value="${user.phone || ''}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Vehicle -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Vehículo *</label>
+        <select id="tapp-vehicle" required style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s; color: var(--color-text-primary); font-family: inherit;">
+          <option value="Auto" selected>Auto</option>
+          <option value="Moto">Moto</option>
+        </select>
+      </div>
+
+      <!-- Vehicle Model -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Modelo del Vehículo (Marca, Modelo) *</label>
+        <input type="text" id="tapp-vehiclemodel" required placeholder="Ej: Fiat Cronos / Honda Wave" value="${user.vehicleModel || ''}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Vehicle Color -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Color del Vehículo *</label>
+        <input type="text" id="tapp-vehiclecolor" required placeholder="Ej: Blanco / Negro / Rojo" value="${user.vehicleColor || ''}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Vehicle Plate -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Patente del Vehículo *</label>
+        <input type="text" id="tapp-vehicledetails" required placeholder="Ej: AA123BC / A012BCD" value="${user.vehicleDetails || user.patente || ''}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Required Driver License Upload -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Foto de Licencia de Conducir (Registro) *</label>
+        <input type="file" id="tapp-licencia-file" accept="image/*" style="display:none;" required />
+        <button type="button" id="tlicencia-file-btn" class="btn btn-outline" style="height:46px; display:flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:700; border-radius:12px; cursor:pointer; background:var(--color-bg-card); border:1.5px solid var(--color-primary-light); color:var(--color-text-primary);">
+          ${icon('camera', 16)} <span id="tlicencia-file-label">Subir foto de Registro...</span>
+        </button>
+      </div>
+
+      <!-- Required Vehicle Insurance Upload -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Foto de Seguro del Vehículo *</label>
+        <input type="file" id="tapp-seguro-file" accept="image/*" style="display:none;" required />
+        <button type="button" id="tseguro-file-btn" class="btn btn-outline" style="height:46px; display:flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:700; border-radius:12px; cursor:pointer; background:var(--color-bg-card); border:1.5px solid var(--color-primary-light); color:var(--color-text-primary);">
+          ${icon('camera', 16)} <span id="tseguro-file-label">Subir foto de Seguro...</span>
+        </button>
+      </div>
+
+      <!-- Submit button -->
+      <button type="submit" id="submit-tapp-btn" class="btn btn-primary" style="width: 100%; height: 50px; border-radius: 14px; background: #3b82f6; color: white; border: none; font-weight: 900; font-size: 14.5px; cursor: pointer; box-shadow: 0 8px 24px rgba(59,130,246, 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
+        ${icon('check', 18)} Enviar Solicitud de Chofer
+      </button>
+    </form>
+  `;
+
+  showModal({ title: '', content: modalEl, height: '80dvh', hideHeader: true });
+
+  const licenciaFileInput = modalEl.querySelector('#tapp-licencia-file');
+  const licenciaBtn = modalEl.querySelector('#tlicencia-file-btn');
+  const licenciaLabel = modalEl.querySelector('#tlicencia-file-label');
+
+  const seguroFileInput = modalEl.querySelector('#tapp-seguro-file');
+  const seguroBtn = modalEl.querySelector('#tseguro-file-btn');
+  const seguroLabel = modalEl.querySelector('#tseguro-file-label');
+
+  licenciaBtn.onclick = () => licenciaFileInput.click();
+  seguroBtn.onclick = () => seguroFileInput.click();
+
+  licenciaFileInput.onchange = () => {
+    if (licenciaFileInput.files.length > 0) {
+      licenciaLabel.textContent = licenciaFileInput.files[0].name;
+      licenciaBtn.style.borderColor = '#22c55e';
+    }
+  };
+
+  seguroFileInput.onchange = () => {
+    if (seguroFileInput.files.length > 0) {
+      seguroLabel.textContent = seguroFileInput.files[0].name;
+      seguroBtn.style.borderColor = '#22c55e';
+    }
+  };
+
+  const form = modalEl.querySelector('#trip-app-form');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    
+    const fullName = modalEl.querySelector('#tapp-fullname').value.trim();
+    const phone = modalEl.querySelector('#tapp-phone').value.trim();
+    const vehicleType = modalEl.querySelector('#tapp-vehicle').value;
+    const vehicleModel = modalEl.querySelector('#tapp-vehiclemodel').value.trim();
+    const vehicleColor = modalEl.querySelector('#tapp-vehiclecolor').value.trim();
+    const vehicleDetails = modalEl.querySelector('#tapp-vehicledetails').value.trim();
+
+    if (!fullName || !phone || !vehicleType || !vehicleModel || !vehicleColor || !vehicleDetails) {
+      showToast('Por favor, completa todos los campos requeridos.', 'warning');
+      return;
+    }
+
+    if (licenciaFileInput.files.length === 0) {
+      showToast('Por favor, subí la foto de tu registro/licencia.', 'warning');
+      return;
+    }
+
+    if (seguroFileInput.files.length === 0) {
+      showToast('Por favor, subí la foto del seguro.', 'warning');
+      return;
+    }
+
+    const submitBtn = modalEl.querySelector('#submit-tapp-btn');
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = '0.7';
+    submitBtn.innerHTML = `<div class="spinner-mini" style="width:16px; height:16px; border-width:2px; border-top-color:#fff; margin:0; display:inline-block;"></div> Subiendo archivos...`;
+
+    try {
+      const uploadPromises = [];
+
+      // 1. License Upload
+      let licenciaUrl = '';
+      const licenciaFile = licenciaFileInput.files[0];
+      const licenciaRef = ref(storage, `trip_applications/${user.uid}/licencia_${Date.now()}_${licenciaFile.name}`);
+      uploadPromises.push(uploadBytes(licenciaRef, licenciaFile).then(async (snap) => {
+        licenciaUrl = await getDownloadURL(snap.ref);
+      }));
+
+      // 2. Insurance Upload
+      let seguroUrl = '';
+      const seguroFile = seguroFileInput.files[0];
+      const seguroRef = ref(storage, `trip_applications/${user.uid}/seguro_${Date.now()}_${seguroFile.name}`);
+      uploadPromises.push(uploadBytes(seguroRef, seguroFile).then(async (snap) => {
+        seguroUrl = await getDownloadURL(snap.ref);
+      }));
+
+      await Promise.all(uploadPromises);
+
+      const applicationData = {
+        userId: user.uid,
+        fullName,
+        phone,
+        vehicleType,
+        vehicleModel,
+        vehicleColor,
+        vehicleDetails,
+        licenciaUrl,
+        seguroUrl,
+        status: 'pending',
+        appliedAt: serverTimestamp()
+      };
+
+      // Save in global trip_applications collection
+      await setDoc(doc(db, 'trip_applications', user.uid), applicationData);
+
+      // Update user document
+      await setDoc(doc(db, 'users', user.uid), {
+        tripStatus: 'pending',
+        tripApplication: applicationData,
+        phone: phone
+      }, { merge: true });
+
+      showToast('¡Postulación de Chofer enviada correctamente! Revisaremos tus documentos pronto.', 'success');
+      closeModal();
+    } catch (err) {
+      console.error('Error saving trip application:', err);
+      showToast('Error al enviar postulación: ' + err.message, 'error');
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.innerHTML = `${icon('check', 18)} Enviar Solicitud de Chofer`;
+    }
+  };
 }
 
 async function showModifyOrderModal(order) {
@@ -1779,6 +2398,11 @@ async function showEditFavorPriceModal(order) {
   const { doc, updateDoc } = await import('firebase/firestore');
   const { db } = await import('../firebase.js');
   
+  const deliveryFee = order.deliveryCost || 0;
+  const appFee = order.appUsageFee || 0;
+  const pFee = order.purchaseFee || 800;
+  const serviceTotal = deliveryFee + appFee + pFee;
+
   const modalEl = document.createElement('div');
   modalEl.innerHTML = `
     <div style="padding:24px; text-align:center;">
@@ -1786,13 +2410,24 @@ async function showEditFavorPriceModal(order) {
         ${icon('edit', 32)}
       </div>
       <h3 style="font-size:22px; font-weight:950; color:var(--color-text); margin-bottom:10px;">Valor de Productos</h3>
-      <p style="font-size:14px; color:var(--color-text-secondary); line-height:1.6; margin-bottom:24px;">Ingresá el costo total de los productos que compraste para sumarlo al total del pedido.</p>
+      <p style="font-size:14px; color:var(--color-text-secondary); line-height:1.6; margin-bottom:20px;">Ingresá el costo total de los productos que compraste para sumarlo al total del pedido.</p>
       
-      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:24px; border:1px solid var(--color-border-light); margin-bottom:24px;">
+      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1px solid var(--color-border-light); margin-bottom:20px;">
         <div style="font-size:11px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:12px;">Costo de productos</div>
-        <div style="position:relative;">
+        <div style="position:relative; margin-bottom:16px;">
           <span style="position:absolute; left:20px; top:50%; transform:translateY(-50%); font-size:24px; font-weight:900; color:var(--color-text-tertiary);">$</span>
           <input type="number" id="favor-product-price" value="${order.subtotal || ''}" placeholder="0" style="width:100%; height:64px; border-radius:18px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text); font-size:32px; font-weight:950; padding:0 20px 0 45px; text-align:center; outline:none; transition:border-color 0.3s;" inputmode="decimal">
+        </div>
+
+        <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
+          <div style="display:flex; justify-content:space-between;">
+            <span>Servicio (Envío/Gestión/App):</span>
+            <span>+ ${formatPrice(serviceTotal)}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:900; color:var(--color-primary); margin-top:4px;">
+            <span>Cobrar al cliente:</span>
+            <span id="client-total-preview">${formatPrice((parseFloat(order.subtotal) || 0) + serviceTotal)}</span>
+          </div>
         </div>
       </div>
 
@@ -1806,6 +2441,13 @@ async function showEditFavorPriceModal(order) {
   showModal({ content: modalEl, height: 'auto', hideHeader: true });
 
   const input = modalEl.querySelector('#favor-product-price');
+  const preview = modalEl.querySelector('#client-total-preview');
+
+  input.oninput = () => {
+    const val = parseFloat(input.value) || 0;
+    preview.textContent = formatPrice(val + serviceTotal);
+  };
+
   input.focus();
 
   modalEl.querySelector('#cancel-edit-price').onclick = () => closeModal();
@@ -1860,8 +2502,8 @@ async function startSession(user) {
   const userSnap = await getDoc(fDoc(db, 'users', user.uid));
   const userData = userSnap.exists() ? userSnap.data() : {};
   if (!userData.transferAlias || !userData.transferAlias.trim()) {
-    showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en la sección de Finanzas antes de conectarte.', 'warning');
-    document.querySelector('.tab-pill[data-tab="finances"]')?.click();
+    showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en la sección de Configuración antes de conectarte.', 'warning');
+    document.querySelector('.tab-pill[data-tab="config"]')?.click();
     return;
   }
 
@@ -1876,14 +2518,15 @@ async function startSession(user) {
   
   // Optimistic update FIRST
   const { setState, getState } = await import('../state.js');
-  const updatedUser = { ...getState().user, isOnline: true, currentSessionId: sessionRef.id, lastActivityAt: new Date() };
+  const updatedUser = { ...getState().user, isOnline: true, currentSessionId: sessionRef.id, lastActivityAt: new Date(), lastTripAcceptedAt: new Date() };
   setState('user', updatedUser);
   
   // Update Firestore in background
   await updateDoc(doc(db, 'users', user.uid), {
     isOnline: true,
     currentSessionId: sessionRef.id,
-    lastActivityAt: serverTimestamp()
+    lastActivityAt: serverTimestamp(),
+    lastTripAcceptedAt: serverTimestamp()
   });
   
   startInactivityCheck(updatedUser);
@@ -1914,7 +2557,7 @@ async function endSession(user) {
           where('deliverySessionId', '==', user.currentSessionId),
           where('status', '==', 'completed')
         ));
-        const total = ordersSnap.docs.reduce((s, d) => s + (d.data().deliveryCost || 0), 0);
+        const total = ordersSnap.docs.reduce((s, d) => s + (d.data().deliveryCost || 0) + (d.data().purchaseFee || 0) + (d.data().tip || d.data().tipAmount || 0), 0);
         
         await updateDoc(sessRef, {
           endTime: serverTimestamp(),
@@ -2018,9 +2661,28 @@ function startInactivityCheck(user) {
       lastActivityDate = new Date();
     }
 
+    // 1-hour trip/order inactivity check
+    const lastTripValue = currentUser.lastTripAcceptedAt;
+    let lastTripDate;
+    if (lastTripValue && typeof lastTripValue.toDate === 'function') {
+      lastTripDate = lastTripValue.toDate();
+    } else if (lastTripValue instanceof Date) {
+      lastTripDate = lastTripValue;
+    } else if (typeof lastTripValue === 'number') {
+      lastTripDate = new Date(lastTripValue);
+    } else {
+      lastTripDate = lastActivityDate; // fallback
+    }
+
+    const oneHour = 1 * 60 * 60 * 1000;
     const threeHours = 3 * 60 * 60 * 1000;
     
-    if (new Date() - lastActivityDate > threeHours) {
+    if (new Date() - lastTripDate > oneHour) {
+      console.log('Trip inactivity (1 hour) detected. Disconnecting...');
+      await endSession(currentUser);
+      renderDeliveryPanel();
+      showToast('Sesión cerrada por inactividad (1 hora sin tomar viajes)', 'warning');
+    } else if (new Date() - lastActivityDate > threeHours) {
       console.log('Inactivity detected. Disconnecting...');
       await endSession(currentUser);
       renderDeliveryPanel();
@@ -2037,10 +2699,18 @@ async function loadProfessionalStats(driverId, callback = null) {
     const snap = await getDocs(q);
     const orders = snap.docs.map(d => {
       const data = d.data();
+      let deliveredDate = null;
+      if (data.deliveredAt && typeof data.deliveredAt.toDate === 'function') {
+        deliveredDate = data.deliveredAt.toDate();
+      } else if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+        deliveredDate = data.createdAt.toDate();
+      } else {
+        deliveredDate = new Date();
+      }
       return {
         ...data,
         deliveryCost: (data.deliveryCost || 0) + (data.purchaseFee || 0) + (data.tip || data.tipAmount || 0),
-        deliveredAt: data.deliveredAt?.toDate()
+        deliveredAt: deliveredDate
       };
     });
     
@@ -2179,11 +2849,93 @@ async function showRegularizeModal(debt) {
   };
 }
 
+async function loadRecentSessionsList(uid) {
+  const container = document.getElementById('recent-sessions-list');
+  if (!container) return;
+
+  try {
+    const { getDocs, query, collection, where } = await import('firebase/firestore');
+    const q = query(
+      collection(db, 'deliverySessions'),
+      where('driverId', '==', uid)
+    );
+    const snap = await getDocs(q);
+    let sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    
+    // Fallback if empty
+    if (sessions.length === 0) {
+      const user = getState().user;
+      if (user && user.deliveryId) {
+        const snap2 = await getDocs(query(
+          collection(db, 'deliverySessions'),
+          where('driverDeliveryId', '==', user.deliveryId)
+        ));
+        sessions = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+    }
+
+    sessions = sessions.filter(s => s.startTime);
+    sessions.sort((a, b) => (b.startTime?.toMillis() || 0) - (a.startTime?.toMillis() || 0));
+
+    // Limit to 4 sessions
+    const recent = sessions.slice(0, 4);
+
+    if (recent.length === 0) {
+      container.innerHTML = `
+        <div style="text-align:center; padding:16px; color:var(--color-text-tertiary); font-size:12px; font-weight:700;">
+          Aún no tenés sesiones registradas.
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = recent.map(s => {
+      let dateStr = 'Fecha desconocida';
+      if (s.startTime) {
+        const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        dateStr = d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
+        dateStr = dateStr.replace('.', '');
+      }
+
+      const total = s.totalEarned || 0;
+      const count = s.ordersCount || 0;
+      const isLive = s.id === getState().user?.currentSessionId;
+
+      return `
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:14px; gap:12px;">
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <div style="width:8px; height:8px; border-radius:50%; background:${isLive ? '#22c55e' : 'var(--color-text-tertiary)'}; ${isLive ? 'box-shadow:0 0 8px #22c55e;' : ''}"></div>
+            <span style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">${dateStr}</span>
+            ${isLive ? `<span style="font-size:9px; font-weight:900; background:rgba(34,197,94,0.1); color:#22c55e; padding:1px 6px; border-radius:4px; margin-left:4px;">VIVO</span>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:14px; text-align:right;">
+            <div style="display:flex; flex-direction:column;">
+              <span style="font-size:8px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Pedidos</span>
+              <span style="font-size:12px; font-weight:800; color:var(--color-text-primary);">${count}</span>
+            </div>
+            <div style="display:flex; flex-direction:column;">
+              <span style="font-size:8px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Ganancia</span>
+              <span style="font-size:12.5px; font-weight:900; color:var(--color-primary);">${formatPrice(total)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Error rendering recent sessions:', err);
+    container.innerHTML = `
+      <div style="text-align:center; padding:16px; color:var(--color-text-tertiary); font-size:12px;">
+        Error al cargar historial.
+      </div>
+    `;
+  }
+}
+
 async function showSessionsHistoryModal(driverId) {
   const { getDocs, collection, query, where, orderBy } = await import('firebase/firestore');
   
   const content = document.createElement('div');
-  content.style.cssText = 'padding:24px; background:var(--color-bg); min-height:60dvh; display:flex; flex-direction:column;';
+  content.style.cssText = 'padding:20px; background:var(--color-bg); min-height:60dvh; display:flex; flex-direction:column; gap:16px;';
   
   const now = new Date();
   let currentMonth = now.getMonth(); // 0-11
@@ -2203,7 +2955,6 @@ async function showSessionsHistoryModal(driverId) {
       const snap = await getDocs(q);
       let sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
-      // FALLBACK: If no sessions found by UID, try by deliveryId (ID shown in header)
       if (sessions.length === 0) {
         const user = getState().user;
         if (user.deliveryId) {
@@ -2215,13 +2966,10 @@ async function showSessionsHistoryModal(driverId) {
         }
       }
 
-      
-      // Filter by month and year in memory
       const startOfMonth = new Date(year, month, 1, 0, 0, 0).getTime();
       const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
 
       sessions = sessions.filter(s => {
-        // Robust timestamp handling
         let time = 0;
         if (s.startTime?.toMillis) time = s.startTime.toMillis();
         else if (s.startTime?.seconds) time = s.startTime.seconds * 1000;
@@ -2231,7 +2979,6 @@ async function showSessionsHistoryModal(driverId) {
         return time >= startOfMonth && time <= endOfMonth;
       });
 
-      // Sort by startTime desc
       sessions.sort((a, b) => (b.startTime?.toMillis() || 0) - (a.startTime?.toMillis() || 0));
       
       const totalMonth = sessions.reduce((s, sess) => s + (sess.totalEarned || 0), 0);
@@ -2239,9 +2986,14 @@ async function showSessionsHistoryModal(driverId) {
 
       if (sessions.length === 0) {
         listContainer.innerHTML = `
-          <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary);">
-            ${icon('calendar', 32)}
-            <p style="margin-top:12px; font-weight:600;">No hay sesiones en este período</p>
+          <div style="text-align:center; padding:60px 20px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;">
+            <div style="width:64px; height:64px; border-radius:50%; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); display:flex; align-items:center; justify-content:center; color:var(--color-text-tertiary);">
+              ${icon('calendar', 28)}
+            </div>
+            <div style="margin-top:4px;">
+              <p style="margin:0; font-weight:800; font-size:14px; color:var(--color-text-primary);">Sin sesiones en este período</p>
+              <p style="margin:4px 0 0; font-size:11.5px; color:var(--color-text-tertiary);">Las sesiones que realices en este mes aparecerán acá.</p>
+            </div>
           </div>
         `;
         return;
@@ -2259,56 +3011,71 @@ async function showSessionsHistoryModal(driverId) {
           durationStr = `${hours > 0 ? hours + 'h ' : ''}${minutes}min`;
         }
 
+        const isLive = s.id === getState().user?.currentSessionId;
+
         return `
-          <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:18px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm); margin-bottom:12px;">
-            <div style="min-width:0; flex:1;">
-              <div style="font-weight:800; font-size:15px; color:var(--color-text);">${new Date(s.startTime?.toDate()).toLocaleDateString('es-AR', {day:'numeric', month:'short'})}</div>
-              <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">
-                ${new Date(s.startTime?.toDate()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} 
-                ${s.endTime ? ' → ' + new Date(s.endTime?.toDate()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ' (Activa)'}
+          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:20px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm); margin-bottom:12px; transition:all 0.2s;">
+            <div style="min-width:0; flex:1; display:flex; flex-direction:column; gap:4px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-weight:900; font-size:15px; color:var(--color-text-primary); text-transform:capitalize;">
+                  ${new Date(s.startTime?.toDate()).toLocaleDateString('es-AR', {day:'numeric', month:'short'})}
+                </span>
+                ${isLive ? `<span style="font-size:9px; font-weight:900; background:rgba(34,197,94,0.1); color:#22c55e; padding:1px 6px; border-radius:6px; letter-spacing:0.02em;">VIVO</span>` : ''}
               </div>
-              <div style="font-size:10px; color:var(--color-primary); font-weight:800; margin-top:4px; text-transform:uppercase; letter-spacing:0.02em;">
-                Tiempo de la sesión: <span style="color:var(--color-text);">${durationStr}</span>
+              <div style="font-size:11.5px; color:var(--color-text-secondary); font-weight:600; display:flex; align-items:center; gap:4px;">
+                <span>${new Date(s.startTime?.toDate()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                <span style="opacity:0.5;">→</span>
+                <span>${s.endTime ? new Date(s.endTime?.toDate()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'Activa'}</span>
+              </div>
+              <div style="font-size:10.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">
+                Duración: <span style="color:var(--color-text-primary); font-weight:800;">${durationStr}</span>
               </div>
             </div>
-            <div style="text-align:right; margin-left:12px;">
-              <div style="font-weight:900; font-size:18px; color:#22c55e; letter-spacing:-0.5px;">${formatPrice(s.totalEarned || 0)}</div>
-              <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">${s.ordersCount || 0} pedidos</div>
+            <div style="text-align:right; display:flex; flex-direction:column; gap:4px; margin-left:16px;">
+              <div style="font-weight:950; font-size:18px; color:${isLive ? '#22c55e' : 'var(--color-primary)'}; letter-spacing:-0.5px;">${formatPrice(s.totalEarned || 0)}</div>
+              <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.02em;">${s.ordersCount || 0} pedidos</div>
             </div>
           </div>
         `;
       }).join('');
     } catch (e) {
       console.error(e);
-      listContainer.innerHTML = `<p style="color:var(--color-danger); text-align:center;">Error al cargar. Verificá tu conexión.</p>`;
+      listContainer.innerHTML = `<p style="color:var(--color-danger); text-align:center; font-size:12px; font-weight:700; padding:20px;">Error al cargar. Verificá tu conexión.</p>`;
     }
   };
 
   const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
   content.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-      <div style="display:flex; align-items:center; gap:12px;">
-        <button id="prev-month" style="width:36px; height:36px; border-radius:10px; border:none; background:var(--color-bg-secondary); color:var(--color-text); cursor:pointer;">${icon('chevronLeft', 18)}</button>
-        <div style="text-align:center; min-width:120px;">
-          <div id="month-name" style="font-weight:900; font-size:16px; color:var(--color-text); text-transform:capitalize;">${monthNames[currentMonth]}</div>
-          <div id="year-name" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary);">${currentYear}</div>
+    <!-- Top Month Selector Card -->
+    <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:24px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm);">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button id="prev-month" style="width:38px; height:38px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" onmouseover="this.style.background='var(--color-border-light)'" onmouseout="this.style.background='var(--color-bg-secondary)'">
+          ${icon('chevronLeft', 16)}
+        </button>
+        <div style="text-align:center; min-width:90px;">
+          <div id="month-name" style="font-weight:900; font-size:15px; color:var(--color-text-primary); text-transform:capitalize;">${monthNames[currentMonth]}</div>
+          <div id="year-name" style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); margin-top:2px;">${currentYear}</div>
         </div>
-        <button id="next-month" style="width:36px; height:36px; border-radius:10px; border:none; background:var(--color-bg-secondary); color:var(--color-text); cursor:pointer;">${icon('chevronRight', 18)}</button>
+        <button id="next-month" style="width:38px; height:38px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s;" onmouseover="this.style.background='var(--color-border-light)'" onmouseout="this.style.background='var(--color-bg-secondary)'">
+          ${icon('chevronRight', 16)}
+        </button>
       </div>
       <div style="text-align:right;">
-        <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Total Mes</div>
-        <div id="month-total-display" style="font-size:18px; font-weight:900; color:var(--color-primary);">$0</div>
+        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Total Mes</div>
+        <div id="month-total-display" style="font-size:20px; font-weight:950; color:#22c55e; letter-spacing:-0.5px;">$0</div>
       </div>
     </div>
 
-    <div style="display:flex; justify-content:center; margin-bottom:20px;">
-      <button id="recalculate-sessions-btn" style="padding:8px 16px; border-radius:10px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); color:var(--color-primary); font-size:10px; font-weight:900; text-transform:uppercase; cursor:pointer; display:flex; align-items:center; gap:6px; letter-spacing:0.02em;">
-        ${icon('refresh', 14)} Recalcular Totales
+    <!-- Actions Row -->
+    <div style="display:flex; justify-content:center;">
+      <button id="recalculate-sessions-btn" style="padding:10px 18px; border-radius:14px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); color:var(--color-primary); font-size:11px; font-weight:900; text-transform:uppercase; cursor:pointer; display:flex; align-items:center; gap:6px; letter-spacing:0.04em; transition:all 0.2s; box-shadow:var(--shadow-sm);" onmouseover="this.style.background='var(--color-bg-card)'" onmouseout="this.style.background='var(--color-bg-secondary)'">
+        ${icon('refresh', 13)} Recalcular Totales
       </button>
     </div>
 
-    <div id="sessions-list-render" style="flex:1; overflow-y:auto; padding-bottom:20px;"></div>
+    <!-- Session List Render Container -->
+    <div id="sessions-list-render" style="flex:1; overflow-y:auto; padding-bottom:10px;"></div>
   `;
   
   showModal({ title: 'Historial de Sesiones', content, height: '80dvh' });
@@ -2427,28 +3194,52 @@ async function showBalanceHistoryModal(driverId) {
         <div style="display:flex; flex-direction:column; gap:12px;">
           ${transactions.map(t => {
             const isLiquidation = t.type === 'liquidation';
+            const isCoupon = t.type === 'coupon_reimbursement';
             const amount = t.amount || 0;
             const absAmount = Math.abs(amount);
+
+            let iconColor = '#ef4444';
+            let iconBg = 'rgba(239,68,68,0.1)';
+            let iconName = 'package';
+            let amountSign = '+';
+            let amountColor = '#ef4444';
+            let labelText = 'Tarifa App';
+
+            if (isLiquidation) {
+              iconColor = '#22c55e';
+              iconBg = 'rgba(34,197,94,0.1)';
+              iconName = 'checkCircle';
+              amountSign = '-';
+              amountColor = '#22c55e';
+              labelText = 'Saldo Restado';
+            } else if (isCoupon) {
+              iconColor = '#a855f7';
+              iconBg = 'rgba(168,85,247,0.1)';
+              iconName = 'tag';
+              amountSign = '-';
+              amountColor = '#a855f7';
+              labelText = 'Reintegro Cupón';
+            }
             
             return `
               <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:18px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm);">
                 <div style="min-width:0; flex:1; display:flex; align-items:center; gap:14px;">
-                  <div style="width:40px; height:40px; border-radius:12px; background:${isLiquidation ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)'}; color:${isLiquidation ? '#22c55e' : '#ef4444'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                    ${isLiquidation ? icon('checkCircle', 20) : icon('package', 20)}
+                  <div style="width:40px; height:40px; border-radius:12px; background:${iconBg}; color:${iconColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    ${icon(iconName, 20)}
                   </div>
                   <div style="min-width:0;">
-                    <div style="font-weight:800; font-size:14px; color:var(--color-text); margin-bottom:2px;">${t.description || (isLiquidation ? 'Liquidación' : 'Entrega')}</div>
+                    <div style="font-weight:800; font-size:14px; color:var(--color-text); margin-bottom:2px;">${t.description || (isLiquidation ? 'Liquidación' : isCoupon ? 'Reintegro Cupón' : 'Entrega')}</div>
                     <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase;">
                       ${t.createdAt ? new Date(t.createdAt.toDate()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : ''}
                     </div>
                   </div>
                 </div>
                 <div style="text-align:right; margin-left:16px;">
-                  <div style="font-weight:900; font-size:17px; color:${isLiquidation ? '#22c55e' : '#ef4444'}; letter-spacing:-0.5px;">
-                    ${isLiquidation ? '-' : '+'}${formatPrice(absAmount)}
+                  <div style="font-weight:900; font-size:17px; color:${amountColor}; letter-spacing:-0.5px;">
+                    ${amountSign}${formatPrice(absAmount)}
                   </div>
                   <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">
-                    ${isLiquidation ? 'Saldo Restado' : 'Tarifa App'}
+                    ${labelText}
                   </div>
                 </div>
               </div>
@@ -2523,12 +3314,12 @@ function renderStatusBar(user) {
       <button id="session-toggle-btn" style="
         height: 36px; padding: 0 18px; border-radius: 12px;
         border: none;
-        background: ${finalIsOnline ? 'var(--color-bg-secondary)' : 'var(--color-primary)'};
-        color: ${finalIsOnline ? 'var(--color-text)' : 'white'};
+        background: ${finalIsOnline ? 'rgba(239, 68, 68, 0.08)' : 'var(--color-primary)'};
+        color: ${finalIsOnline ? '#ef4444' : 'white'};
         font-weight: 900; font-size: 11px;
         cursor: pointer;
         box-shadow: ${finalIsOnline ? 'none' : '0 4px 15px rgba(var(--color-primary-rgb), 0.3)'};
-        border: 1px solid ${finalIsOnline ? 'var(--color-border-light)' : 'transparent'};
+        border: 1px solid ${finalIsOnline ? 'rgba(239, 68, 68, 0.2)' : 'transparent'};
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         text-transform: uppercase;
         display: flex; align-items: center; gap: 8px;
@@ -2596,6 +3387,17 @@ function attachStatusBarListeners(user) {
 
 let isCurrentlyTakingBatch = false;
 
+function getDistanceSync(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 export async function takeBatch(batchId, user, batchData = null, btn = null) {
   if (isCurrentlyTakingBatch) {
     console.log('[takeBatch] A order claim is already in progress, ignoring double-click.');
@@ -2608,11 +3410,14 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
     const userSnap = await getDoc(fDoc(db, 'users', user.uid));
     const userData = userSnap.exists() ? userSnap.data() : {};
     if (!userData.transferAlias || !userData.transferAlias.trim()) {
-      showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en la sección de Finanzas antes de tomar pedidos.', 'warning');
-      document.querySelector('.tab-pill[data-tab="finances"]')?.click();
+      showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en la sección de Configuración antes de tomar pedidos.', 'warning');
+      document.querySelector('.tab-pill[data-tab="config"]')?.click();
       isCurrentlyTakingBatch = false;
       return;
     }
+
+    // Default estimated delivery time to 30 mins
+    const estTime = 30;
 
     let ordersToTake = [];
     if (batchData && batchData.isBundle) {
@@ -2724,6 +3529,33 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
 
       ordersToTake.forEach((o, index) => {
         const ref = orderRefs[index];
+        const snap = snaps[index];
+        const orderData = snap.data();
+
+        let deliveryCost = orderData.deliveryCost;
+        let total = orderData.total;
+
+        if (orderData.isGoCash || orderData.favorType === 'gocash') {
+          if (initialDriverLocation && orderData.deliveryCoords) {
+            try {
+              const dist = getDistanceSync(initialDriverLocation.lat, initialDriverLocation.lng, orderData.deliveryCoords.lat, orderData.deliveryCoords.lng);
+              const state = getState();
+              const basePriceVal = state.deliveryBasePrice || 1500;
+              const pricePerKmVal = state.deliveryPricePerKm || 300;
+              const minPriceVal = state.deliveryMinPrice || 1500;
+              
+              let rawFee = basePriceVal + (dist * pricePerKmVal);
+              if (rawFee < minPriceVal) {
+                rawFee = minPriceVal;
+              }
+              deliveryCost = Math.ceil(rawFee / 10) * 10;
+              total = deliveryCost;
+            } catch (e) {
+              console.error("[takeBatch] Error calculating Go Cash delivery cost:", e);
+            }
+          }
+        }
+
         const updateFields = {
           driverId: user.uid,
           driverName: user.displayName || user.name || 'Repartidor',
@@ -2731,10 +3563,20 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
           driverPhone: user.phone || '',
           driverDeliveryId: user.deliveryId || '',
           driverAlias: userData.transferAlias || '',
+          driverVehicleModel: userData.vehicleModel || '',
+          driverVehicleColor: userData.vehicleColor || '',
+          driverVehiclePatent: userData.vehicleDetails || userData.patente || '',
           deliverySessionId: user.currentSessionId || null,
-          status: o.isFavor ? 'confirmed' : o.status,
-          acceptedAt: serverTimestamp()
+          status: (o.isFavor || o.isTrip) ? 'confirmed' : o.status,
+          acceptedAt: serverTimestamp(),
+          estimatedDeliveryTime: estTime
         };
+
+        if (orderData.isGoCash || orderData.favorType === 'gocash') {
+          updateFields.deliveryCost = deliveryCost;
+          updateFields.total = total;
+        }
+
         if (initialDriverLocation) {
           updateFields.driverLocation = {
             lat: initialDriverLocation.lat,
@@ -2743,13 +3585,29 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
           };
         }
         transaction.update(ref, updateFields);
+
+        // Add real-time push/in-app notification to the client
+        if (o.isTrip) {
+          const notifRef = doc(collection(db, 'users', o.userId, 'notifications'));
+          transaction.set(notifRef, {
+            type: 'trip_taken',
+            title: '⚡ ¡Chofer asignado!',
+            body: `El chofer está yendo a tu ubicación. Patente: ${userData.vehicleDetails || userData.patente || '---'}`,
+            status: 'unread',
+            url: `#/pedido/${o.id}`,
+            createdAt: new Date()
+          });
+        }
       });
 
       // Update driver activity
       transaction.update(doc(db, 'users', user.uid), {
-        lastActivityAt: serverTimestamp()
+        lastActivityAt: serverTimestamp(),
+        lastTripAcceptedAt: serverTimestamp()
       });
       user.lastActivityAt = new Date();
+      user.lastTripAcceptedAt = new Date();
+      setState('user', { ...getState().user, lastActivityAt: new Date(), lastTripAcceptedAt: new Date() });
     });
 
     showToast('¡Pedido tomado! Empezá tu ruta.', 'success');
@@ -2828,98 +3686,22 @@ export async function markAsDelivered(orderIdOrIds) {
   const user = getState().user;
   
   try {
-    // 1. Fetch the orders to get appUsageFee
+    // 1. Fetch the orders
     const q = query(collection(db, 'orders'), where('__name__', 'in', ids));
     const snap = await getDocs(q);
     const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    
-    let totalDebtAmount = 0;
-    let totalDeliveryEarned = 0;
-    orders.forEach(o => {
-      totalDebtAmount += (o.appUsageFee || 0);
-      totalDeliveryEarned += (o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.tip || o.tipAmount || 0);
-    });
 
     const batch = writeBatch(db);
 
-    // 2. Update orders
+    // 2. Update orders to completed (this is fully authorized by the driver's write rules on orders)
     ids.forEach(id => {
       const orderData = orders.find(o => o.id === id);
       batch.update(doc(db, 'orders', id), {
         status: 'completed',
         deliveredAt: serverTimestamp(),
-        // Ensure deliverySessionId is set if not already
         deliverySessionId: orderData?.deliverySessionId || user.currentSessionId || null
       });
     });
-
-    // 3. Update User Debt (App Fees + Commissions)
-    if (totalDebtAmount !== 0) {
-      batch.update(doc(db, 'users', user.uid), {
-        deliveryDebt: increment(totalDebtAmount)
-      });
-
-      // 4. Record transaction for driver history
-      const transRef = doc(collection(db, 'delivery_transactions'));
-      batch.set(transRef, {
-        driverId: user.uid,
-        type: 'order_completion',
-        amount: totalDebtAmount,
-        orderIds: ids,
-        description: ids.length > 1 ? `Entrega de lote (${ids.length} pedidos)` : `Entrega de pedido #${orders[0]?.orderId || ids[0].slice(0,6)}`,
-        createdAt: serverTimestamp()
-      });
-    }
-
-    // 5. Update Current Session Stats
-    const sessionId = orders[0]?.deliverySessionId || user.currentSessionId;
-    if (sessionId) {
-      const sessionRef = doc(db, 'deliverySessions', sessionId);
-      batch.set(sessionRef, {
-        totalEarned: increment(totalDeliveryEarned),
-        ordersCount: increment(ids.length) // Use actual IDs count
-      }, { merge: true });
-    }
-
-    // 6. Reward GoPoints to Customer(s) with Level Multiplier
-    const { getUserLevel } = await import('../state.js');
-    const { processOrderCompletionRewards } = await import('../utils/rewards.js');
-    const settingsRef = doc(db, 'settings', 'global');
-    const settingsSnap = await getDoc(settingsRef);
-    const basePointsRate = settingsSnap.exists() ? (settingsSnap.data().pointsPerDollar || 0.01) : 0.01;
-
-    for (const o of orders) {
-      if (o.userId) {
-        // Fetch user to get their current order count for level calculation
-        const uSnap = await getDoc(doc(db, 'users', o.userId));
-        const uData = uSnap.exists() ? uSnap.data() : {};
-        const orderCount = (uData.completedOrdersCount || 0) + 1; // +1 because this one is finishing
-        const level = getUserLevel(orderCount);
-        
-        const finalRate = basePointsRate * level.multiplier;
-        const pointsEarned = Math.floor((o.subtotal || 0) * finalRate);
-        
-        if (pointsEarned > 0) {
-          batch.update(doc(db, 'users', o.userId), {
-            points: increment(pointsEarned),
-            completedOrdersCount: increment(1)
-          });
-          // Also store points earned and multiplier in order
-          batch.update(doc(db, 'orders', o.id), {
-            pointsEarned,
-            appliedMultiplier: level.multiplier,
-            userLevel: level.id
-          });
-        } else {
-          batch.update(doc(db, 'users', o.userId), {
-            completedOrdersCount: increment(1)
-          });
-        }
-
-        // Process referral and weekly challenges
-        await processOrderCompletionRewards(batch, o.userId, uData, o.id);
-      }
-    }
 
     try {
       await batch.commit();
@@ -3091,4 +3873,56 @@ function getHaversineDistance(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c; // in metres
+}
+
+export async function renderDeliveryHistory() {
+  await renderSubPage('history', 'Historial de Pedidos');
+}
+
+export async function renderDeliveryFinances() {
+  await renderSubPage('finances', 'Finanzas y Cuentas');
+}
+
+export async function renderDeliveryConfig() {
+  await renderSubPage('config', 'Configuración de Perfil');
+}
+
+async function renderSubPage(tab, title) {
+  const content = document.getElementById('app-content');
+  if (!content) return;
+  content.style.overflow = 'hidden';
+
+  const user = getState().user;
+  if (!user || !isDelivery()) {
+    content.innerHTML = `<div class="empty-state">Acceso denegado</div>`;
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; overflow:hidden; background:var(--color-bg-secondary);">
+      <!-- Header -->
+      <div style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:14px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; background:var(--color-primary); flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
+        <!-- Decorative Circles -->
+        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+        
+        <a href="#/delivery" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; flex-shrink:0; text-decoration:none; transition:all 0.2s; position:relative; z-index:2;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+          ${icon('chevronLeft', 24)}
+        </a>
+        <div style="flex:1; min-width:0; position:relative; z-index:2;">
+          <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; line-height:1.2; letter-spacing:-0.02em;">
+            ${title}
+          </h1>
+          <p style="font-size:11px; color:rgba(255,255,255,0.7); font-weight:800; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.05em;">Repartidor ${user.deliveryId || ''}</p>
+        </div>
+      </div>
+
+      <!-- Scrollable Content -->
+      <div id="sub-page-content" style="flex:1; overflow-y:auto; overflow-x:hidden; padding:16px 16px 40px; -webkit-overflow-scrolling:touch;">
+        <div class="loader-dots" style="margin: 4rem auto;"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+  `;
+
+  const container = document.getElementById('sub-page-content');
+  loadTabContent(tab, container, user);
 }

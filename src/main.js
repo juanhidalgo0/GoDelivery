@@ -23,6 +23,91 @@ AudioManager.init();
 
 // Initialize app
 async function init() {
+  // Seed Database: Pizzería category and Dany's Pizza categories
+  try {
+    const runOnceKey = 'gd_seed_pizzeria_danys_pizza_2026_06_11';
+    if (!localStorage.getItem(runOnceKey)) {
+      const { doc, setDoc, getDoc, updateDoc, collection, getDocs, query } = await import('firebase/firestore');
+      
+      // 1. Ensure Pizzería category exists in platformCategories
+      await setDoc(doc(db, 'platformCategories', 'pizzeria'), {
+        name: 'Pizzería',
+        icon: '🍕',
+        order: 10,
+        isActive: true
+      }, { merge: true });
+      
+      // 2. Find Dany's Pizza and update it
+      const comQuery = query(collection(db, 'comercios'));
+      const comSnap = await getDocs(comQuery);
+      for (const d of comSnap.docs) {
+        const cData = d.data();
+        if (cData.name && cData.name.toLowerCase().includes("dany's pizza")) {
+          await updateDoc(doc(db, 'comercios', d.id), {
+            category: 'Comida',
+            categories: ['Comida', 'Pizzería']
+          });
+          console.log("Updated Dany's Pizza to Comida + Pizzería!");
+        }
+      }
+      
+      localStorage.setItem(runOnceKey, 'true');
+      console.log("Database seeded successfully for Pizzería / Dany's Pizza!");
+    }
+  } catch (err) {
+    console.error('Error seeding database for Pizzería / Dany\'s Pizza:', err);
+  }
+
+  // Force-update check against version.json
+  try {
+    const vRes = await fetch('/version.json?cb=' + Date.now());
+    if (vRes.ok) {
+      const vData = await vRes.json();
+      const currentVer = localStorage.getItem('gd_app_version');
+      if (currentVer && currentVer !== String(vData.version)) {
+        console.log('[Version] New version detected:', vData.version, '. Clearing app caches and reloading...');
+        
+        // Clear Firestore cache
+        try {
+          const { terminate, clearIndexedDbPersistence } = await import('firebase/firestore');
+          const { db: firestoreDb } = await import('./firebase.js');
+          await terminate(firestoreDb);
+          await clearIndexedDbPersistence(firestoreDb);
+          console.log('[Version] Firestore IndexedDb cache cleared successfully.');
+        } catch (dbErr) {
+          console.warn('[Version] Failed to clear Firestore IndexedDb:', dbErr);
+        }
+
+        // Unregister service workers
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            await r.unregister();
+          }
+        }
+        
+        // Clear all caches
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            await caches.delete(key);
+          }
+        }
+
+        // Update version in localStorage (do NOT clear localStorage/sessionStorage to preserve session and state)
+        localStorage.setItem('gd_app_version', String(vData.version));
+        
+        // Force reload bypassing HTTP cache
+        window.location.reload();
+        return;
+      } else if (!currentVer) {
+        localStorage.setItem('gd_app_version', String(vData.version));
+      }
+    }
+  } catch (err) {
+    console.warn('[Version] Check failed:', err);
+  }
+
   // Capture referral code from URL (?ref=GO-REF-XXXX)
   const urlParams = new URLSearchParams(window.location.search);
   const refCode = urlParams.get('ref');
@@ -42,17 +127,25 @@ async function init() {
           // Check for updates every time the app opens
           reg.update();
 
+          // If there's already a waiting worker, skip waiting immediately
+          if (reg.waiting) {
+            console.log('GoDelivery: Found waiting Service Worker. Updating...');
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+
           reg.onupdatefound = () => {
             const installingWorker = reg.installing;
-            installingWorker.onstatechange = () => {
-              if (installingWorker.state === 'installed') {
-                if (navigator.serviceWorker.controller) {
-                  // New version available! Force skip waiting
-                  console.log('GoDelivery: New version found. Updating...');
-                  installingWorker.postMessage({ type: 'SKIP_WAITING' });
+            if (installingWorker) {
+              installingWorker.onstatechange = () => {
+                if (installingWorker.state === 'installed') {
+                  if (navigator.serviceWorker.controller) {
+                    // New version available! Force skip waiting
+                    console.log('GoDelivery: New version found. Updating...');
+                    installingWorker.postMessage({ type: 'SKIP_WAITING' });
+                  }
                 }
-              }
-            };
+              };
+            }
           };
         })
         .catch(err => console.error('GoDelivery: SW registration failed', err));
@@ -103,6 +196,232 @@ async function init() {
   // Load global settings (non-blocking)
   initSettings();
 
+  async function ensureAdminOwnership(comercioId) {
+    const user = getState().user;
+    if (!user) return;
+    const { isAdmin } = await import('./auth.js');
+    if (isAdmin()) {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDoc(doc(db, 'comercios', comercioId));
+        if (snap.exists()) {
+          const name = (snap.data().name || '').toLowerCase();
+          if (name.includes('go!') && name.includes('market')) {
+            console.log(`[Admin Ownership Sync] Syncing ownerId for Go Market (${comercioId}) to admin ${user.uid}`);
+            const res = await fetch(`https://us-central1-godelivery-magdalena.cloudfunctions.net/setCommerceOwner?comercioId=${comercioId}&ownerId=${user.uid}`);
+            const text = await res.text();
+            console.log('[Admin Ownership Sync] Result:', text);
+          } else {
+            console.log(`[Admin Ownership Sync] Skipping sync for non-GoMarket commerce (${comercioId}: ${snap.data().name})`);
+          }
+        }
+      } catch (err) {
+        console.warn('[Admin Ownership Sync] Failed:', err);
+      }
+    }
+  }
+
+  async function checkCommerceAccessPin(comercioId, container) {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const { db } = await import('./firebase.js');
+    const { isAdmin } = await import('./auth.js');
+    
+    // Admins bypass PIN check
+    if (isAdmin()) {
+      return true;
+    }
+    
+    try {
+      const snap = await getDoc(doc(db, 'comercios', comercioId));
+      if (!snap.exists()) return true;
+      const data = snap.data();
+      const pin = data.pin;
+      
+      console.log(`[PIN Check] id: ${comercioId}, pin in DB: "${pin}", session auth: "${sessionStorage.getItem('gd-comercio-auth-' + comercioId)}"`);
+
+      if (!pin || pin.trim() === '') {
+        return true;
+      }
+      
+      if (sessionStorage.getItem('gd-comercio-auth-' + comercioId) === 'true') {
+        return true;
+      }
+      
+      showPinLockScreen(comercioId, data.name, data.logo, pin, container);
+      return false;
+    } catch (e) {
+      console.error('Error checking commerce pin:', e);
+      return true;
+    }
+  }
+
+  function showPinLockScreen(comercioId, commerceName, logoUrl, correctPin, container) {
+    const content = container || document.getElementById('app-content');
+    if (!content) return;
+    
+    const style = document.createElement('style');
+    style.id = 'pin-screen-styles';
+    style.innerHTML = `
+      .pin-dot {
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--color-primary);
+        border-radius: 50%;
+        transition: all 0.2s;
+      }
+      .pin-dot.filled {
+        background: var(--color-primary);
+        transform: scale(1.15);
+        box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.5);
+      }
+      .pin-key {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        border: 1px solid var(--color-border-light);
+        background: var(--color-bg-secondary);
+        color: var(--color-text-primary);
+        font-size: 22px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.15s;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .pin-key:active {
+        background: var(--color-primary-light);
+        color: var(--color-primary);
+        border-color: var(--color-primary);
+        transform: scale(0.92);
+      }
+      @keyframes pin-shake {
+        0%, 100% { transform: translateX(0); }
+        20%, 60% { transform: translateX(-8px); }
+        40%, 80% { transform: translateX(8px); }
+      }
+      .pin-shake-anim {
+        animation: pin-shake 0.3s ease-in-out;
+      }
+    `;
+    document.getElementById('pin-screen-styles')?.remove();
+    document.head.appendChild(style);
+    
+    content.innerHTML = `
+      <div style="width:100%; min-height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; background:var(--color-bg-page); box-sizing:border-box; position:relative; z-index: 99999;">
+        <div style="position: absolute; top: 20px; left: 20px;">
+          <button id="pin-back-btn" class="btn btn-ghost" style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:13px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border-radius:12px; padding:8px 16px; border:1px solid var(--color-border-light);">
+            ${icon('chevronLeft', 16)} VOLVER
+          </button>
+        </div>
+
+        <div style="text-align:center; max-width:320px; width:100%; display:flex; flex-direction:column; align-items:center; gap:24px;">
+          <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+            <img src="${logoUrl || '/logo.png'}" alt="${commerceName}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; border:3px solid var(--color-primary); box-shadow:0 8px 24px rgba(var(--color-primary-rgb), 0.25);" />
+            <h2 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:var(--color-text-primary); margin:0;">${commerceName}</h2>
+            <p style="font-size:12px; color:var(--color-text-secondary); margin:0; line-height:1.4; font-weight:650;">Panel protegido. Ingresá el PIN numérico de acceso.</p>
+          </div>
+
+          <div id="pin-dots" style="display:flex; gap:16px; justify-content:center; height:20px;">
+            <div class="pin-dot"></div>
+            <div class="pin-dot"></div>
+            <div class="pin-dot"></div>
+            <div class="pin-dot"></div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; justify-items:center; margin-top:12px;">
+            <div class="pin-key" data-val="1">1</div>
+            <div class="pin-key" data-val="2">2</div>
+            <div class="pin-key" data-val="3">3</div>
+            <div class="pin-key" data-val="4">4</div>
+            <div class="pin-key" data-val="5">5</div>
+            <div class="pin-key" data-val="6">6</div>
+            <div class="pin-key" data-val="7">7</div>
+            <div class="pin-key" data-val="8">8</div>
+            <div class="pin-key" data-val="9">9</div>
+            <div class="pin-key" data-val="delete" style="font-size:14px; border:none; background:transparent; display:flex; align-items:center; justify-content:center;">${icon('delete', 22)}</div>
+            <div class="pin-key" data-val="0">0</div>
+            <div class="pin-key" data-val="clear" style="font-size:11px; font-weight:900; border:none; background:transparent; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-tertiary); display:flex; align-items:center; justify-content:center;">Limpiar</div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    let currentInput = '';
+    const dots = content.querySelectorAll('.pin-dot');
+    const dotsContainer = content.querySelector('#pin-dots');
+    
+    const updateDots = () => {
+      dots.forEach((dot, idx) => {
+        if (idx < currentInput.length) {
+          dot.classList.add('filled');
+        } else {
+          dot.classList.remove('filled');
+        }
+      });
+    };
+    
+    const handleKey = (val) => {
+      if (val === 'delete') {
+        currentInput = currentInput.slice(0, -1);
+        try { AudioManager.hapticLight(); } catch(e){}
+      } else if (val === 'clear') {
+        currentInput = '';
+        try { AudioManager.hapticLight(); } catch(e){}
+      } else {
+        if (currentInput.length < 4) {
+          currentInput += val;
+          try { AudioManager.hapticLight(); } catch(e){}
+        }
+      }
+      
+      updateDots();
+      
+      if (currentInput.length === 4) {
+        setTimeout(() => {
+          if (currentInput === correctPin) {
+            sessionStorage.setItem('gd-comercio-auth-' + comercioId, 'true');
+            showToast('Acceso concedido', 'success');
+            try { AudioManager.playSynthPop(); } catch(e){}
+            window.dispatchEvent(new HashChangeEvent('hashchange'));
+          } else {
+            dotsContainer.classList.add('pin-shake-anim');
+            showToast('PIN incorrecto', 'error');
+            try { AudioManager.hapticLight(); } catch(e){}
+            setTimeout(() => {
+              dotsContainer.classList.remove('pin-shake-anim');
+              currentInput = '';
+              updateDots();
+            }, 350);
+          }
+        }, 150);
+      }
+    };
+    
+    content.querySelectorAll('.pin-key').forEach(key => {
+      key.onclick = () => handleKey(key.dataset.val);
+    });
+    
+    content.querySelector('#pin-back-btn').onclick = () => {
+      location.hash = '#/profile';
+    };
+  }
+
+  async function wrapCommerceRoute(comercioId, container, renderFn) {
+    if (comercioId) {
+      await ensureAdminOwnership(comercioId);
+      const accessGranted = await checkCommerceAccessPin(comercioId, container);
+      if (!accessGranted) {
+        return;
+      }
+    }
+    return renderFn();
+  }
+
+
   // Register all routes
   registerRoutes({
     '/': (c) => import('./pages/home.js').then(m => m.renderHome(c)),
@@ -126,6 +445,8 @@ async function init() {
     '/admin/offers': (c) => import('./pages/admin/offers.js').then(m => m.renderAdminOffers(c)),
     '/admin/coupons': (c) => import('./pages/admin/coupons.js').then(m => m.renderAdminCoupons(c)),
     '/admin/metrics': (c) => import('./pages/admin/metrics.js').then(m => m.renderAdminMetrics(c)),
+    '/admin/metrics/services': (c) => import('./pages/admin/services-metrics.js').then(m => m.renderServicesMetrics(c)),
+    '/admin/metrics/breakdown': (c) => import('./pages/admin/metrics-breakdown.js').then(m => m.renderAdminMetricsBreakdown(c)),
 
     '/mi-comercio': async () => {
       const user = getState().user;
@@ -134,47 +455,89 @@ async function init() {
       const { isAdmin } = await import('./auth.js');
       const { collection, query, where, getDocs } = await import('firebase/firestore');
 
-      if (isAdmin()) {
-        const q = query(collection(db, 'comercios'));
-        const snap = await getDocs(q);
-        const goMarket = snap.docs.find(d => {
-          const name = (d.data().name || '').toLowerCase();
-          return name.includes('go!') && name.includes('market');
-        });
-        if (goMarket) {
-          location.hash = `#/mi-comercio/${goMarket.id}/orders`;
-          return;
-        }
-      }
-
       try {
+        // 1. Priorizar el comercio del cual el usuario es dueño directo
         const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
         const snap = await getDocs(q);
         if (!snap.empty) {
           location.hash = `#/mi-comercio/${snap.docs[0].id}/orders`;
-        } else {
-          location.hash = '#/profile';
+          return;
         }
+
+        // 2. Si no es dueño de ningún comercio pero es Admin, redirigir a Go! Market
+        if (isAdmin()) {
+          const allSnap = await getDocs(collection(db, 'comercios'));
+          const goMarket = allSnap.docs.find(d => {
+            const name = (d.data().name || '').toLowerCase();
+            return name.includes('go!') && name.includes('market');
+          });
+          if (goMarket) {
+            location.hash = `#/mi-comercio/${goMarket.id}/orders`;
+            return;
+          }
+        }
+
+        location.hash = '#/profile';
       } catch (err) {
         console.error('Error redirecting to commerce:', err);
         location.hash = '#/profile';
       }
     },
-    '/mi-comercio/:id': () => import('./pages/comercio-panel/dashboard.js').then(m => m.renderComercioDashboard()),
-    '/mi-comercio/:id/products': () => import('./pages/comercio-panel/products.js').then(m => m.renderComercioProducts()),
-    '/mi-comercio/:id/settings': () => import('./pages/comercio-panel/settings.js').then(m => m.renderComercioSettings()),
-    '/mi-comercio/:id/orders': () => import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders()),
-    '/mi-comercio/:id/finances': () => import('./pages/comercio-panel/finances.js').then(m => m.renderComercioFinances()),
-    '/mi-comercio/:id/offers': () => import('./pages/comercio-panel/offers.js').then(m => m.renderComercioOffers()),
-    '/mi-comercio/:id/metrics': () => import('./pages/comercio-panel/metrics.js').then(m => m.renderComercioMetrics()),
+    '/mi-comercio/:id': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/dashboard.js').then(m => m.renderComercioDashboard(c)));
+    },
+    '/mi-comercio/:id/products': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/products.js').then(m => m.renderComercioProducts(c)));
+    },
+    '/mi-comercio/:id/sabores': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/sabores.js').then(m => m.renderComercioSabores(c)));
+    },
+    '/mi-comercio/:id/settings': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/settings.js').then(m => m.renderComercioSettings(c)));
+    },
+    '/mi-comercio/:id/orders': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      if (id) {
+        await ensureAdminOwnership(id);
+        sessionStorage.removeItem('gd-comercio-auth-' + id);
+      }
+      return import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders(id));
+    },
+    '/mi-comercio/:id/finances': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/finances.js').then(m => m.renderComercioFinances(c)));
+    },
+    '/mi-comercio/:id/offers': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/offers.js').then(m => m.renderComercioOffers(c)));
+    },
+    '/mi-comercio/:id/metrics': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/metrics.js').then(m => m.renderComercioMetrics(c)));
+    },
     '/notifications': (c) => import('./pages/notifications.js').then(m => m.renderNotifications(c)),
     '/mp-connect': (c) => import('./pages/mp-connect.js').then(m => m.renderMPConnect(c)),
     '/gofavores': (c) => import('./pages/gofavores.js').then(m => m.renderGoFavores(c)),
+    '/viajes': (c) => import('./pages/viajes.js').then(m => m.renderViajes(c)),
     '/category/:id': (c) => {
       const { id } = (window.location.hash.match(/#\/category\/([^/]+)/) || [])[1] ? { id: decodeURIComponent(window.location.hash.split('/').pop()) } : { id: null };
+      if (id && id.toLowerCase() === 'gomarket') {
+        const cachedGmId = localStorage.getItem('gd_gomarket_id') || getState().goMarketId;
+        if (cachedGmId) {
+          window.history.replaceState(null, '', `#/comercio/${cachedGmId}`);
+          return import('./pages/comercio.js').then(m => m.renderComercio(c));
+        }
+      }
       return import('./pages/category.js').then(m => m.renderCategoryPage(id, c));
     },
     '/delivery': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel(c)),
+    '/delivery/history': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryHistory(c)),
+    '/delivery/finances': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryFinances(c)),
+    '/delivery/config': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryConfig(c)),
     '/pedido/:id': (c) => {
       const { id } = (window.location.hash.match(/#\/pedido\/([^/]+)/) || [])[1] ? { id: window.location.hash.split('/').pop() } : { id: null };
       return import('./pages/order-tracking.js').then(m => m.renderOrderTracking(id, c));
@@ -209,12 +572,12 @@ async function init() {
           loginWall.id = 'login-wall';
           loginWall.style.position = 'fixed';
           loginWall.style.inset = '0';
-          loginWall.style.zIndex = '99999';
+          loginWall.style.zIndex = '1500';
           document.body.appendChild(loginWall);
         }
         
         loginWall.innerHTML = `
-          <div class="login-wall-container" style="position:fixed; inset:0; background:linear-gradient(to bottom, #F9FAFB, #FFFFFF); z-index:10000; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;">
+          <div class="login-wall-container" style="position:fixed; inset:0; background:linear-gradient(to bottom, #F9FAFB, #FFFFFF); z-index:1500; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;">
             <div class="login-card" style="max-width:400px; width:100%; background:white; padding:40px 32px; border-radius:32px; box-shadow:0 20px 50px rgba(0,0,0,0.08); text-align:center; animation: fadeInUp 0.6s cubic-bezier(0.23, 1, 0.32, 1);">
               <div style="margin-bottom:24px;">
                 <img src="/logo-brand.jpg" alt="GoDelivery" style="width:100px; height:100px; border-radius:50%; box-shadow:0 12px 30px rgba(0,0,0,0.1); border: 4px solid white;" />
@@ -232,6 +595,11 @@ async function init() {
                 </svg>
                 <span style="font-weight:700; color:#374151; font-size:15px;">Continuar con Google</span>
               </button>
+              <div style="margin-top: 24px; text-align: center;">
+                <button id="reviewer-login-btn" style="background: none; border: none; color: #6B7280; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; opacity: 0.8;">
+                  Acceso para revisores (Google Play)
+                </button>
+              </div>
             </div>
           </div>
           <style>
@@ -242,6 +610,53 @@ async function init() {
         `;
 
         const { signInWithGoogle } = await import('./auth.js');
+        
+        const reviewerBtn = document.getElementById('reviewer-login-btn');
+        reviewerBtn?.addEventListener('click', () => {
+          const modalEl = document.createElement('div');
+          modalEl.style.cssText = 'padding: 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
+          modalEl.innerHTML = `
+            <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
+            <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales proporcionadas para revisar la aplicación.</p>
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+              <input type="email" id="test-email" placeholder="Correo electrónico" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
+              <input type="password" id="test-password" placeholder="Contraseña" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
+            </div>
+            <button id="btn-submit-test-login" style="margin-top: 16px; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.2);">
+              Iniciar Sesión
+            </button>
+          `;
+          
+          import('./components/modal.js').then(m => {
+            m.showModal({
+              title: '',
+              content: modalEl,
+              height: 'auto',
+              hideHeader: true,
+              onOpen: () => {
+                modalEl.querySelector('#btn-submit-test-login').onclick = async () => {
+                  const email = modalEl.querySelector('#test-email').value.trim();
+                  const password = modalEl.querySelector('#test-password').value.trim();
+                  if (!email || !password) return;
+                  
+                  modalEl.querySelector('#btn-submit-test-login').disabled = true;
+                  modalEl.querySelector('#btn-submit-test-login').textContent = 'Iniciando...';
+                  
+                  const { signInWithTestAccount } = await import('./auth.js');
+                  const success = await signInWithTestAccount(email, password);
+                  if (success) {
+                    m.closeModal();
+                    loginWall?.remove();
+                  } else {
+                    modalEl.querySelector('#btn-submit-test-login').disabled = false;
+                    modalEl.querySelector('#btn-submit-test-login').textContent = 'Iniciar Sesión';
+                  }
+                };
+              }
+            });
+          });
+        });
+
         const loginBtn = document.getElementById('google-login-btn');
         loginBtn?.addEventListener('click', () => {
           loginBtn.disabled = true;
@@ -282,22 +697,40 @@ async function init() {
       const loginWall = document.getElementById('login-wall');
       if (loginWall) {
         loginWall.remove();
+        
+        // Show the splash screen after Google Sign-In
+        const splash = document.getElementById('splash-screen');
+        if (splash) {
+          splash.classList.remove('fade-out');
+          document.getElementById('app')?.classList.remove('ready');
+          
+          // Force CSS animations to replay by cloning and replacing the element
+          const newSplash = splash.cloneNode(true);
+          splash.parentNode.replaceChild(newSplash, splash);
+          
+          setTimeout(() => {
+            newSplash.classList.add('fade-out');
+            document.getElementById('app')?.classList.add('ready');
+          }, 2400);
+        }
       }
+
+      const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
 
       // USER IS LOGGED IN -> Initialize UI
       initHeader();
-      trackUserVisit(user.uid).catch(e => console.warn('Telemetry visit tracking failed:', e));
-      initNotificationsDrawer();
-      initNavbar();
-      initActiveOrderBanner();
-      initDeliveryMonitor();
-      initCommerceMonitor();
-      initChatNotifier();
-      
-      // Initialize floating support chatbot dynamically
-      import('./components/support-bot.js').then(m => m.initSupportBot()).catch(err => console.warn('Failed to load support bot:', err));
-
-      const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
+      if (!isPreview) {
+        trackUserVisit(user.uid).catch(e => console.warn('Telemetry visit tracking failed:', e));
+        initNotificationsDrawer();
+        initNavbar();
+        initActiveOrderBanner();
+        initDeliveryMonitor();
+        initCommerceMonitor();
+        initChatNotifier();
+        
+        // Initialize floating support chatbot dynamically
+        import('./components/support-bot.js').then(m => m.initSupportBot()).catch(err => console.warn('Failed to load support bot:', err));
+      }
 
       const header = document.getElementById('app-header');
       const navbar = document.getElementById('app-navbar');
@@ -305,18 +738,19 @@ async function init() {
       if (navbar) navbar.style.display = isPreview ? 'none' : 'flex';
 
       if (isPreview) {
+        document.documentElement.classList.add('preview-mode');
+        document.body.classList.add('preview-mode');
         let style = document.getElementById('preview-mode-styles');
         if (!style) {
           style = document.createElement('style');
           style.id = 'preview-mode-styles';
           style.innerHTML = `
-            #app-header, #app-navbar, .nav-item, #app-overlay, .cart-button, .checkout-button, .add-to-cart-btn, .whatsapp-cart-btn, .comercio-header-back, .product-card-add, #cart-fab-container, [class*="whatsapp"], [class*="cart"], button:has(.lucide-shopping-bag), button:has(.lucide-shopping-cart), .fab {
+            #app-header, #app-navbar, .nav-item, .cart-button, .checkout-button, .add-to-cart-btn, .whatsapp-cart-btn, .comercio-header-back, .product-card-add, #cart-fab-container, [class*="whatsapp"], [class*="cart"], button:has(.lucide-shopping-bag), button:has(.lucide-shopping-cart), .fab {
               display: none !important;
               pointer-events: none !important;
             }
             .product-card {
-              pointer-events: none !important;
-              cursor: default !important;
+              cursor: pointer !important;
             }
             body {
               padding-top: 0 !important;
@@ -330,25 +764,51 @@ async function init() {
       import('./utils/background-tracking.js').then(m => m.initGlobalTracking()).catch(e => console.warn('Tracking failed', e));
       import('./pages/home.js').then(m => m.renderHome()).catch(e => console.warn('Home pre-render failed', e));
 
-      // Fetch GoMarket Logo for Banner
+      // Fetch GoMarket Logo for Banner and Auto-Sync new Assets in Firestore
       try {
-        const { collection, query, getDocs } = await import('firebase/firestore');
+        const { collection, query, getDocs, doc, updateDoc } = await import('firebase/firestore');
         const comSnap = await getDocs(collection(db, 'comercios'));
         const gm = comSnap.docs.find(d => {
           const n = (d.data().name || '').toLowerCase();
           return n.includes('go!') && n.includes('market');
         });
-        if (gm && gm.data().logo) {
-          import('./state.js').then(m => m.setState('goMarketLogo', gm.data().logo));
+        if (gm) {
+          const data = gm.data();
+          localStorage.setItem('gd_gomarket_id', gm.id);
+          import('./state.js').then(m => m.setState('goMarketId', gm.id));
+          if (data.logo) {
+            import('./state.js').then(m => m.setState('goMarketLogo', data.logo));
+          }
+          if (data.banner) {
+            import('./state.js').then(m => m.setState('goMarketBanner', data.banner));
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('Error auto-syncing GoMarket assets:', e);
+      }
 
-      if (isDelivery()) import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel());
-      if (isComercio() && user) {
-        const { collection, query, where, getDocs } = await import('firebase/firestore');
+      if (isDelivery() && !isPreview) import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel());
+      if (isComercio() && user && !isPreview) {
+        const { collection, query, where, getDocs, doc, getDoc, updateDoc } = await import('firebase/firestore');
+        
+        // Upgrade database role to admin first to satisfy rules
+        const { isAdmin } = await import('./auth.js');
+        if (isAdmin()) {
+          try {
+            const userRef = doc(db, 'users', user.uid);
+            const uSnap = await getDoc(userRef);
+            if (uSnap.exists() && uSnap.data().role !== 'admin') {
+              await updateDoc(userRef, { role: 'admin' });
+              user.role = 'admin';
+              console.log('[Auth] Database role updated to admin');
+            }
+          } catch (e) {
+            console.warn('Failed to auto-promote database role:', e);
+          }
+        }
+
         let comId = null;
 
-        const { isAdmin } = await import('./auth.js');
         if (isAdmin()) {
           const comSnap = await getDocs(collection(db, 'comercios'));
           const gm = comSnap.docs.find(d => {
@@ -358,6 +818,26 @@ async function init() {
           if (gm) {
             comId = gm.id;
             import('./state.js').then(m => m.setState('currentComercio', { id: gm.id, ...gm.data() }));
+            
+            // Sync GoMarket ownerId with current admin user to satisfy Firestore rules
+            const gmData = gm.data();
+            if (gmData.ownerId !== user.uid) {
+              import('firebase/firestore').then(async ({ doc, updateDoc }) => {
+                try {
+                  await updateDoc(doc(db, 'comercios', gm.id), { ownerId: user.uid });
+                  console.log('[Auth] Synced GoMarket ownerId with Admin UID:', user.uid);
+                } catch (err) {
+                  console.warn('Failed to sync GoMarket ownerId locally, trying Cloud Function...', err);
+                  try {
+                    const res = await fetch(`https://us-central1-godelivery-magdalena.cloudfunctions.net/setCommerceOwner?comercioId=${gm.id}&ownerId=${user.uid}`);
+                    const text = await res.text();
+                    console.log('[Auth] Cloud Function owner sync result:', text);
+                  } catch (fetchErr) {
+                    console.warn('[Auth] Cloud Function owner sync failed:', fetchErr);
+                  }
+                }
+              });
+            }
           }
         } else {
           const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
@@ -375,6 +855,10 @@ async function init() {
 
       import('./pages/cart.js').then(m => m.renderCart());
       import('./pages/profile.js').then(m => m.renderProfile());
+
+      if (isPreview) {
+        routerReady();
+      }
 
       // Show Onboarding and Notifications if NOT on the Install Lock Screen
       const runStartupFlow = () => {
@@ -579,10 +1063,11 @@ async function init() {
       const splash = document.getElementById('splash-screen');
       if (splash) {
         const elapsedTime = Date.now() - startTime;
-        const minDuration = 1800; // PedidosYa standard (at least 1.8s to fully appreciate the animations)
+        const minDuration = 2400; // Wait for the 2.2s + 0.1s circle expansion to complete fully
         const remainingTime = Math.max(0, minDuration - elapsedTime);
         setTimeout(() => {
           splash.classList.add('fade-out');
+          document.getElementById('app')?.classList.add('ready');
         }, remainingTime);
       }
     }

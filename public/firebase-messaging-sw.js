@@ -168,9 +168,10 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Ignore non-GET, Firebase/Google APIs, firestore, Vite Dev Server paths, and Chrome extensions
+  // Ignore non-GET, external API calls, Firebase/Google APIs, firestore, Vite Dev Server paths, and Chrome extensions
   if (
     request.method !== 'GET' || 
+    url.origin !== self.location.origin ||
     url.origin.includes('firebase') || 
     url.origin.includes('firestore') || 
     url.origin.includes('google') ||

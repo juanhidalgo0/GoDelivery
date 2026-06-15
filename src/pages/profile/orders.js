@@ -28,9 +28,12 @@ export async function renderProfileOrders(content) {
 
   const q = query(collection(db, 'orders'), where('userId', '==', user.uid));
   const unsub = onSnapshot(q, (snap) => {
-    const orders = snap.docs
-      .map(doc => ({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+    let orders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    // Only show orders that the user made as a client, not ones received as commerce
+    orders = orders.filter(o => o.comercioId !== user.uid);
+    
+    orders.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
     
     renderOrders(orders);
   });

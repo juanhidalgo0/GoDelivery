@@ -5,8 +5,8 @@
 let deferredPrompt = null;
 let isInstalled = false;
 
-// Check if app is already running in standalone mode
-if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+// Check if app is already running in standalone mode or native Capacitor wrapper
+if (window.Capacitor || window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
   isInstalled = true;
 }
 

@@ -15,6 +15,8 @@ function getAudioContext() {
   return audioCtx;
 }
 
+const synthLoops = new Map();
+
 export const AudioManager = {
   init() {
     const unlock = () => {
@@ -192,6 +194,38 @@ export const AudioManager = {
     }
   },
 
+  /**
+   * Synthesizes a beautiful notification chime chord (E5 -> G5 -> C6).
+   */
+  playSynthNotification() {
+    this.hapticSuccess();
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      
+      const tones = [659.25, 783.99, 1046.50];
+      tones.forEach((freq, idx) => {
+        const delay = idx * 0.08;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + delay);
+        
+        gain.gain.setValueAtTime(0.001, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.06, now + delay + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.3);
+        
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.3);
+      });
+    } catch (err) {
+      console.warn('SynthNotification failed:', err);
+    }
+  },
+
   playSound(url, volume = 1.0) {
     if (!url) return;
 
@@ -212,10 +246,12 @@ export const AudioManager = {
       audio.currentTime = 0;
       audio.volume = volume;
       audio.play().catch(err => {
-        console.error('Playback failed:', err);
+        console.error('Playback failed, falling back to synth chime:', err);
+        this.playSynthNotification();
       });
     } catch (err) {
-      console.error('Audio manager error:', err);
+      console.error('Audio manager error, falling back to synth chime:', err);
+      this.playSynthNotification();
     }
   },
 
@@ -240,11 +276,13 @@ export const AudioManager = {
       audio.currentTime = 0;
       audio.volume = volume;
       audio.play().catch(err => {
-        console.error('Playback loop failed:', err);
+        console.error('Playback loop failed, falling back to synth loop:', err);
+        this.startSynthLoop(url);
       });
       return audio;
     } catch (err) {
-      console.error('Audio loop error:', err);
+      console.error('Audio loop error, falling back to synth loop:', err);
+      this.startSynthLoop(url);
       return null;
     }
   },
@@ -252,6 +290,7 @@ export const AudioManager = {
   stopLoop(url) {
     if (!url) return;
     try {
+      this.stopSynthLoop(url);
       const audio = audioCache.get(url + '_loop');
       if (audio) {
         audio.pause();
@@ -260,6 +299,24 @@ export const AudioManager = {
       }
     } catch (err) {
       console.error('Stop audio loop error:', err);
+    }
+  },
+
+  startSynthLoop(url) {
+    if (synthLoops.has(url)) return;
+    this.playSynthNotification();
+    const intervalId = setInterval(() => {
+      this.playSynthNotification();
+    }, 1500);
+    synthLoops.set(url, intervalId);
+  },
+
+  stopSynthLoop(url) {
+    const intervalId = synthLoops.get(url);
+    if (intervalId) {
+      clearInterval(intervalId);
+      synthLoops.delete(url);
+      console.log('⏸ Stopped synthetic loop for:', url);
     }
   },
   

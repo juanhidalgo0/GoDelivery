@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eliminar Cuenta — GoDelivery</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --color-primary: #E11D48;
+      --color-bg: #F9FAFB;
+      --color-card: #FFFFFF;
+      --color-text: #1F2937;
+      --color-text-secondary: #4B5563;
+    }
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--color-bg);
+      color: var(--color-text);
+      margin: 0;
+      padding: 24px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .card {
+      max-width: 500px;
+      width: 100%;
+      background: var(--color-card);
+      border-radius: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+      padding: 32px;
+      text-align: center;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 16px rgba(225, 29, 72, 0.15);
+    }
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 900;
+      margin: 0 0 12px 0;
+    }
+    p {
+      color: var(--color-text-secondary);
+      font-size: 1rem;
+      line-height: 1.6;
+      margin: 0 0 24px 0;
+    }
+    .steps {
+      text-align: left;
+      background: #FFF1F2;
+      border: 1px solid #FFE4E6;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .steps h2 {
+      font-size: 1.1rem;
+      color: var(--color-primary);
+      margin: 0 0 12px 0;
+      font-weight: 700;
+    }
+    .steps ol {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--color-text-secondary);
+      font-size: 0.95rem;
+    }
+    .steps li {
+      margin-bottom: 8px;
+    }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 16px;
+      background: var(--color-primary);
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      border-radius: 14px;
+      box-shadow: 0 4px 12px rgba(225, 29, 72, 0.2);
+      box-sizing: border-box;
+      transition: opacity 0.2s;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .footer {
+      margin-top: 24px;
+      font-size: 0.85rem;
+      color: #9CA3AF;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/logo-brand.jpg" alt="GoDelivery" class="logo">
+    <h1>Solicitud de Eliminación de Cuenta</h1>
+    <p>Con el fin de garantizar tu privacidad y la seguridad de tu información personal, puedes solicitar la eliminación definitiva de tu cuenta y los datos asociados en cualquier momento.</p>
+    
+    <div class="steps">
+      <h2>¿Cómo solicitar la eliminación?</h2>
+      <ol>
+        <li>Envía un correo electrónico a <strong>soporte.godelivery@gmail.com</strong> indicando que deseas eliminar tu cuenta.</li>
+        <li>Incluye en el correo la dirección de email con la que te registraste en la aplicación.</li>
+        <li>Una vez verificada la titularidad, eliminaremos tu perfil, datos de ubicación, historial de pedidos y credenciales asociadas de forma permanente en un plazo no mayor a 72 horas.</li>
+      </ol>
+    </div>
+
+    <a href="mailto:soporte.godelivery@gmail.com?subject=Solicitud%20de%20eliminacion%20de%20cuenta%20-%20GoDelivery" class="btn">Enviar correo de solicitud</a>
+    
+    <div class="footer">
+      GoDelivery — Magdalena
+    </div>
+  </div>
+</body>
+</html>

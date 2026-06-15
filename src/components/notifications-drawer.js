@@ -64,6 +64,9 @@ export function initNotificationsDrawer() {
 }
 
 function startListener() {
+  const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
+  if (isPreview) return;
+
   const user = getState().user;
 
   if (!user) {
@@ -171,11 +174,29 @@ function renderItems() {
     item.onclick = async () => {
       const id = item.dataset.id;
       const url = item.dataset.url;
+      const user = getState().user;
       try {
-        const user = getState().user;
-        await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
+        if (user) {
+          await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
+        }
       } catch (e) { }
       if (url) {
+        // Validate route exists in orders/chats if it contains order ID
+        const orderMatch = url.match(/#\/pedido\/([^/]+)/);
+        if (orderMatch && orderMatch[1]) {
+          const orderId = orderMatch[1];
+          try {
+            const { getDoc, doc } = await import('firebase/firestore');
+            const oDoc = await getDoc(doc(db, 'orders', orderId));
+            if (!oDoc.exists()) {
+              console.warn('[NotificationsDrawer] Order does not exist. Skipping navigation.');
+              return;
+            }
+          } catch (err) {
+            console.error('[NotificationsDrawer] Failed to verify order existence:', err);
+            return;
+          }
+        }
         closeNotificationsDrawer();
         window.location.hash = url;
       }

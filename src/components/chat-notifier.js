@@ -5,6 +5,7 @@ import { getState, subscribe } from '../state.js';
 import { sendLocalNotification } from '../utils/notifications.js';
 import { setBanner, clearBanner } from './banner-manager.js';
 import { icon } from '../utils/icons.js';
+import { AudioManager } from '../utils/audio-manager.js';
 
 const MSG_SOUND = '/assets/sounds/message.mp3';
 let audioUnlocked = false;
@@ -91,6 +92,14 @@ function listenToChat(chatId, userId, otherName, order) {
           const now = new Date();
           if (Math.abs(now - msgTime) < 60000) {
             notifiedMessages.add(msgKey);
+            
+            // Play sound alert
+            try {
+              AudioManager.playSynthMessageReceive();
+            } catch (soundErr) {
+              console.warn('AudioManager sound play failed:', soundErr);
+            }
+
             sendLocalNotification(`💬 ${msg.senderName || otherName}`, msg.text, {
               tag: `chat-${chatId}`,
               url: `#/pedido/${order.id}`,
@@ -109,11 +118,120 @@ function listenToChat(chatId, userId, otherName, order) {
 
 function notifyUnreadChange() {
   onUnreadChangeCallbacks.forEach(cb => cb(unreadCounts));
-  // Global FAB disabled per user request
+  updateGlobalFAB();
 }
 
 function updateGlobalFAB() {
-  // Disabled
+  const total = getTotalUnread();
+  let fab = document.getElementById('chat-global-fab');
+  if (total <= 0) {
+    if (fab) fab.remove();
+    return;
+  }
+
+  if (!fab) {
+    fab = document.createElement('div');
+    fab.id = 'chat-global-fab';
+    fab.style.cssText = `
+      position: fixed;
+      bottom: calc(var(--navbar-height, 60px) + 20px + env(safe-area-inset-bottom, 0px));
+      right: 20px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #FF4D6D 0%, var(--color-primary) 100%);
+      border: 2px solid white;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(227, 27, 35, 0.4);
+      z-index: 2000;
+      cursor: pointer;
+    `;
+    
+    // Add pulsing border ring style once
+    if (!document.getElementById('fab-pulse-style')) {
+      const style = document.createElement('style');
+      style.id = 'fab-pulse-style';
+      style.innerHTML = `
+        @keyframes fab-pop { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fab-pulse { 0% { box-shadow: 0 0 0 0 rgba(227,27,35,0.4); } 70% { box-shadow: 0 0 0 15px rgba(227,27,35,0); } 100% { box-shadow: 0 0 0 0 rgba(227,27,35,0); } }
+        .banner-stack-item.message {
+          margin-right: 80px !important;
+          margin-bottom: 10px !important;
+        }
+        .banner-stack-item.message .active-message-banner {
+          border-radius: 20px !important;
+          box-shadow: -5px 5px 25px rgba(0,0,0,0.35) !important;
+          border: 1.5px solid rgba(255, 255, 255, 0.1) !important;
+          position: relative !important;
+        }
+        .banner-stack-item.message .active-message-banner::after {
+          content: '' !important;
+          position: absolute !important;
+          right: -9px !important;
+          top: 50% !important;
+          transform: translateY(-50%) !important;
+          border-width: 10px 0 10px 10px !important;
+          border-style: solid !important;
+          border-color: transparent transparent transparent #121826 !important;
+          display: block !important;
+          width: 0 !important;
+          z-index: 10 !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    fab.style.animation = 'fab-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), fab-pulse 2s infinite';
+    document.body.appendChild(fab);
+  }
+
+  fab.innerHTML = `
+    ${icon('chatBubble', 24)}
+    <span style="
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: #ffffff;
+      color: var(--color-primary);
+      font-size: 11px;
+      font-weight: 900;
+      border-radius: 10px;
+      padding: 2px 7px;
+      border: 2px solid var(--color-primary);
+      box-shadow: var(--shadow-sm);
+      min-width: 20px;
+      text-align: center;
+    ">${total}</span>
+  `;
+
+  fab.onclick = async () => {
+    const activeChatId = Object.keys(unreadCounts).find(key => unreadCounts[key] > 0);
+    if (activeChatId) {
+      const isCommerce = activeChatId.includes('commerce');
+      const parts = activeChatId.split('_');
+      const orderId = parts[0];
+      const { openChat } = await import('../components/chat.js');
+      
+      // Load sender name from activeListeners/unreadCounts context (fallback to 'Chat')
+      let sender = 'Chat';
+      const { doc, getDoc } = await import('firebase/firestore');
+      const snap = await getDoc(doc(db, 'orders', orderId));
+      if (snap.exists()) {
+        const orderData = snap.data();
+        sender = isCommerce ? (orderData.userName || 'Cliente') : (orderData.comercioName || orderData.driverName || 'Soporte');
+      }
+
+      openChat({
+        orderId: orderId,
+        type: isCommerce ? 'client-commerce' : 'client-delivery',
+        otherName: sender,
+        orderNum: orderId.slice(0, 6).toUpperCase(),
+        senderDisplayName: sender
+      });
+    }
+  };
 }
 
 function showGlobalMessageBanner(sender, text, orderId, chatId) {

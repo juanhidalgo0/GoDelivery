@@ -2,25 +2,12 @@
 // Uses Haversine formula for distance and Nominatim for geocoding
 
 /**
- * Calculates real driving distance between two points using OSRM
- * Fallback to Haversine if API fails
+ * Calculates straight line distance synchronously (Haversine formula)
+ * to avoid network requests and rate limits on list views.
  */
-export async function getDistance(lat1, lon1, lat2, lon2) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    
-    if (data.code === 'Ok' && data.routes && data.routes[0]) {
-      // OSRM returns distance in METERS
-      return data.routes[0].distance / 1000; 
-    }
-  } catch (err) {
-    console.warn('OSRM routing failed, falling back to Haversine:', err);
-  }
-
-  // Haversine fallback (Straight line)
-  const R = 6371;
+export function getQuickDistance(lat1, lon1, lat2, lon2) {
+  if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined) return null;
+  const R = 6371; // Earth's radius in KM
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = 
@@ -28,7 +15,15 @@ export async function getDistance(lat1, lon1, lat2, lon2) {
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c * 1.35; // Add estimation factor if we are in fallback mode
+  return R * c * 1.25; // Apply correction factor for driving routes
+}
+
+/**
+ * Calculates straight line distance with a driving routes correction factor.
+ * Unified to guarantee 100% pricing consistency across all screens without network lag or API costs.
+ */
+export async function getDistance(lat1, lon1, lat2, lon2) {
+  return getQuickDistance(lat1, lon1, lat2, lon2);
 }
 
 const geocodeCache = new Map();
@@ -125,40 +120,81 @@ export async function searchAddressSuggestions(term) {
     }
 
     // Google Places Autocomplete Attempt
-    if (window.google && window.google.maps && window.google.maps.places && window.google.maps.places.AutocompleteService) {
+    if (window.google && window.google.maps && window.google.maps.places) {
       try {
-        const predictions = await new Promise((resolve, reject) => {
-          const service = new window.google.maps.places.AutocompleteService();
-          service.getPlacePredictions({
-            input: term,
-            locationBias: { radius: 10000, center: { lat: -35.0811, lng: -57.5146 } },
-            componentRestrictions: { country: 'ar' }
-          }, (preds, status) => {
-            if (status === 'OK' && preds) {
-              resolve(preds);
-            } else {
-              reject(new Error("Google Autocomplete status: " + status));
+        console.log('[Autocomplete] Attempting Google Maps autocomplete...');
+        let predictions = null;
+
+        // Try modern fetchAutocompleteSuggestions (Places API v1) first
+        if (window.google.maps.places.AutocompleteSuggestion) {
+          try {
+            // Race the modern API with a 1.5s timeout
+            const response = await Promise.race([
+              window.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+                input: term,
+                locationBias: { lat: -35.0811, lng: -57.5146 }
+              }),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('Google Modern API timeout')), 1500))
+            ]);
+            if (response && response.suggestions) {
+              predictions = response.suggestions.map(s => {
+                const p = s.placePrediction;
+                return {
+                  place_id: p.placeId,
+                  description: p.text.toString(),
+                  main_text: p.text.mainText ? p.text.mainText.text : ''
+                };
+              });
+              console.log('[Autocomplete] Google Modern API predictions found:', predictions.length);
             }
-          });
-        });
+          } catch (modernErr) {
+            console.log('[Places API] Modern autocomplete failed/not enabled, trying legacy AutocompleteService.', modernErr.message || modernErr);
+          }
+        }
+
+        // Fallback to legacy AutocompleteService if new API not supported or failed
+        if (!predictions && window.google.maps.places.AutocompleteService) {
+          console.log('[Autocomplete] Attempting legacy AutocompleteService...');
+          predictions = await Promise.race([
+            new Promise((resolve, reject) => {
+              const service = new window.google.maps.places.AutocompleteService();
+              service.getPlacePredictions({
+                input: term,
+                locationBias: { radius: 10000, center: { lat: -35.0811, lng: -57.5146 } },
+                componentRestrictions: { country: 'ar' }
+              }, (preds, status) => {
+                if (status === 'OK' && preds) {
+                  resolve(preds);
+                } else {
+                  reject(new Error("Google Autocomplete status: " + status));
+                }
+              });
+            }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Google Legacy API timeout')), 1500))
+          ]);
+          console.log('[Autocomplete] Google Legacy predictions found:', predictions?.length || 0);
+        }
 
         if (predictions && predictions.length > 0) {
           const geocoder = new window.google.maps.Geocoder();
           const results = await Promise.all(predictions.slice(0, 5).map(async (pred) => {
             try {
-              const geoRes = await new Promise((res, rej) => {
-                geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
-                  if (s === 'OK' && r && r[0]) {
-                    res(r[0]);
-                  } else {
-                    rej(new Error(s));
-                  }
-                });
-              });
+              const geoRes = await Promise.race([
+                new Promise((res, rej) => {
+                  geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
+                    if (s === 'OK' && r && r[0]) {
+                      res(r[0]);
+                    } else {
+                      rej(new Error(s));
+                    }
+                  });
+                }),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('Google Geocoder timeout')), 1200))
+              ]);
               return {
                 lat: geoRes.geometry.location.lat(),
                 lng: geoRes.geometry.location.lng(),
-                address: pred.structured_formatting.main_text || pred.description.split(',')[0],
+                address: pred.main_text || pred.description.split(',')[0],
                 displayName: pred.description
               };
             } catch (e) {
@@ -166,16 +202,25 @@ export async function searchAddressSuggestions(term) {
             }
           }));
           const filtered = results.filter(Boolean);
-          if (filtered.length > 0) return filtered;
+          if (filtered.length > 0) {
+            console.log('[Autocomplete] Returning Google predictions:', filtered.length);
+            return filtered;
+          }
         }
       } catch (gErr) {
-        console.warn('Google Address suggestions failed, falling back to Nominatim:', gErr);
+        console.warn('[Autocomplete] Google autocomplete pipeline failed, falling back:', gErr.message || gErr);
       }
     }
 
     // Passive Nominatim Fallback
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&accept-language=es`);
+    console.log('[Autocomplete] Querying Nominatim for address search...', query);
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&accept-language=es`, {
+      headers: {
+        'Accept-Language': 'es'
+      }
+    });
     const data = await response.json();
+    console.log('[Autocomplete] Nominatim returned results:', data.length);
     return data.map(item => {
       const a = item.address;
       const street = a.road || a.pedestrian || a.suburb || '';

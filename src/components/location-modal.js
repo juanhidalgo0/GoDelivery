@@ -15,6 +15,17 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
     <div style="padding:16px 20px; background:var(--color-bg); border-bottom:1px solid var(--color-border-light); display:flex; justify-content:space-between; align-items:center;">
       <h2 style="margin:0; font-family:var(--font-display); font-size:18px; font-weight:800;">Seleccionar Ubicación</h2>
     </div>
+
+    <!-- Autocomplete Search Bar -->
+    <div style="padding:10px 16px; background:var(--color-bg); border-bottom:1px solid var(--color-border-light); position:relative; z-index:2000;">
+      <div style="display:flex; align-items:center; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:12px; padding:0 12px; height:44px; gap:8px;">
+        <span style="color:var(--color-text-tertiary); display:flex;">${icon('search', 16)}</span>
+        <input type="text" id="map-picker-search-input" placeholder="Buscar dirección (ej: brenan 1280)..." autocomplete="off" style="flex:1; border:none; background:transparent; outline:none; font-size:13.5px; font-weight:600; color:var(--color-text);" />
+        <button id="map-picker-clear-search" style="display:none; background:none; border:none; color:var(--color-text-tertiary); font-size:16px; cursor:pointer; padding:4px;">×</button>
+      </div>
+      <!-- Suggestions Dropdown wrapper -->
+      <div id="map-picker-suggestions-box" class="address-suggestions-list" style="position:absolute; top:100%; left:16px; right:16px; max-height:220px; overflow-y:auto; background:var(--color-surface); border-radius:0 0 12px 12px; box-shadow:var(--shadow-lg); border:1px solid var(--color-border); border-top:none; z-index:9999; display:none;"></div>
+    </div>
     
     <!-- Map Container -->
     <div id="map-picker-container" style="flex:1; background:var(--color-bg-secondary); position:relative; overflow:hidden;">
@@ -105,6 +116,92 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
           addrDisplay.textContent = "Ubicación seleccionada";
         }
       };
+
+      // Autocomplete Suggestions logic
+      const searchInput = document.getElementById('map-picker-search-input');
+      const suggestionsBox = document.getElementById('map-picker-suggestions-box');
+      const clearSearchBtn = document.getElementById('map-picker-clear-search');
+      
+      let searchTimeout = null;
+
+      if (searchInput && suggestionsBox) {
+        searchInput.oninput = async (e) => {
+          const val = e.target.value;
+          if (clearSearchBtn) {
+            clearSearchBtn.style.display = val ? 'block' : 'none';
+          }
+          
+          clearTimeout(searchTimeout);
+          if (!val || val.trim().length < 3) {
+            suggestionsBox.style.display = 'none';
+            suggestionsBox.innerHTML = '';
+            return;
+          }
+
+          searchTimeout = setTimeout(async () => {
+            try {
+              const { searchAddressSuggestions } = await import('../utils/geo.js');
+              const results = await searchAddressSuggestions(val);
+              if (results && results.length > 0) {
+                suggestionsBox.innerHTML = results.map(r => `
+                  <div class="suggestion-item" data-lat="${r.lat}" data-lng="${r.lng}" data-address="${r.address}" style="padding:12px 16px; border-bottom:1px solid var(--color-border-light); cursor:pointer; font-size:13px; font-weight:600; color:var(--color-text);">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <span style="color:var(--color-primary); display:flex;">${icon('mapPin', 14)}</span>
+                      <div>
+                        <div style="color:var(--color-text);">${r.address}</div>
+                        <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:normal; margin-top:2px;">Magdalena, Buenos Aires</div>
+                      </div>
+                    </div>
+                  </div>
+                `).join('');
+                suggestionsBox.style.display = 'block';
+
+                suggestionsBox.querySelectorAll('.suggestion-item').forEach(item => {
+                  item.onclick = () => {
+                    const lat = parseFloat(item.dataset.lat);
+                    const lng = parseFloat(item.dataset.lng);
+                    const addr = item.dataset.address;
+
+                    selectedCoords = { lat, lng };
+                    selectedAddress = addr;
+
+                    map.setCenter(selectedCoords);
+                    map.setZoom(17);
+
+                    const addrDisplay = document.getElementById('detected-address');
+                    if (addrDisplay) addrDisplay.textContent = selectedAddress;
+
+                    suggestionsBox.style.display = 'none';
+                    suggestionsBox.innerHTML = '';
+                    searchInput.value = addr;
+                  };
+                });
+              } else {
+                suggestionsBox.style.display = 'none';
+                suggestionsBox.innerHTML = '';
+              }
+            } catch (err) {
+              console.error('[LocationPicker] Autocomplete failed:', err);
+            }
+          }, 350);
+        };
+
+        if (clearSearchBtn) {
+          clearSearchBtn.onclick = () => {
+            searchInput.value = '';
+            clearSearchBtn.style.display = 'none';
+            suggestionsBox.style.display = 'none';
+            suggestionsBox.innerHTML = '';
+          };
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+          if (!e.target.closest('#map-picker-search-input') && !e.target.closest('#map-picker-suggestions-box')) {
+            suggestionsBox.style.display = 'none';
+          }
+        });
+      }
 
       map.addListener('idle', () => {
         const center = map.getCenter();

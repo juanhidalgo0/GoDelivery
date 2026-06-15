@@ -3,7 +3,8 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
-  persistentMultipleTabManager 
+  persistentMultipleTabManager,
+  clearIndexedDbPersistence
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, isSupported } from 'firebase/messaging';
@@ -21,6 +22,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 // Modern Firestore initialization with Persistent Local Cache
 export const db = initializeFirestore(app, {
@@ -28,6 +32,16 @@ export const db = initializeFirestore(app, {
     tabManager: persistentMultipleTabManager()
   })
 });
+
+// Clear IndexedDB offline cache if flagged by hard reset
+if (localStorage.getItem('gd_clear_persistence') === 'true') {
+  localStorage.removeItem('gd_clear_persistence');
+  clearIndexedDbPersistence(db).then(() => {
+    console.log('Firestore IndexedDB persistence cleared successfully.');
+  }).catch(err => {
+    console.warn('Error clearing Firestore persistence:', err);
+  });
+}
 
 
 export const storage = getStorage(app);

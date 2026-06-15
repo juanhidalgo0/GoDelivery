@@ -1198,10 +1198,14 @@ select.input {
 }
 
 @keyframes spin {
-
   to {
     transform: rotate(360deg);
   }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+  display: inline-block;
 }
 
 .qty-stepper.sm .qty-btn {

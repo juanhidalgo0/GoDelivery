@@ -21,13 +21,13 @@ export async function renderComercioCategories() {
 
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;">
-      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--color-surface);border-bottom:1px solid var(--color-border-light);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;">
-        <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--color-bg-secondary);color:var(--color-text);border:1px solid var(--color-border-light);flex-shrink:0;">${icon('back', 18)}</a>
+      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--color-primary);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
+        <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);flex-shrink:0;">${icon('back', 18)}</a>
         <div style="flex:1;min-width:0;">
-          <h1 style="font-family:var(--font-display);font-weight:800;font-size:18px;color:var(--color-text);margin:0;line-height:1.2;">Categorías</h1>
-          <p id="panel-commerce-name" style="font-size:12px;color:var(--color-text-tertiary);margin:2px 0 0;"></p>
+          <h1 style="font-family:var(--font-display);font-weight:800;font-size:18px;color:white;margin:0;line-height:1.2;">${isAdmin() ? 'Adm: Categorías' : 'Categorías'}</h1>
+          <p id="panel-commerce-name" style="font-size:12px;color:rgba(255,255,255,0.85);margin:2px 0 0;"></p>
         </div>
-        <button class="btn btn-primary btn-sm" id="add-cat-btn" style="border-radius:10px;font-size:12px;padding:8px 14px;">
+        <button class="btn btn-sm" id="add-cat-btn" style="border-radius:10px;font-size:12px;padding:8px 14px;background:white;color:var(--color-primary);border:none;font-weight:700;">
           ${icon('plus', 14)} Agregar
         </button>
       </div>
@@ -55,7 +55,7 @@ export async function renderComercioCategories() {
       return;
     }
     const nameContainer = document.getElementById('panel-commerce-name');
-    if (nameContainer) nameContainer.textContent = comercioData.name;
+    if (nameContainer) nameContainer.textContent = isAdmin() ? `Adm: ${comercioData.name}` : comercioData.name;
 
     const snap = await getDocs(query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order')));
     categories = snap.docs.map(d => ({ id: d.id, ...d.data() }));

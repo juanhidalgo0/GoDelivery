@@ -2,22 +2,27 @@ import { db } from '../firebase.js';
 import { doc, onSnapshot, runTransaction, serverTimestamp, increment, collection, query, where, getDocs } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
-import { showConfirm, closeModal } from '../components/modal.js';
+import { showConfirm, closeModal, showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { getState } from '../state.js';
 
 let liveMap = null;
 let riderMarker = null;
 let homeMarker = null;
+let pickupMarker = null;
+let dropoffMarker = null;
 let routeLine = null;
 let routeLineGlow = null;
 let currentETA = '--';
 let isFirstFit = true;
+let isDetailsExpanded = false;
 
 export function renderOrderTracking(orderId, content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
 
   isFirstFit = true;
+  isDetailsExpanded = false;
 
   content.innerHTML = `
     <div class="tracking-v5-viewport">
@@ -52,7 +57,7 @@ export function renderOrderTracking(orderId, content) {
       #global-active-delivery-fab, 
       #global-delivery-available-fab, 
       #global-order-fab,
-      [id*="active-order-banner"],
+      .active-order-banner,
       .active-order-banner-v2 { 
         display: none !important; 
       }
@@ -68,7 +73,7 @@ export function renderOrderTracking(orderId, content) {
       }
       .map-container-v5 { position: absolute; inset: 0; z-index: 1; background: var(--color-bg-secondary); }
       
-      .tracking-v5-nav { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
+      .tracking-v5-nav { position: absolute; top: calc(16px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
       .v5-back-btn { pointer-events: auto; width: 44px; height: 44px; background: var(--color-surface); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--color-text); box-shadow: var(--shadow-md); border: 1px solid var(--color-border); }
       .v5-live-pill { background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: 8px 14px; border-radius: 100px; display: flex; align-items: center; gap: 6px; font-weight: 900; font-size: 11px; color: var(--color-danger); box-shadow: var(--shadow-sm); border: 1px solid var(--glass-border); }
       .v5-pulse-dot { width: 7px; height: 7px; background: var(--color-danger); border-radius: 50%; animation: pulse-v5 1.5s infinite; }
@@ -291,15 +296,56 @@ export function renderOrderTracking(orderId, content) {
         transform: scale(0.97);
         background: rgba(239, 68, 68, 0.15);
       }
+      .v5-details-container {
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-top 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 8px;
+      }
+      .v5-details-container.expanded {
+        max-height: 500px;
+        opacity: 1;
+        margin-top: 10px;
+      }
+      .v5-toggle-btn {
+        width: 100%;
+        height: 44px;
+        border-radius: 16px;
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-light);
+        color: var(--color-text-secondary);
+        font-size: 11.5px;
+        font-weight: 850;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 4px;
+        text-transform: uppercase;
+        transition: all 0.2s ease;
+        letter-spacing: 0.03em;
+        box-shadow: var(--shadow-sm);
+      }
+      .v5-toggle-btn:hover {
+        background: var(--color-border-light);
+        color: var(--color-primary);
+      }
+      .v5-toggle-btn:active {
+        transform: scale(0.97);
+      }
     </style>
   `;
 
-  const unsub = onSnapshot(doc(db, 'orders', orderId), async (snapshot) => {
+  const unsub = onSnapshot(doc(db, 'orders', orderId), (snapshot) => {
     if (!snapshot.exists()) return;
     const order = { id: snapshot.id, ...snapshot.data() };
     
     // Auth Check: Prevent driver from viewing the customer tracking view and the verification code
-    const { getState } = await import('../state.js');
     const user = getState().user;
     if (user && order.driverId === user.uid && order.userId !== user.uid) {
       window.location.hash = '#/delivery';
@@ -308,9 +354,11 @@ export function renderOrderTracking(orderId, content) {
 
     const rawStatus = (order.status || '').toString().toLowerCase();
     const isCompleted = rawStatus === 'completed' || rawStatus === 'entregado';
-    if (isCompleted && !window[`hasShownCompletedModal_${order.id}`]) {
-      window[`hasShownCompletedModal_${order.id}`] = true;
-      showPointsEarnedModal(order);
+    if (isCompleted) {
+      if (!window[`hasShownCompletedModal_${order.id}`]) {
+        window[`hasShownCompletedModal_${order.id}`] = true;
+        import('../components/delivery-rating.js').then(m => m.showDeliveryRating(order));
+      }
     }
 
     window.lastOrderData = order;
@@ -319,10 +367,34 @@ export function renderOrderTracking(orderId, content) {
   });
 
   document.getElementById('recenter-map-btn').onclick = () => {
-    if (liveMap && routeLine) {
+    if (!liveMap) return;
+    
+    const order = window.lastOrderData;
+    const isTrip = order?.isTrip === true;
+    const rawStatus = (order?.status || '').toString().toLowerCase();
+    const riderPos = order?.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
+    const pickupPos = order?.pickupCoords ? { lat: order.pickupCoords.lat, lng: order.pickupCoords.lng } : null;
+    const dropoffPos = order?.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
+    const destPos = isTrip
+      ? (rawStatus === 'delivering' || rawStatus === 'en camino' ? dropoffPos : pickupPos)
+      : dropoffPos;
+
+    if (riderPos && destPos && routeLine) {
       const bounds = new google.maps.LatLngBounds();
       routeLine.getPath().forEach(p => bounds.extend(p));
       liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
+    } else if (destPos) {
+      liveMap.panTo(destPos);
+      liveMap.setZoom(17);
+    } else if (riderPos) {
+      liveMap.panTo(riderPos);
+      liveMap.setZoom(17);
+    } else if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const myCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        liveMap.panTo(myCoords);
+        liveMap.setZoom(17);
+      }, (err) => console.warn('Geolocation error:', err));
     }
   };
 
@@ -332,12 +404,16 @@ export function renderOrderTracking(orderId, content) {
       if (liveMap) {
         if (riderMarker) riderMarker.setMap(null);
         if (homeMarker) homeMarker.setMap(null);
+        if (pickupMarker) pickupMarker.setMap(null);
+        if (dropoffMarker) dropoffMarker.setMap(null);
         if (routeLine) routeLine.setMap(null);
         if (routeLineGlow) routeLineGlow.setMap(null);
         liveMap = null;
       }
       riderMarker = null;
       homeMarker = null;
+      pickupMarker = null;
+      dropoffMarker = null;
       routeLine = null;
       routeLineGlow = null;
     }
@@ -378,7 +454,7 @@ function updateUI(order) {
   const isFinalized = isCompleted || isCancelled;
   const isDelivering = normalizedStatus === 'delivering';
   const isWaitingConfirmation = (normalizedStatus === 'pending');
-  const isSearchingRider = (!order.driverId && (normalizedStatus === 'ready' || order.isFavor));
+  const isSearchingRider = (!order.driverId && (normalizedStatus === 'ready' || order.isFavor || order.isTrip));
 
   // Update Live Pill
   const livePill = document.querySelector('.v5-live-pill');
@@ -395,72 +471,162 @@ function updateUI(order) {
 
   const serviceFee = order.appUsageFee || order.serviceFee || order.platformFee || 0;
 
+  // Title translation logic for Trips
+  let titleText = '';
+  if (order.isTrip) {
+    titleText = isCompleted ? '¡Viaje Finalizado!' :
+                isCancelled ? 'Viaje Cancelado' :
+                isDelivering ? 'Viaje en curso (Pasajero a bordo)' :
+                (!order.driverId ? 'Buscando chofer...' : 'El chofer va hacia tu ubicación');
+  } else {
+    titleText = isCompleted ? (order.isFavor ? '¡Favor Finalizado!' : '¡Pedido Finalizado!') : 
+                isCancelled ? (order.isFavor ? 'Favor Cancelado' : 'Pedido Cancelado') : 
+                isDelivering ? (order.isFavor ? 'El repartidor está en movimiento' : 'El repartidor va hacia vos') : 
+                (normalizedStatus === 'pending' ? 'Esperando a ser confirmado' :
+                 normalizedStatus === 'ready' ? (order.driverId ? (order.isGoCash ? 'El repartidor está yendo a tu ubicación' : 'El repartidor está yendo a buscar tu pedido') : 'Buscando repartidor...') : 
+                 (order.isFavor ? (order.driverId ? 'El repartidor está yendo a buscar tu pedido' : 'Buscando repartidor...') : 'Preparando tu pedido'));
+  }
+
+  let subtitleHtml = '';
+  if (normalizedStatus === 'pending') {
+    subtitleHtml = `
+      <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
+        Por favor espera a que el comercio confirme tu pedido, tomará solo un momento
+      </p>
+    `;
+  } else if (!order.driverId && (order.isTrip || order.isFavor)) {
+    subtitleHtml = order.isTrip ? `
+      <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
+        Por favor espera mientras asignamos un chofer disponible para tu viaje.
+      </p>
+    ` : `
+      <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
+        Por favor espera mientras asignamos un repartidor para tu favor.
+      </p>
+    `;
+  }
+
   container.innerHTML = `
     <div class="v5-status-header">
       <div class="v5-status-content">
-        <h2 class="v5-status-title">${
-          isCompleted ? (order.isFavor ? '¡Favor Finalizado!' : '¡Pedido Finalizado!') : 
-          isCancelled ? (order.isFavor ? 'Favor Cancelado' : 'Pedido Cancelado') : 
-          isDelivering ? (order.isFavor ? 'El repartidor está en movimiento' : 'El repartidor va hacia vos') : 
-          (normalizedStatus === 'pending' ? 'Esperando a ser confirmado' :
-           normalizedStatus === 'ready' ? (order.driverId ? 'El repartidor está yendo a buscar tu pedido' : 'Buscando repartidor...') : 
-           (order.isFavor ? (order.driverId ? 'El repartidor está yendo a buscar tu pedido' : 'Buscando repartidor...') : 'Preparando tu pedido'))
-        }</h2>
-        ${normalizedStatus === 'pending' ? `
-          <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
-            Por favor espera a que el comercio confirme tu pedido, tomará solo un momento
-          </p>
-        ` : ''}
+        <h2 class="v5-status-title">${titleText}</h2>
+        ${subtitleHtml}
         <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
       </div>
       <div style="font-size:9px; font-weight:800; color: var(--color-text-tertiary); padding:5px 10px; background: var(--color-bg-secondary); border-radius:8px; border: 1px solid var(--color-border-light);">#${order.orderId || '...'}</div>
     </div>
-    <div class="v5-stepper-container">
-      <div class="v5-stepper-line">
-        <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus)}%;"></div>
-      </div>
-      
-      <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0)}">
-        <div class="v5-step-circle">
-          <span class="v5-step-icon">${icon('check', 10)}</span>
-          <span class="v5-step-pulse"></span>
+    
+    ${order.isTrip ? `
+      <div class="v5-stepper-container">
+        <div class="v5-stepper-line">
+          <div class="v5-stepper-line-fill" style="width: ${getTripStepperLinePercent(order)}%;"></div>
         </div>
-        <span class="v5-step-label">Pendiente</span>
+        
+        <div class="v5-stepper-step ${getTripStepClass(order, 0)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Buscando</span>
+        </div>
+ 
+        <div class="v5-stepper-step ${getTripStepClass(order, 1)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Asignado</span>
+        </div>
+ 
+        <div class="v5-stepper-step ${getTripStepClass(order, 2)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">En camino</span>
+        </div>
+ 
+        <div class="v5-stepper-step ${getTripStepClass(order, 3)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">En viaje</span>
+        </div>
+ 
+        <div class="v5-stepper-step ${getTripStepClass(order, 4)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Llegaste</span>
+        </div>
       </div>
+    ` : `
+      <div class="v5-stepper-container">
+        <div class="v5-stepper-line">
+          <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus)}%;"></div>
+        </div>
+        
+        <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Pendiente</span>
+        </div>
 
-      <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1)}">
-        <div class="v5-step-circle">
-          <span class="v5-step-icon">${icon('check', 10)}</span>
-          <span class="v5-step-pulse"></span>
+        <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Aprobado</span>
         </div>
-        <span class="v5-step-label">Aprobado</span>
-      </div>
 
-      <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2)}">
-        <div class="v5-step-circle">
-          <span class="v5-step-icon">${icon('check', 10)}</span>
-          <span class="v5-step-pulse"></span>
+        <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Preparando</span>
         </div>
-        <span class="v5-step-label">Preparando</span>
-      </div>
 
-      <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3)}">
-        <div class="v5-step-circle">
-          <span class="v5-step-icon">${icon('check', 10)}</span>
-          <span class="v5-step-pulse"></span>
+        <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Listo</span>
         </div>
-        <span class="v5-step-label">Listo</span>
-      </div>
 
-      <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4)}">
-        <div class="v5-step-circle">
-          <span class="v5-step-icon">${icon('check', 10)}</span>
-          <span class="v5-step-pulse"></span>
+        <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">En camino</span>
         </div>
-        <span class="v5-step-label">En camino</span>
       </div>
-    </div>
-    ${order.isFavor ? `
+    `}
+
+    ${order.isTrip ? `
+      <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">${order.tripType === 'moto' ? '🏍️' : '🚗'}</span>
+          <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
+          <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+            <span style="color:#22c55e;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
+          </div>
+          <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+            <span style="color:#ef4444;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino:</span> ${order.deliveryAddress}
+          </div>
+        </div>
+      </div>
+    ` : order.isFavor ? `
       <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px;">
         <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Detalles del Favor</div>
         <p style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${order.details}</p>
@@ -471,16 +637,29 @@ function updateUI(order) {
         ` : ''}
       </div>
     ` : ''}
+
     ${order.driverId ? `
       <div class="v5-driver-strip" style="display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; background: var(--color-bg-secondary); border-radius: 16px; border: 1px solid var(--color-border-light);">
         <div style="display: flex; align-items: center; gap: 10px;">
           <div class="v5-driver-img">${order.driverPhoto ? `<img src="${order.driverPhoto}">` : icon('user', 20)}</div>
           <div class="v5-driver-info" style="flex: 1;">
-            <h4>${order.driverName || 'Repartidor'}</h4>
-            <p>ID: ${order.driverDeliveryId || (order.driverId ? order.driverId.slice(0, 8).toUpperCase() : '---')} • ${isDelivering ? 'EN CAMINO' : 'ASIGNADO'}</p>
+            <h4>${order.driverName || 'Chofer'}</h4>
+            <p>ID: ${order.driverDeliveryId || (order.driverId ? order.driverId.slice(0, 8).toUpperCase() : '---')} • ${isDelivering ? 'EN VIAJE' : 'ASIGNADO'}</p>
           </div>
           <button class="v5-chat-btn" id="chat-v5-btn" style="margin-left: auto;">${icon('chatBubble', 18)}</button>
         </div>
+        ${order.isTrip ? `
+          <div style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 700;">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--color-text-tertiary);">🚘 Vehículo:</span>
+              <span style="color: var(--color-text-primary); font-weight: 800;">${order.driverVehicleModel || '---'} (${order.driverVehicleColor || '---'})</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-top: 1px dashed var(--color-border-light); padding-top: 6px;">
+              <span style="color: var(--color-text-tertiary);">🎫 Patente:</span>
+              <span style="color: var(--color-text-primary); font-weight: 850; letter-spacing: 0.5px;">${order.driverVehiclePatent || '---'}</span>
+            </div>
+          </div>
+        ` : ''}
         ${order.paymentMethod === 'mercadopago' ? `
           <div style="background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.05); border: 1px dashed rgba(var(--color-primary-rgb, 59, 130, 246), 0.25); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;">
             <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 750;">
@@ -494,76 +673,111 @@ function updateUI(order) {
         ` : ''}
       </div>
     ` : ''}
-    ${isDelivering ? `
+
+    ${isDelivering && !order.isTrip ? `
       <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
     ` : ''}
-    ${normalizedStatus === 'pending' ? `
-      <div style="margin: 8px 0; display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%;">
-        <button id="v5-cancel-order-btn" class="v5-cancel-btn">
-          ${icon('trash', 15)} Cancelar Pedido
-        </button>
-        ${order.pointsRedeemed > 0 ? `
-          <div style="display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; text-transform: none; letter-spacing: 0.1px;">
-            ${icon('goPointsLogo', 11)} Los Go Points canjeados serán reintegrados a tu cuenta.
-          </div>
-        ` : ''}
-      </div>
-    ` : ''}
-    <div class="v5-summary-mini" style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--color-border-light); padding-top: 12px; width: 100%;">
-      ${order.isFavor ? `
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Envío</div>
-          <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.deliveryCost)}${order.tip > 0 ? ` (incluye ${formatPrice(order.tip)} propina)` : ''}</div>
+
+    <!-- Botón para ver/ocultar detalles -->
+    <button id="v5-toggle-details-btn" class="v5-toggle-btn">
+      ${isDetailsExpanded ? icon('chevronUp', 14) : icon('chevronDown', 14)} 
+      ${isDetailsExpanded ? 'Ocultar Detalles' : 'Ver Detalles y Cancelación'}
+    </button>
+
+    <!-- Contenedor expandible -->
+    <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
+      ${normalizedStatus === 'pending' ? `
+        <div style="margin: 8px 0; display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%;">
+          <button id="v5-cancel-order-btn" class="v5-cancel-btn">
+            ${icon('trash', 15)} Cancelar Viaje
+          </button>
+          ${order.pointsRedeemed > 0 ? `
+            <div style="display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; text-transform: none; letter-spacing: 0.1px;">
+              ${icon('goPointsLogo', 11)} Los Go Points canjeados serán reintegrados a tu cuenta.
+            </div>
+          ` : ''}
         </div>
-        ${order.purchaseFee ? `
+      ` : ''}
+      <div class="v5-summary-mini" style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--color-border-light); padding-top: 12px; width: 100%;">
+        ${order.isTrip ? `
           <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Gestión</div>
-            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.purchaseFee)}</div>
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Valor del viaje</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.deliveryCost)}</div>
+          </div>
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Tarifa de servicio</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.appUsageFee || 0)}</div>
+          </div>
+        ` : order.isFavor ? `
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Envío</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.deliveryCost)}${order.tip > 0 ? ` (incluye ${formatPrice(order.tip)} propina)` : ''}</div>
+          </div>
+          ${order.purchaseFee ? `
+            <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+              <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Gestión</div>
+              <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.purchaseFee)}</div>
+            </div>
+          ` : ''}
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Servicio</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.appUsageFee || 0)}</div>
+          </div>
+        ` : `
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Productos</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.subtotal)}</div>
+          </div>
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Envío</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.deliveryCost)}${order.tip > 0 ? ` (incluye ${formatPrice(order.tip)} propina)` : ''}</div>
+          </div>
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Servicio</div>
+            <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(serviceFee)}</div>
+          </div>
+        `}
+
+        ${(order.discountAmount || 0) > 0 ? `
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--color-success); font-weight: 700;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-success); text-transform: none; margin-bottom: 0;">Descuento GoPoints</div>
+            <div class="v5-price-val">- ${formatPrice(order.discountAmount)}</div>
           </div>
         ` : ''}
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Servicio</div>
-          <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.appUsageFee || 0)}</div>
-        </div>
-      ` : `
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Productos</div>
-          <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.subtotal)}</div>
-        </div>
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Envío</div>
-          <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.deliveryCost)}${order.tip > 0 ? ` (incluye ${formatPrice(order.tip)} propina)` : ''}</div>
-        </div>
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Servicio</div>
-          <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(serviceFee)}</div>
-        </div>
-      `}
 
-      ${(order.discountAmount || 0) > 0 ? `
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--color-success); font-weight: 700;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-success); text-transform: none; margin-bottom: 0;">Descuento GoPoints</div>
-          <div class="v5-price-val">- ${formatPrice(order.discountAmount)}</div>
-        </div>
-      ` : ''}
-
-      ${order.couponCode ? `
-        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #a855f7; font-weight: 700; background: rgba(168, 85, 247, 0.06); padding: 8px 10px; border-radius: 10px; border: 1px dashed rgba(168, 85, 247, 0.25); margin-top: 4px; margin-bottom: 4px; width: 100%; box-sizing: border-box;">
-          <div class="v5-price-label" style="font-size: 12px; font-weight: 800; color: #a855f7; text-transform: none; margin-bottom: 0; display: flex; align-items: center; gap: 6px;">
-            ${icon('tag', 14)} Cupón (${order.couponCode})
+        ${order.couponCode ? `
+          <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #a855f7; font-weight: 700; background: rgba(168, 85, 247, 0.06); padding: 8px 10px; border-radius: 10px; border: 1px dashed rgba(168, 85, 247, 0.25); margin-top: 4px; margin-bottom: 4px; width: 100%; box-sizing: border-box;">
+            <div class="v5-price-label" style="font-size: 12px; font-weight: 800; color: #a855f7; text-transform: none; margin-bottom: 0; display: flex; align-items: center; gap: 6px;">
+              ${icon('tag', 14)} Cupón (${order.couponCode})
+            </div>
+            <div class="v5-price-val" style="font-weight: 800; color: #a855f7;">- ${formatPrice(order.couponDiscount || 0)}</div>
           </div>
-          <div class="v5-price-val" style="font-weight: 800; color: #a855f7;">- ${formatPrice(order.couponDiscount || 0)}</div>
+        ` : ''}
+
+        <div style="height: 1px; background: var(--color-border-light); margin: 4px 0;"></div>
+
+        <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 900;">
+          <div class="v5-price-label" style="font-size: 13px; font-weight: 900; color: var(--color-text-primary); text-transform: none; margin-bottom: 0;">Total final</div>
+          <div class="v5-price-val total" style="font-size: 16px; font-weight: 950; color: var(--color-primary);">${formatPrice(order.total)}</div>
         </div>
-      ` : ''}
-
-      <div style="height: 1px; background: var(--color-border-light); margin: 4px 0;"></div>
-
-      <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 900;">
-        <div class="v5-price-label" style="font-size: 13px; font-weight: 900; color: var(--color-text-primary); text-transform: none; margin-bottom: 0;">Total final</div>
-        <div class="v5-price-val total" style="font-size: 16px; font-weight: 950; color: var(--color-primary);">${formatPrice(order.total)}</div>
       </div>
     </div>
   `;
+
+  document.getElementById('v5-toggle-details-btn')?.addEventListener('click', () => {
+    isDetailsExpanded = !isDetailsExpanded;
+    const expDiv = document.getElementById('v5-expandable-details');
+    const toggleBtn = document.getElementById('v5-toggle-details-btn');
+    if (expDiv && toggleBtn) {
+      if (isDetailsExpanded) {
+        expDiv.classList.add('expanded');
+        toggleBtn.innerHTML = `${icon('chevronUp', 14)} Ocultar Detalles`;
+      } else {
+        expDiv.classList.remove('expanded');
+        toggleBtn.innerHTML = `${icon('chevronDown', 14)} Ver Detalles y Cancelación`;
+      }
+    }
+  });
 
   document.getElementById('chat-v5-btn')?.addEventListener('click', () => {
     import('../components/chat.js').then(m => m.openChat({
@@ -666,6 +880,9 @@ function updateMap(order) {
   if (isFinalized) {
     if (liveMap) {
       if (riderMarker) riderMarker.setMap(null);
+      if (homeMarker) homeMarker.setMap(null);
+      if (pickupMarker) pickupMarker.setMap(null);
+      if (dropoffMarker) dropoffMarker.setMap(null);
       if (routeLine) routeLine.setMap(null);
       if (routeLineGlow) routeLineGlow.setMap(null);
     }
@@ -678,107 +895,290 @@ function updateMap(order) {
     return;
   }
 
-  const riderPos = order.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
-  const destPos = order.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
+  const rawStatus = (order.status || '').toString().toLowerCase();
 
-  if (!liveMap) {
-    const theme = document.documentElement.getAttribute('data-theme') || 'light';
-    liveMap = new google.maps.Map(container, {
-      zoom: 16,
-      center: destPos || riderPos || { lat: -35.0315, lng: -57.5147 },
-      disableDefaultUI: true,
-      zoomControl: false,
-      styles: theme === 'dark' ? getDarkStyles() : [],
-      gestureHandling: 'greedy'
-    });
-  }
+  if (order.isTrip === true) {
+    const riderPos = order.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
+    const pickupPos = order.pickupCoords ? { lat: order.pickupCoords.lat, lng: order.pickupCoords.lng } : null;
+    const dropoffPos = order.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
 
-  // Handle re-centering if only dest is available or if it's the first load
-  if (destPos && riderPos && isFirstFit) {
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend(destPos);
-    bounds.extend(riderPos);
-    liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
-    isFirstFit = false;
-  } else if (destPos && isFirstFit && !riderPos) {
-    liveMap.setCenter(destPos);
-    liveMap.setZoom(17);
-    isFirstFit = false;
-  }
+    if (!liveMap) {
+      const theme = document.documentElement.getAttribute('data-theme') || 'light';
+      liveMap = new google.maps.Map(container, {
+        zoom: 16,
+        center: pickupPos || dropoffPos || { lat: -35.0315, lng: -57.5147 },
+        disableDefaultUI: true,
+        zoomControl: false,
+        styles: theme === 'dark' ? getDarkStyles() : [],
+        gestureHandling: 'greedy'
+      });
+    }
 
-  if (destPos) {
-    if (!homeMarker) {
-      homeMarker = new google.maps.OverlayView();
-      homeMarker.pos = destPos;
-      homeMarker.onAdd = function() {
-        const div = document.createElement('div');
-        div.className = 'v5-marker-shadow';
-        div.style.position = 'absolute';
-        div.style.zIndex = '50';
-        div.innerHTML = `
-          <div style="display:flex; flex-direction:column; align-items:center;">
-            <div style="background:#ef4444; width:48px; height:48px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 10px 25px rgba(239,68,68, 0.5);">
-              <div style="transform:rotate(45deg); color:white; display:flex;">${icon('home', 24)}</div>
-            </div>
-            <div style="width:12px; height:4px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:4px; filter:blur(2px);"></div>
-          </div>`;
-        this.getPanes().overlayMouseTarget.appendChild(div);
-        this.div = div;
-      };
-      homeMarker.draw = function() {
-        const projection = this.getProjection();
-        if (!projection) return;
-        const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-        if (point && this.div) {
-          this.div.style.left = (point.x - 24) + 'px';
-          this.div.style.top = (point.y - 52) + 'px';
+    if (pickupPos) {
+      if (!pickupMarker) {
+        pickupMarker = new google.maps.OverlayView();
+        pickupMarker.pos = pickupPos;
+        pickupMarker.onAdd = function() {
+          const div = document.createElement('div');
+          div.className = 'v5-marker-shadow';
+          div.style.position = 'absolute';
+          div.style.zIndex = '50';
+          div.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center;">
+              <div style="background:#22c55e; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 6px 15px rgba(34,197,94, 0.45);">
+                <div style="color:white; display:flex;">${icon('user', 18)}</div>
+              </div>
+              <div style="width:10px; height:3px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:2px; filter:blur(1px);"></div>
+            </div>`;
+          this.getPanes().overlayMouseTarget.appendChild(div);
+          this.div = div;
+        };
+        pickupMarker.draw = function() {
+          const projection = this.getProjection();
+          if (!projection) return;
+          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
+          if (point && this.div) {
+            this.div.style.left = (point.x - 19) + 'px';
+            this.div.style.top = (point.y - 41) + 'px';
+          }
+        };
+        pickupMarker.setMap(liveMap);
+      } else {
+        pickupMarker.pos = pickupPos;
+        if (pickupMarker.draw) pickupMarker.draw();
+      }
+    }
+
+    if (dropoffPos) {
+      if (!dropoffMarker) {
+        dropoffMarker = new google.maps.OverlayView();
+        dropoffMarker.pos = dropoffPos;
+        dropoffMarker.onAdd = function() {
+          const div = document.createElement('div');
+          div.className = 'v5-marker-shadow';
+          div.style.position = 'absolute';
+          div.style.zIndex = '50';
+          div.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center;">
+              <div style="background:#ef4444; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 6px 15px rgba(239,68,68, 0.45);">
+                <div style="color:white; display:flex;">${icon('mapPin', 18)}</div>
+              </div>
+              <div style="width:10px; height:3px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:2px; filter:blur(1px);"></div>
+            </div>`;
+          this.getPanes().overlayMouseTarget.appendChild(div);
+          this.div = div;
+        };
+        dropoffMarker.draw = function() {
+          const projection = this.getProjection();
+          if (!projection) return;
+          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
+          if (point && this.div) {
+            this.div.style.left = (point.x - 19) + 'px';
+            this.div.style.top = (point.y - 41) + 'px';
+          }
+        };
+        dropoffMarker.setMap(liveMap);
+      } else {
+        dropoffMarker.pos = dropoffPos;
+        if (dropoffMarker.draw) dropoffMarker.draw();
+      }
+    }
+
+    if (riderPos) {
+      if (!riderMarker) {
+        riderMarker = new google.maps.OverlayView();
+        riderMarker.pos = riderPos;
+        riderMarker.onAdd = function() {
+          const div = document.createElement('div');
+          div.className = 'v5-marker-shadow';
+          div.style.position = 'absolute';
+          div.innerHTML = `
+            <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
+              <div class="sonar-pulse-ring-1"></div>
+              <div class="sonar-pulse-ring-2"></div>
+              <div style="background:#3b82f6; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2.5px solid white; position:relative; z-index:2; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.45);">
+                ${order.tripType === 'moto' ? icon('bike', 18) : icon('car', 18)}
+              </div>
+            </div>`;
+          this.getPanes().overlayMouseTarget.appendChild(div);
+          this.div = div;
+        };
+        riderMarker.draw = function() {
+          const projection = this.getProjection();
+          if (!projection) return;
+          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
+          if (point && this.div) {
+            this.div.style.left = (point.x - 20) + 'px';
+            this.div.style.top = (point.y - 20) + 'px';
+          }
+        };
+        riderMarker.setMap(liveMap);
+      } else {
+        riderMarker.pos = riderPos;
+        if (riderMarker.div) {
+          const innerBadge = riderMarker.div.querySelector('div[style*="background"]');
+          if (innerBadge) {
+            innerBadge.innerHTML = order.tripType === 'moto' ? icon('bike', 18) : icon('car', 18);
+          }
         }
-      };
-      homeMarker.setMap(liveMap);
-    } else {
-      homeMarker.pos = destPos;
-      if (homeMarker.draw) homeMarker.draw();
+        if (riderMarker.draw) riderMarker.draw();
+      }
+    }
+
+    if (isFirstFit) {
+      const bounds = new google.maps.LatLngBounds();
+      if (pickupPos) bounds.extend(pickupPos);
+      if (dropoffPos) bounds.extend(dropoffPos);
+      if (riderPos) bounds.extend(riderPos);
+      liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
+      isFirstFit = false;
+    }
+
+    if (riderPos) {
+      const targetPos = (rawStatus === 'delivering' || rawStatus === 'en camino') ? dropoffPos : pickupPos;
+      if (targetPos) {
+        updateRoute(riderPos, targetPos);
+      }
+    }
+  } else {
+    const riderPos = order.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
+    const destPos = order.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
+
+    if (!liveMap) {
+      const theme = document.documentElement.getAttribute('data-theme') || 'light';
+      liveMap = new google.maps.Map(container, {
+        zoom: 16,
+        center: destPos || riderPos || { lat: -35.0315, lng: -57.5147 },
+        disableDefaultUI: true,
+        zoomControl: false,
+        styles: theme === 'dark' ? getDarkStyles() : [],
+        gestureHandling: 'greedy'
+      });
+    }
+
+    if (destPos && riderPos && isFirstFit) {
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(destPos);
+      bounds.extend(riderPos);
+      liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
+      isFirstFit = false;
+    } else if (destPos && isFirstFit && !riderPos) {
+      liveMap.setCenter(destPos);
+      liveMap.setZoom(17);
+      isFirstFit = false;
+    }
+
+    if (destPos) {
+      if (!homeMarker) {
+        homeMarker = new google.maps.OverlayView();
+        homeMarker.pos = destPos;
+        homeMarker.onAdd = function() {
+          const div = document.createElement('div');
+          div.className = 'v5-marker-shadow';
+          div.style.position = 'absolute';
+          div.style.zIndex = '50';
+          div.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center;">
+              <div style="background:#ef4444; width:48px; height:48px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 10px 25px rgba(239,68,68, 0.5);">
+                <div style="transform:rotate(45deg); color:white; display:flex;">${icon('home', 24)}</div>
+              </div>
+              <div style="width:12px; height:4px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:4px; filter:blur(2px);"></div>
+            </div>`;
+          this.getPanes().overlayMouseTarget.appendChild(div);
+          this.div = div;
+        };
+        homeMarker.draw = function() {
+          const projection = this.getProjection();
+          if (!projection) return;
+          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
+          if (point && this.div) {
+            this.div.style.left = (point.x - 24) + 'px';
+            this.div.style.top = (point.y - 52) + 'px';
+          }
+        };
+        homeMarker.setMap(liveMap);
+      } else {
+        homeMarker.pos = destPos;
+        if (homeMarker.draw) homeMarker.draw();
+      }
+    }
+
+    if (riderPos) {
+      if (!riderMarker) {
+        riderMarker = new google.maps.OverlayView();
+        riderMarker.pos = riderPos;
+        riderMarker.onAdd = function() {
+          const div = document.createElement('div');
+          div.className = 'v5-marker-shadow';
+          div.style.position = 'absolute';
+          div.innerHTML = `
+            <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
+              <div class="sonar-pulse-ring-1"></div>
+              <div class="sonar-pulse-ring-2"></div>
+              <div style="background:#ef4444; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2.5px solid white; position:relative; z-index:2; box-shadow: 0 4px 10px rgba(239, 68, 68, 0.45);">
+                ${icon('bike', 18)}
+              </div>
+            </div>`;
+          this.getPanes().overlayMouseTarget.appendChild(div);
+          this.div = div;
+        };
+        riderMarker.draw = function() {
+          const projection = this.getProjection();
+          if (!projection) return;
+          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
+          if (point && this.div) {
+            this.div.style.left = (point.x - 20) + 'px';
+            this.div.style.top = (point.y - 20) + 'px';
+          }
+        };
+        riderMarker.setMap(liveMap);
+      } else {
+        riderMarker.pos = riderPos;
+        if (riderMarker.draw) riderMarker.draw();
+      }
+    }
+
+    if (riderPos && destPos) {
+      updateRoute(riderPos, destPos);
     }
   }
+}
 
-  if (riderPos) {
-    if (!riderMarker) {
-      riderMarker = new google.maps.OverlayView();
-      riderMarker.pos = riderPos;
-      riderMarker.onAdd = function() {
-        const div = document.createElement('div');
-        div.className = 'v5-marker-shadow';
-        div.style.position = 'absolute';
-        div.innerHTML = `
-          <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
-            <div class="sonar-pulse-ring-1"></div>
-            <div class="sonar-pulse-ring-2"></div>
-            <div style="background:#ef4444; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2.5px solid white; position:relative; z-index:2; box-shadow: 0 4px 10px rgba(239, 68, 68, 0.45);">
-              ${icon('bike', 18)}
-            </div>
-          </div>`;
-        this.getPanes().overlayMouseTarget.appendChild(div);
-        this.div = div;
-      };
-      riderMarker.draw = function() {
-        const projection = this.getProjection();
-        if (!projection) return;
-        const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-        if (point && this.div) {
-          this.div.style.left = (point.x - 20) + 'px';
-          this.div.style.top = (point.y - 20) + 'px';
-        }
-      };
-      riderMarker.setMap(liveMap);
-    } else {
-      riderMarker.pos = riderPos;
-      if (riderMarker.draw) riderMarker.draw();
-    }
+function getTripStepClass(order, index) {
+  const rawStatus = (order.status || '').toString().toLowerCase();
+  let currentVal = 0;
+  if (!order.driverId) {
+    currentVal = 0; // Buscando
+  } else if (rawStatus === 'confirmed') {
+    currentVal = 1; // Asignado
+  } else if (rawStatus === 'ready') {
+    currentVal = 2; // En camino
+  } else if (rawStatus === 'delivering' || rawStatus === 'en camino') {
+    currentVal = 3; // En viaje
+  } else if (rawStatus === 'completed' || rawStatus === 'entregado') {
+    currentVal = 4; // Llegaste
   }
+  
+  if (currentVal > index) return 'completed';
+  if (currentVal === index) return 'active';
+  return 'inactive';
+}
 
-  if (riderPos && destPos) {
-    updateRoute(riderPos, destPos);
+function getTripStepperLinePercent(order) {
+  const rawStatus = (order.status || '').toString().toLowerCase();
+  let currentVal = 0;
+  if (!order.driverId) {
+    currentVal = 0;
+  } else if (rawStatus === 'confirmed') {
+    currentVal = 25;
+  } else if (rawStatus === 'ready') {
+    currentVal = 50;
+  } else if (rawStatus === 'delivering' || rawStatus === 'en camino') {
+    currentVal = 75;
+  } else if (rawStatus === 'completed' || rawStatus === 'entregado') {
+    currentVal = 100;
   }
+  return currentVal;
 }
 
 async function updateRoute(start, end) {
@@ -1076,16 +1476,14 @@ function getDarkStyles() {
   ];
 }
 
-async function showPointsEarnedModal(order) {
-  const { showModal } = await import('../components/modal.js');
-  const { icon } = await import('../utils/icons.js');
-  const { formatPrice } = await import('../utils/format.js');
-  const { getState } = await import('../state.js');
-
+export function showPointsEarnedModal(order) {
   const s = getState();
   const dollarPerPoint = s.dollarPerPoint || 1;
-  const points = order.pointsEarned || 0;
-  const valueDiscount = points * dollarPerPoint;
+  window.lastDollarPerPoint = dollarPerPoint;
+  
+  const points = order.pointsEarned;
+  const hasPoints = points !== undefined && points !== null;
+  const valueDiscount = (points || 0) * dollarPerPoint;
 
   const levelMap = {
     bronce: { name: 'Bronce', color: '#CD7F32' },
@@ -1111,31 +1509,31 @@ async function showPointsEarnedModal(order) {
 
       <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 20px; padding: 18px 24px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: var(--shadow-sm);">
         <span style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px;">Sumaste en Club GO</span>
-        <div style="font-size: 32px; font-weight: 950; color: #f59e0b; letter-spacing: -0.5px; display: flex; align-items: center; gap: 4.5px;">
-          +${points} <span style="font-size: 14px; font-weight: 850; letter-spacing: 0;">GO PTS</span>
+        <div id="modal-points-value-container" style="font-size: 32px; font-weight: 950; color: #f59e0b; letter-spacing: -0.5px; display: flex; align-items: center; gap: 4.5px; min-height: 38px;">
+          ${hasPoints ? `+${points} <span style="font-size: 14px; font-weight: 850; letter-spacing: 0;">GO PTS</span>` : `<div class="spinner-mini" style="width:20px; height:20px; border-width:3px; border-top-color:#f59e0b; margin:0;"></div>`}
         </div>
-        <div style="font-size: 12px; color: var(--color-text-secondary); font-weight: 700; margin-top: 2px;">
-          Equivalentes a <strong style="color: var(--color-success); font-weight: 900;">${formatPrice(valueDiscount)}</strong> de descuento directo.
+        <div id="modal-points-discount-container" style="font-size: 12px; color: var(--color-text-secondary); font-weight: 700; margin-top: 2px;">
+          ${hasPoints ? `Equivalentes a <strong style="color: var(--color-success); font-weight: 900;">${formatPrice(valueDiscount)}</strong> de descuento directo.` : `Calculando puntos ganados...`}
         </div>
       </div>
 
-      ${points > 0 ? `
-        <div style="font-size: 11.5px; color: var(--color-text-tertiary); line-height: 1.5; text-align: center; max-width: 280px; font-weight: 600;">
-          Multiplicador de nivel <strong style="color: ${lvlInfo.color}; font-weight: 900;">${lvlInfo.name}</strong> activo: <strong style="color: var(--color-primary); font-weight: 900;">${order.appliedMultiplier || 1.0}x puntos</strong>.
-        </div>
-      ` : ''}
+      <div id="modal-points-multiplier-container" style="font-size: 11.5px; color: var(--color-text-tertiary); line-height: 1.5; text-align: center; max-width: 280px; font-weight: 600;">
+        ${hasPoints ? `Multiplicador de nivel <strong style="color: ${lvlInfo.color}; font-weight: 900;">${lvlInfo.name}</strong> activo: <strong style="color: var(--color-primary); font-weight: 900;">${order.appliedMultiplier || 1.0}x puntos</strong>.` : ''}
+      </div>
 
-      ${order.referredRewardGranted ? `
-        <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%); border: 1.5px dashed rgba(245, 158, 11, 0.4); border-radius: 20px; padding: 16px; width:100%; box-sizing:border-box; text-align:left; display:flex; gap:12px; align-items:flex-start; margin-top: 4px;">
-          <span style="font-size:24px; animation: scale-pulse 2s infinite;">🎁</span>
-          <div>
-            <strong style="font-size:13px; color:#d97706; display:block; margin-bottom:2px;">¡Bono de Referido Acreditado!</strong>
-            <span style="font-size:11.5px; color:var(--color-text-secondary); line-height:1.45; display:block;">
-              Por haber ingresado con la invitación de tu amigo y completar tu primer pedido, te regalamos <strong>${order.referralBonusAmount || 500} GO Points extra</strong>. ¡Disfrutalos!
-            </span>
+      <div id="modal-points-referral-container" style="width: 100%;">
+        ${order.referredRewardGranted ? `
+          <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%); border: 1.5px dashed rgba(245, 158, 11, 0.4); border-radius: 20px; padding: 16px; width:100%; box-sizing:border-box; text-align:left; display:flex; gap:12px; align-items:flex-start; margin-top: 4px;">
+            <span style="font-size:24px; animation: scale-pulse 2s infinite;">🎁</span>
+            <div>
+              <strong style="font-size:13px; color:#d97706; display:block; margin-bottom:2px;">¡Bono de Referido Acreditado!</strong>
+              <span style="font-size:11.5px; color:var(--color-text-secondary); line-height:1.45; display:block;">
+                Por haber ingresado con la invitación de tu amigo y completar tu primer pedido, te regalamos <strong>${order.referralBonusAmount || 500} GO Points extra</strong>. ¡Disfrutalos!
+              </span>
+            </div>
           </div>
-        </div>
-      ` : ''}
+        ` : ''}
+      </div>
 
       <button id="btn-close-points-modal" class="btn btn-primary btn-block" style="height: 50px; border-radius: 16px; font-size: 13.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; border: none; margin-top: 8px; box-shadow: 0 8px 24px rgba(var(--color-primary-rgb), 0.25);">
         ¡Genial, gracias!
@@ -1157,10 +1555,69 @@ async function showPointsEarnedModal(order) {
     content: modalContent,
     onOpen: () => {
       const btn = document.getElementById('btn-close-points-modal');
-      btn?.addEventListener('click', async () => {
-        const { closeModal } = await import('../components/modal.js');
+      btn?.addEventListener('click', () => {
+        localStorage.setItem(`gd_dismissed_points_modal_${order.id}`, 'true');
         closeModal();
       });
     }
   });
 }
+
+export function updatePointsModalValues(order) {
+  const pointsContainer = document.getElementById('modal-points-value-container');
+  const discountContainer = document.getElementById('modal-points-discount-container');
+  const multiplierContainer = document.getElementById('modal-points-multiplier-container');
+  const referralContainer = document.getElementById('modal-points-referral-container');
+  
+  if (!pointsContainer || order.pointsEarned === undefined) return;
+  
+  const points = order.pointsEarned;
+  const dollarPerPoint = window.lastDollarPerPoint || 1;
+  const valueDiscount = points * dollarPerPoint;
+  
+  const levelMap = {
+    bronce: { name: 'Bronce', color: '#CD7F32' },
+    plata: { name: 'Plata', color: '#C0C0C0' },
+    oro: { name: 'Oro', color: '#FFD700' }
+  };
+  const lvlInfo = levelMap[order.userLevel || 'bronce'] || levelMap.bronce;
+  
+  const formatPrice = (val) => `$${Number(val).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  
+  // Animate values load
+  pointsContainer.style.opacity = '0';
+  pointsContainer.style.transform = 'scale(0.8)';
+  pointsContainer.style.transition = 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+  
+  setTimeout(() => {
+    pointsContainer.innerHTML = `+${points} <span style="font-size: 14px; font-weight: 850; letter-spacing: 0;">GO PTS</span>`;
+    pointsContainer.style.opacity = '1';
+    pointsContainer.style.transform = 'scale(1)';
+  }, 150);
+  
+  if (discountContainer) {
+    discountContainer.innerHTML = `Equivalentes a <strong style="color: var(--color-success); font-weight: 900;">${formatPrice(valueDiscount)}</strong> de descuento directo.`;
+  }
+  
+  if (multiplierContainer) {
+    multiplierContainer.innerHTML = `
+      Multiplicador de nivel <strong style="color: ${lvlInfo.color}; font-weight: 900;">${lvlInfo.name}</strong> activo: <strong style="color: var(--color-primary); font-weight: 900;">${order.appliedMultiplier || 1.0}x puntos</strong>.
+    `;
+  }
+
+  if (referralContainer && order.referredRewardGranted) {
+    referralContainer.innerHTML = `
+      <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%); border: 1.5px dashed rgba(245, 158, 11, 0.4); border-radius: 20px; padding: 16px; width:100%; box-sizing:border-box; text-align:left; display:flex; gap:12px; align-items:flex-start; margin-top: 4px;">
+        <span style="font-size:24px; animation: scale-pulse 2s infinite;">🎁</span>
+        <div>
+          <strong style="font-size:13px; color:#d97706; display:block; margin-bottom:2px;">¡Bono de Referido Acreditado!</strong>
+          <span style="font-size:11.5px; color:var(--color-text-secondary); line-height:1.45; display:block;">
+            Por haber ingresado con la invitación de tu amigo y completar tu primer pedido, te regalamos <strong>${order.referralBonusAmount || 500} GO Points extra</strong>. ¡Disfrutalos!
+          </span>
+        </div>
+      </div>
+    `;
+  }
+}
+
+

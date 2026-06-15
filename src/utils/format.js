@@ -30,10 +30,14 @@ export function getArgentinaTime() {
   return new Date(utc + (3600000 * artOffset));
 }
 
-export function isShopOpen(schedules) {
+export function isShopOpen(schedules, daysOpen) {
+  const now = getArgentinaTime();
+  if (Array.isArray(daysOpen) && daysOpen.length > 0) {
+    const currentDay = now.getDay();
+    if (!daysOpen.includes(currentDay)) return false;
+  }
   if (!schedules || schedules.length === 0) return true;
   
-  const now = getArgentinaTime();
   const currentTime = now.getHours() * 60 + now.getMinutes();
 
   return schedules.some(slot => {
@@ -58,5 +62,29 @@ export function isShopOpen(schedules) {
       return false;
     }
   });
+}
+
+export function formatDeliveryTime(distanceKm) {
+  if (distanceKm === null || distanceKm === undefined) return '25-40 min';
+  
+  // 1. Acceptance Delay (time it takes for the commerce to accept the order): ~4 min
+  const acceptanceDelay = 4;
+  
+  // 2. Preparation Time (time to prepare the food/items): ~15 min
+  const prepTime = 15;
+  
+  // 3. Driver Pickup Time (driver assignment + travel to store + pickup): ~6 min
+  const riderToStoreTime = 6;
+  
+  // 4. Transit Time (store to customer travel): ~3.5 min per km
+  const travelToCustomerTime = distanceKm * 3.5;
+  
+  // Total Estimated Time
+  const totalMinutes = acceptanceDelay + prepTime + riderToStoreTime + travelToCustomerTime;
+  
+  const minTime = Math.max(20, Math.round(totalMinutes - 5));
+  const maxTime = Math.max(35, Math.round(totalMinutes + 5));
+  
+  return `${minTime}-${maxTime} min`;
 }
 

@@ -46,6 +46,15 @@ export function printComanda(order) {
             <div class="date">${d.toLocaleDateString('es-AR')} - ${d.toLocaleTimeString('es-AR', {hour: '2-digit', minute:'2-digit'})}</div>
           </div>
           
+          ${order.isScheduled ? `
+          <div class="section" style="border: 2px solid #000; padding: 10px; text-align: center; margin-bottom: 20px;">
+            <div style="font-size: 18px; font-weight: bold; text-transform: uppercase;">*** PEDIDO PROGRAMADO ***</div>
+            <div style="font-size: 16px; font-weight: bold; margin-top: 5px;">
+              ENTREGAR EL: ${order.scheduledDate} a las ${order.scheduledTime} HS
+            </div>
+          </div>
+          ` : ''}
+          
           <div class="section">
             <div class="row"><strong>Cliente:</strong> ${order.userName || 'Consumidor Final'}</div>
             <div class="row"><strong>Teléfono:</strong> ${order.userPhone || '---'}</div>
@@ -70,18 +79,9 @@ export function printComanda(order) {
         <div class="footer-wrapper">
 
         <div class="section totals">
-          <div class="total-row">
-            <span>Subtotal</span>
-            <span>${formatP(order.subtotal || order.total - (order.deliveryCost || 0))}</span>
-          </div>
-          ${order.deliveryCost ? `
-          <div class="total-row">
-            <span>Costo de Envío</span>
-            <span>${formatP(order.deliveryCost)}</span>
-          </div>` : ''}
           <div class="total-final">
-            <span>TOTAL</span>
-            <span>${formatP(order.total)}</span>
+            <span>TOTAL PRODUCTOS</span>
+            <span>${formatP(order.subtotal || order.total - (order.deliveryCost || 0) - (order.appUsageFee || 0))}</span>
           </div>
         </div>
 

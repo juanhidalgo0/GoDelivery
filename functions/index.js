@@ -1484,5 +1484,150 @@ exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/
   }
 });
 
+/**
+ * Endpoint: Perform a complete platform data reset (Admin only)
+ */
+exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  // Get token either from Auth header or req.body.idToken
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split("Bearer ")[1];
+  } else if (req.body && req.body.idToken) {
+    token = req.body.idToken;
+  }
+
+  if (!token) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(token);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+
+  const uid = decodedToken.uid;
+  try {
+    // 1. Verify user is an Admin
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists || userDoc.data().role !== "admin") {
+      return res.status(403).json({ error: "No tenés permisos para realizar esta acción" });
+    }
+
+    const { keepPoints, keepAds, keepOffers } = req.body;
+
+    // 2. Auxiliary/transactional collections cleared always
+    const collectionsToClear = [
+      'orders', 'chats', 'support_chats', 'notifications', 'commissions',
+      'settlements', 'delivery_transactions', 'deliverySessions',
+      'visits', 'broadcasts', 'reviews'
+    ];
+
+    if (!keepAds) {
+      collectionsToClear.push('ads', 'customAds');
+    }
+
+    if (!keepOffers) {
+      collectionsToClear.push('offers', 'coupons');
+    }
+
+    // Perform deletions
+    for (const colName of collectionsToClear) {
+      await deleteCollection(db.collection(colName));
+    }
+
+    // 3. Clear global reset counters/settings
+    await db.collection('settings').doc('global').set({
+      lastOrderId: 0,
+      lastResetAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // 4. Update all users: blanquear saldos, deudas, ratings
+    const usersSnap = await db.collection('users').get();
+    const userChunks = chunkArray(usersSnap.docs, 500);
+    for (const chunk of userChunks) {
+      const batch = db.batch();
+      chunk.forEach(uDoc => {
+        const updateData = {
+          deliveryDebt: 0,
+          commerceBalance: 0,
+          completedOrdersCount: 0,
+          ratings: [] // Clear driver ratings list
+        };
+        if (!keepPoints) {
+          updateData.points = 0;
+        }
+        batch.update(uDoc.ref, updateData);
+      });
+      await batch.commit();
+    }
+
+    // 5. Update all comercios: reset ratings and reviewsCount to default
+    const comerciosSnap = await db.collection('comercios').get();
+    const comercioChunks = chunkArray(comerciosSnap.docs, 500);
+    for (const chunk of comercioChunks) {
+      const batch = db.batch();
+      chunk.forEach(cDoc => {
+        batch.update(cDoc.ref, {
+          rating: 4.8,
+          reviewsCount: 0
+        });
+      });
+      await batch.commit();
+    }
+
+    return res.status(200).json({ success: true, message: "Reseteo Nuclear completado correctamente" });
+
+  } catch (error) {
+    logger.error("Error in adminHardReset:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper functions for deletion and chunking
+async function deleteCollection(collectionRef) {
+  const query = collectionRef.limit(500);
+  return new Promise((resolve, reject) => {
+    deleteQueryBatch(query, resolve, reject);
+  });
+}
+
+async function deleteQueryBatch(query, resolve, reject) {
+  try {
+    const snapshot = await query.get();
+    if (snapshot.size === 0) {
+      resolve();
+      return;
+    }
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    process.nextTick(() => {
+      deleteQueryBatch(query, resolve, reject);
+    });
+  } catch (error) {
+    reject(error);
+  }
+}
+
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+
+
+
 
 

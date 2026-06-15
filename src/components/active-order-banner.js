@@ -44,7 +44,21 @@ function startListening(userId) {
   );
 
   activeUnsub = onSnapshot(q, (snap) => {
-    const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Check for completed orders that haven't been dismissed yet
+    const undismissedCompleted = orders.filter(o => 
+      (o.status === 'completed' || o.status === 'entregado') && 
+      localStorage.getItem(`gd_dismissed_points_modal_${o.id}`) !== 'true'
+    );
+
+    undismissedCompleted.forEach(async (completedOrder) => {
+      // Show unified rating and points modal globally!
+      const { showDeliveryRating } = await import('./delivery-rating.js');
+      showDeliveryRating(completedOrder);
+    });
+
+    const activeOrders = orders.filter(o => !['completed', 'cancelled'].includes(o.status))
       .sort((a, b) => {
         const statusOrder = { delivering: 0, ready: 1, confirmed: 2, pending: 3 };
         const aStatus = statusOrder[a.status] ?? 99;
@@ -53,7 +67,7 @@ function startListening(userId) {
         return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
       });
 
-    updateBannerState(orders[0] || null, orders);
+    updateBannerState(activeOrders[0] || null, activeOrders);
   }, (err) => {
     console.error('Error in ActiveOrderBanner listener:', err);
   });
@@ -97,24 +111,42 @@ function updateBannerState(order, allOrders = []) {
       clearOrderIndicator();
       return;
     case 'confirmed':
-      color1 = '#0284c7'; color2 = '#0369a1';
-      title = 'Preparando pedido';
+      if (order.isTrip) {
+        color1 = '#EF4444'; color2 = '#DC2626'; // Bright Red!
+        title = 'Chofer en camino';
+        iconName = 'car';
+      } else {
+        color1 = '#0284c7'; color2 = '#0369a1';
+        title = 'Preparando pedido';
+      }
       break;
     case 'ready':
-      color1 = '#7c3aed'; color2 = '#5b21b6';
-      title = '¡Pedido listo!';
+      if (order.isTrip) {
+        color1 = '#EF4444'; color2 = '#DC2626';
+        title = 'Chofer en camino';
+        iconName = 'car';
+      } else {
+        color1 = '#7c3aed'; color2 = '#5b21b6';
+        title = '¡Pedido listo!';
+      }
       break;
     case 'delivering':
-      color1 = '#059669'; color2 = '#10b981';
-      title = '¡Pedido en camino!';
-      iconName = 'bike';
+      if (order.isTrip) {
+        color1 = '#059669'; color2 = '#10b981';
+        title = 'Viaje iniciado';
+        iconName = 'car';
+      } else {
+        color1 = '#059669'; color2 = '#10b981';
+        title = '¡Pedido en camino!';
+        iconName = 'bike';
+      }
       break;
     default:
       return;
   }
 
   // Show persistent floating indicator
-  const showCode = order.status === 'delivering' || (order.bundleId && allOrders.some(o => o.bundleId === order.bundleId && o.status === 'delivering'));
+  const showCode = !order.isTrip && (order.status === 'delivering' || (order.bundleId && allOrders.some(o => o.bundleId === order.bundleId && o.status === 'delivering')));
   updateOrderFAB(order, { color1, color2, title, iconName, showCode });
 
   // If status JUST changed, also show a brief banner for attention
@@ -123,18 +155,28 @@ function updateBannerState(order, allOrders = []) {
 
     // Generate highly professional, descriptive text in Spanish instead of raw status codes
     let statusDesc = '';
-    switch (order.status) {
-      case 'confirmed':
-        statusDesc = 'El comercio confirmó tu pedido y comenzó a prepararlo.';
-        break;
-      case 'ready':
-        statusDesc = 'El comercio ya preparó tu pedido y el repartidor se dirige a retirarlo.';
-        break;
-      case 'delivering':
-        statusDesc = `El repartidor ya retiró tu pedido y está en camino a tu ubicación. Código de entrega: ${order.verificationCode || '----'}`;
-        break;
-      default:
-        statusDesc = `Tu pedido cambió al estado: ${order.status}`;
+    if (order.isTrip) {
+      if (order.status === 'confirmed' || order.status === 'ready') {
+        statusDesc = `El chofer está yendo a tu ubicación. Patente: ${order.driverVehiclePatent || '---'}`;
+      } else if (order.status === 'delivering') {
+        statusDesc = 'El viaje ha iniciado. Pasajero a bordo.';
+      } else {
+        statusDesc = `Tu viaje cambió al estado: ${order.status}`;
+      }
+    } else {
+      switch (order.status) {
+        case 'confirmed':
+          statusDesc = 'El comercio confirmó tu pedido y comenzó a prepararlo.';
+          break;
+        case 'ready':
+          statusDesc = 'El comercio ya preparó tu pedido y el repartidor se dirige a retirarlo.';
+          break;
+        case 'delivering':
+          statusDesc = `El repartidor ya retiró tu pedido y está en camino a tu ubicación. Código de entrega: ${order.verificationCode || '----'}`;
+          break;
+        default:
+          statusDesc = `Tu pedido cambió al estado: ${order.status}`;
+      }
     }
 
     // SEND TO DRAWER
@@ -192,11 +234,21 @@ function updateOrderFAB(order, config) {
   FABStack.reposition();
   fab.style.background = `linear-gradient(135deg, ${config.color1} 0%, ${config.color2} 100%)`;
   fab.className = 'order-fab-active';
+  
+  let subtitleHtml = '';
+  if (order.isTrip && order.driverId) {
+    subtitleHtml = `<span style="font-size:11px; font-weight:900; margin-top:2px;">PATENTE: ${order.driverVehiclePatent || '---'}</span>`;
+  } else if (config.showCode) {
+    subtitleHtml = `<span style="font-size:14px; font-weight:950; letter-spacing:2px; margin-top:2px;">CÓD: ${order.verificationCode}</span>`;
+  } else {
+    subtitleHtml = `<span style="font-size:11px; font-weight:700; opacity:0.7; margin-top:2px;">Pedido #${order.orderId || order.id.slice(0,6)}</span>`;
+  }
+
   fab.innerHTML = `
     ${icon(config.iconName, 22)}
     <div style="display:flex; flex-direction:column; align-items:flex-start; line-height:1.1;">
       <span style="font-size:9px; opacity:0.85; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">${config.title}</span>
-      ${config.showCode ? `<span style="font-size:14px; font-weight:950; letter-spacing:2px; margin-top:2px;">CÓD: ${order.verificationCode}</span>` : `<span style="font-size:11px; font-weight:700; opacity:0.7; margin-top:2px;">Pedido #${order.orderId || order.id.slice(0,6)}</span>`}
+      ${subtitleHtml}
     </div>
     <div class="fab-toggle-dot"></div>
   `;

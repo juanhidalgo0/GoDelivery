@@ -1,11 +1,11 @@
 /* GoDelivery — Address Modal Component with Google Maps & PedidosYa Style */
 import { showModal, closeModal, closeMultipleModals } from './modal.js';
 import { icon } from '../utils/icons.js';
-import { setDeliveryAddress, getState } from '../state.js';
+import { setDeliveryAddress, getState, setState } from '../state.js';
 import { showToast } from './toast.js';
 
 export function showAddressPrompt(onSuccess, config = {}) {
-  const isGeneric = config.mode === 'pick';
+  const isGeneric = config.mode === 'pick' || config.skipDetails === true;
   const modalContent = document.createElement('div');
   modalContent.className = 'delivery-map-modal-v4';
   modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden;';
@@ -18,6 +18,16 @@ export function showAddressPrompt(onSuccess, config = {}) {
   let lastGeocodedAddress = '';
   let userLocationMarker = null;
   let lastKnownUserPos = null;
+  let geocodingDisabled = false;
+  let geocodingDisabledTimeout = null;
+
+  const disableGeocodingTemporarily = (ms = 1200) => {
+    geocodingDisabled = true;
+    if (geocodingDisabledTimeout) clearTimeout(geocodingDisabledTimeout);
+    geocodingDisabledTimeout = setTimeout(() => {
+      geocodingDisabled = false;
+    }, ms);
+  };
 
   const renderMainView = () => {
     modalContent.innerHTML = `
@@ -78,12 +88,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
         <div id="search-section" style="margin-bottom: 16px; position: relative;">
           <div style="position: relative;">
-            <input type="text" id="address-search-input" placeholder="¿A dónde lo enviamos?" style="width: 100%; height: 56px; padding: 0 52px 0 20px; border-radius: 18px; border: 1.5px solid var(--color-bg-secondary); background: var(--color-bg-secondary); font-size: 15px; font-weight: 700; outline: none; color: var(--color-text-primary); transition: all 0.2s;">
+            <input type="text" id="address-search-input" placeholder="Calle y Número (Ejemplo: Brenan 1340)" style="width: 100%; height: 56px; padding: 0 52px 0 20px; border-radius: 18px; border: 1.5px solid var(--color-bg-secondary); background: var(--color-bg-secondary); font-size: 15px; font-weight: 700; outline: none; color: var(--color-text-primary); transition: all 0.2s;">
             <div id="search-icon-wrapper" style="position: absolute; right: 18px; top: 50%; transform: translateY(-50%); color: var(--color-primary); display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
               ${icon('search', 20)}
             </div>
           </div>
-          <div id="address-suggestions" class="address-suggestions-list" style="display:none; position:absolute; bottom:100%; left:0; right:0; margin-bottom:8px; max-height:220px; overflow-y:auto; background:var(--color-bg); border-radius:16px; border:1px solid var(--color-border); box-shadow:0 -10px 25px rgba(0,0,0,0.15); z-index:100;"></div>
+          <div id="address-suggestions" class="address-suggestions-list" style="display:none; position:absolute; top:100%; left:0; right:0; margin-top:8px; max-height:220px; overflow-y:auto; background:var(--color-bg); border-radius:16px; border:1px solid var(--color-border); box-shadow:0 10px 25px rgba(0,0,0,0.15); z-index:1000;"></div>
         </div>
 
         <!-- Saved Addresses Horizontal List -->
@@ -176,6 +186,9 @@ export function showAddressPrompt(onSuccess, config = {}) {
     });
 
     googleMap.addListener('idle', () => {
+      if (geocodingDisabled) {
+        return;
+      }
       const center = googleMap.getCenter();
       selectedCoords = { lat: center.lat(), lng: center.lng() };
       reverseGeocode(selectedCoords.lat, selectedCoords.lng);
@@ -237,6 +250,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
       if (addrText) addrText.textContent = config.editAddress.address;
       const input = document.getElementById('address-search-input');
       if (input) input.value = ''; // Always empty
+      disableGeocodingTemporarily(1500);
       googleMap.setCenter(config.editAddress.coords);
       googleMap.setZoom(17);
     } else if (prefetched && !getState().deliveryAddress) {
@@ -253,15 +267,10 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const addrId = chip.dataset.id;
         const saved = (getState().savedAddresses || []).find(a => a.id === addrId);
         if (saved) {
-          googleMap.setCenter(saved.coords);
-          googleMap.setZoom(17);
-          lastGeocodedAddress = saved.address;
-          selectedCoords = saved.coords;
-          const addrText = document.getElementById('current-selected-address-text');
-          if (addrText) addrText.textContent = saved.address;
-          const input = document.getElementById('address-search-input');
-          if (input) input.value = ''; // Keep empty on selection
-          showToast(`Ubicación: ${saved.name}`, 'info');
+          setDeliveryAddress(saved.address, saved.notes || '', saved.coords, '');
+          closeModal();
+          showToast(`Ubicación: ${saved.name}`, 'success');
+          if (onSuccess) onSuccess(saved.address, saved.notes || '', saved.coords);
         }
       };
     });
@@ -389,13 +398,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
       searchIconEl.innerHTML = `<div class="mini-spinner"></div>`;
     }
 
-    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-      isGeocoding = false;
-      if (searchIconEl) {
-        searchIconEl.innerHTML = icon('search', 20);
-      }
-
+    geocoder.geocode({ location: { lat, lng } }, async (results, status) => {
       if (status === 'OK' && results[0]) {
+        isGeocoding = false;
+        if (searchIconEl) {
+          searchIconEl.innerHTML = icon('search', 20);
+        }
         lastGeocodedAddress = results[0].formatted_address.split(',').slice(0, 2).join(', ');
         const addrText = document.getElementById('current-selected-address-text');
         if (addrText) addrText.textContent = lastGeocodedAddress;
@@ -410,14 +418,50 @@ export function showAddressPrompt(onSuccess, config = {}) {
           }
         }
       } else {
-        if (pendingConfirm) {
-          pendingConfirm = false;
-          const confirmBtn = document.getElementById('confirm-location-btn');
-          if (confirmBtn) {
-            confirmBtn.innerHTML = 'Confirmar';
-            confirmBtn.disabled = false;
+        // Fallback to Nominatim Reverse Geocoding
+        try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=es`);
+          const data = await response.json();
+          if (data && data.display_name) {
+            const a = data.address;
+            const street = a.road || a.pedestrian || a.suburb || '';
+            const number = a.house_number || '';
+            let display = `${street} ${number}`.trim();
+            const neighborhood = a.neighbourhood || a.residential || '';
+            if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
+
+            lastGeocodedAddress = display || data.display_name.split(',')[0];
+            const addrText = document.getElementById('current-selected-address-text');
+            if (addrText) addrText.textContent = lastGeocodedAddress;
+
+            if (pendingConfirm) {
+              pendingConfirm = false;
+              const confirmBtn = document.getElementById('confirm-location-btn');
+              if (confirmBtn) {
+                confirmBtn.innerHTML = 'Confirmar';
+                confirmBtn.disabled = false;
+                confirmBtn.click();
+              }
+            }
+          } else {
+            throw new Error('No results from Nominatim');
           }
-          showToast('No se pudo determinar la dirección. Escríbela manualmente.', 'warning');
+        } catch (nomErr) {
+          console.warn('Nominatim reverse geocode failed:', nomErr);
+          if (pendingConfirm) {
+            pendingConfirm = false;
+            const confirmBtn = document.getElementById('confirm-location-btn');
+            if (confirmBtn) {
+              confirmBtn.innerHTML = 'Confirmar';
+              confirmBtn.disabled = false;
+            }
+            showToast('No se pudo determinar la dirección. Escríbela manualmente.', 'warning');
+          }
+        } finally {
+          isGeocoding = false;
+          if (searchIconEl) {
+            searchIconEl.innerHTML = icon('search', 20);
+          }
         }
       }
     });
@@ -441,6 +485,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           const lng = parseFloat(first.lng);
           
           if (googleMap) {
+            disableGeocodingTemporarily(1500);
             googleMap.setCenter(new google.maps.LatLng(lat, lng));
             googleMap.setZoom(17);
           }
@@ -448,6 +493,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
           lastGeocodedAddress = first.address;
           selectedCoords = { lat, lng };
           searchInput.value = first.address;
+          const addrText = document.getElementById('current-selected-address-text');
+          if (addrText) addrText.textContent = first.address;
           showToast('Ubicación encontrada y centrada en el mapa', 'success');
         } else {
           showToast('No se encontraron resultados para esa dirección', 'warning');
@@ -526,6 +573,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const addr = item.dataset.addr;
 
         if (googleMap) {
+          disableGeocodingTemporarily(1500);
           googleMap.setCenter(new google.maps.LatLng(lat, lng));
           googleMap.setZoom(17);
         }
@@ -535,6 +583,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
         selectedCoords = { lat, lng };
         const searchInput = document.getElementById('address-search-input');
         if (searchInput) searchInput.value = addr;
+        const addrText = document.getElementById('current-selected-address-text');
+        if (addrText) addrText.textContent = addr;
       };
     });
   };
@@ -592,18 +642,8 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
       </div>
 
       <div class="field">
-        <label style="display:block; font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:8px;">Instrucciones para el repartidor</label>
-        <textarea id="details-notes" placeholder="Ej: Portón blanco, timbre roto..." style="width:100%; height:100px; padding:16px; border:1.5px solid var(--color-border); border-radius:12px; font-size:14px; outline:none; resize:none; background: var(--color-bg); color: var(--color-text-primary);">${notesVal}</textarea>
-      </div>
-
-      <div class="field">
-        <label style="display:block; font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:8px;">Celular de contacto</label>
-        <div style="display:flex; gap:8px;">
-          <div style="height:52px; padding:0 12px; border:1.5px solid var(--color-border); border-radius:12px; display:flex; align-items:center; background:var(--color-bg-secondary); color: var(--color-text-primary);">
-             <span style="font-size:14px; font-weight:700;">🇦🇷 +54</span>
-          </div>
-          <input type="tel" id="details-phone" placeholder="Celular sin el 0" value="${getState().user?.phone || ''}" style="flex:1; height:52px; padding:0 16px; border:1.5px solid var(--color-border); border-radius:12px; font-size:14px; outline:none; background: var(--color-bg); color: var(--color-text-primary);" />
-        </div>
+        <label style="display:block; font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:8px;">Instrucciones / Referencia de ubicación (Obligatorio)</label>
+        <textarea id="details-notes" placeholder="Ej: Portón blanco, entre calles X e Y, timbre roto... (Obligatorio)" style="width:100%; height:100px; padding:16px; border:1.5px solid var(--color-border); border-radius:12px; font-size:14px; outline:none; resize:none; background: var(--color-bg); color: var(--color-text-primary);">${notesVal}</textarea>
       </div>
     </div>
 
@@ -639,16 +679,30 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     const name = document.getElementById('details-name').value.trim();
     const apt = document.getElementById('details-apt').value.trim();
     const notes = document.getElementById('details-notes').value.trim();
+
+    // Reset styles
+    const notesInput = document.getElementById('details-notes');
+    notesInput.style.borderColor = 'var(--color-border)';
+
+    let hasError = false;
+
+    if (!notes) {
+      notesInput.style.borderColor = '#EF4444';
+      showToast('Por favor, ingresá una referencia de ubicación (Instrucciones para el repartidor)', 'warning');
+      hasError = true;
+    }
+
+    if (hasError) return;
+
     const finalNotes = [apt, notes].filter(Boolean).join(' - ');
     
-    // Save/Update user addresses list if a name is provided
-    if (name) {
-      const { saveUserAddress, updateUserAddress } = await import('../state.js');
-      if (config.editAddress) {
-        updateUserAddress(config.editAddress.id, name, address, finalNotes, coords);
-      } else {
-        saveUserAddress(name, address, finalNotes, coords);
-      }
+    // Save/Update user addresses list
+    const finalName = name || 'Dirección';
+    const { saveUserAddress, updateUserAddress } = await import('../state.js');
+    if (config.editAddress) {
+      updateUserAddress(config.editAddress.id, finalName, address, finalNotes, coords);
+    } else {
+      saveUserAddress(finalName, address, finalNotes, coords);
     }
 
     setDeliveryAddress(address, finalNotes, coords, '');
