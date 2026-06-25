@@ -1,0 +1,59 @@
+# Codemagic configuration file for Capacitor iOS Build
+workflows:
+  ios-workflow:
+    name: iOS Capacitor Build
+    max_build_duration: 120
+    instance_type: mac_mini_m1
+    environment:
+      groups:
+        # Aquí puedes vincular el grupo de variables para credenciales de Apple
+        - apple_credentials
+      node: latest
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Install Node dependencies
+        script: |
+          npm install
+      - name: Build web project
+        script: |
+          npm run build
+      - name: Sync Capacitor iOS platform
+        script: |
+          npx cap sync ios
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios/App && pod install
+      - name: Setup keychain and signing certificates
+        script: |
+          # Inicializa el llavero de Codemagic para firmas digitales
+          keychain initialize
+          
+          # Descarga automáticamente perfiles y certificados usando la API de App Store Connect
+          # (Requiere configurar las variables API de Apple en la web de Codemagic)
+          app-store-connect fetch-signing-files "com.godelivery.magdalena" --type IOS_APP_STORE --create
+          
+          # Añade los certificados al llavero para la compilación
+          keychain add-certificates
+      - name: Build iOS Package (.ipa)
+        script: |
+          xcode-project build-ipa \
+            --workspace ios/App/App.xcworkspace \
+            --scheme App \
+            --bundle-identifier com.godelivery.magdalena
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      email:
+        recipients:
+          - juanhidalgobaez@gmail.com
+        notify:
+          success: true
+          failure: true
