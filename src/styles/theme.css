@@ -172,7 +172,7 @@
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
-    width: 100vw !important;
+    width: 100% !important;
     overflow-x: hidden !important;
   }
 
@@ -182,7 +182,7 @@
     background: #F8FAFC !important;
     display: block !important;
     overflow: hidden !important;
-    width: 100vw !important;
+    width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -191,7 +191,7 @@
   :root:not(.preview-mode) .slide-panel,
   html:not(.preview-mode) .slide-panel {
     display: none !important;
-    width: 100vw !important;
+    width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
     padding: 0 !important;

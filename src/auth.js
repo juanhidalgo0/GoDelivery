@@ -1,6 +1,6 @@
 // GoDelivery — Auth Module
 import { auth, googleProvider, db } from './firebase.js';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc, getDocs, collection, query, where, serverTimestamp, runTransaction, onSnapshot } from 'firebase/firestore';
 import { setState, getState, clearUserState, setDeliveryAddress } from './state.js';
 import { showToast } from './components/toast.js';
@@ -25,6 +25,31 @@ const ADMIN_EMAILS = ['kioscopaulos7@gmail.com'];
 // Sign in with Google
 export async function signInWithGoogle() {
   try {
+    const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
+    if (isNativeApp) {
+      console.log('[Auth] Attempting Native Google Sign-In...');
+      const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+      
+      // Initialize first to ensure it's loaded
+      try {
+        await GoogleAuth.initialize({
+          clientId: '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com',
+          scopes: ['profile', 'email'],
+          grantOfflineAccess: true
+        });
+      } catch (initErr) {
+        console.warn('[Auth] GoogleAuth already initialized or failed to init:', initErr);
+      }
+      
+      const googleUser = await GoogleAuth.signIn();
+      const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+      const result = await signInWithCredential(auth, credential);
+      const user = result.user;
+      await ensureUserDoc(user);
+      showToast(`¡Bienvenido, ${user.displayName}!`, 'success');
+      return user;
+    }
+
     console.log('[Auth] Attempting Google Sign-In with Popup...');
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
@@ -33,6 +58,12 @@ export async function signInWithGoogle() {
     return user;
   } catch (error) {
     console.error('Auth error:', error);
+    
+    const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
+    if (isNativeApp) {
+      showToast('Error al iniciar sesión con Google nativo: ' + (error.message || 'Desconocido'), 'error');
+      return null;
+    }
     
     const isRedirectFallback = 
       error.code === 'auth/popup-blocked' || 
@@ -173,11 +204,6 @@ async function ensureUserDoc(user) {
       data.referralCode = refCode;
     }
     
-    // Auto-promote if email is in whitelist
-    if (ADMIN_EMAILS.includes(data.email) && data.role !== 'admin') {
-      updates.role = 'admin';
-      data.role = 'admin';
-    }
 
     // Auto-promote test delivery account
     if (data.email === 'test-delivery@godelivery.com' && (data.role !== 'admin' || !data.isDelivery)) {
@@ -284,18 +310,6 @@ export function initAuth(callback) {
           if (snap.exists()) {
             userData = snap.data();
             
-            // Auto-promote to admin if email is whitelisted
-            if (ADMIN_EMAILS.includes(userData.email || user.email) && userData.role !== 'admin') {
-              import('firebase/firestore').then(async ({ updateDoc }) => {
-                try {
-                  await updateDoc(userRef, { role: 'admin' });
-                } catch (e) {
-                  console.warn('Error upgrading user role to admin:', e);
-                }
-              });
-              userData.role = 'admin';
-            }
-
             if (Array.isArray(userData.favorites)) {
               localStorage.setItem('gd-favorites', JSON.stringify(userData.favorites));
             }

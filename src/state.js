@@ -1,5 +1,5 @@
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot } from 'firebase/firestore';
 import { db } from './firebase.js';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { AudioManager } from './utils/audio-manager.js';
 
 const listeners = new Map();
@@ -8,6 +8,7 @@ const state = {
   user: null,       // Firebase user + Firestore profile
   cart: [],         // { product, comercioId, comercioName, qty, options }
   theme: 'light',   // Locked to light mode
+  useDarkBrandTheme: false,
   deliveryAddress: localStorage.getItem('gd-address') || null,
   houseNumber: localStorage.getItem('gd-house-number') || '',
   addressNotes: localStorage.getItem('gd-address-notes') || '',
@@ -22,6 +23,8 @@ const state = {
   tripPricePerKm: 300,
   tripMinPrice: 1500,
   isRaining: false,
+  rainMode: 'auto',
+  weatherData: { isRaining: false },
   dynamicDeliveryFees: JSON.parse(localStorage.getItem('gd-cached-fees') || '{}'),
   dynamicDistances: JSON.parse(localStorage.getItem('gd-cached-distances') || '{}'),
   savedAddresses: JSON.parse(localStorage.getItem('gd-saved-addresses') || '[]'),
@@ -56,7 +59,11 @@ const state = {
     oro: { id: 'oro', name: 'Oro', minOrders: 16, multiplier: 1.5, color: '#FFD700', icon: 'crown', benefits: 'Ganás un 50% extra de GoPoints y acceso a promos exclusivas.' }
   },
   currentComercio: null, // Cached commerce data for panel header
-  commercePendingCount: 0 // Track pending orders across commerces for navbar badge
+  commercePendingCount: 0, // Track pending orders across commerces for navbar badge
+
+  // Dynamic schedule pricing
+  nightSurchargeConfig: { enabled: false, start: '00:00', end: '06:00', type: 'fixed', value: 0 },
+  driverIncentiveConfig: { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 }
 };
 
 export function getUserLevel(orderCount = 0) {
@@ -71,49 +78,84 @@ export function getUserLevel(orderCount = 0) {
 
 export async function initSettings() {
   try {
-    const snap = await getDoc(doc(db, 'settings', 'global'));
-    if (snap.exists()) {
-      const data = snap.data();
-      state.deliveryCost = data.deliveryCost || 0;
-      state.deliveryBasePrice = data.deliveryBasePrice !== undefined ? data.deliveryBasePrice : 1500;
-      state.deliveryPricePerKm = data.deliveryPricePerKm !== undefined ? data.deliveryPricePerKm : 300;
-      state.deliveryMinPrice = data.deliveryMinPrice !== undefined ? data.deliveryMinPrice : 1500;
-      state.deliveryExtraStopFee = data.deliveryExtraStopFee !== undefined ? data.deliveryExtraStopFee : 500;
-      state.deliveryRainSurcharge = data.deliveryRainSurcharge !== undefined ? data.deliveryRainSurcharge : 300;
-      state.tripBasePrice = data.tripBasePrice !== undefined ? data.tripBasePrice : 1500;
-      state.tripPricePerKm = data.tripPricePerKm !== undefined ? data.tripPricePerKm : 300;
-      state.tripMinPrice = data.tripMinPrice !== undefined ? data.tripMinPrice : 1500;
-      state.commissionRate = data.commissionRate !== undefined ? data.commissionRate : 0.10;
-      state.appUsageFeeRate = data.appUsageFeeRate !== undefined ? data.appUsageFeeRate : 0.05;
+    // Listen to settings/global in real-time
+    onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        state.deliveryCost = data.deliveryCost || 0;
+        state.deliveryBasePrice = data.deliveryBasePrice !== undefined ? data.deliveryBasePrice : 1500;
+        state.deliveryPricePerKm = data.deliveryPricePerKm !== undefined ? data.deliveryPricePerKm : 300;
+        state.deliveryMinPrice = data.deliveryMinPrice !== undefined ? data.deliveryMinPrice : 1500;
+        state.deliveryExtraStopFee = data.deliveryExtraStopFee !== undefined ? data.deliveryExtraStopFee : 500;
+        state.deliveryRainSurcharge = data.deliveryRainSurcharge !== undefined ? data.deliveryRainSurcharge : 300;
+        state.tripBasePrice = data.tripBasePrice !== undefined ? data.tripBasePrice : 1500;
+        state.tripPricePerKm = data.tripPricePerKm !== undefined ? data.tripPricePerKm : 300;
+        state.tripMinPrice = data.tripMinPrice !== undefined ? data.tripMinPrice : 1500;
+        state.commissionRate = data.commissionRate !== undefined ? data.commissionRate : 0.10;
+        state.appUsageFeeRate = data.appUsageFeeRate !== undefined ? data.appUsageFeeRate : 0.05;
+        state.whatsappPayments = data.whatsappPayments || '5491123456789';
+        state.pointsPerDollar = data.pointsPerDollar !== undefined ? data.pointsPerDollar : 0.01;
+        state.dollarPerPoint = data.dollarPerPoint !== undefined ? data.dollarPerPoint : 1.00;
+        state.referralPoints = data.referralPoints !== undefined ? data.referralPoints : 500;
+        state.weeklyChallenges = data.weeklyChallenges || state.weeklyChallenges;
+        state.nightSurchargeConfig = data.nightSurchargeConfig || { enabled: false, start: '00:00', end: '06:00', type: 'fixed', value: 0 };
+        state.driverIncentiveConfig = data.driverIncentiveConfig || { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 };
+        state.rainMode = data.rainMode || 'auto';
+        state.useDarkBrandTheme = data.useDarkBrandTheme || false;
 
-      // GoPoints Settings
-      state.pointsPerDollar = data.pointsPerDollar !== undefined ? data.pointsPerDollar : 0.01;
-      state.dollarPerPoint = data.dollarPerPoint !== undefined ? data.dollarPerPoint : 1.00;
-      state.referralPoints = data.referralPoints !== undefined ? data.referralPoints : 500;
-      state.weeklyChallenges = data.weeklyChallenges || [
-        { id: 'weekly_3', title: 'Desafío Bronce', description: 'Completá 3 pedidos esta semana', target: 3, pointsReward: 150 },
-        { id: 'weekly_5', title: 'Desafío Plata', description: 'Completá 5 pedidos esta semana', target: 5, pointsReward: 300 },
-        { id: 'weekly_10', title: 'Desafío Oro', description: 'Completá 10 pedidos esta semana', target: 10, pointsReward: 600 }
-      ];
-      state.whatsappPayments = data.whatsappPayments || '5491123456789';
+        // Dynamically apply brand theme
+        const primaryColor = state.useDarkBrandTheme ? '#0F172A' : '#E11D48';
+        if (state.useDarkBrandTheme) {
+          document.documentElement.style.setProperty('--color-primary', '#0F172A');
+          document.documentElement.style.setProperty('--color-primary-hover', '#1E293B');
+          document.documentElement.style.setProperty('--color-primary-dark', '#020617');
+          document.documentElement.style.setProperty('--color-primary-light', 'rgba(15, 23, 42, 0.1)');
+          document.documentElement.style.setProperty('--color-primary-lighter', 'rgba(15, 23, 42, 0.05)');
+          document.documentElement.style.setProperty('--color-primary-rgb', '15, 23, 42');
+        } else {
+          document.documentElement.style.setProperty('--color-primary', '#E11D48');
+          document.documentElement.style.setProperty('--color-primary-hover', '#BE123C');
+          document.documentElement.style.setProperty('--color-primary-dark', '#9F1239');
+          document.documentElement.style.setProperty('--color-primary-light', 'rgba(225, 29, 72, 0.1)');
+          document.documentElement.style.setProperty('--color-primary-lighter', 'rgba(225, 29, 72, 0.05)');
+          document.documentElement.style.setProperty('--color-primary-rgb', '225, 29, 72');
+        }
 
-      notify('deliveryCost');
-      notify('deliveryBasePrice');
-      notify('deliveryPricePerKm');
-      notify('deliveryMinPrice');
-      notify('deliveryExtraStopFee');
-      notify('deliveryRainSurcharge');
-      notify('tripBasePrice');
-      notify('tripPricePerKm');
-      notify('tripMinPrice');
-      notify('commissionRate');
-      notify('appUsageFeeRate');
-      notify('pointsPerDollar');
-      notify('dollarPerPoint');
-      notify('referralPoints');
-      notify('weeklyChallenges');
-      notify('whatsappPayments');
-    }
+        // Update HTML meta theme-color for mobile web browsers
+        const metaTheme = document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) {
+          metaTheme.setAttribute('content', primaryColor);
+        }
+
+        // Update native mobile status bar color if running under Capacitor
+        if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StatusBar) {
+          try {
+            const StatusBar = window.Capacitor.Plugins.StatusBar;
+            StatusBar.setBackgroundColor({ color: primaryColor }).catch(() => {});
+            StatusBar.setStyle({ style: 'DARK' }).catch(() => {});
+          } catch (e) {
+            console.warn('Failed to set native status bar:', e);
+          }
+        }
+
+        updateRainStatus();
+
+        const keys = [
+          'deliveryCost', 'deliveryBasePrice', 'deliveryPricePerKm', 'deliveryMinPrice',
+          'deliveryExtraStopFee', 'deliveryRainSurcharge', 'tripBasePrice', 'tripPricePerKm',
+          'tripMinPrice', 'commissionRate', 'appUsageFeeRate', 'pointsPerDollar',
+          'dollarPerPoint', 'referralPoints', 'weeklyChallenges', 'whatsappPayments',
+          'useDarkBrandTheme'
+        ];
+        keys.forEach(k => notify(k));
+      }
+    });
+
+    // Listen to settings/weather in real-time
+    onSnapshot(doc(db, 'settings', 'weather'), (snap) => {
+      state.weatherData = snap.exists() ? snap.data() : { isRaining: false };
+      updateRainStatus();
+    });
 
     // Load dynamic levels
     const levelsSnap = await getDoc(doc(db, 'settings', 'levels'));
@@ -123,6 +165,23 @@ export async function initSettings() {
     }
   } catch (e) {
     console.error('Error loading global settings:', e);
+  }
+}
+
+function updateRainStatus() {
+  const rainMode = state.rainMode || 'auto';
+  let isRaining = false;
+  if (rainMode === 'on') {
+    isRaining = true;
+  } else if (rainMode === 'off') {
+    isRaining = false;
+  } else {
+    isRaining = state.weatherData ? state.weatherData.isRaining : false;
+  }
+
+  if (state.isRaining !== isRaining) {
+    state.isRaining = isRaining;
+    notify('isRaining');
   }
 }
 
@@ -176,7 +235,7 @@ export function addToCart(product, comercioId, comercioName, qty = 1, options = 
   const cartItemId = `${product.id}-${JSON.stringify(sortedOptions)}`;
 
   // Enforce limited stock checks
-  if (product.stockMode === 'limited') {
+  if (product.stockMode === 'limited' && !product.useGlobalFlavors) {
     const stockQty = typeof product.stockQuantity === 'number' ? product.stockQuantity : 0;
     const currentCartQty = state.cart
       .filter(item => item.product.id === product.id)
@@ -230,7 +289,7 @@ export function updateCartQty(cartItemId, comercioId, qty) {
     } else {
       // Enforce limited stock checks
       const product = item.product;
-      if (product && product.stockMode === 'limited') {
+      if (product && product.stockMode === 'limited' && !product.useGlobalFlavors) {
         const stockQty = typeof product.stockQuantity === 'number' ? product.stockQuantity : 0;
         const otherCartQty = state.cart
           .filter(i => i.product.id === product.id && i.cartItemId !== cartItemId)

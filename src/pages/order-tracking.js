@@ -127,7 +127,7 @@ export function renderOrderTracking(orderId, content) {
 
       .v5-info-panel {
         position: absolute;
-        bottom: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         left: 16px;
         right: 16px;
         background: var(--glass-bg, var(--color-surface));
@@ -146,7 +146,12 @@ export function renderOrderTracking(orderId, content) {
       }
       @keyframes v5-slide-up { from { transform: translateY(110%); } to { transform: translateY(0); } }
       .v5-status-header { display: flex; align-items: flex-start; justify-content: space-between; }
-      .v5-status-title { font-size: 19px; font-weight: 950; color: var(--color-text); margin: 0; letter-spacing: -0.5px; }
+      .v5-status-title { font-size: 19px; font-weight: 950; color: var(--color-text); margin: 0; letter-spacing: -0.5px; display: flex; align-items: center; gap: 10px; }
+      .radar-search-wrapper { position: relative; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .radar-search-dot { width: 8px; height: 8px; background-color: var(--color-primary); border-radius: 50%; position: absolute; z-index: 2; }
+      .radar-search-wave { position: absolute; width: 100%; height: 100%; background-color: var(--color-primary); border-radius: 50%; opacity: 0.6; z-index: 1; animation: radar-pulse 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+      .radar-search-wave:nth-child(2) { animation-delay: 0.4s; }
+      @keyframes radar-pulse { 0% { transform: scale(0.5); opacity: 0.8; } 70% { transform: scale(3.5); opacity: 0; } 100% { transform: scale(0.5); opacity: 0; } }
       .v5-eta-label { font-size: 13px; color: var(--color-primary); font-weight: 800; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
       .v5-stepper-container {
         position: relative;
@@ -476,11 +481,13 @@ function updateUI(order) {
   if (order.isTrip) {
     titleText = isCompleted ? '¡Viaje Finalizado!' :
                 isCancelled ? 'Viaje Cancelado' :
+                order.isAtDoor ? '¡El chofer está en la puerta!' :
                 isDelivering ? 'Viaje en curso (Pasajero a bordo)' :
                 (!order.driverId ? 'Buscando chofer...' : 'El chofer va hacia tu ubicación');
   } else {
     titleText = isCompleted ? (order.isFavor ? '¡Favor Finalizado!' : '¡Pedido Finalizado!') : 
                 isCancelled ? (order.isFavor ? 'Favor Cancelado' : 'Pedido Cancelado') : 
+                order.isAtDoor ? '¡El repartidor está en la puerta!' :
                 isDelivering ? (order.isFavor ? 'El repartidor está en movimiento' : 'El repartidor va hacia vos') : 
                 (normalizedStatus === 'pending' ? 'Esperando a ser confirmado' :
                  normalizedStatus === 'ready' ? (order.driverId ? (order.isGoCash ? 'El repartidor está yendo a tu ubicación' : 'El repartidor está yendo a buscar tu pedido') : 'Buscando repartidor...') : 
@@ -488,7 +495,13 @@ function updateUI(order) {
   }
 
   let subtitleHtml = '';
-  if (normalizedStatus === 'pending') {
+  if (order.isAtDoor && !isCompleted && !isCancelled) {
+    subtitleHtml = `
+      <p class="v5-status-subtitle" style="font-size: 13px; color: #d97706; margin: 6px 0 0 0; font-weight: 700; line-height: 1.4;">
+        Por favor, salí a recibir ${order.isTrip ? 'al chofer' : 'tu pedido'} para evitar demoras.
+      </p>
+    `;
+  } else if (normalizedStatus === 'pending') {
     subtitleHtml = `
       <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
         Por favor espera a que el comercio confirme tu pedido, tomará solo un momento
@@ -509,7 +522,16 @@ function updateUI(order) {
   container.innerHTML = `
     <div class="v5-status-header">
       <div class="v5-status-content">
-        <h2 class="v5-status-title">${titleText}</h2>
+        <h2 class="v5-status-title">
+          ${titleText.includes('Buscando') ? `
+            <div class="radar-search-wrapper">
+              <div class="radar-search-wave"></div>
+              <div class="radar-search-wave"></div>
+              <div class="radar-search-dot"></div>
+            </div>
+          ` : ''}
+          ${titleText}
+        </h2>
         ${subtitleHtml}
         <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
       </div>
@@ -626,16 +648,6 @@ function updateUI(order) {
           </div>
         </div>
       </div>
-    ` : order.isFavor ? `
-      <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px;">
-        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Detalles del Favor</div>
-        <p style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${order.details}</p>
-        ${order.pickupAddress ? `
-          <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
-            ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
-          </div>
-        ` : ''}
-      </div>
     ` : ''}
 
     ${order.driverId ? `
@@ -686,6 +698,17 @@ function updateUI(order) {
 
     <!-- Contenedor expandible -->
     <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
+      ${order.isFavor ? `
+        <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left;">
+          <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Detalles del Favor</div>
+          <p style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4; white-space:pre-wrap;">${order.details}</p>
+          ${order.pickupAddress ? `
+            <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
+              ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
       ${normalizedStatus === 'pending' ? `
         <div style="margin: 8px 0; display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%;">
           <button id="v5-cancel-order-btn" class="v5-cancel-btn">
@@ -709,6 +732,12 @@ function updateUI(order) {
             <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.appUsageFee || 0)}</div>
           </div>
         ` : order.isFavor ? `
+          ${order.subtotal ? `
+            <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+              <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Productos</div>
+              <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.subtotal)}</div>
+            </div>
+          ` : ''}
           <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
             <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Envío</div>
             <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.deliveryCost)}${order.tip > 0 ? ` (incluye ${formatPrice(order.tip)} propina)` : ''}</div>
@@ -717,6 +746,12 @@ function updateUI(order) {
             <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
               <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Gestión</div>
               <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.purchaseFee)}</div>
+            </div>
+          ` : ''}
+          ${order.extraStopsFee ? `
+            <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+              <div class="v5-price-label" style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: none; margin-bottom: 0;">Paradas extra</div>
+              <div class="v5-price-val" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">${formatPrice(order.extraStopsFee)}</div>
             </div>
           ` : ''}
           <div class="v5-price-item" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">

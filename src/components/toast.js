@@ -4,7 +4,6 @@ import { icon } from '../utils/icons.js';
 const activeToasts = new Set();
 
 export function showToast(message, type = 'info', duration = 2500) {
-  if (true) return; // Toasts disabled per user request
   if (activeToasts.has(message)) return;
   activeToasts.add(message);
 

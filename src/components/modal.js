@@ -16,7 +16,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   modalWrapper.style.cssText = `position:fixed; inset:0; z-index:${zIndex};`;
 
   const isFullscreen = fullscreen === true;
-  const finalHeight = isFullscreen ? '100dvh' : height;
+  const finalHeight = isFullscreen ? '100%' : height;
 
   modalWrapper.innerHTML = `
     <div class="modal-overlay" id="${modalId}-overlay" style="
@@ -25,11 +25,11 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       will-change: background;
     ">
       <div class="modal" id="${modalId}-dialog" style="
-        background:var(--color-bg); border-radius:${isFullscreen ? '0' : '28px 28px 0 0'}; width:100%; max-width:${isFullscreen ? 'none' : '500px'};
+        background:var(--color-bg); border-radius:${isFullscreen ? '0' : '28px 28px 0 0'}; width:100%; max-width:${isFullscreen ? 'none' : '500px'}; max-height:${isFullscreen ? 'none' : '94dvh'};
         height:${finalHeight}; margin:0 auto; overflow:hidden; position:relative; display:flex; flex-direction:column;
-        animation: ${isFullscreen ? 'fadeIn' : 'slideUp'} 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        animation: ${isFullscreen ? 'fadeIn' : 'springUp'} 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.1);
         box-shadow: ${isFullscreen ? 'none' : '0 -12px 60px rgba(0,0,0,0.35)'};
-        margin-top: calc(100dvh - ${finalHeight});
+        margin-top: ${isFullscreen ? '0' : `calc(100dvh - ${finalHeight})`};
         will-change: transform, opacity;
       ">
         ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(120,120,120,0.4); border-radius:var(--radius-full); position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab;"></div>` : ''}
@@ -42,7 +42,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
         <div class="modal-body" id="${modalId}-body" style="flex:1; overflow:hidden; position:relative; display:flex; flex-direction:column; ${hideHeader || isFullscreen ? 'padding:0;' : ''}">
           ${typeof content === 'string' ? content : ''}
         </div>
-        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg);">${footer}</div>` : ''}
+        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px calc(20px + env(safe-area-inset-bottom, 0px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg);">${footer}</div>` : ''}
       </div>
     </div>
   `;
@@ -69,9 +69,9 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       window.history.back();
     }
 
-    // Ultra-fluid slide down animation
-    dialog.style.transition = 'transform 0.45s cubic-bezier(0.32, 0, 0.67, 0)';
-    dialog.style.transform = 'translateY(100%)';
+    // Ultra-fluid spring down animation
+    dialog.style.transition = 'transform 0.45s cubic-bezier(0.32, 0, 0.67, 0), opacity 0.4s ease-out';
+    dialog.style.transform = 'translateY(100%) scale(0.95)';
     
     overlay.style.transition = 'opacity 0.35s ease-out';
     overlay.style.opacity = '0';
@@ -292,6 +292,26 @@ export function showConfirm({ title, message, confirmText = 'Confirmar', cancelT
   }
 }
 
+export function showAlert({ title, message, btnText = 'OK', onClose }) {
+  const uid = Math.random().toString(36).substr(2, 5);
+  const okId = `modal-ok-${uid}`;
+
+  showModal({
+    title,
+    height: 'auto',
+    content: `<p style="color:var(--color-text-secondary); font-size:15px; line-height:1.6; padding:32px 24px; text-align:center; font-weight:500;">${message}</p>`,
+    footer: `
+      <div style="display:flex;justify-content:center;width:100%;padding:0 4px 12px 4px;">
+        <button class="btn btn-primary" id="${okId}" style="width:100%;height:54px;border-radius:18px;font-weight:900;font-size:14px;padding:0 16px;box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);border:none;background:var(--color-primary);color:white;">${btnText}</button>
+      </div>
+    `,
+    onClose
+  });
+
+  const okBtn = document.getElementById(okId);
+  if (okBtn) okBtn.addEventListener('click', () => closeModal());
+}
+
 // Android physical Back Button / browser back interceptor to support closing stacked modals in order.
 window.addEventListener('popstate', (e) => {
   const activeModalId = e.state ? e.state.isModalId : null;
@@ -306,3 +326,114 @@ window.addEventListener('popstate', (e) => {
     closeMultipleModals(modalStack.length - (idx + 1), true);
   }
 });
+
+// Global Lightbox Implementation with Download Button
+window.openLightbox = (url) => {
+  if (!url || url === 'undefined') return;
+
+  const imgContainer = document.createElement('div');
+  imgContainer.style.width = '100%';
+  imgContainer.style.height = '100%';
+  imgContainer.style.display = 'flex';
+  imgContainer.style.flexDirection = 'column';
+  imgContainer.style.alignItems = 'center';
+  imgContainer.style.justifyContent = 'center';
+  imgContainer.style.background = 'rgba(0, 0, 0, 0.95)';
+  imgContainer.style.position = 'relative';
+
+  const img = document.createElement('img');
+  img.src = url;
+  img.style.maxWidth = '100%';
+  img.style.maxHeight = '80dvh';
+  img.style.objectFit = 'contain';
+  img.style.animation = 'fadeIn 0.3s ease-out';
+
+  // Header/ActionBar on top of Lightbox
+  const actionBar = document.createElement('div');
+  actionBar.style.position = 'absolute';
+  actionBar.style.top = 'max(20px, env(safe-area-inset-top, 20px))';
+  actionBar.style.right = '20px';
+  actionBar.style.display = 'flex';
+  actionBar.style.gap = '14px';
+  actionBar.style.zIndex = '2100';
+
+  // Download button
+  const downloadBtn = document.createElement('button');
+  downloadBtn.innerHTML = icon('download', 24) || '📥';
+  downloadBtn.title = 'Descargar imagen';
+  downloadBtn.style.background = 'rgba(255,255,255,0.15)';
+  downloadBtn.style.color = 'white';
+  downloadBtn.style.border = 'none';
+  downloadBtn.style.borderRadius = '50%';
+  downloadBtn.style.width = '44px';
+  downloadBtn.style.height = '44px';
+  downloadBtn.style.display = 'flex';
+  downloadBtn.style.alignItems = 'center';
+  downloadBtn.style.justifyContent = 'center';
+  downloadBtn.style.cursor = 'pointer';
+  downloadBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+  downloadBtn.style.backdropFilter = 'blur(5px)';
+
+  downloadBtn.onclick = async (e) => {
+    e.stopPropagation();
+    try {
+      downloadBtn.disabled = true;
+      downloadBtn.innerHTML = icon('loader', 20, 'animate-spin') || '...';
+      
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `GoDelivery_Image_${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      
+      import('./toast.js').then(m => m.showToast('Imagen descargada', 'success'));
+    } catch (err) {
+      console.error('Error downloading image:', err);
+      import('./toast.js').then(m => m.showToast('Error al descargar imagen', 'error'));
+    } finally {
+      downloadBtn.disabled = false;
+      downloadBtn.innerHTML = icon('download', 24) || '📥';
+    }
+  };
+
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = icon('close', 24) || '✕';
+  closeBtn.title = 'Cerrar';
+  closeBtn.style.background = 'rgba(255,255,255,0.15)';
+  closeBtn.style.color = 'white';
+  closeBtn.style.border = 'none';
+  closeBtn.style.borderRadius = '50%';
+  closeBtn.style.width = '44px';
+  closeBtn.style.height = '44px';
+  closeBtn.style.display = 'flex';
+  closeBtn.style.alignItems = 'center';
+  closeBtn.style.justifyContent = 'center';
+  closeBtn.style.cursor = 'pointer';
+  closeBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+  closeBtn.style.backdropFilter = 'blur(5px)';
+
+  closeBtn.onclick = () => closeModal();
+
+  actionBar.appendChild(downloadBtn);
+  actionBar.appendChild(closeBtn);
+
+  imgContainer.appendChild(img);
+  imgContainer.appendChild(actionBar);
+
+  imgContainer.onclick = (e) => {
+    if (e.target === imgContainer || e.target === img) closeModal();
+  };
+
+  showModal({
+    title: '',
+    content: imgContainer,
+    fullscreen: true,
+    hideHeader: true
+  });
+};

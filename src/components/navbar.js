@@ -17,6 +17,8 @@ export function renderNavbar() {
 
   const user = getState().user;
 
+  const isOverlayFullscreen = hash.startsWith('/profile/') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || (hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/');
+
   // Hide on admin/panel pages or tracking (except support-chats)
   if ((hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash.startsWith('/pedido/')) {
     navbar.innerHTML = '';
@@ -40,7 +42,13 @@ export function renderNavbar() {
     appContent.style.minHeight = '';
   }
   const overlay = document.getElementById('app-overlay');
-  if (overlay) overlay.classList.remove('panel-fullscreen');
+  if (overlay) {
+    if (isOverlayFullscreen) {
+      overlay.classList.add('panel-fullscreen');
+    } else {
+      overlay.classList.remove('panel-fullscreen');
+    }
+  }
 
   const hashPath = hash.split('?')[0];
 
@@ -72,17 +80,15 @@ export function renderNavbar() {
         </span>
         <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Carrito</span>
       </a>
-      ${isAdmin() ? `
-        <a href="#/admin/support-chats" class="nav-item ${hashPath.startsWith('/admin/support-chats') ? 'active' : ''}">
-          <span class="nav-item-icon">
-            ${icon('chatBubble', 24)}
-            ${(getState().unreadSupportCount || 0) > 0 ? `
-              <span id="support-chats-badge" style="background: var(--color-primary); border: 2px solid var(--color-surface); animation: badgePulse 2s infinite;" class="nav-item-badge">${getState().unreadSupportCount}</span>
-            ` : ''}
-          </span>
-          <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Soporte</span>
-        </a>
-      ` : ''}
+      <a href="#/mis-chats" class="nav-item ${hashPath.startsWith('/mis-chats') ? 'active' : ''}">
+        <span class="nav-item-icon">
+          ${icon('chatBubble', 24)}
+          ${(getState().totalUnreadChats || 0) > 0 ? `
+            <span id="support-chats-badge" style="background: var(--color-primary); border: 2px solid var(--color-surface); animation: badgePulse 2s infinite;" class="nav-item-badge">${getState().totalUnreadChats}</span>
+          ` : ''}
+        </span>
+        <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Mis Chats</span>
+      </a>
       <a href="#/profile/orders" class="nav-item ${hashPath === '/profile/orders' ? 'active' : ''}">
         <span class="nav-item-icon">${icon('package', 24, '', hashPath === '/profile/orders' ? 'var(--color-primary)' : 'var(--footer-item-inactive)')}</span>
         <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Pedidos</span>
@@ -97,6 +103,7 @@ export function initNavbar() {
   subscribe('user', () => renderNavbar());
   subscribe('commercePendingCount', () => renderNavbar());
   subscribe('unreadSupportCount', () => renderNavbar());
+  subscribe('totalUnreadChats', () => renderNavbar());
   window.addEventListener('hashchange', () => renderNavbar());
 
   // Real-time unread support chats listener for admins
@@ -111,6 +118,47 @@ export function initNavbar() {
       unreadUnsub = onSnapshot(q, (snap) => {
         stateSetState('unreadSupportCount', snap.size);
       }, (err) => console.warn('Unread chats listener failed:', err));
+    }
+  });
+
+  // Real-time unread chats listener for all users (order chats + support chat)
+  let unreadUserChatsUnsub = null;
+  let unreadUserSupportUnsub = null;
+  subscribe('user', async (user) => {
+    if (unreadUserChatsUnsub) { unreadUserChatsUnsub(); unreadUserChatsUnsub = null; }
+    if (unreadUserSupportUnsub) { unreadUserSupportUnsub(); unreadUserSupportUnsub = null; }
+
+    if (user) {
+      const { collection, doc, query, where, onSnapshot } = await import('firebase/firestore');
+      const { db } = await import('../firebase.js');
+      const { setState: stateSetState } = await import('../state.js');
+
+      let unreadSupport = 0;
+      let unreadChats = 0;
+
+      const updateCount = () => {
+        stateSetState('totalUnreadChats', unreadSupport + unreadChats);
+      };
+
+      // 1. Support chat unread
+      unreadUserSupportUnsub = onSnapshot(doc(db, 'support_chats', user.uid), (snap) => {
+        unreadSupport = (snap.exists() && snap.data().unreadByUser === true) ? 1 : 0;
+        updateCount();
+      }, (err) => console.warn('User support unread listener failed:', err));
+
+      // 2. Order chats unread
+      const q = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid));
+      unreadUserChatsUnsub = onSnapshot(q, (snap) => {
+        let count = 0;
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.unread && data.unread[user.uid] === true) {
+            count++;
+          }
+        });
+        unreadChats = count;
+        updateCount();
+      }, (err) => console.warn('User chats unread listener failed:', err));
     }
   });
 }

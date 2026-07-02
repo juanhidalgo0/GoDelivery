@@ -1,0 +1,480 @@
+/* ============================================
+   GoDelivery — Interactive App Guide Styles
+   Premium slideshow with micro-animations
+   ============================================ */
+
+/* Full-screen overlay */
+.app-guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  animation: guideOverlayIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  overflow: hidden;
+}
+
+.app-guide-overlay.closing {
+  animation: guideOverlayOut 0.5s ease-in forwards;
+}
+
+/* Animated background particles */
+.app-guide-overlay::before {
+  content: '';
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(225, 29, 72, 0.08) 0%, transparent 70%);
+  top: -80px;
+  right: -80px;
+  border-radius: 50%;
+  animation: guidePulseGlow 6s ease-in-out infinite;
+}
+
+.app-guide-overlay::after {
+  content: '';
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(225, 29, 72, 0.05) 0%, transparent 70%);
+  bottom: -60px;
+  left: -60px;
+  border-radius: 50%;
+  animation: guidePulseGlow 8s ease-in-out infinite reverse;
+}
+
+/* Main card container */
+.app-guide-card {
+  position: relative;
+  width: 92%;
+  max-width: 420px;
+  max-height: 85dvh;
+  display: flex;
+  flex-direction: column;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 32px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  z-index: 2;
+}
+
+/* Top progress bar */
+.app-guide-progress {
+  display: flex;
+  gap: 6px;
+  padding: 16px 20px 12px;
+  flex-shrink: 0;
+}
+
+.app-guide-progress-segment {
+  flex: 1;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-guide-progress-segment.completed {
+  background: rgba(225, 29, 72, 0.8);
+}
+
+.app-guide-progress-segment.active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(225, 29, 72, 0.9), #e11d48);
+  border-radius: 4px;
+  animation: guideProgressFill 8s linear forwards;
+}
+
+/* Slide content area */
+.app-guide-slide {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 28px 20px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  text-align: center;
+  position: relative;
+}
+
+/* Slide entrance/exit */
+.app-guide-slide.slide-in-right {
+  animation: guideSlideInRight 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.app-guide-slide.slide-in-left {
+  animation: guideSlideInLeft 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.app-guide-slide.slide-out-left {
+  animation: guideSlideOutLeft 0.35s ease-in forwards;
+}
+
+.app-guide-slide.slide-out-right {
+  animation: guideSlideOutRight 0.35s ease-in forwards;
+}
+
+/* Icon/Emoji area */
+.app-guide-icon {
+  width: 100px;
+  height: 100px;
+  border-radius: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 52px;
+  margin-bottom: 20px;
+  position: relative;
+  flex-shrink: 0;
+  animation: guideIconFloat 3s ease-in-out infinite;
+}
+
+.app-guide-icon::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 32px;
+  background: inherit;
+  filter: blur(20px);
+  opacity: 0.4;
+  z-index: -1;
+}
+
+/* Title */
+.app-guide-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  color: #111827;
+  margin: 0 0 8px;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+}
+
+/* Subtitle */
+.app-guide-subtitle {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #4b5563;
+  margin: 0 0 20px;
+  line-height: 1.6;
+  max-width: 320px;
+}
+
+/* Feature list items */
+.app-guide-features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+
+.app-guide-feature {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 16px;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: guideFeatureReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.app-guide-feature:nth-child(1) { animation-delay: 0.15s; }
+.app-guide-feature:nth-child(2) { animation-delay: 0.25s; }
+.app-guide-feature:nth-child(3) { animation-delay: 0.35s; }
+.app-guide-feature:nth-child(4) { animation-delay: 0.45s; }
+.app-guide-feature:nth-child(5) { animation-delay: 0.55s; }
+
+.app-guide-feature-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.app-guide-feature-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-guide-feature-text strong {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #111827;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.app-guide-feature-text span {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.45;
+  display: block;
+}
+
+/* Interactive step highlight */
+.app-guide-step-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.app-guide-step-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  position: relative;
+  padding: 10px 0;
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: guideStepReveal 0.4s ease-out forwards;
+}
+
+.app-guide-step-item:nth-child(1) { animation-delay: 0.2s; }
+.app-guide-step-item:nth-child(2) { animation-delay: 0.4s; }
+.app-guide-step-item:nth-child(3) { animation-delay: 0.6s; }
+.app-guide-step-item:nth-child(4) { animation-delay: 0.8s; }
+.app-guide-step-item:nth-child(5) { animation-delay: 1.0s; }
+
+.app-guide-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e11d48, #be123c);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.app-guide-step-item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 38px;
+  bottom: -2px;
+  width: 2px;
+  background: rgba(225, 29, 72, 0.2);
+  z-index: 1;
+}
+
+.app-guide-step-content {
+  flex: 1;
+  text-align: left;
+}
+
+.app-guide-step-content strong {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #111827;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.app-guide-step-content span {
+  font-size: 11px;
+  font-weight: 500;
+  color: #4b5563;
+  line-height: 1.45;
+  display: block;
+}
+
+/* Footer with navigation */
+.app-guide-footer {
+  padding: 16px 24px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  border-top: 1px solid #f3f4f6;
+}
+
+.app-guide-footer .guide-btn-next {
+  flex: 1;
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+  color: #fff;
+  border: none;
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 8px 24px rgba(225, 29, 72, 0.3);
+}
+
+.app-guide-footer .guide-btn-next:active {
+  transform: scale(0.97);
+}
+
+.app-guide-footer .guide-btn-back {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  color: #4b5563;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.app-guide-footer .guide-btn-back:active {
+  background: #e5e7eb;
+}
+
+/* Step counter */
+.app-guide-step-counter {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ca3af;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding-bottom: 8px;
+}
+
+/* FAB (Floating Action Button) for guide */
+.app-guide-fab {
+  position: fixed;
+  bottom: 185px;
+  right: 25px;
+  left: auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+  color: white;
+  border: none;
+  cursor: pointer;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(225, 29, 72, 0.35);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: guideFabAppear 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.app-guide-fab:hover {
+  transform: scale(1.08);
+  box-shadow: 0 8px 28px rgba(225, 29, 72, 0.45);
+}
+
+.app-guide-fab:active {
+  transform: scale(0.95);
+}
+
+.app-guide-fab svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+
+@keyframes guideOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes guideOverlayOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes guideProgressFill {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+@keyframes guideSlideInRight {
+  from { opacity: 0; transform: translateX(60px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes guideSlideInLeft {
+  from { opacity: 0; transform: translateX(-60px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes guideSlideOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-60px); }
+}
+
+@keyframes guideSlideOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(60px); }
+}
+
+@keyframes guideIconFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes guideFeatureReveal {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes guideStepReveal {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes guidePulseGlow {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.2); opacity: 0.6; }
+}
+
+@keyframes guideFabAppear {
+  from { opacity: 0; transform: scale(0.3) rotate(-90deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+@keyframes guideFabPulse {
+  0%, 100% { box-shadow: 0 6px 20px rgba(225, 29, 72, 0.35); }
+  50% { box-shadow: 0 6px 30px rgba(225, 29, 72, 0.55), 0 0 0 8px rgba(225, 29, 72, 0.1); }
+}
+
+/* Attention pulse for first time */
+.app-guide-fab.attention {
+  animation: guideFabAppear 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+             guideFabPulse 2s ease-in-out 1s infinite;
+}

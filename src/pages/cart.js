@@ -1,6 +1,6 @@
 // GoDelivery — Cart Page
 import { getState, setState, getCartByComercio, getCartTotal, getCartCount, updateCartQty, removeFromCart, clearCart, subscribe, setDeliveryAddress } from '../state.js';
-import { formatPrice } from '../utils/format.js';
+import { formatPrice, calculateScheduleSurcharge } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 window.showToast = showToast; // Global access for inline modal events
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
@@ -37,12 +37,8 @@ export async function renderCart(content) {
 
   const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
 
-  // Load weather status dynamically
-  if (!isPreview) {
-    isRainingInMagdalena().then(isRaining => {
-      setState('isRaining', isRaining);
-    });
-  } else {
+  // Weather status is loaded dynamically in real-time in state.js
+  if (isPreview) {
     setState('isRaining', false);
   }
 
@@ -401,7 +397,16 @@ function renderCartContent(content) {
           const maxIndividualFee = allFeesReady ? Math.max(...individualFees, 0) : null;
           const extraStopsFee = (allFeesReady && individualFees.length > 1) ? (individualFees.length - 1) * (getState().deliveryExtraStopFee || 500) : 0;
           const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-          const totalDelivery = allFeesReady ? maxIndividualFee + extraStopsFee + rainSurcharge + selectedTip : null;
+          
+          let baseDeliveryFeeCalc = null;
+          let nightSurcharge = null;
+          let totalDelivery = null;
+
+          if (allFeesReady) {
+            baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+            nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, baseDeliveryFeeCalc);
+            totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
+          }
 
           const appUsageFee = totalProducts * (getState().appUsageFeeRate || 0.05);
           const discount = getState().appliedDiscount || 0;
@@ -414,13 +419,13 @@ function renderCartContent(content) {
             const couponVal = Number(appliedCoupon.value || 0);
 
             if (scope === 'shipping' || appliedCoupon.type === 'free_delivery') {
-              const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+              const feeForCoupon = baseDeliveryFeeCalc + (nightSurcharge || 0);
               if (appliedCoupon.type === 'free_delivery') {
-                couponDiscount = baseDeliveryFee || 0;
+                couponDiscount = feeForCoupon || 0;
               } else if (discountType === 'percentage') {
-                couponDiscount = baseDeliveryFee * (couponVal / 100);
+                couponDiscount = feeForCoupon * (couponVal / 100);
               } else if (discountType === 'fixed') {
-                couponDiscount = Math.min(couponVal, baseDeliveryFee);
+                couponDiscount = Math.min(couponVal, feeForCoupon);
               }
             } else { // products
               let targetProductsTotal = totalProducts;
@@ -492,6 +497,11 @@ function renderCartContent(content) {
                     ${getState().isRaining ? `
                       <span class="rain-badge-pulsing" style="background:rgba(0,158,227,0.08); color:#009EE3; font-size:10px; font-weight:900; padding:2px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; border:1px solid rgba(0,158,227,0.15); animation: pulse 2s infinite;">
                         ${icon('cloudRain', 11)} +${formatPrice(getState().deliveryRainSurcharge || 300)} Lluvia
+                      </span>
+                    ` : ''}
+                    ${nightSurcharge > 0 ? `
+                      <span class="night-badge-pulsing" style="background:rgba(163,11,17,0.08); color:#a30b11; font-size:10px; font-weight:900; padding:2px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; border:1px solid rgba(163,11,17,0.15); animation: pulse 2s infinite;">
+                        ${icon('moon', 11)} +${formatPrice(nightSurcharge)} Nocturno
                       </span>
                     ` : ''}
                   </div>
@@ -750,18 +760,83 @@ function showFeeDetails() {
     const dist = dynamicDistances[cid] || 0;
     const kmPrice = dist * state.deliveryPricePerKm;
     const totalRaw = state.deliveryBasePrice + kmPrice;
+    const minPrice = state.deliveryMinPrice || 1500;
+    
+    const minAdjustment = Math.max(0, minPrice - totalRaw);
+    const beforeRound = Math.max(minPrice, totalRaw);
+    const rounded = Math.ceil(beforeRound / 10) * 10;
+    const roundingAdjustment = rounded - beforeRound;
 
     html += `
       <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
         <span>Costo Base</span>
         <span style="font-weight:600;">${formatPrice(state.deliveryBasePrice)}</span>
       </div>
-      <div style="display:flex; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
         <span>Distancia (${dist.toFixed(1)} km x ${formatPrice(state.deliveryPricePerKm)})</span>
         <span style="font-weight:600;">+ ${formatPrice(kmPrice)}</span>
       </div>
     `;
+
+    if (minAdjustment > 0) {
+      html += `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px; color:var(--color-success); font-weight:600;">
+          <span>Ajuste Costo Mínimo</span>
+          <span>+ ${formatPrice(minAdjustment)}</span>
+        </div>
+      `;
+    }
+
+    if (roundingAdjustment > 0) {
+      html += `
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px; font-size:13px; color:var(--color-text-tertiary);">
+          <span>Ajuste de Redondeo</span>
+          <span>+ ${formatPrice(roundingAdjustment)}</span>
+        </div>
+      `;
+    }
   }
+
+  // Calculate base total for surcharges
+  let baseDeliveryFeeCalc = 0;
+  if (isMulti) {
+    const individualFees = Object.keys(grouped).map(cid => dynamicFees[cid] || state.deliveryCost);
+    const maxFee = Math.max(...individualFees);
+    const othersCount = individualFees.length - 1;
+    baseDeliveryFeeCalc = maxFee + (othersCount * (state.deliveryExtraStopFee || 500));
+  } else {
+    const cid = Object.keys(grouped)[0];
+    const dist = dynamicDistances[cid] || 0;
+    baseDeliveryFeeCalc = dynamicFees[cid] || Math.ceil(Math.max(state.deliveryMinPrice || 1500, state.deliveryBasePrice + (dist * state.deliveryPricePerKm)) / 10) * 10;
+  }
+
+  const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
+  if (nightSurcharge > 0) {
+    html += `
+      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <span style="display:flex; align-items:center; gap:6px;">${icon('moon', 14)} Recargo Nocturno</span>
+        <span style="font-weight:700; color:#a30b11;">+ ${formatPrice(nightSurcharge)}</span>
+      </div>
+    `;
+  }
+
+  if (state.isRaining) {
+    const rainSurcharge = state.deliveryRainSurcharge || 300;
+    html += `
+      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px; padding-top:${nightSurcharge > 0 ? '0' : '12px'}; border-top:${nightSurcharge > 0 ? 'none' : '1px dashed var(--color-border-light)'};">
+        <span style="display:flex; align-items:center; gap:6px;">${icon('cloudRain', 14)} Recargo por Lluvia</span>
+        <span style="font-weight:700; color:#009EE3;">+ ${formatPrice(rainSurcharge)}</span>
+      </div>
+    `;
+  }
+
+  const finalBreakdownTotal = baseDeliveryFeeCalc + nightSurcharge + (state.isRaining ? (state.deliveryRainSurcharge || 300) : 0);
+  html += `
+      <div style="display:flex; justify-content:space-between; margin-top:12px; padding-top:12px; font-size:15px; font-weight:900; color:var(--color-text-primary); border-top:2px solid var(--color-border-light);">
+        <span>Total del Envío</span>
+        <span>${formatPrice(finalBreakdownTotal)}</span>
+      </div>
+  `;
 
   html += `
       </div>
@@ -937,12 +1012,15 @@ function openGoPointsModal() {
 
   const selectedTip = state.selectedTip || 0;
   let totalDelivery = 0;
+  let nightSurcharge = 0;
   if (allFeesReady) {
     const individualFees = commerceIds.map(cid => dynamicFees[cid]);
     const maxIndividualFee = Math.max(...individualFees, 0);
     const extraStopsFee = (individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
     const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
-    totalDelivery = maxIndividualFee + extraStopsFee + rainSurcharge + selectedTip;
+    const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+    nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
+    totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
   }
   const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
 
@@ -1317,7 +1395,10 @@ async function openCheckoutConfirmationModal() {
   const maxIndividualFee = Math.max(...individualFees, 0);
   const extraStopsFee = (individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
   const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
-  const totalDelivery = maxIndividualFee + extraStopsFee + rainSurcharge + selectedTip;
+  const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+  const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
+  const driverIncentive = calculateScheduleSurcharge(state.driverIncentiveConfig, baseDeliveryFee);
+  const totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
 
   const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
   const discount = state.appliedDiscount || 0;
@@ -1330,13 +1411,13 @@ async function openCheckoutConfirmationModal() {
     const couponVal = Number(appliedCoupon.value || 0);
 
     if (scope === 'shipping' || appliedCoupon.type === 'free_delivery') {
-      const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+      const feeForCoupon = baseDeliveryFee + (nightSurcharge || 0);
       if (appliedCoupon.type === 'free_delivery') {
-        couponDiscount = baseDeliveryFee || 0;
+        couponDiscount = feeForCoupon || 0;
       } else if (discountType === 'percentage') {
-        couponDiscount = baseDeliveryFee * (couponVal / 100);
+        couponDiscount = feeForCoupon * (couponVal / 100);
       } else if (discountType === 'fixed') {
-        couponDiscount = Math.min(couponVal, baseDeliveryFee);
+        couponDiscount = Math.min(couponVal, feeForCoupon);
       }
     } else { // products
       let targetProductsTotal = totalProducts;
@@ -1626,6 +1707,11 @@ async function openCheckoutConfirmationModal() {
               ${icon('cloudRain', 8)} Lluvia
             </span>
           ` : ''}
+          ${nightSurcharge > 0 ? `
+            <span style="background: rgba(163, 11, 17, 0.08); color: #a30b11; font-size: 8px; font-weight: 800; padding: 1px 3px; border-radius: 4px; border: 1px solid rgba(163, 11, 17, 0.15);">
+              ${icon('moon', 8)} Nocturno
+            </span>
+          ` : ''}
         </span>
         <span style="font-weight: 600; color: var(--color-text-primary); text-align: right;">
           ${totalDelivery > 0 ? `${formatPrice(totalDelivery)}${selectedTip > 0 ? ` (${formatPrice(selectedTip)} prop.)` : ''}` : '¡Gratis!'}
@@ -1899,7 +1985,7 @@ async function openCheckoutConfirmationModal() {
         
         // Re-open this confirmation modal recursively!
         openCheckoutConfirmationModal();
-      });
+      }, { skipDetails: true });
     });
   };
 
@@ -1918,7 +2004,7 @@ async function openCheckoutConfirmationModal() {
       close();
       import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
         openCheckoutConfirmationModal();
-      }));
+      }, { skipDetails: true }));
       return;
     }
     submitBtn.disabled = true;
@@ -1977,7 +2063,9 @@ async function openCheckoutConfirmationModal() {
           allowReplacement,
           isScheduled: selectedIsScheduled,
           scheduledDate: schedDateVal,
-          scheduledTime: schedTimeVal
+          scheduledTime: schedTimeVal,
+          nightSurcharge: nightSurcharge || 0,
+          driverIncentive: driverIncentive || 0
         })
       });
 
@@ -2143,7 +2231,7 @@ async function handleCartClick(e) {
     if (!address) {
       import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
         checkoutBtn.click();
-      }));
+      }, { skipDetails: true }));
       return;
     }
 
@@ -2152,7 +2240,7 @@ async function handleCartClick(e) {
       showToast('La referencia de ubicación es obligatoria.', 'warning');
       import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
         checkoutBtn.click();
-      }));
+      }, { skipDetails: true }));
       return;
     }
 

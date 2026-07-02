@@ -12,7 +12,7 @@ let selectedIndex = -1;
 async function loadSearchData() {
   if (isLoaded) return;
   try {
-    const comSnap = await getDocs(query(collection(db, 'comercios'), where('isActive', '==', true)));
+    const comSnap = await getDocs(query(collection(db, 'comercios')));
     allComercios = comSnap.docs.map(doc => ({ id: doc.id, type: 'comercio', ...doc.data() }));
 
     // Fetch products with fallback if collectionGroup fails or index is missing
@@ -31,7 +31,7 @@ async function loadSearchData() {
           comercioName: comercio.name, 
           ...data 
         };
-      }).filter(p => p !== null && p.isActive !== false);
+      }).filter(p => p !== null);
     } catch (err) {
       console.warn('CollectionGroup failed, fetching individually', err);
       const promises = allComercios.map(async (c) => {
@@ -45,7 +45,7 @@ async function loadSearchData() {
         }));
       });
       const results = await Promise.all(promises);
-      allProducts = results.flat().filter(p => p.isActive !== false && allComercios.some(c => c.id === p.comercioId));
+      allProducts = results.flat().filter(p => allComercios.some(c => c.id === p.comercioId));
     }
 
     isLoaded = true;
@@ -68,10 +68,21 @@ export function initSearchSuggestions() {
   const suggestionsContainer = document.createElement('div');
   suggestionsContainer.id = 'search-suggestions';
   suggestionsContainer.className = 'search-suggestions-dropdown';
-  searchInput.parentElement.parentElement.appendChild(suggestionsContainer);
+  document.body.appendChild(suggestionsContainer);
+
+  const positionDropdown = () => {
+    const rect = searchInput.parentElement.getBoundingClientRect();
+    suggestionsContainer.style.top = `${rect.bottom + 8}px`;
+    suggestionsContainer.style.left = `${rect.left}px`;
+    suggestionsContainer.style.width = `${rect.width}px`;
+  };
 
   searchInput.addEventListener('focus', () => {
     loadSearchData();
+    if (searchInput.value.trim().length >= 2) {
+      positionDropdown();
+      suggestionsContainer.classList.add('active');
+    }
   });
 
   searchInput.addEventListener('keydown', (e) => {
@@ -100,10 +111,11 @@ export function initSearchSuggestions() {
     const query = e.target.value.trim().toLowerCase();
     selectedIndex = -1;
     if (query.length < 2) {
-      suggestionsContainer.innerHTML = '';
       suggestionsContainer.classList.remove('active');
+      setTimeout(() => suggestionsContainer.innerHTML = '', 300); // Wait for animation
       return;
     }
+    positionDropdown();
     renderSuggestions(query, suggestionsContainer);
   });
 

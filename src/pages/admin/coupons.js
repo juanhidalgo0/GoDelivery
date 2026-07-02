@@ -12,7 +12,7 @@ export async function renderAdminCoupons() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Premium Header with Violet Gradient -->
-      <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
+      <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
         <!-- Decorative Background Circles -->
         <div style="position: absolute; top: -30px; right: -30px; width: 110px; height: 110px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         <div style="position: absolute; bottom: -20px; left: -20px; width: 70px; height: 70px; background: rgba(255,255,255,0.05); border-radius: 50%; pointer-events: none;"></div>

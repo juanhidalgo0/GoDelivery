@@ -76,7 +76,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       
       document.getElementById('reviewer-login-btn')?.addEventListener('click', () => {
         const modalEl = document.createElement('div');
-        modalEl.style.cssText = 'padding: 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
+        modalEl.style.cssText = 'padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 16px)) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
         modalEl.innerHTML = `
           <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
           <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales proporcionadas para revisar la aplicación.</p>
@@ -456,6 +456,14 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 ${icon('shoppingBag', 20)}
               </div>
               <span class="settings-label">Mis Pedidos</span>
+              ${icon('chevronRight', 16, 'settings-chevron')}
+            </a>
+
+            <a href="#/profile/publications" class="settings-row">
+              <div class="settings-icon-box" style="background:rgba(16, 185, 129, 0.1); color:#10b981;">
+                ${icon('shop', 20) || icon('tag', 20) || '🏷️'}
+              </div>
+              <span class="settings-label">Mis Publicaciones (Market)</span>
               ${icon('chevronRight', 16, 'settings-chevron')}
             </a>
 
@@ -1696,7 +1704,7 @@ async function showManageAddressesModal() {
       <div style="display:flex; flex-direction:column; gap:8px;">
         <span style="font-size:11.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Dirección en uso</span>
         ${activeAddress ? `
-          <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(34, 197, 94, 0.06); border:1.5px solid #22c55e; border-radius:16px; padding:14px 16px; gap:12px;">
+          <div class="active-address-card" style="display:flex; align-items:center; justify-content:space-between; background:rgba(34, 197, 94, 0.06); border:1.5px solid #22c55e; border-radius:16px; padding:14px 16px; gap:12px; cursor:pointer;" title="Editar dirección o referencia activa">
             <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
               <div style="width:36px; height:36px; border-radius:10px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('mapPin', 20)}
@@ -1768,6 +1776,23 @@ async function showManageAddressesModal() {
     `;
 
     // Attach listeners
+    const activeCard = modalEl.querySelector('.active-address-card');
+    if (activeCard) {
+      activeCard.onclick = () => {
+        showAddressPrompt(() => {
+          renderList();
+        }, {
+          editAddress: {
+            id: 'active',
+            name: 'Activa',
+            address: activeAddress,
+            notes: getState().addressNotes || '',
+            coords: getState().deliveryCoords
+          }
+        });
+      };
+    }
+
     modalEl.querySelectorAll('.select-address-trigger').forEach(trigger => {
       trigger.onclick = async (e) => {
         e.stopPropagation();

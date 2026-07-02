@@ -243,6 +243,15 @@ export function showDeliveryRating(order) {
       showToast('¡Gracias por tu puntuación!', 'success');
     } catch (err) {
       console.error('Error submitting rating:', err);
+      
+      const isNotFound = err.code === 'not-found' || (err.message && err.message.includes('No document to update'));
+      if (isNotFound) {
+        localStorage.setItem(`gd_dismissed_points_modal_${order.id}`, 'true');
+        closeModal();
+        showToast('El pedido ya no existe en el sistema', 'warning');
+        return;
+      }
+
       showToast('Error al enviar la puntuación', 'error');
       if (submitBtn) {
         submitBtn.disabled = false;

@@ -20,6 +20,23 @@ export function showAddressPrompt(onSuccess, config = {}) {
   let lastKnownUserPos = null;
   let geocodingDisabled = false;
   let geocodingDisabledTimeout = null;
+  let isManualAddress = false;
+
+  const updateSelectedAddress = (newAddress) => {
+    if (!newAddress) return;
+    const addrText = document.getElementById('current-selected-address-text');
+    if (addrText) {
+      const oldAddr = addrText.textContent.trim();
+      if (oldAddr && oldAddr !== 'Cargando dirección...' && oldAddr !== 'Cargando...' && oldAddr !== newAddress) {
+        const refInput = document.getElementById('address-reference-input');
+        if (refInput) {
+          refInput.value = '';
+          refInput.style.borderColor = 'var(--color-border)';
+        }
+      }
+      addrText.textContent = newAddress;
+    }
+  };
 
   const disableGeocodingTemporarily = (ms = 1200) => {
     geocodingDisabled = true;
@@ -94,6 +111,11 @@ export function showAddressPrompt(onSuccess, config = {}) {
             </div>
           </div>
           <div id="address-suggestions" class="address-suggestions-list" style="display:none; position:absolute; top:100%; left:0; right:0; margin-top:8px; max-height:220px; overflow-y:auto; background:var(--color-bg); border-radius:16px; border:1px solid var(--color-border); box-shadow:0 10px 25px rgba(0,0,0,0.15); z-index:1000;"></div>
+        </div>
+
+        <!-- Reference/Notes input -->
+        <div style="margin-bottom: 16px;">
+          <textarea id="address-reference-input" placeholder="Referencia / Indicaciones de entrega (Ej: Portón negro, depto 2) - Obligatorio" style="width:100%; height:54px; padding:10px 14px; border-radius:14px; border:1.5px solid var(--color-border); background:var(--color-surface); font-size:13px; font-weight:600; outline:none; color:var(--color-text-primary); resize:none; line-height:1.4; transition:all 0.2s; box-sizing:border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'">${getState().addressNotes || ''}</textarea>
         </div>
 
         <!-- Saved Addresses Horizontal List -->
@@ -186,11 +208,16 @@ export function showAddressPrompt(onSuccess, config = {}) {
     });
 
     googleMap.addListener('idle', () => {
+      const center = googleMap.getCenter();
+      selectedCoords = { lat: center.lat(), lng: center.lng() };
+
       if (geocodingDisabled) {
         return;
       }
-      const center = googleMap.getCenter();
-      selectedCoords = { lat: center.lat(), lng: center.lng() };
+      if (isManualAddress) {
+        console.log('[Map] Skipping reverse-geocoding to preserve custom manual address text');
+        return;
+      }
       reverseGeocode(selectedCoords.lat, selectedCoords.lng);
     });
 
@@ -216,11 +243,24 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
       const address = lastGeocodedAddress || document.getElementById('address-search-input').value;
       if (address) {
+        // Validation of reference note (Obligatorio)
+        const reference = document.getElementById('address-reference-input')?.value.trim() || '';
+        if (!reference) {
+          const refInput = document.getElementById('address-reference-input');
+          if (refInput) {
+            refInput.style.borderColor = '#EF4444';
+            refInput.focus();
+          }
+          showToast('La referencia de ubicación es obligatoria.', 'warning');
+          return;
+        }
+
         if (isGeneric) {
-           if (onSuccess) onSuccess(address, '', selectedCoords);
+           setDeliveryAddress(address, reference, selectedCoords, '');
            closeModal();
+           if (onSuccess) onSuccess(address, reference, selectedCoords);
         } else {
-           showAddressDetails(address, selectedCoords, onSuccess, config);
+           showAddressDetails(address, selectedCoords, onSuccess, { ...config, initialReference: reference });
         }
       } else {
         showToast('Elegí una ubicación', 'warning');
@@ -376,18 +416,10 @@ export function showAddressPrompt(onSuccess, config = {}) {
       }
     };
 
-    // Doble pasada robusta e infalible para iOS Safari
     navigator.geolocation.getCurrentPosition(
       onSuccessCoords,
-      (err) => {
-        console.warn('Alta precisión falló en address-modal. Intentando precisión celular/Wi-Fi...');
-        navigator.geolocation.getCurrentPosition(
-          onSuccessCoords,
-          onErrorCoords,
-          { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-        );
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      onErrorCoords,
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
@@ -405,8 +437,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           searchIconEl.innerHTML = icon('search', 20);
         }
         lastGeocodedAddress = results[0].formatted_address.split(',').slice(0, 2).join(', ');
-        const addrText = document.getElementById('current-selected-address-text');
-        if (addrText) addrText.textContent = lastGeocodedAddress;
+        updateSelectedAddress(lastGeocodedAddress);
 
         if (pendingConfirm) {
           pendingConfirm = false;
@@ -431,8 +462,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
             if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
 
             lastGeocodedAddress = display || data.display_name.split(',')[0];
-            const addrText = document.getElementById('current-selected-address-text');
-            if (addrText) addrText.textContent = lastGeocodedAddress;
+            updateSelectedAddress(lastGeocodedAddress);
 
             if (pendingConfirm) {
               pendingConfirm = false;
@@ -493,8 +523,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           lastGeocodedAddress = first.address;
           selectedCoords = { lat, lng };
           searchInput.value = first.address;
-          const addrText = document.getElementById('current-selected-address-text');
-          if (addrText) addrText.textContent = first.address;
+          updateSelectedAddress(first.address);
           showToast('Ubicación encontrada y centrada en el mapa', 'success');
         } else {
           showToast('No se encontraron resultados para esa dirección', 'warning');
@@ -504,7 +533,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
       }
     };
 
-    if (searchInput) {
+     if (searchInput) {
       searchInput.oninput = (e) => {
         const query = e.target.value;
         if (query.length < 3) {
@@ -516,7 +545,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           try {
             const { searchAddressSuggestions } = await import('../utils/geo.js');
             const suggestions = await searchAddressSuggestions(query);
-            renderSuggestions(suggestions);
+            renderSuggestions(suggestions, query);
           } catch (err) {
             console.error('Error fetching search suggestions:', err);
           }
@@ -549,42 +578,72 @@ export function showAddressPrompt(onSuccess, config = {}) {
     });
   };
 
-  const renderSuggestions = (suggestions) => {
+  const renderSuggestions = (suggestions, currentQuery = '') => {
     const suggestionsBox = document.getElementById('address-suggestions');
     if (!suggestionsBox) return;
 
-    if (!suggestions || suggestions.length === 0) {
+    suggestions = suggestions || [];
+
+    if (suggestions.length === 0 && currentQuery.trim().length < 3) {
       suggestionsBox.style.display = 'none';
       return;
     }
 
     suggestionsBox.style.display = 'block';
-    suggestionsBox.innerHTML = suggestions.map(s => `
+    
+    let html = suggestions.map(s => `
       <div class="suggestion-item" data-lat="${s.lat}" data-lng="${s.lng}" data-addr="${s.address}" style="padding:14px 20px; border-bottom:1px solid var(--color-border-light); cursor:pointer;">
         <div style="font-weight:700; font-size:14px; color:var(--color-text-primary);">${s.address}</div>
         <div style="font-size:12px; color:var(--color-text-tertiary);">${s.displayName || ''}</div>
       </div>
     `).join('');
 
+    // Append the custom typed option
+    if (currentQuery.trim().length >= 3) {
+      html += `
+        <div class="suggestion-item custom-typed-suggestion" data-addr="${currentQuery.trim()}" style="padding:14px 20px; border-top:2px solid rgba(var(--color-primary-rgb), 0.15); background:rgba(var(--color-primary-rgb), 0.03); cursor:pointer; display:flex; align-items:center; gap:10px;">
+          <div style="color:var(--color-primary); flex-shrink:0; font-size:16px;">📍</div>
+          <div style="flex:1; min-width:0; text-align:left;">
+            <div style="font-weight:800; font-size:13.5px; color:var(--color-primary);">Usar: "${currentQuery.trim()}"</div>
+            <div style="font-size:11px; color:var(--color-text-tertiary);">Se usará este texto con la posición del pin en el mapa</div>
+          </div>
+        </div>
+      `;
+    }
+
+    suggestionsBox.innerHTML = html;
+
     suggestionsBox.querySelectorAll('.suggestion-item').forEach(item => {
       item.onclick = () => {
-        const lat = parseFloat(item.dataset.lat);
-        const lng = parseFloat(item.dataset.lng);
+        const isCustom = item.classList.contains('custom-typed-suggestion');
         const addr = item.dataset.addr;
 
-        if (googleMap) {
-          disableGeocodingTemporarily(1500);
-          googleMap.setCenter(new google.maps.LatLng(lat, lng));
-          googleMap.setZoom(17);
-        }
-        suggestionsBox.style.display = 'none';
+        if (isCustom) {
+          isManualAddress = true;
+          lastGeocodedAddress = addr;
+          const searchInput = document.getElementById('address-search-input');
+          if (searchInput) searchInput.value = addr;
+          updateSelectedAddress(addr);
+          suggestionsBox.style.display = 'none';
+          showToast(`Dirección establecida: "${addr}". Ajustá el pin del mapa sobre tu casa.`, 'success');
+        } else {
+          isManualAddress = false;
+          const lat = parseFloat(item.dataset.lat);
+          const lng = parseFloat(item.dataset.lng);
+          
+          if (googleMap) {
+            disableGeocodingTemporarily(1500);
+            googleMap.setCenter(new google.maps.LatLng(lat, lng));
+            googleMap.setZoom(17);
+          }
+          suggestionsBox.style.display = 'none';
 
-        lastGeocodedAddress = addr;
-        selectedCoords = { lat, lng };
-        const searchInput = document.getElementById('address-search-input');
-        if (searchInput) searchInput.value = addr;
-        const addrText = document.getElementById('current-selected-address-text');
-        if (addrText) addrText.textContent = addr;
+          lastGeocodedAddress = addr;
+          selectedCoords = { lat, lng };
+          const searchInput = document.getElementById('address-search-input');
+          if (searchInput) searchInput.value = addr;
+          updateSelectedAddress(addr);
+        }
       };
     });
   };
@@ -700,7 +759,9 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     const finalName = name || 'Dirección';
     const { saveUserAddress, updateUserAddress } = await import('../state.js');
     if (config.editAddress) {
-      updateUserAddress(config.editAddress.id, finalName, address, finalNotes, coords);
+      if (config.editAddress.id !== 'active') {
+        updateUserAddress(config.editAddress.id, finalName, address, finalNotes, coords);
+      }
     } else {
       saveUserAddress(finalName, address, finalNotes, coords);
     }

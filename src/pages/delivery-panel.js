@@ -9,7 +9,35 @@ import { isDelivery } from '../auth.js';
 import { showDeliveryMapModal } from '../components/delivery-map-modal.js';
 import { showConfirm, showModal, closeModal } from '../components/modal.js';
 
+function parseFavorDetails(details) {
+  if (!details) return [];
+  const stores = [];
+  const regex = /🏪\s*\*\*?\d+\.\s*Comercio:\*\*?\s*(.*?)(?=\s*📦|$)/gi;
+  const matches = [...details.matchAll(regex)];
+  
+  matches.forEach((match, index) => {
+    const storeName = match[1].trim();
+    const nextIndex = index + 1 < matches.length ? matches[index + 1].index : details.length;
+    const subStr = details.slice(match.index, nextIndex);
+    const pedMatch = subStr.match(/📦\s*\*\*?Pedido:\*\*?\s*([\s\S]*?)(?=\n*🏪|$)/i);
+    
+    stores.push({
+      name: storeName,
+      items: pedMatch ? pedMatch[1].trim() : ''
+    });
+  });
+  
+  if (stores.length === 0) {
+    stores.push({
+      name: 'Favor',
+      items: details
+    });
+  }
+  return stores;
+}
+
 let activeOrdersCount = 0;
+let activeOrdersList = [];
 const commerceCache = new Map();
 
 export async function renderDeliveryPanel() {
@@ -101,11 +129,16 @@ export async function renderDeliveryPanel() {
     return;
   }
 
-  const existingPanel = content.querySelector('.panel-page');
+  const isNative = !!window.Capacitor;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+
+  const existingPanel = content.querySelector('.delivery-panel-page');
   if (!existingPanel) {
     content.innerHTML = `
-      <div class="panel-page" style="display:flex; flex-direction:column; height:100%; width:100%; overflow:hidden; background:var(--color-bg); position:relative;">
-        <div id="delivery-header-slot" style="flex-shrink:0; z-index:110; background:var(--color-surface);"></div>
+      <div class="delivery-panel-page delivery-panel page-enter" style="display:flex; flex-direction:column; height:100%; width:100%; overflow:hidden; background:var(--color-bg); position:relative;">
+        <div id="delivery-header-slot" style="flex-shrink:0; z-index:110; background:var(--color-primary); padding-top: ${topPadding};"></div>
         <div id="session-status-bar-container" style="flex-shrink:0; z-index:100; background:var(--color-bg); border-bottom:1px solid var(--color-border-light); box-shadow:0 4px 10px rgba(0,0,0,0.05);"></div>
         
         <!-- Scrollable content area -->
@@ -137,14 +170,10 @@ export async function renderDeliveryPanel() {
   const headerSlot = document.getElementById('delivery-header-slot');
   if (headerSlot) {
     headerSlot.innerHTML = `
-      <div style="display:flex;align-items:center;gap:12px;padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px;background:var(--color-primary);border-bottom:none;box-shadow:0 4px 12px rgba(0,0,0,0.1);position:relative;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:12px;padding: 12px 20px 20px 20px;background:var(--color-primary);border-bottom:none;box-shadow:0 4px 12px rgba(0,0,0,0.1);position:relative;overflow:hidden;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
         
-        <a href="#/" style="display:flex;align-items:center;justify-content:center;background:none;border:none;color:white;cursor:pointer;padding:0;text-decoration:none;position:relative;z-index:2;" title="Volver al inicio">
-          ${icon('chevronLeft', 28)}
-        </a>
-
         <div style="flex:1;min-width:0;position:relative;z-index:2;padding-right:4px;">
           <h1 style="font-family:var(--font-display);font-weight:800;font-size:17px;color:white;margin:0;line-height:1.2;letter-spacing:-0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Panel Delivery</h1>
           <p style="font-size:10px;color:rgba(255,255,255,0.85);font-weight:700;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Repartidor ${user.deliveryId || 'Oficial'}</p>
@@ -262,7 +291,18 @@ export async function renderDeliveryPanel() {
       const batches = new Set();
       allOrders.forEach(o => {
         if (o.driverId) return;
-        if (o.isTrip) batches.add(o.id);
+        
+        const mode = user.deliveryMode || 'both';
+        if (mode === 'trip' && !o.isTrip) return;
+        if (mode === 'delivery' && o.isTrip) return;
+        
+        if (o.isTrip) {
+          if (user.tripStatus !== 'approved') return;
+          const requestedTripType = (o.tripType || 'auto').toLowerCase();
+          const driverVehicleType = (user.tripVehicleType || 'auto').toLowerCase();
+          if (requestedTripType !== driverVehicleType) return;
+          batches.add(o.id);
+        }
         else if (o.isFavor) batches.add(o.id);
         else if (o.bundleId) batches.add(o.bundleId);
         else if (o.status === 'ready') batches.add(o.id);
@@ -282,7 +322,8 @@ export async function renderDeliveryPanel() {
     // Active Badge
     const qActive = query(collection(db, 'orders'), where('driverId', '==', user.uid));
     const unsubActive = onSnapshot(qActive, (snap) => {
-      const activeOrders = snap.docs.filter(d => !['completed', 'cancelled'].includes(d.data().status));
+      const activeOrders = snap.docs.filter(d => !['completed', 'cancelled'].includes(d.data().status)).map(d => ({ id: d.id, ...d.data() }));
+      activeOrdersList = activeOrders;
       activeOrdersCount = activeOrders.length;
       // Group active by bundleId to count "tasks"
       const activeBatches = new Set();
@@ -355,6 +396,10 @@ function loadTabContent(tab, container, user) {
           if (mode === 'delivery' && o.isTrip) return;
           
           if (o.isTrip) {
+            if (user.tripStatus !== 'approved') return;
+            const requestedTripType = (o.tripType || 'auto').toLowerCase();
+            const driverVehicleType = (user.tripVehicleType || 'auto').toLowerCase();
+            if (requestedTripType !== driverVehicleType) return;
             trips.push(o);
           } else if (o.isFavor) {
             favors.push(o);
@@ -412,6 +457,8 @@ function loadTabContent(tab, container, user) {
             total: o.total,
             subtotal: o.subtotal || 0,
             deliveryCost: o.deliveryCost || 0,
+            purchaseFee: o.purchaseFee || 0,
+            extraStopsFee: o.extraStopsFee || 0,
             appUsageFee: o.appUsageFee || 0,
             commissionAmount: o.commissionAmount || 0,
             discountAmount: o.discountAmount || 0,
@@ -431,6 +478,7 @@ function loadTabContent(tab, container, user) {
             total: o.total,
             subtotal: o.subtotal || 0,
             deliveryCost: o.deliveryCost || 0,
+            purchaseFee: o.purchaseFee || 0,
             appUsageFee: o.appUsageFee || 0,
             commissionAmount: o.commissionAmount || 0,
             discountAmount: o.discountAmount || 0,
@@ -665,13 +713,13 @@ function loadTabContent(tab, container, user) {
                   <div style="display:flex; gap:12px; margin-top:16px; margin-bottom:20px;">
                     <!-- Costo Productos / Servicio -->
                     <div style="flex:1; background: #ef4444; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(239, 68, 68, 0.15); border: none;">
-                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${(isFavor || isTrip) ? 'Costo Servicio' : 'Costo Productos'}</div>
-                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice((isFavor || isTrip) ? b.total : b.subtotal)}</div>
+                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${isTrip ? 'Costo Viaje' : 'Costo Productos'}</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice(isTrip ? b.total : (b.subtotal || 0))}</div>
                     </div>
                     <!-- Ganancia Tuya -->
                     <div style="flex:1; background: #10b981; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(16, 185, 129, 0.15); border: none;">
                       <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">Ganancia Tuya</div>
-                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice(b.deliveryCost)}</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice((isFavor || isTrip) ? (b.total - (b.subtotal || 0) - (b.appUsageFee || 0)) : b.deliveryCost)}</div>
                     </div>
                   </div>
  
@@ -725,12 +773,29 @@ function loadTabContent(tab, container, user) {
                         </div>
                       </div>
                     ` : isFavor ? `
-                      <div style="margin-bottom:16px; padding:12px; background:var(--color-bg-secondary); border-radius:14px; border:1px solid var(--color-border-light);">
-                        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">DETALLES DEL FAVOR</div>
-                        <p style="font-size:13px; font-weight:600; color:var(--color-text-secondary); margin-bottom:12px; line-height:1.4;">${b.order.details}</p>
+                      <div style="margin-bottom:16px; padding:14px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light); text-align:left;">
+                        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:10px; letter-spacing:0.04em;">Detalles del Favor</div>
+                        ${(() => {
+                          const stores = parseFavorDetails(b.order.details || b.order.description);
+                          const storePrices = b.order.storePrices || {};
+                          return `
+                            <div style="display:flex; flex-direction:column; gap:8px; width:100%; margin-bottom:10px;">
+                              ${stores.map(st => `
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:12.5px; border-bottom:1.5px solid var(--color-border-light); padding-bottom:8px; margin-bottom:2px;">
+                                  <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
+                                    <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
+                                    <span style="color:var(--color-text-secondary); font-size:11.5px; font-weight:500;">${st.items}</span>
+                                  </div>
+                                  ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
+                                </div>
+                              `).join('')}
+                            </div>
+                          `;
+                        })()}
                         ${b.order.pickupAddress ? `
-                          <div style="font-size:11px; font-weight:700; color:var(--color-text-primary); margin-top:8px; display:flex; align-items:center; gap:6px;">
-                            ${icon('mapPin', 14)} <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9px;">RECOGER EN:</span> ${b.order.pickupAddress}
+                          <div style="font-size:11px; font-weight:700; color:var(--color-text-primary); margin-top:10px; display:flex; align-items:flex-start; gap:6px;">
+                            <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9px; display:flex; align-items:center; gap:4px; font-weight:800;">${icon('mapPin', 13)} Recoger en:</span>
+                            <span style="font-weight:600; color:var(--color-text-secondary); flex:1;">${b.order.pickupAddress}</span>
                           </div>
                         ` : ''}
                       </div>
@@ -794,9 +859,227 @@ function loadTabContent(tab, container, user) {
           const orderForMap = batch.isBundle ? batch.orders[0] : batch.order;
           btn.addEventListener('click', () => showDeliveryMapModal(orderForMap, batch.isBundle ? batch.orders : null));
         });
-      });
+        });
 
-      tabUnsub = listUnsub;
+        // ── Scheduled Trips Section (for approved chofers) ──
+        // NOTE: This runs OUTSIDE the main available-orders onSnapshot, at the tab level.
+        if (user.tripStatus === 'approved') {
+          const qScheduled = query(
+            collection(db, 'orders'),
+            where('status', '==', 'scheduled'),
+            where('isTrip', '==', true)
+          );
+
+          const scheduledUnsub = onSnapshot(qScheduled, (scheduledSnap) => {
+            // Re-create the container if it was destroyed by the main onSnapshot re-render
+            let scheduledContainer = document.getElementById('scheduled-trips-section');
+            if (!scheduledContainer) {
+              scheduledContainer = document.createElement('div');
+              scheduledContainer.id = 'scheduled-trips-section';
+              container.appendChild(scheduledContainer);
+            }
+            const scheduledTrips = scheduledSnap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(o => {
+                if (o.driverId && o.driverId !== user.uid) return false;
+                const reqType = (o.tripType || 'auto').toLowerCase();
+                const driverType = (user.tripVehicleType || 'auto').toLowerCase();
+                return reqType === driverType;
+              });
+
+            if (scheduledTrips.length === 0) {
+              scheduledContainer.innerHTML = '';
+              return;
+            }
+
+            scheduledContainer.innerHTML = `
+              <div style="margin-top:24px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px; padding-left:4px;">
+                  <div style="width:28px; height:28px; border-radius:8px; background:rgba(139,92,246,0.12); display:flex; align-items:center; justify-content:center; color:#8b5cf6;">
+                    ${icon('calendar', 16)}
+                  </div>
+                  <span style="font-size:13px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.03em;">Viajes Programados</span>
+                  <span style="font-size:10px; font-weight:900; color:white; background:#8b5cf6; padding:2px 8px; border-radius:8px;">${scheduledTrips.length}</span>
+                </div>
+                ${scheduledTrips.map(trip => {
+                  const scheduledDate = trip.scheduledFor?.toDate ? trip.scheduledFor.toDate() : new Date(trip.scheduledFor);
+                  const dateStr = scheduledDate.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
+                  const timeStr = scheduledDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+                  const isAssignedToMe = trip.driverId === user.uid;
+                  const isUnassigned = !trip.driverId;
+
+                  return `
+                    <div class="admin-card" style="margin-bottom:14px; border:1px solid ${isAssignedToMe ? 'rgba(139,92,246,0.3)' : 'var(--color-border)'}; background:var(--color-bg-card); padding:18px; border-radius:22px; position:relative; overflow:hidden; ${isAssignedToMe ? 'box-shadow:0 4px 16px rgba(139,92,246,0.1);' : ''}">
+                      <div style="position:absolute; top:0; left:0; width:5px; height:100%; background:#8b5cf6;"></div>
+                      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                        <div>
+                          <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                            <span style="font-size:9px; font-weight:900; color:white; background:#8b5cf6; padding:2px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.03em;">PROGRAMADO</span>
+                            ${isAssignedToMe ? '<span style="font-size:9px; font-weight:900; color:white; background:#22c55e; padding:2px 8px; border-radius:6px;">ACEPTADO</span>' : ''}
+                          </div>
+                          <strong style="font-size:15px; font-weight:900; color:var(--color-text-primary); display:block;">Viaje en ${(trip.tripType || 'auto') === 'moto' ? 'Moto 🏍️' : 'Auto 🚗'}</strong>
+                        </div>
+                        <div style="text-align:right;">
+                          <div style="font-size:18px; font-weight:950; color:var(--color-text-primary);">${formatPrice(trip.total || trip.deliveryCost || 0)}</div>
+                          <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">A Cobrar</div>
+                        </div>
+                      </div>
+                      <div style="background:rgba(139,92,246,0.06); border:1px solid rgba(139,92,246,0.12); border-radius:14px; padding:10px 12px; margin-bottom:12px; display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:20px;">📅</span>
+                        <div>
+                          <div style="font-size:12px; font-weight:800; color:#8b5cf6;">${dateStr} — ${timeStr} hs</div>
+                          <div style="font-size:10px; font-weight:600; color:var(--color-text-tertiary);">Pasajero: ${trip.userName || 'Cliente'}</div>
+                        </div>
+                      </div>
+                      <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <div style="width:8px; height:8px; border-radius:50%; background:#22c55e; flex-shrink:0;"></div>
+                          <span style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${trip.pickupAddress || 'Origen'}</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <div style="width:8px; height:8px; border-radius:50%; background:var(--color-primary); flex-shrink:0;"></div>
+                          <span style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${trip.deliveryAddress || 'Destino'}</span>
+                        </div>
+                      </div>
+                      ${isUnassigned ? `
+                        <button class="btn btn-primary btn-block accept-scheduled-btn" data-trip-id="${trip.id}"
+                          style="height:48px; border-radius:14px; font-weight:900; font-size:13px; text-transform:uppercase; letter-spacing:0.02em; gap:8px; background:linear-gradient(135deg, #8b5cf6, #7c3aed); box-shadow:0 6px 16px rgba(139,92,246,0.25); border:none; color:white; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+                          ${icon('checkCircle', 18)} ACEPTAR VIAJE PROGRAMADO
+                        </button>
+                      ` : `
+                        <div style="text-align:center; padding:8px; background:rgba(34,197,94,0.06); border-radius:12px; border:1px solid rgba(34,197,94,0.15);">
+                          <span style="font-size:12px; font-weight:800; color:#22c55e;">✅ Ya aceptaste este viaje</span>
+                        </div>
+                      `}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `;
+
+            // Bind accept buttons
+            scheduledContainer.querySelectorAll('.accept-scheduled-btn').forEach(btn => {
+              btn.addEventListener('click', async () => {
+                const tripId = btn.dataset.tripId;
+                showConfirm({
+                  title: '📅 ¿Aceptar viaje programado?',
+                  message: 'Te comprometerás a realizar este viaje en la fecha y hora indicadas. Recibirás un recordatorio antes de la hora del viaje.',
+                  confirmText: 'Sí, Aceptar',
+                  onConfirm: async () => {
+                    try {
+                      btn.disabled = true;
+                      btn.innerHTML = icon('loader', 18, 'animate-spin') + ' Aceptando...';
+                      const tripDoc = doc(db, 'orders', tripId);
+                      await updateDoc(tripDoc, {
+                        driverId: user.uid,
+                        driverName: user.displayName || user.name || 'Chofer'
+                      });
+
+                      // Send notification to user
+                      try {
+                        const trip = scheduledTrips.find(t => t.id === tripId);
+                        if (trip && trip.userId) {
+                          await addDoc(collection(db, 'users', trip.userId, 'notifications'), {
+                            title: '🚗 Chofer asignado a tu viaje programado',
+                            body: `${user.displayName || 'Un chofer'} aceptó tu viaje programado. Te notificaremos antes de la hora del viaje.`,
+                            type: 'scheduled_trip_accepted',
+                            orderId: tripId,
+                            createdAt: serverTimestamp(),
+                            read: false
+                          });
+                        }
+                      } catch (e) {
+                        console.warn('Error sending scheduled trip notification:', e);
+                      }
+
+                      showToast('¡Viaje programado aceptado!', 'success');
+                    } catch (err) {
+                      console.error('Error accepting scheduled trip:', err);
+                      showToast('Error al aceptar el viaje: ' + err.message, 'error');
+                      btn.disabled = false;
+                      btn.innerHTML = icon('checkCircle', 18) + ' ACEPTAR VIAJE PROGRAMADO';
+                    }
+                  }
+                });
+              });
+            });
+          });
+
+          // Clean up scheduled listener when main listener is cleaned
+          const originalUnsub = listUnsub;
+          tabUnsub = () => {
+            originalUnsub();
+            scheduledUnsub();
+          };
+        } else {
+          tabUnsub = listUnsub;
+        }
+
+        // ── Countdown Banner for driver's own upcoming scheduled trips ──
+        if (user.tripStatus === 'approved') {
+          const bannerQ = query(
+            collection(db, 'orders'),
+            where('driverId', '==', user.uid),
+            where('status', '==', 'scheduled'),
+            where('isTrip', '==', true)
+          );
+          const bannerUnsub = onSnapshot(bannerQ, (bSnap) => {
+            document.getElementById('scheduled-trip-banner')?.remove();
+            const myScheduled = bSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            if (myScheduled.length === 0) return;
+
+            // Find the nearest scheduled trip
+            const now = Date.now();
+            let nearest = null;
+            let nearestMs = Infinity;
+            myScheduled.forEach(t => {
+              const ts = t.scheduledFor?.toDate ? t.scheduledFor.toDate().getTime() : 0;
+              const diff = ts - now;
+              if (diff > 0 && diff < nearestMs) {
+                nearestMs = diff;
+                nearest = t;
+              }
+            });
+
+            if (!nearest || nearestMs > 4 * 60 * 60 * 1000) return; // Only show within 4 hours
+
+            const banner = document.createElement('div');
+            banner.id = 'scheduled-trip-banner';
+            banner.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9990; padding:12px 16px; background:linear-gradient(135deg, #7c3aed, #8b5cf6); color:white; display:flex; align-items:center; gap:10px; box-shadow:0 4px 16px rgba(139,92,246,0.3); font-size:13px; font-weight:700;';
+
+            function updateBannerTime() {
+              const diff = (nearest.scheduledFor?.toDate ? nearest.scheduledFor.toDate().getTime() : 0) - Date.now();
+              if (diff <= 0) {
+                banner.innerHTML = `<span style="font-size:18px;">🚗</span> <span>¡Tu viaje programado comienza AHORA!</span>`;
+                return;
+              }
+              const hrs = Math.floor(diff / 3600000);
+              const mins = Math.floor((diff % 3600000) / 60000);
+              banner.innerHTML = `<span style="font-size:18px;">⏰</span> <span>Viaje programado en <strong>${hrs}h ${mins}m</strong></span> <span style="margin-left:auto; font-size:10px; opacity:0.8; text-transform:uppercase;">${nearest.deliveryAddress || ''}</span>`;
+            }
+
+            updateBannerTime();
+            const bannerInterval = setInterval(updateBannerTime, 60000);
+            banner._interval = bannerInterval;
+
+            document.body.appendChild(banner);
+
+            // Cleanup when navigating away
+            const cleanupBanner = () => {
+              clearInterval(bannerInterval);
+              banner.remove();
+            };
+            window.addEventListener('hashchange', cleanupBanner, { once: true });
+          });
+
+          // Add to cleanup
+          const prevUnsub = tabUnsub;
+          tabUnsub = () => {
+            prevUnsub();
+            bannerUnsub();
+            document.getElementById('scheduled-trip-banner')?.remove();
+          };
+        }
 
     } else if (tab === 'active') {
       const q = query(
@@ -881,10 +1164,13 @@ function loadTabContent(tab, container, user) {
           id: o.id,
           status: o.status,
           pickedUp: !!o.pickedUpAt,
+          isAtDoor: !!o.isAtDoor,
           comercioId: o.comercioId,
           orderId: o.orderId,
           deliveryAddress: o.deliveryAddress,
-          comercioAddress: o.comercioAddress || ''
+          comercioAddress: o.comercioAddress || '',
+          subtotal: o.subtotal || 0,
+          total: o.total || 0
         }))) + '_' + JSON.stringify(suggestedOrders.map(o => o.id));
 
         if (container.dataset.lastActiveFingerprint === fingerprint) {
@@ -1140,26 +1426,23 @@ function loadTabContent(tab, container, user) {
                               <span style="font-size:18px; color:var(--color-primary); font-weight:950; letter-spacing:-0.02em;">${formatPrice(stop.amountToPay)}</span>
                             </div>
                           ` : `
-                            <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3);">
-                              <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">Detalle del Pedido</div>
-                              ${stop.orders[0].items && stop.orders[0].items.length > 0 ? `
-                                <div style="display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--color-text-secondary); font-weight:600; opacity:0.95;">
-                                  ${stop.orders[0].items.map(item => `
-                                    <div style="display:flex; align-items:center; gap:8px;">
-                                      <span style="background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); padding:2px 8px; border-radius:8px; font-size:10.5px; font-weight:900; min-width:20px; text-align:center;">${item.qty || 1}x</span>
-                                      <span>${item.name || item.product?.name || 'Producto'}</span>
+                            <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3); display:flex; flex-direction:column; gap:8px; text-align:left;">
+                              <div style="font-size:9px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px; text-align:left;">Detalle del Favor</div>
+                              ${(() => {
+                                const order = stop.orders[0];
+                                const details = order.details || '';
+                                const stores = parseFavorDetails(details);
+                                const storePrices = order.storePrices || {};
+                                return stores.map(st => `
+                                  <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:13px; font-weight:600; color:var(--color-text-secondary); line-height:1.4; border-bottom:1.5px solid var(--color-border-light); padding-bottom:6px; margin-bottom:2px;">
+                                    <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
+                                      <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
+                                      <span style="font-size:11.5px; color:var(--color-text-secondary); font-weight:500;">${st.items}</span>
                                     </div>
-                                  `).join('')}
-                                </div>
-                              ` : (stop.orders[0].details && stop.orders[0].details !== 'Ver detalles en el chat' ? `
-                                <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; opacity:0.95;">
-                                  ${stop.orders[0].details}
-                                </div>
-                              ` : `
-                                <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; opacity:0.95;">
-                                  Pedido en ${stop.comercioName || 'Comercio'}
-                                </div>
-                              `)}
+                                    ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
+                                  </div>
+                                `).join('');
+                              })()}
                             </div>
                             ${!stop.isFavor ? `
                               <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
@@ -1177,34 +1460,6 @@ function loadTabContent(tab, container, user) {
                         </button>
 
                         <div class="collapsible-stop-details ${isExpanded ? 'expanded' : ''}" id="details-${stopKey}" style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
-                          <!-- Premium Order Details/Items list for Drop-off -->
-                          <div style="background:rgba(var(--color-primary-rgb),0.02); border-radius:18px; padding:14px; border:1px dashed var(--color-border-light); display:flex; flex-direction:column; gap:8px;">
-                            <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Detalle de la Entrega</div>
-                            ${stop.orders.map(o => `
-                              <div style="padding-bottom:4px; margin-bottom:4px; ${stop.orders.length > 1 ? 'border-bottom:1px solid rgba(var(--color-border-light-rgb),0.3);' : ''}">
-                                ${stop.orders.length > 1 ? `<div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); margin-bottom:4px;">Pedido #${o.orderId}</div>` : ''}
-                                ${o.items && o.items.length > 0 ? `
-                                  <div style="display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--color-text-secondary); font-weight:600; opacity:0.95;">
-                                    ${o.items.map(item => `
-                                      <div style="display:flex; align-items:center; gap:8px;">
-                                        <span style="background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); padding:2px 8px; border-radius:8px; font-size:10.5px; font-weight:900; min-width:20px; text-align:center;">${item.qty || 1}x</span>
-                                        <span>${item.name || item.product?.name || 'Producto'}</span>
-                                      </div>
-                                    `).join('')}
-                                  </div>
-                                ` : (o.details && o.details !== 'Ver detalles en el chat' ? `
-                                  <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; opacity:0.95;">
-                                    ${o.details}
-                                  </div>
-                                ` : `
-                                  <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; opacity:0.95;">
-                                    Pedido de ${o.comercioName || 'Comercio'}
-                                  </div>
-                                `)}
-                              </div>
-                            `).join('')}
-                          </div>
-
                           <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Desglose de Cobro</div>
                           ${stop.orders.map(o => `
                             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
@@ -1229,6 +1484,18 @@ function loadTabContent(tab, container, user) {
                               <span style="color:var(--color-text-primary);">${formatPrice(stop.orders.reduce((s, o) => s + (o.purchaseFee || 800), 0))}</span>
                             </div>
                           ` : ''}
+                          ${(() => {
+                            const totalExtraStops = stop.orders.reduce((s, o) => s + (o.extraStopsFee || 0), 0);
+                            if (totalExtraStops > 0) {
+                              return `
+                                <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
+                                  <span style="color:var(--color-text-secondary); opacity:0.8;">Paradas Extra</span>
+                                  <span style="color:var(--color-text-primary);">${formatPrice(totalExtraStops)}</span>
+                                </div>
+                              `;
+                            }
+                            return '';
+                          })()}
                           ${(() => {
                             const totalDiscount = stop.orders.reduce((sum, o) => sum + (o.discountAmount || 0), 0);
                             if (totalDiscount > 0) {
@@ -1293,14 +1560,33 @@ function loadTabContent(tab, container, user) {
                         ` : ''}
                         
                         ${stop.type === 'DROP_OFF' ? `
-                          <button class="btn mark-delivered-btn" 
-                                  data-ids="${stop.orders.map(o => o.id).join(',')}" 
-                                  data-codes="${stop.orders.map(o => o.verificationCode).join(',')}"
-                                  data-istrip="${stop.orders.some(o => o.isTrip)}"
-                                  ${!stop.orders.every(o => !!o.pickedUpAt) ? 'disabled' : ''}
-                                  style="height:100%; font-size:14px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:var(--color-success); box-shadow: ${!stop.orders.every(o => !!o.pickedUpAt) ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!stop.orders.every(o => !!o.pickedUpAt) ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:10px; white-space:nowrap; letter-spacing:0.02em;">
-                            ${icon('checkCircle', 18)} ${stop.orders.some(o => o.isTrip) ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
-                          </button>
+                          ${(() => {
+                            const hasNotifiedAtDoor = stop.orders.every(o => o.isAtDoor);
+                            const allPickedUp = stop.orders.every(o => !!o.pickedUpAt);
+                            const isTrip = stop.orders.some(o => o.isTrip);
+
+                            if (!isTrip && !hasNotifiedAtDoor) {
+                              return `
+                                <button class="btn notify-at-door-btn" 
+                                        data-ids="${stop.orders.map(o => o.id).join(',')}" 
+                                        ${!allPickedUp ? 'disabled' : ''}
+                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:#f59e0b; box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(245, 158, 11, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
+                                  ${icon('bell', 15)} AVISAR QUE ESTOY AFUERA
+                                </button>
+                              `;
+                            } else {
+                              return `
+                                <button class="btn mark-delivered-btn" 
+                                        data-ids="${stop.orders.map(o => o.id).join(',')}" 
+                                        data-codes="${stop.orders.map(o => o.verificationCode).join(',')}"
+                                        data-istrip="${isTrip}"
+                                        ${!allPickedUp ? 'disabled' : ''}
+                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:var(--color-success); box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
+                                  ${icon('checkCircle', 15)} ${isTrip ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
+                                </button>
+                              `;
+                            }
+                          })()}
                         ` : ''}
 
                         <button class="btn view-active-map-btn" 
@@ -1434,11 +1720,56 @@ function loadTabContent(tab, container, user) {
           });
         });
 
+        container.querySelectorAll('.notify-at-door-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const ids = btn.dataset.ids.split(',');
+            btn.disabled = true;
+            btn.innerHTML = icon('loader', 14, 'animate-spin') + ' NOTIFICANDO...';
+            
+            try {
+              for (const orderId of ids) {
+                const order = orders.find(o => o.id === orderId);
+                if (!order) continue;
+                
+                await updateDoc(doc(db, 'orders', orderId), {
+                  isAtDoor: true,
+                  atDoorAt: serverTimestamp()
+                });
+                
+                if (order.userId) {
+                  await addDoc(collection(db, 'users', order.userId, 'notifications'), {
+                    title: '¡Tu repartidor está en la puerta!',
+                    body: order.isFavor ? 'El repartidor llegó con tu favor. ¡Salí a recibirlo!' : 'Prepárate para recibir tu pedido. ¡Ya llegó!',
+                    type: 'system',
+                    status: 'unread',
+                    createdAt: serverTimestamp()
+                  });
+                }
+              }
+              showToast('Cliente notificado', 'success');
+            } catch (err) {
+              console.error('Error in notify-at-door:', err);
+              showToast('Error al notificar al cliente', 'danger');
+              btn.disabled = false;
+              btn.innerHTML = icon('bell', 18) + ' AVISAR QUE ESTOY AFUERA';
+            }
+          });
+        });
+
         container.querySelectorAll('.mark-delivered-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             const ids = btn.dataset.ids.split(',');
             const codes = btn.dataset.codes.split(',');
             const isTrip = btn.dataset.istrip === 'true';
+
+            // Check if it's a GoFavor Compra and hasn't loaded product prices (subtotal is 0 or empty)
+            const orderId = ids[0];
+            const order = orders.find(o => o.id === orderId);
+            if (order && order.isFavor && order.favorType === 'compra' && !order.subtotal) {
+              showToast('⚠️ Debes ingresar el valor de los productos antes de entregar el pedido', 'warning');
+              showEditFavorPriceModal(order);
+              return;
+            }
 
             if (isTrip) {
               showConfirm({
@@ -1532,6 +1863,34 @@ function loadTabContent(tab, container, user) {
           btn.addEventListener('click', () => showEditFavorPriceModal(order));
         });
 
+        container.querySelectorAll('.btn-save-store-prices').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const orderId = btn.dataset.orderId;
+            const inputs = container.querySelectorAll(`.store-price-input[data-order-id="${orderId}"]`);
+            const storePrices = {};
+            inputs.forEach(input => {
+              const storeName = input.dataset.storeName;
+              const priceVal = parseFloat(input.value) || 0;
+              storePrices[storeName] = priceVal;
+            });
+            
+            btn.disabled = true;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = icon('loader', 14, 'animate-spin') + ' GUARDANDO...';
+            
+            try {
+              await saveFavorStorePrices(orderId, storePrices);
+              showToast('Precios actualizados correctamente', 'success');
+            } catch (err) {
+              console.error(err);
+              showToast('Error al guardar precios', 'error');
+            } finally {
+              btn.disabled = false;
+              btn.innerHTML = originalText;
+            }
+          });
+        });
+
         container.querySelectorAll('.chat-client-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
             const { openChat } = await import('../components/chat.js');
@@ -1585,7 +1944,12 @@ function loadTabContent(tab, container, user) {
               const isBundle = group.length > 1;
               const main = group[0];
               const totalAmount = group.reduce((sum, o) => sum + (o.total || 0), 0);
-              const totalDelivery = group.reduce((sum, o) => sum + (o.deliveryCost || 0), 0);
+              const totalDelivery = group.reduce((sum, o) => {
+                const orderEarnings = o.isTrip || o.isFavor 
+                  ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+                  : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+                return sum + orderEarnings;
+              }, 0);
               const totalAppFee = group.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
               const isFromCurrentSession = currentSessionId && (main.deliverySessionId === currentSessionId);
 
@@ -1631,7 +1995,23 @@ function loadTabContent(tab, container, user) {
                             <span style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${o.isFavor ? 'Detalles del Favor' : (o.comercioName || 'Pedido')}</span>
                             <span style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${formatPrice(o.subtotal || 0)}</span>
                           </div>
-                          ${o.isFavor ? `<p style="font-size:11px; color:var(--color-text-secondary); margin:0;">${o.details || 'Sin detalles'}</p>` : (o.items ? o.items.map(item => `
+                          ${o.isFavor ? (() => {
+                            const stores = parseFavorDetails(o.details || o.description);
+                            const storePrices = o.storePrices || {};
+                            return `
+                              <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
+                                ${stores.map(st => `
+                                  <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:12.5px; border-bottom:1.5px solid var(--color-border-light); padding-bottom:6px; margin-bottom:2px;">
+                                    <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
+                                      <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
+                                      <span style="color:var(--color-text-secondary); font-size:11.5px; font-weight:500;">${st.items}</span>
+                                    </div>
+                                    ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
+                                  </div>
+                                `).join('')}
+                              </div>
+                            `;
+                          })() : (o.items ? o.items.map(item => `
                             <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px; padding-left:8px;">
                               <span style="color:var(--color-text-tertiary); font-weight:600;">${item.qty || 1}× ${item.name}</span>
                               <span style="color:var(--color-text-tertiary);">${formatPrice((item.price || 0) * (item.qty || 1))}</span>
@@ -1790,7 +2170,15 @@ function loadTabContent(tab, container, user) {
                 fWhere('status', '==', 'completed'),
                 fWhere('deliverySessionId', '==', currentSessionId)
               ), (ordersSnap) => {
-                const totalEarned = ordersSnap.docs.reduce((sum, d) => sum + (d.data().deliveryCost || 0) + (d.data().purchaseFee || 0) + (d.data().tip || d.data().tipAmount || 0), 0);
+                const totalEarned = ordersSnap.docs.reduce((sum, d) => {
+                  const o = d.data();
+                  // Driver net earnings for favors & trips: (deliveryCost + purchaseFee + extraStopsFee + tip) - appUsageFee
+                  // For normal store orders: deliveryCost + tip
+                  const orderEarnings = o.isTrip || o.isFavor 
+                    ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+                    : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+                  return sum + orderEarnings;
+                }, 0);
                 const count = ordersSnap.size;
                 
                 if (document.getElementById('session-total-earned')) document.getElementById('session-total-earned').textContent = formatPrice(totalEarned);
@@ -1833,7 +2221,13 @@ function loadTabContent(tab, container, user) {
                      where('status', '==', 'completed')
                    ));
                    if (!liveSnap.empty) {
-                     displayTotal = liveSnap.docs.reduce((s, o) => s + (o.data().deliveryCost || 0) + (o.data().purchaseFee || 0) + (o.data().tip || o.data().tipAmount || 0), 0);
+                     displayTotal = liveSnap.docs.reduce((s, d) => {
+                        const o = d.data();
+                        const orderEarnings = o.isTrip || o.isFavor 
+                          ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+                          : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+                        return s + orderEarnings;
+                      }, 0);
                      displayCount = liveSnap.size;
                    }
                  }
@@ -1876,6 +2270,7 @@ function loadTabContent(tab, container, user) {
       const defaultTripModel = user.tripVehicleModel || user.tripApplication?.vehicleModel || user.vehicleModel || '';
       const defaultTripColor = user.tripVehicleColor || user.tripApplication?.vehicleColor || user.vehicleColor || '';
       const defaultTripPatent = user.tripVehiclePatent || user.tripApplication?.vehicleDetails || user.vehicleDetails || user.patente || '';
+      const defaultTripVehicleType = user.tripVehicleType || user.tripApplication?.vehicleType || user.vehicleType || 'Auto';
 
       // Default values for Delivery Vehicle
       const defaultDelivType = user.deliveryVehicleType || 'Moto';
@@ -1968,6 +2363,14 @@ function loadTabContent(tab, container, user) {
               <h4 style="margin:0; font-size:12.5px; font-weight:900; color:#3b82f6; display:flex; align-items:center; gap:6px;">
                 ${icon('user', 14)} Vehículo para Viajes (Pasajeros)
               </h4>
+
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Tipo de Vehículo</label>
+                <select id="config-trip-vehicletype-select" style="width:100%; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none; font-family:inherit;">
+                  <option value="Auto" ${defaultTripVehicleType.toLowerCase() === 'auto' ? 'selected' : ''}>Auto</option>
+                  <option value="Moto" ${defaultTripVehicleType.toLowerCase() === 'moto' ? 'selected' : ''}>Moto</option>
+                </select>
+              </div>
               
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                 <div style="display:flex; flex-direction:column; gap:4px;">
@@ -2062,6 +2465,7 @@ function loadTabContent(tab, container, user) {
           if (isTripApproved) {
             const modeVal = document.getElementById('config-deliverymode-select').value;
             
+            const tripType = document.getElementById('config-trip-vehicletype-select').value;
             const tripModel = document.getElementById('config-trip-vehiclemodel-input').value.trim();
             const tripColor = document.getElementById('config-trip-vehiclecolor-input').value.trim();
             const tripPatent = document.getElementById('config-trip-vehiclepatent-input').value.trim();
@@ -2073,6 +2477,7 @@ function loadTabContent(tab, container, user) {
 
             updateFields.deliveryMode = modeVal;
             
+            updateFields.tripVehicleType = tripType.toLowerCase();
             updateFields.tripVehicleModel = tripModel;
             updateFields.tripVehicleColor = tripColor;
             updateFields.tripVehiclePatent = tripPatent;
@@ -2083,6 +2488,7 @@ function loadTabContent(tab, container, user) {
             updateFields.deliveryVehiclePatent = delivPatent;
 
             // Retain compatibility (copy trip vehicle details to standard vehicle properties)
+            updateFields.vehicleType = tripType.toLowerCase();
             updateFields.vehicleModel = tripModel;
             updateFields.vehicleColor = tripColor;
             updateFields.vehicleDetails = tripPatent;
@@ -2395,13 +2801,15 @@ async function showEditFavorPriceModal(order) {
   const { showModal, closeModal } = await import('../components/modal.js');
   const { icon } = await import('../utils/icons.js');
   const { formatPrice } = await import('../utils/format.js');
-  const { doc, updateDoc } = await import('firebase/firestore');
-  const { db } = await import('../firebase.js');
   
   const deliveryFee = order.deliveryCost || 0;
   const appFee = order.appUsageFee || 0;
-  const pFee = order.purchaseFee || 800;
-  const serviceTotal = deliveryFee + appFee + pFee;
+  const pFee = order.purchaseFee || 0;
+  const extraStops = order.extraStopsFee || 0;
+  const serviceTotal = deliveryFee + appFee + pFee + extraStops;
+
+  const stores = parseFavorDetails(order.details || order.description);
+  const currentPrices = order.storePrices || {};
 
   const modalEl = document.createElement('div');
   modalEl.innerHTML = `
@@ -2409,14 +2817,31 @@ async function showEditFavorPriceModal(order) {
       <div style="width:64px; height:64px; background:rgba(var(--color-primary-rgb),0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--color-primary); margin:0 auto 20px;">
         ${icon('edit', 32)}
       </div>
-      <h3 style="font-size:22px; font-weight:950; color:var(--color-text); margin-bottom:10px;">Valor de Productos</h3>
-      <p style="font-size:14px; color:var(--color-text-secondary); line-height:1.6; margin-bottom:20px;">Ingresá el costo total de los productos que compraste para sumarlo al total del pedido.</p>
+      <h3 style="font-size:20px; font-weight:950; color:var(--color-text); margin-bottom:8px;">Precios por Comercio</h3>
+      <p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:20px;">Ingresá el valor de los productos comprados en cada local individualmente.</p>
       
-      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1px solid var(--color-border-light); margin-bottom:20px;">
-        <div style="font-size:11px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:12px;">Costo de productos</div>
-        <div style="position:relative; margin-bottom:16px;">
-          <span style="position:absolute; left:20px; top:50%; transform:translateY(-50%); font-size:24px; font-weight:900; color:var(--color-text-tertiary);">$</span>
-          <input type="number" id="favor-product-price" value="${order.subtotal || ''}" placeholder="0" style="width:100%; height:64px; border-radius:18px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text); font-size:32px; font-weight:950; padding:0 20px 0 45px; text-align:center; outline:none; transition:border-color 0.3s;" inputmode="decimal">
+      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1px solid var(--color-border-light); margin-bottom:20px; display:flex; flex-direction:column; gap:16px;">
+        <div style="font-size:11px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; text-align:left; margin-bottom:4px;">Costo de productos</div>
+        
+        ${stores.map((st, idx) => {
+          const price = currentPrices[st.name] || '';
+          return `
+            <div style="display:flex; flex-direction:column; gap:6px; text-align:left;">
+              <label style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                <span>🏪 <strong>${st.name}</strong></span>
+                <span style="font-weight:500; font-size:11px; color:var(--color-text-secondary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:180px;">${st.items}</span>
+              </label>
+              <div style="position:relative;">
+                <span style="position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; font-weight:800; color:var(--color-text-tertiary);">$</span>
+                <input type="number" class="favor-store-price-input" data-store-name="${st.name}" value="${price}" placeholder="0" style="width:100%; box-sizing:border-box; height:48px; border-radius:14px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text); font-size:18px; font-weight:900; padding:0 16px 0 35px; outline:none; transition:border-color 0.3s;" inputmode="decimal">
+              </div>
+            </div>
+          `;
+        }).join('')}
+
+        <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800; color:var(--color-text-primary);">
+          <span>Total Productos:</span>
+          <span id="favor-products-sum" style="font-size:17px; font-weight:950; color:#10b981;">${formatPrice(order.subtotal || 0)}</span>
         </div>
 
         <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
@@ -2432,70 +2857,105 @@ async function showEditFavorPriceModal(order) {
       </div>
 
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <button id="cancel-edit-price" style="height:56px; border-radius:18px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:none; font-weight:900; cursor:pointer;">CANCELAR</button>
-        <button id="confirm-edit-price" style="height:56px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:950; cursor:pointer; box-shadow:0 10px 25px rgba(var(--color-primary-rgb),0.3);">GUARDAR</button>
+        <button id="cancel-edit-price" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:none; font-weight:900; cursor:pointer;">CANCELAR</button>
+        <button id="confirm-edit-price" style="height:54px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:950; cursor:pointer; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);">GUARDAR</button>
       </div>
     </div>
   `;
 
   showModal({ content: modalEl, height: 'auto', hideHeader: true });
 
-  const input = modalEl.querySelector('#favor-product-price');
+  const inputs = modalEl.querySelectorAll('.favor-store-price-input');
+  const sumDisplay = modalEl.querySelector('#favor-products-sum');
   const preview = modalEl.querySelector('#client-total-preview');
 
-  input.oninput = () => {
-    const val = parseFloat(input.value) || 0;
-    preview.textContent = formatPrice(val + serviceTotal);
+  const updateTotals = () => {
+    let sum = 0;
+    inputs.forEach(input => {
+      sum += parseFloat(input.value) || 0;
+    });
+    sumDisplay.textContent = formatPrice(sum);
+    preview.textContent = formatPrice(sum + serviceTotal);
   };
 
-  input.focus();
+  inputs.forEach(input => {
+    input.oninput = updateTotals;
+  });
+
+  if (inputs.length > 0) {
+    inputs[0].focus();
+  }
 
   modalEl.querySelector('#cancel-edit-price').onclick = () => closeModal();
   modalEl.querySelector('#confirm-edit-price').onclick = () => {
-    const val = parseFloat(input.value) || 0;
-    if (val < 0) return;
+    const storePrices = {};
+    let hasInvalid = false;
 
-    // Instant close for fluid feel
+    inputs.forEach(input => {
+      const name = input.dataset.storeName;
+      const val = parseFloat(input.value) || 0;
+      if (val < 0) hasInvalid = true;
+      storePrices[name] = val;
+    });
+
+    if (hasInvalid) {
+      showToast('Por favor, ingresá montos válidos.', 'warning');
+      return;
+    }
+
     closeModal();
     showToast('Actualizando precio...', 'info');
 
     (async () => {
       try {
-        const { getDoc, doc: fDoc, serverTimestamp, addDoc, collection } = await import('firebase/firestore');
-        const { db } = await import('../firebase.js');
-        
-        // Fetch fresh data to ensure we have latest fees
-        const snap = await getDoc(fDoc(db, 'orders', order.id));
-        if (!snap.exists()) return;
-        const freshOrder = snap.data();
-        
-        const deliveryFee = freshOrder.deliveryCost || 0;
-        const appFee = freshOrder.appUsageFee || 0;
-        const pFee = freshOrder.purchaseFee || 800; // Use actual fee or default 800
-        
-        const newTotal = val + deliveryFee + appFee + pFee;
-        
-        await updateDoc(fDoc(db, 'orders', order.id), {
-          subtotal: val,
-          total: newTotal
-        });
-
-        // Add professional chat message
-        await addDoc(collection(db, 'orders', order.id, 'messages'), {
-          senderId: 'system',
-          senderName: 'GoDelivery',
-          text: `✅ **Actualización de Pedido**\n\nHola! El repartidor ha actualizado el valor de los productos:\n\n• **Productos:** ${formatPrice(val)}\n• **Gestión Especial:** ${formatPrice(pFee)}\n• **Servicio + Envío:** ${formatPrice(deliveryFee + appFee)}\n\n💰 **Total a abonar: ${formatPrice(newTotal)}**`,
-          createdAt: serverTimestamp(),
-          type: 'system'
-        });
-        
-        showToast('Precio actualizado', 'success');
+        await saveFavorStorePrices(order.id, storePrices);
+        showToast('Precios actualizados', 'success');
       } catch (e) {
         console.error('Update price error:', e);
         showToast('Error al actualizar', 'error');
       }
     })();
   };
+}
+
+async function saveFavorStorePrices(orderId, storePrices) {
+  const { getDoc, doc: fDoc, serverTimestamp, addDoc, collection, updateDoc } = await import('firebase/firestore');
+  const { db } = await import('../firebase.js');
+  const { formatPrice } = await import('../utils/format.js');
+  
+  // Fetch fresh data to ensure we have latest fees
+  const snap = await getDoc(fDoc(db, 'orders', orderId));
+  if (!snap.exists()) throw new Error('Order not found');
+  const freshOrder = snap.data();
+  
+  const deliveryFee = freshOrder.deliveryCost || 0;
+  const appFee = freshOrder.appUsageFee || 0;
+  const pFee = freshOrder.purchaseFee || 0;
+  const extraStops = freshOrder.extraStopsFee || 0;
+  
+  // Sum prices
+  const val = Object.values(storePrices).reduce((sum, price) => sum + price, 0);
+  const newTotal = val + deliveryFee + appFee + pFee + extraStops;
+  
+  await updateDoc(fDoc(db, 'orders', orderId), {
+    storePrices: storePrices,
+    subtotal: val,
+    total: newTotal
+  });
+
+  // Build detail message of stores
+  const storeLines = Object.entries(storePrices)
+    .map(([name, price]) => `• **${name}:** ${formatPrice(price)}`)
+    .join('\n');
+
+  // Add professional chat message
+  await addDoc(collection(db, 'orders', orderId, 'messages'), {
+    senderId: 'system',
+    senderName: 'GoDelivery',
+    text: `✅ **Actualización de Pedido**\n\nHola! El repartidor ha ingresado los precios de los productos en cada comercio:\n\n${storeLines}\n\n• **Total Productos:** ${formatPrice(val)}\n${pFee > 0 ? `• **Gestión Especial:** ${formatPrice(pFee)}\n` : ''}${extraStops > 0 ? `• **Paradas Extra:** ${formatPrice(extraStops)}\n` : ''}• **Servicio + Envío:** ${formatPrice(deliveryFee + appFee)}\n\n💰 **Total a abonar: ${formatPrice(newTotal)}**`,
+    createdAt: serverTimestamp(),
+    type: 'system'
+  });
 }
 async function startSession(user) {
   const { getDoc, doc: fDoc } = await import('firebase/firestore');
@@ -2557,7 +3017,13 @@ async function endSession(user) {
           where('deliverySessionId', '==', user.currentSessionId),
           where('status', '==', 'completed')
         ));
-        const total = ordersSnap.docs.reduce((s, d) => s + (d.data().deliveryCost || 0) + (d.data().purchaseFee || 0) + (d.data().tip || d.data().tipAmount || 0), 0);
+        const total = ordersSnap.docs.reduce((s, d) => {
+          const o = d.data();
+          const orderEarnings = o.isTrip || o.isFavor 
+            ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+            : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+          return s + orderEarnings;
+        }, 0);
         
         await updateDoc(sessRef, {
           endTime: serverTimestamp(),
@@ -2707,9 +3173,12 @@ async function loadProfessionalStats(driverId, callback = null) {
       } else {
         deliveredDate = new Date();
       }
+      const netEarnings = data.isTrip || data.isFavor 
+        ? ((data.deliveryCost || 0) + (data.purchaseFee || 0) + (data.extraStopsFee || 0) + (data.tip || data.tipAmount || 0) - (data.appUsageFee || 0))
+        : ((data.deliveryCost || 0) + (data.tip || data.tipAmount || 0));
       return {
         ...data,
-        deliveryCost: (data.deliveryCost || 0) + (data.purchaseFee || 0) + (data.tip || data.tipAmount || 0),
+        deliveryCost: netEarnings,
         deliveredAt: deliveredDate
       };
     });
@@ -2889,6 +3358,14 @@ async function loadRecentSessionsList(uid) {
       return;
     }
 
+    // Fetch all completed orders for this driver to compute actual stats in real time
+    const ordersSnap = await getDocs(query(
+      collection(db, 'orders'),
+      where('driverId', '==', uid),
+      where('status', '==', 'completed')
+    ));
+    const allCompletedOrders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
     container.innerHTML = recent.map(s => {
       let dateStr = 'Fecha desconocida';
       if (s.startTime) {
@@ -2897,8 +3374,30 @@ async function loadRecentSessionsList(uid) {
         dateStr = dateStr.replace('.', '');
       }
 
-      const total = s.totalEarned || 0;
-      const count = s.ordersCount || 0;
+      // Compute stats dynamically from Firestore orders for accuracy
+      const sessOrders = allCompletedOrders.filter(o => {
+        if (o.deliverySessionId === s.id) return true;
+        // Fallback: match by timestamp range if deliverySessionId is missing
+        if (!o.deliverySessionId && o.deliveredAt && s.startTime) {
+          const deliveredTime = o.deliveredAt.toMillis ? o.deliveredAt.toMillis() : new Date(o.deliveredAt).getTime();
+          const sessionStart = s.startTime.toMillis ? s.startTime.toMillis() : new Date(s.startTime).getTime();
+          const sessionEnd = s.endTime 
+            ? (s.endTime.toMillis ? s.endTime.toMillis() : new Date(s.endTime).getTime())
+            : Date.now();
+          return deliveredTime >= sessionStart && deliveredTime <= sessionEnd;
+        }
+        return false;
+      });
+
+      const total = sessOrders.reduce((sum, o) => {
+        const orderEarnings = o.isTrip || o.isFavor 
+          ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+          : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+        return sum + orderEarnings;
+      }, 0);
+
+      const uniqueBundles = new Set(sessOrders.map(o => o.bundleId || o.id));
+      const count = uniqueBundles.size;
       const isLive = s.id === getState().user?.currentSessionId;
 
       return `
@@ -2980,6 +3479,46 @@ async function showSessionsHistoryModal(driverId) {
       });
 
       sessions.sort((a, b) => (b.startTime?.toMillis() || 0) - (a.startTime?.toMillis() || 0));
+
+      // Fetch all completed orders for this driver to compute actual stats in real time
+      const ordersSnap = await getDocs(query(
+        collection(db, 'orders'),
+        where('driverId', '==', driverId),
+        where('status', '==', 'completed')
+      ));
+      const allCompletedOrders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      sessions = sessions.map(s => {
+        const sessOrders = allCompletedOrders.filter(o => {
+          if (o.deliverySessionId === s.id) return true;
+          // Fallback: match by timestamp range if deliverySessionId is missing
+          if (!o.deliverySessionId && o.deliveredAt && s.startTime) {
+            const deliveredTime = o.deliveredAt.toMillis ? o.deliveredAt.toMillis() : new Date(o.deliveredAt).getTime();
+            const sessionStart = s.startTime.toMillis ? s.startTime.toMillis() : new Date(s.startTime).getTime();
+            const sessionEnd = s.endTime 
+              ? (s.endTime.toMillis ? s.endTime.toMillis() : new Date(s.endTime).getTime())
+              : Date.now();
+            return deliveredTime >= sessionStart && deliveredTime <= sessionEnd;
+          }
+          return false;
+        });
+
+        const totalEarned = sessOrders.reduce((sum, o) => {
+          const orderEarnings = o.isTrip || o.isFavor 
+            ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+            : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+          return sum + orderEarnings;
+        }, 0);
+
+        const uniqueBundles = new Set(sessOrders.map(o => o.bundleId || o.id));
+        const ordersCount = uniqueBundles.size;
+
+        return {
+          ...s,
+          totalEarned,
+          ordersCount
+        };
+      });
       
       const totalMonth = sessions.reduce((s, sess) => s + (sess.totalEarned || 0), 0);
       content.querySelector('#month-total-display').textContent = formatPrice(totalMonth);
@@ -3114,9 +3653,12 @@ async function showSessionsHistoryModal(driverId) {
       ));
       const orders = ordersSnap.docs.map(d => {
         const data = d.data();
+        const netEarnings = data.isTrip || data.isFavor 
+          ? ((data.deliveryCost || 0) + (data.purchaseFee || 0) + (data.extraStopsFee || 0) + (data.tip || data.tipAmount || 0) - (data.appUsageFee || 0))
+          : ((data.deliveryCost || 0) + (data.tip || data.tipAmount || 0));
         return {
           ...data,
-          deliveryCost: (data.deliveryCost || 0) + (data.purchaseFee || 0),
+          deliveryCost: netEarnings,
           deliveredAt: data.deliveredAt?.toDate()
         };
       });
@@ -3406,9 +3948,7 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
   isCurrentlyTakingBatch = true;
   try {
     // Check mandatory transfer alias
-    const { getDoc, doc: fDoc } = await import('firebase/firestore');
-    const userSnap = await getDoc(fDoc(db, 'users', user.uid));
-    const userData = userSnap.exists() ? userSnap.data() : {};
+    const userData = getState().user || user;
     if (!userData.transferAlias || !userData.transferAlias.trim()) {
       showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en la sección de Configuración antes de tomar pedidos.', 'warning');
       document.querySelector('.tab-pill[data-tab="config"]')?.click();
@@ -3443,12 +3983,8 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
 
     if (ordersToTake.length === 0) throw new Error('No se encontraron pedidos');
 
-    // Anti-hoarding Smart Dynamic Cap Logic
-    const { getDocs, query, collection, where } = await import('firebase/firestore');
-    
-    // 1. Fetch active orders
-    const activeSnap = await getDocs(query(collection(db, 'orders'), where('driverId', '==', user.uid)));
-    const activeOrders = activeSnap.docs.filter(d => !['completed', 'cancelled'].includes(d.data().status)).map(d => ({ id: d.id, ...d.data() }));
+    // Anti-hoarding Smart Dynamic Cap Logic (Using cached activeOrdersList for immediate lookup)
+    const activeOrders = activeOrdersList;
     const activeCount = activeOrders.length;
     const ordersToTakeCount = ordersToTake.length;
     const totalCount = activeCount + ordersToTakeCount;
@@ -3496,25 +4032,21 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
       }
     }
 
-    // Fetch initial driver GPS location asynchronously before transaction (with iOS robust fallback)
-    let initialDriverLocation = null;
-    if (navigator.geolocation) {
+    // Fetch initial driver GPS location with cached fallback and fast timeout to prevent blocking UI
+    let initialDriverLocation = window.lastRiderPos || null;
+    if (!initialDriverLocation && navigator.geolocation) {
       try {
-        console.log('[takeBatch] Fetching initial driver location...');
+        console.log('[takeBatch] Fetching initial driver location with fast timeout...');
         const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, (err) => {
-            console.warn('[takeBatch] High accuracy timeout/error, trying low accuracy...', err);
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, enableHighAccuracy: false });
-          }, { timeout: 6000, enableHighAccuracy: true });
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1000, enableHighAccuracy: false });
         });
         initialDriverLocation = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude
         };
-        window.lastRiderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        console.log('[takeBatch] Initial driver location obtained:', initialDriverLocation);
+        window.lastRiderPos = initialDriverLocation;
       } catch (e) {
-        console.warn('[takeBatch] Initial location fetch failed on claiming order', e);
+        console.warn('[takeBatch] Fast GPS location fetch timed out/failed', e);
       }
     }
 
@@ -3642,10 +4174,7 @@ export async function markAsPickedUp(orderIdOrIds) {
     } else if (navigator.geolocation) {
       try {
         const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, (err) => {
-            console.warn('[pickup] High accuracy timeout/error, trying low accuracy...', err);
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, enableHighAccuracy: false });
-          }, { timeout: 6000, enableHighAccuracy: true });
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1000, enableHighAccuracy: false });
         });
         lat = pos.coords.latitude;
         lng = pos.coords.longitude;
@@ -3699,7 +4228,7 @@ export async function markAsDelivered(orderIdOrIds) {
       batch.update(doc(db, 'orders', id), {
         status: 'completed',
         deliveredAt: serverTimestamp(),
-        deliverySessionId: orderData?.deliverySessionId || user.currentSessionId || null
+        deliverySessionId: user.currentSessionId || orderData?.deliverySessionId || null
       });
     });
 

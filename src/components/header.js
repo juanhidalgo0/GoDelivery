@@ -6,20 +6,37 @@ import { showAddressPrompt } from './address-modal.js';
 import { initSearchSuggestions } from './search-suggestions.js';
 import { showModal, closeModal } from './modal.js';
 import { db } from '../firebase.js';
-import { collection, query, limit, onSnapshot, orderBy, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { isIOS } from './install-prompt.js';
+import { showToast } from './toast.js';
+
+function isNotifClickable(n) {
+  if (!n.url || n.url === '' || n.url === '#') return false;
+  if (n.url.includes('/pedido/')) {
+    const type = n.type || '';
+    if (type === 'order_completed' || type === 'order_cancelled') return false;
+    const text = ((n.title || '') + ' ' + (n.body || '')).toLowerCase();
+    if (text.includes('entregado') || text.includes('entregó') || text.includes('cancelado') || text.includes('canceló') || text.includes('disfrutes')) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export function renderHeader() {
   const header = document.getElementById('app-header');
   if (!header) return;
 
+  const isNative = !!window.Capacitor;
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   const isIosDevice = isIOS();
-  const topPadding = (isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)';
+  const topPadding = isNative 
+    ? 'var(--status-bar-height, 24px)' 
+    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
-  const isSubPage = hash.startsWith('#/profile') || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats');
+  const isSubPage = (hash.startsWith('#/profile') && !hash.startsWith('#/profile/publications')) || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats');
   const slider = document.getElementById('app-slider');
 
   if (!isHome && !isSubPage) {
@@ -38,6 +55,11 @@ export function renderHeader() {
   if (slider) slider.style.height = '';
 
   const address = getState().deliveryAddress;
+  let displayAddress = address || 'Seleccionar dirección';
+  if (displayAddress.includes(',')) {
+    displayAddress = displayAddress.split(',')[0];
+  }
+  
   const unreadCount = getState().unreadNotifications || 0;
 
   const isOwner = isComercio();
@@ -126,8 +148,11 @@ export function renderHeader() {
                   </div>
                 ` : filteredNotifs.map(n => {
                   const isUnread = n.status === 'unread';
+                  const clickable = isNotifClickable(n);
                   return `
-                    <div class="notif-dropdown-item-card ${isUnread ? 'unread' : ''}" data-id="${n.id}" data-url="${n.url || ''}">
+                    <div class="notif-dropdown-item-card ${isUnread ? 'unread' : ''}" 
+                      data-id="${n.id}" data-url="${n.url || ''}" data-clickable="${clickable}"
+                      style="${!clickable ? 'cursor: default; opacity: 0.85;' : 'cursor: pointer;'}">
                       <div class="notif-item-dot"></div>
                       <div class="notif-item-body">
                         <div class="notif-item-title-row">
@@ -205,28 +230,33 @@ export function renderHeader() {
         <div class="header-top" style="height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 2;">
           <!-- Address Selector -->
           <div id="header-location-selector" style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-            <span style="font-weight: 700; font-size: 14px; color: white; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              ${address || 'Seleccionar dirección'}
+            <span style="font-weight: 700; font-size: 14px; color: white; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${displayAddress}
             </span>
             <span style="color: white; display: flex; opacity: 0.8;">${icon('chevronDown', 14)}</span>
           </div>
 
           <!-- Action Buttons -->
-          <div style="display: flex; align-items: center; gap: 14px;">
-            <a href="#/notifications" style="color: white; display: flex; position: relative; opacity: 0.95;">
-              ${icon('bell', 26)}
+          <div style="display: flex; align-items: center;">
+            <a href="#/notifications" style="color: white; display: flex; position: relative; background: rgba(255,255,255,0.2); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
+              ${icon('bell', 20)}
               ${(getState().unreadNotifications || 0) > 0 ? `
-                <span style="position: absolute; top: 1px; right: 1px; background: white; width: 8px; height: 8px; border: 2px solid var(--color-primary); border-radius: 50%;"></span>
+                <span style="position: absolute; top: -2px; right: -2px; background: #FF4757; width: 12px; height: 12px; border: 2px solid var(--color-primary); border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></span>
               ` : ''}
             </a>
-            <a href="#/profile" style="color: white; display: flex; opacity: 0.95;">
-              ${icon('user', 26)}
+            <a href="#/profile" style="color: white; display: flex; background: rgba(255,255,255,0.2); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(8px); margin-left: 12px;">
+              ${icon('user', 20)}
             </a>
+            <button id="header-search-expand-btn" class="header-action-btn" style="color: white; background: rgba(255,255,255,0.2); border: none; height: 38px; width: 0px; margin-left: 0px; opacity: 0; transform: scale(0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); cursor:pointer; overflow: hidden; padding: 0;">
+              <div style="min-width: 38px; display: flex; align-items: center; justify-content: center;">
+                ${icon('search', 18)}
+              </div>
+            </button>
           </div>
         </div>
 
         <!-- Search Bar -->
-        <div style="padding: 0 16px 16px 16px; margin-top: 2px; position: relative; z-index: 2;">
+        <div id="header-search-container" style="padding: 0 16px 16px 16px; margin-top: 2px; position: relative; z-index: 2; overflow: hidden; height: 62px; opacity: 1; transform: translateY(0); will-change: height, opacity, transform;">
           <div style="background: white; border-radius: 14px; height: 46px; display: flex; align-items: center; padding: 0 4px 0 16px; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
             <input type="text" id="header-search" placeholder="Locales, platos y productos" autocomplete="off" style="color: #333; font-weight: 600; font-size: 14px; border: none; background: transparent; width: 100%; outline: none;" />
             <div style="background: var(--color-primary); width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; cursor: pointer;">
@@ -246,20 +276,97 @@ export function renderHeader() {
     // Re-bind location selector
     const locationBtn = document.getElementById('header-location-selector');
     if (locationBtn) {
-      locationBtn.onclick = () => showAddressSelector();
+      locationBtn.addEventListener('click', showAddressPrompt);
+    }
+    
+    // Dynamic Scroll Compression Effect
+    const searchContainer = document.getElementById('header-search-container');
+    const searchExpandBtn = document.getElementById('header-search-expand-btn');
+    
+    if (searchContainer && searchExpandBtn) {
+      if (window._headerScrollHandler) {
+        window.removeEventListener('scroll', window._headerScrollHandler, { capture: true });
+      }
+
+      window._headerScrollHandler = (e) => {
+        // Only run on mobile and on home page
+        const h = window.location.hash;
+        if ((h !== '#/' && h !== '#' && h !== '') || window.innerWidth >= 1024) return;
+        
+        const target = e.target;
+        const isPanel = target.classList && target.classList.contains('slide-panel');
+        const isDocument = target === document || target === window;
+        if (!isPanel && !isDocument) return;
+
+        let scrollTop = isPanel ? target.scrollTop : (window.scrollY || document.documentElement.scrollTop);
+        
+        // Calculate progress (0 to 1) over 120px of scroll for a slower, longer animation
+        let progress = Math.min(Math.max(scrollTop / 120, 0), 1);
+        
+        // Use requestAnimationFrame for smooth progressive rendering
+        requestAnimationFrame(() => {
+          // Progressively compress search container
+          searchContainer.style.height = (62 * (1 - progress)) + 'px';
+          searchContainer.style.opacity = 1 - Math.pow(progress, 1.5);
+          searchContainer.style.paddingBottom = (16 * (1 - progress)) + 'px';
+          searchContainer.style.transform = `translateY(${-10 * progress}px)`;
+          searchContainer.style.pointerEvents = progress > 0.5 ? 'none' : 'auto';
+
+          // Progressively expand search button on the right, pushing others
+          searchExpandBtn.style.width = (38 * progress) + 'px';
+          searchExpandBtn.style.marginLeft = (12 * progress) + 'px';
+          searchExpandBtn.style.opacity = progress;
+          searchExpandBtn.style.transform = `scale(${0.5 + (0.5 * progress)})`;
+          searchExpandBtn.style.pointerEvents = progress > 0.8 ? 'auto' : 'none';
+        });
+      };
+
+      window.addEventListener('scroll', window._headerScrollHandler, { capture: true, passive: true });
+      
+      // Expand Button Logic (scroll to top and focus)
+      searchExpandBtn.addEventListener('click', () => {
+        const activePanels = document.querySelectorAll('.slide-panel.active, .slide-panel');
+        activePanels.forEach(p => {
+          if (p.scrollTop > 0) {
+            p.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        setTimeout(() => document.getElementById('header-search')?.focus(), 400);
+      });
     }
     initSearchSuggestions();
 
   } else {
-    header.style.setProperty('background', 'var(--color-primary)', 'important');
-    header.style.setProperty('border-bottom-left-radius', '0', 'important');
-    header.style.setProperty('border-bottom-right-radius', '0', 'important');
-    header.style.setProperty('border', 'none', 'important');
-    header.style.setProperty('box-shadow', 'none', 'important');
-    header.style.setProperty('backdrop-filter', 'none', 'important');
-    header.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-    header.style.setProperty('margin', '0', 'important');
-    header.style.setProperty('padding', '0', 'important');
+    if (window.innerWidth < 1024) {
+      header.style.setProperty('background', 'var(--color-primary)', 'important');
+      header.style.setProperty('border-bottom-left-radius', '28px', 'important');
+      header.style.setProperty('border-bottom-right-radius', '28px', 'important');
+      header.style.setProperty('box-shadow', '0 10px 30px rgba(var(--color-primary-rgb), 0.3)', 'important');
+      header.style.setProperty('border', 'none', 'important');
+      header.style.setProperty('backdrop-filter', 'none', 'important');
+      header.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+      header.style.setProperty('margin', '0', 'important');
+      header.style.setProperty('padding', '0', 'important');
+      header.style.setProperty('position', 'sticky', 'important');
+      header.style.setProperty('top', '0', 'important');
+      header.style.setProperty('z-index', '2000', 'important');
+      header.style.setProperty('overflow', 'visible', 'important');
+    } else {
+      header.style.removeProperty('background');
+      header.style.removeProperty('border-bottom-left-radius');
+      header.style.removeProperty('border-bottom-right-radius');
+      header.style.removeProperty('box-shadow');
+      header.style.removeProperty('border');
+      header.style.removeProperty('backdrop-filter');
+      header.style.removeProperty('-webkit-backdrop-filter');
+      header.style.removeProperty('margin');
+      header.style.removeProperty('padding');
+      header.style.removeProperty('position');
+      header.style.removeProperty('top');
+      header.style.removeProperty('z-index');
+      header.style.removeProperty('overflow');
+    }
 
     // SUB-PAGE HEADER: Dynamic Title + Gradient + Circles
     let title = 'Notificaciones';
@@ -274,7 +381,7 @@ export function renderHeader() {
     header.innerHTML = `
       ${desktopHeaderHTML}
       <div class="mobile-header-only" style="width:100%; padding-top: ${topPadding};">
-        <div class="header-nav-sub" style="background: var(--color-primary); height: 64px; display: flex; align-items: center; padding: 0 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0; padding-top: 0; border: none;">
+        <div class="header-nav-sub" style="display: flex; align-items: center; padding: 12px 16px 20px 16px; position: relative; overflow: hidden; margin: 0; border: none;">
           <!-- Decorative Circles -->
           <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
           
@@ -363,12 +470,16 @@ export function renderHeader() {
       e.stopPropagation();
       const id = item.dataset.id;
       const url = item.dataset.url;
+      const clickable = item.dataset.clickable === 'true';
       const user = getState().user;
       if (user) {
         try {
-          await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
+          await deleteDoc(doc(db, 'users', user.uid, 'notifications', id));
         } catch (err) {}
       }
+      
+      if (!clickable) return;
+
       if (url) {
         // Validate route exists in orders/chats if it contains order ID
         const orderMatch = url.match(/#\/pedido\/([^/]+)/);
@@ -378,7 +489,13 @@ export function renderHeader() {
             const { getDoc, doc } = await import('firebase/firestore');
             const oDoc = await getDoc(doc(db, 'orders', orderId));
             if (!oDoc.exists()) {
-              console.warn('[HeaderNotifications] Order does not exist. Skipping navigation.');
+              showToast('El pedido no existe o fue eliminado', 'error');
+              return;
+            }
+            const orderData = oDoc.data();
+            const status = orderData.status;
+            if (status === 'completed' || status === 'cancelled' || status === 'entregado' || status === 'cancelado') {
+              showToast('Este pedido ya ha sido finalizado', 'info');
               return;
             }
           } catch (err) {

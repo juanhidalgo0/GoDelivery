@@ -40,6 +40,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           groupName: group.name,
           name: group.options[0].name,
           price: group.options[0].price || 0,
+          stockMultiplier: group.options[0].stockMultiplier || 1,
           qty: 1
         });
       }
@@ -72,16 +73,20 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           const data = snap.data();
           const rawList = data.sabores || [];
           
-          const productNameLower = (product.name || '').toLowerCase();
-          const isPizza = productCategoryName.includes('pizza') || productNameLower.includes('pizza');
-          const isEmpanada = productCategoryName.includes('empanada') || productNameLower.includes('empanada');
-
           let filteredRawList = rawList.filter(f => f.isAvailable === true);
 
-          if (isPizza) {
-            filteredRawList = filteredRawList.filter(f => (f.category || '').toLowerCase().includes('pizza'));
-          } else if (isEmpanada) {
-            filteredRawList = filteredRawList.filter(f => (f.category || '').toLowerCase().includes('empanada'));
+          if (product.allowedFlavors && product.allowedFlavors.length > 0) {
+            filteredRawList = filteredRawList.filter(f => product.allowedFlavors.includes(f.name));
+          } else {
+            const productNameLower = (product.name || '').toLowerCase();
+            const isPizza = productCategoryName.includes('pizza') || productNameLower.includes('pizza');
+            const isEmpanada = productCategoryName.includes('empanada') || productNameLower.includes('empanada');
+
+            if (isPizza) {
+              filteredRawList = filteredRawList.filter(f => (f.category || '').toLowerCase().includes('pizza'));
+            } else if (isEmpanada) {
+              filteredRawList = filteredRawList.filter(f => (f.category || '').toLowerCase().includes('empanada'));
+            }
           }
 
           const list = filteredRawList.map(f => ({ name: f.name, category: f.category || 'Otros' }));
@@ -139,19 +144,27 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
 
     const baseOptionsGroups = product.optionsGroups || [];
     const optionsGroups = globalFlavorsGroup ? [globalFlavorsGroup, ...baseOptionsGroups] : baseOptionsGroups;
-    const optionsPrice = selectedOptions.reduce((s, o) => s + (o.price * o.qty || 0), 0);
-    const unitPrice = baseDiscountedPrice + optionsPrice;
+    
+    const replaceOption = selectedOptions.find(o => o.priceMode === 'replace');
+    let effectiveBasePrice = replaceOption ? (replaceOption.price || 0) : baseDiscountedPrice;
+    let effectiveOriginalBasePrice = replaceOption ? (replaceOption.price || 0) : (product.price || 0);
+
+    const optionsPrice = selectedOptions.reduce((s, o) => s + (o.priceMode === 'replace' ? 0 : (o.price * o.qty || 0)), 0);
+    const unitPrice = effectiveBasePrice + optionsPrice;
     const totalPrice = unitPrice * qty;
 
-    const originalUnitPrice = (product.price || 0) + optionsPrice;
+    const originalUnitPrice = effectiveOriginalBasePrice + optionsPrice;
     const originalTotalPrice = originalUnitPrice * qty;
 
     const isFav = isProductFavorite(product.id);
 
+    const currentStockMultiplier = selectedOptions.reduce((max, o) => Math.max(max, o.stockMultiplier || 1), 1);
+    const requiredStockPerUnit = currentStockMultiplier;
+
     const isLimited = product.stockMode === 'limited';
     const stockQty = typeof product.stockQuantity === 'number' ? product.stockQuantity : 0;
     const stockThresh = typeof product.stockThreshold === 'number' ? product.stockThreshold : 0;
-    const isOutOfStock = isLimited && stockQty <= 0;
+    const isOutOfStock = isLimited && stockQty < requiredStockPerUnit;
 
     let stockBadgeHTML = '';
     if (isLimited) {
@@ -490,13 +503,13 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                 return;
               }
             }
-            selectedOptions.push({ groupName: group.name, name: opt.name, price: opt.price || 0, qty: 1 });
+            selectedOptions.push({ groupName: group.name, name: opt.name, price: opt.price || 0, stockMultiplier: opt.stockMultiplier || 1, priceMode: group.priceMode, stock: opt.stock, qty: 1 });
           }
         } else {
           // Single choice
           const otherIdx = selectedOptions.findIndex(o => o.groupName === group.name);
           if (otherIdx > -1) selectedOptions.splice(otherIdx, 1);
-          selectedOptions.push({ groupName: group.name, name: opt.name, price: opt.price || 0, qty: 1 });
+          selectedOptions.push({ groupName: group.name, name: opt.name, price: opt.price || 0, stockMultiplier: opt.stockMultiplier || 1, priceMode: group.priceMode, stock: opt.stock, qty: 1 });
         }
         render();
       };
@@ -540,6 +553,12 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         }
 
         if (selection && selection.qty < (opt.maxQty || 99)) {
+          if (opt.stock !== undefined && opt.stock !== null) {
+            if ((selection.qty + 1) * qty > opt.stock) {
+              showToast(`Solo quedan ${opt.stock} unidades de ${opt.name} en stock`, 'warning');
+              return;
+            }
+          }
           selection.qty++;
           render();
         }
@@ -551,9 +570,17 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       if (qty > 1) { qty--; render(); }
     };
     modalContent.querySelector('#pm-qty-plus').onclick = () => {
-      if (isLimited && qty >= stockQty) {
-        showToast(`Solo quedan ${stockQty} unidades en stock`, 'warning');
+      if (isLimited && (qty + 1) * requiredStockPerUnit > stockQty) {
+        showToast(`Solo quedan ${stockQty} unidades en stock (requiere ${requiredStockPerUnit} por item)`, 'warning');
         return;
+      }
+      for (const sel of selectedOptions) {
+        if (sel.stock !== undefined && sel.stock !== null) {
+          if (sel.qty * (qty + 1) > sel.stock) {
+             showToast(`No hay stock suficiente de ${sel.name} para esta cantidad. (Quedan ${sel.stock})`, 'warning');
+             return;
+          }
+        }
       }
       if (qty < 99) { qty++; render(); }
     };
@@ -703,6 +730,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   showModal({
     title: '',
     hideHeader: true,
+    fullSwipe: true,
     content: modalContent,
   });
 }

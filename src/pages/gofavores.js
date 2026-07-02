@@ -26,123 +26,196 @@ export async function renderGoFavores(content) {
       <div class="home-blob home-blob-1" style="position: absolute; top: -10%; left: -20%; width: 300px; height: 300px; background: rgba(225, 29, 72, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
       <div class="home-blob home-blob-2" style="position: absolute; bottom: 10%; right: -20%; width: 250px; height: 250px; background: rgba(99, 102, 241, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
 
-      <div style="padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; height: 100%; position: relative; z-index: 2;">
+      <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
         
-        <!-- Option 1: Encomienda -->
-        <div id="favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 20px; padding: 18px 16px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 16px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.05s both;">
-          <!-- Ambient light reflection -->
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-          <div class="gofavores-icon-box" style="width: 54px; height: 54px; border-radius: 16px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('package', 28)}
-          </div>
-          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-            <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 2px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Encomienda</h3>
-            <p style="font-size: 12px; color: rgba(255, 255, 255, 0.9); line-height: 1.35; margin: 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
-            <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; background: rgba(255, 255, 255, 0.2); padding: 4px 10px; border-radius: 8px; color: #ffffff; font-size: 9.0px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Costo normal de envío
-            </span>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-            <div id="info-mandado-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-              ${icon('info', 16)}
+        <!-- Cards Grouped Together -->
+        <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; box-sizing: border-box; flex-shrink: 0;">
+          <!-- Option 1: Encomienda -->
+          <div id="favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.05s both;">
+            <!-- Ambient light reflection -->
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+              ${icon('package', 22)}
             </div>
-            <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 32px; height: 32px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-              ${icon('chevronRight', 14)}
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
+              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Encomienda</h3>
+              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
+              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                Costo normal de envío
+              </span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
+              <div id="info-mandado-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
+                ${icon('info', 14)}
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+          </div>
+
+          <!-- Option 2: Mandado -->
+          <div id="favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.12s both;">
+            <!-- Ambient light reflection -->
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+              ${icon('shoppingBag', 22)}
+            </div>
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
+              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Mandado</h3>
+              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
+              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                Tarifa de gestión
+              </span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
+              <div id="info-compra-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
+                ${icon('info', 14)}
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+          </div>
+
+          <!-- Option 3: Go Cash -->
+          <div id="favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.18s both;">
+            <!-- Ambient light reflection -->
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+              ${icon('dollarSign', 22)}
+            </div>
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
+              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Go Cash</h3>
+              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
+              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                Efectivo ↔ Transferencia
+              </span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
+              <div id="info-gocash-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
+                ${icon('info', 14)}
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
+                ${icon('chevronRight', 12)}
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Option 2: Mandado -->
-        <div id="favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 20px; padding: 18px 16px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 16px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.12s both;">
-          <!-- Ambient light reflection -->
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-          <div class="gofavores-icon-box" style="width: 54px; height: 54px; border-radius: 16px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('shoppingBag', 28)}
+        <!-- Info Section (Stretches to fill available space) -->
+        <div class="gofavores-info-section" style="padding: 14px 16px; border-radius: 16px; border: 1px dashed var(--color-border); width: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; flex: 1; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.24s both; min-height: 0;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+              <div style="width:28px; height:28px; border-radius:6px; background:rgba(var(--color-primary-rgb),0.15); color:var(--color-primary); display:flex; align-items:center; justify-content:center;">
+                ${icon('info', 15)}
+              </div>
+              <h4 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; color: var(--color-text-primary); margin: 0;">¿Cómo funciona GoFavores?</h4>
+            </div>
+            <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px;">
+              <li style="display:flex; gap:10px; align-items: flex-start;">
+                 <div style="width:18px; height:18px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; font-weight:900; margin-top:2px;">1</div>
+                 <div style="display: flex; flex-direction: column; text-align: left;">
+                   <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Completás el formulario</span>
+                   <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 1px;">Ingresá el origen, el destino y las aclaraciones sobre qué requerís.</span>
+                 </div>
+              </li>
+              <li style="display:flex; gap:10px; align-items: flex-start;">
+                 <div style="width:18px; height:18px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; font-weight:900; margin-top:2px;">2</div>
+                 <div style="display: flex; flex-direction: column; text-align: left;">
+                   <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Contacto y coordinación</span>
+                   <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 1px;">El repartidor asignado te escribirá por chat privado ante cualquier duda comercial.</span>
+                 </div>
+              </li>
+              <li style="display:flex; gap:10px; align-items: flex-start;">
+                 <div style="width:18px; height:18px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; font-weight:900; margin-top:2px;">3</div>
+                 <div style="display: flex; flex-direction: column; text-align: left;">
+                   <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Seguís el recorrido en vivo</span>
+                   <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 1px;">Seguí el recorrido en tiempo real sobre el mapa integrado hasta tu puerta.</span>
+                 </div>
+              </li>
+            </ul>
           </div>
-          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-            <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 2px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Mandado</h3>
-            <p style="font-size: 12px; color: rgba(255, 255, 255, 0.9); line-height: 1.35; margin: 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
-            <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; background: rgba(255, 255, 255, 0.2); padding: 4px 10px; border-radius: 8px; color: #ffffff; font-size: 9.0px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Tarifa de gestión
+          
+          <!-- Bottom Security Badge to fill space beautifully -->
+          <div style="display: flex; align-items: center; gap: 8px; background: rgba(var(--color-primary-rgb), 0.05); padding: 8px 12px; border-radius: 10px; margin-top: 10px; border: 1px solid rgba(var(--color-primary-rgb), 0.1); justify-content: center;">
+            <span style="color: var(--color-primary); display: flex; align-items: center; justify-content: center;">
+              ${icon('check', 14)}
+            </span>
+            <span style="font-size: 10px; font-weight: 700; color: var(--color-text-secondary); text-align: center;">
+              Tu solicitud está asegurada y monitoreada por soporte técnico en tiempo real.
             </span>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-            <div id="info-compra-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-              ${icon('info', 16)}
-            </div>
-            <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 32px; height: 32px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-              ${icon('chevronRight', 14)}
-            </div>
-          </div>
-        </div>
-
-        <!-- Option 3: Go Cash -->
-        <div id="favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 20px; padding: 18px 16px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 16px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.18s both;">
-          <!-- Ambient light reflection -->
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-          <div class="gofavores-icon-box" style="width: 54px; height: 54px; border-radius: 16px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('dollarSign', 28)}
-          </div>
-          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-            <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 2px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Go Cash</h3>
-            <p style="font-size: 12px; color: rgba(255, 255, 255, 0.9); line-height: 1.35; margin: 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
-            <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; background: rgba(255, 255, 255, 0.2); padding: 4px 10px; border-radius: 8px; color: #ffffff; font-size: 9.0px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Efectivo ↔ Transferencia
-            </span>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-            <div id="info-gocash-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-              ${icon('info', 16)}
-            </div>
-            <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 32px; height: 32px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-              ${icon('chevronRight', 14)}
-            </div>
-          </div>
-        </div>
-
-        <!-- Info Section -->
-        <div class="gofavores-info-section" style="flex: 1; margin-top: 4px; padding: 18px 20px; border-radius: 20px; border: 1px dashed var(--color-border); width: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.24s both;">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-            <div style="width:32px; height:32px; border-radius:8px; background:rgba(var(--color-primary-rgb),0.15); color:var(--color-primary); display:flex; align-items:center; justify-content:center;">
-              ${icon('info', 18)}
-            </div>
-            <h4 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; color: var(--color-text-primary); margin: 0;">¿Cómo funciona GoFavores?</h4>
-          </div>
-          <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; justify-content: space-between; flex: 1; padding-bottom: 4px;">
-            <li style="display:flex; gap:12px; align-items: flex-start; margin-top: 4px;">
-               <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; font-weight:900; margin-top:2px;">1</div>
-               <div style="display: flex; flex-direction: column;">
-                 <span style="font-size: 13.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Completás el formulario</span>
-                 <span style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 2px;">Ingresá el origen, el destino y las aclaraciones sobre qué requerís.</span>
-               </div>
-            </li>
-            <li style="display:flex; gap:12px; align-items: flex-start; margin-top: 4px;">
-               <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; font-weight:900; margin-top:2px;">2</div>
-               <div style="display: flex; flex-direction: column;">
-                 <span style="font-size: 13.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Contacto y coordinación</span>
-                 <span style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 2px;">El repartidor asignado te escribirá por chat privado ante cualquier duda comercial.</span>
-               </div>
-            </li>
-            <li style="display:flex; gap:12px; align-items: flex-start; margin-top: 4px;">
-               <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; font-weight:900; margin-top:2px;">3</div>
-               <div style="display: flex; flex-direction: column;">
-                 <span style="font-size: 13.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Seguís el recorrido en vivo</span>
-                 <span style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 2px;">Seguí el recorrido en tiempo real sobre el mapa integrado hasta tu puerta.</span>
-               </div>
-            </li>
-          </ul>
         </div>
       </div>
     </div>
     
     <style>
+      .slide-overlay:has(.gofavores-page) {
+        overflow: hidden !important;
+        overflow-y: hidden !important;
+        height: 100% !important;
+      }
+      .slide-overlay:has(.gofavores-page) #app-content {
+        height: 100% !important;
+        min-height: 100% !important;
+        padding-bottom: 0 !important;
+        overflow: hidden !important;
+        display: flex !important;
+        flex-direction: column !important;
+      }
       #app-content:has(.gofavores-page) {
         overflow: hidden !important;
         height: 100% !important;
       }
-      .slide-overlay:has(.gofavores-page) {
-        overflow-y: hidden !important;
+      #app-content:has(.gofavores-page) ~ #app-navbar,
+      body:has(.gofavores-page) #app-navbar,
+      body:has(.gofavores-page) .bottom-nav {
+        display: none !important;
       }
+      
+      /* Make layout responsive to smaller screen heights to prevent overflow and clipping */
+      @media (max-height: 700px) {
+        .gofavores-page > div {
+          padding-top: calc(var(--header-height, 60px) + 4px) !important;
+          padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+        }
+        .gofavores-card {
+          padding: 8px 12px !important;
+          gap: 10px !important;
+        }
+        .gofavores-icon-box {
+          width: 38px !important;
+          height: 38px !important;
+        }
+        .gofavores-icon-box svg {
+          width: 18px !important;
+          height: 18px !important;
+        }
+        .gofavores-card h3 {
+          font-size: 13.5px !important;
+        }
+        .gofavores-card p {
+          font-size: 10.5px !important;
+        }
+        .gofavores-info-section {
+          padding: 8px 12px !important;
+          gap: 6px !important;
+        }
+        .gofavores-info-section ul {
+          gap: 4px !important;
+        }
+        .gofavores-info-section li {
+          gap: 8px !important;
+        }
+        .gofavores-info-section li span {
+          font-size: 11.5px !important;
+        }
+        .gofavores-info-section li span + span {
+          font-size: 10px !important;
+        }
+      }
+
       .gofavores-card {
         will-change: transform, box-shadow;
         color: #ffffff;
@@ -572,6 +645,8 @@ async function createFavorOrder(data) {
     details: data.details,
     deliveryCost: data.deliveryCost,
     purchaseFee: data.purchaseFee || 0,
+    extraStopsFee: data.extraStopsFee || 0,
+    stopsCount: data.stopsCount || 1,
     appUsageFee: data.appUsageFee || 0,
     total: data.total,
     paymentMethod: data.paymentMethod

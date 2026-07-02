@@ -40,11 +40,11 @@ export async function renderAdminUsers() {
           <input type="text" id="users-search" placeholder="Buscar usuarios..." style="flex:1; border:none; background:transparent; font-size:15px; font-weight:600; color:var(--color-text); outline:none;" />
         </div>
 
-        <!-- Filter Tabs -->
         <div class="tab-pills" style="display:flex; gap:8px; overflow-x:auto; padding:4px 2px; scrollbar-width:none; flex-shrink:0; min-height:48px; align-items:center;">
           <button class="tab-pill active" data-filter="all">Todos</button>
           <button class="tab-pill" data-filter="cliente">Clientes</button>
           <button class="tab-pill" data-filter="delivery">Repartidores</button>
+          <button class="tab-pill" data-filter="chofer">Choferes</button>
           <button class="tab-pill" data-filter="comercio">Comercios</button>
         </div>
 
@@ -119,7 +119,7 @@ export async function renderAdminUsers() {
       
       .user-avatar { width: 52px; height: 52px; border-radius: 18px; object-fit: cover; background: var(--color-bg-secondary); border: 2px solid var(--color-bg-secondary); }
       
-      .role-toggle-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border-light); }
+      .role-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border-light); }
       .role-btn {
         height: 44px; border-radius: 12px; border: 1px solid var(--color-border-light); background: var(--color-bg-secondary);
         color: var(--color-text-tertiary); font-size: 11px; font-weight: 800; cursor: pointer; transition: all 0.2s;
@@ -149,11 +149,18 @@ export async function renderAdminUsers() {
         background: var(--color-warning);
         box-shadow: 0 6px 16px rgba(255, 179, 0, 0.4);
       }
+      .role-btn.active-chofer { background: #3b82f6; color: white; border-color: #3b82f6; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
+      .role-btn.active-chofer:not(:disabled):hover {
+        transform: translateY(-2px);
+        background: #2563eb;
+        box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+      }
       .role-btn:disabled { opacity: 0.6; cursor: not-allowed; }
       
       .id-badge { font-size: 10px; font-weight: 900; padding: 3px 10px; border-radius: 8px; font-family: monospace; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
       .id-go { background: #1e1e2d; color: white; }
       .id-dl { background: #eab308; color: white; }
+      .id-ch { background: #3b82f6; color: white; }
       
       .status-badge { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 8px; text-transform: uppercase; display: flex; align-items: center; gap: 5px; }
       .badge-admin { background: var(--color-primary-light); color: var(--color-primary); }
@@ -298,16 +305,30 @@ export async function renderAdminUsers() {
         return;
       }
 
-      const newValue = !targetUser[field];
+      const newValue = field === 'isChofer' ? targetUser.tripStatus !== 'approved' : !targetUser[field];
       showConfirm({
         title: 'Actualizar Acceso',
-        message: `¿Querés ${newValue ? 'ACTIVAR' : 'DESACTIVAR'} el permiso de <b>${field.replace('is', '')}</b> para ${targetUser.displayName}?`,
+        message: `¿Querés ${newValue ? 'ACTIVAR' : 'DESACTIVAR'} el permiso de <b>${field === 'isChofer' ? 'Chofer' : field.replace('is', '')}</b> para ${targetUser.displayName}?`,
         onConfirm: async () => {
           try {
-            const updateData = { [field]: newValue };
+            const updateData = {};
+            if (field === 'isChofer') {
+              if (newValue) {
+                updateData.tripStatus = 'approved';
+                updateData['tripApplication.status'] = 'approved';
+                updateData.isDelivery = true;
+                updateData.deliveryMode = 'both';
+              } else {
+                updateData.tripStatus = 'rejected';
+                updateData['tripApplication.status'] = 'rejected';
+              }
+            } else {
+              updateData[field] = newValue;
+            }
             
             if (field === 'isDelivery') {
               if (newValue) {
+                updateData.deliveryStatus = 'approved';
                 if (!targetUser.deliveryId) {
                   const { runTransaction, doc: fDoc } = await import('firebase/firestore');
                   await runTransaction(db, async (t) => {
@@ -353,8 +374,13 @@ export async function renderAdminUsers() {
               }
             }
 
-            if (field === 'isAdmin' && newValue) {
-              updateData.isComercio = false;
+            if (field === 'isAdmin') {
+              if (newValue) {
+                updateData.role = 'admin';
+                updateData.isComercio = false;
+              } else {
+                updateData.role = 'user';
+              }
             }
 
             await updateDoc(doc(db, 'users', uid), updateData);
@@ -363,6 +389,15 @@ export async function renderAdminUsers() {
             if (newValue === false && field === 'isDelivery') {
                delete targetUser.deliveryId;
                delete targetUser.deliveryStatus;
+            }
+            if (field === 'isChofer') {
+              if (newValue) {
+                targetUser.tripStatus = 'approved';
+                targetUser.isDelivery = true;
+                targetUser.deliveryMode = 'both';
+              } else {
+                targetUser.tripStatus = 'rejected';
+              }
             }
             Object.assign(targetUser, updateData);
             renderUsersList(users, document.getElementById('users-search')?.value || '', currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
@@ -414,7 +449,9 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
   } else if (filter === 'comercio') {
     filtered = filtered.filter(u => u.isComercio || u.role === 'comercio');
   } else if (filter === 'delivery') {
-    filtered = filtered.filter(u => u.isDelivery);
+    filtered = filtered.filter(u => u.isDelivery && u.tripStatus !== 'approved');
+  } else if (filter === 'chofer') {
+    filtered = filtered.filter(u => u.tripStatus === 'approved');
   }
 
   // Helper to calculate rating stats
@@ -520,6 +557,7 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
             <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
               <span class="id-badge id-go">${u.goId || '...'}</span>
               ${u.deliveryId ? `<span class="id-badge id-dl">${u.deliveryId}</span>` : ''}
+              ${u.tripStatus === 'approved' ? `<span class="id-badge id-ch" style="cursor:pointer;" data-toggle="isChofer" data-uid="${u.uid}">Chofer</span>` : ''}
               <span class="id-badge" style="background:#fbbf24; color:white; display:inline-flex; align-items:center; gap:3.5px;">
                 ${icon('goPointsLogo', 10)} ${u.points || 0} pts
               </span>
@@ -570,6 +608,9 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
               </button>
               <button class="role-btn ${u.isDelivery ? 'active-delivery' : ''}" data-toggle="isDelivery" data-uid="${u.uid}">
                 ${icon('bike', 14)} Delivery
+              </button>
+              <button class="role-btn ${u.tripStatus === 'approved' ? 'active-chofer' : ''}" data-toggle="isChofer" data-uid="${u.uid}">
+                ${icon('car', 14)} Chofer
               </button>
             </div>
           </div>
@@ -929,7 +970,6 @@ async function showApplicationDetailsModal(u, users) {
 
   // Approve action
   modalEl.querySelector('#approve-app-btn').onclick = () => {
-    closeModal();
     showConfirm({
       title: 'Aprobar Repartidor',
       message: `¿Confirmás la aprobación de <b>${app.fullName || u.displayName}</b> como repartidor oficial?`,
@@ -945,6 +985,17 @@ async function showApplicationDetailsModal(u, users) {
             deliveryId: `DL-${nId}`,
             deliveryStatus: 'approved'
           });
+
+          // Log notification for user so the Cloud Function sends a push
+          const notificationRef = fDoc(collection(db, 'users', u.uid, 'notifications'));
+          t.set(notificationRef, {
+            type: 'delivery_approved',
+            title: '✅ ¡Postulación Aprobada!',
+            body: '¡Felicitaciones! Tu postulación como repartidor ha sido aprobada.',
+            status: 'unread',
+            url: '#/profile',
+            createdAt: new Date()
+          });
         });
         showToast('¡Repartidor aprobado correctamente!', 'success');
         location.reload();
@@ -954,7 +1005,6 @@ async function showApplicationDetailsModal(u, users) {
 
   // Reject action
   modalEl.querySelector('#reject-app-btn').onclick = () => {
-    closeModal();
     showConfirm({
       title: 'Rechazar Postulación',
       message: `¿Confirmás el rechazo de la solicitud de <b>${app.fullName || u.displayName}</b>?`,
@@ -1122,7 +1172,6 @@ async function showTripApplicationDetailsModal(u, users) {
 
   // Approve action
   modalEl.querySelector('#approve-trip-btn').onclick = () => {
-    closeModal();
     showConfirm({
       title: 'Aprobar Chofer',
       message: `¿Confirmás la aprobación de <b>${app.fullName || u.displayName}</b> como chofer oficial para viajes de pasajeros?`,
@@ -1144,6 +1193,8 @@ async function showTripApplicationDetailsModal(u, users) {
             tripStatus: 'approved',
             isDelivery: true,
             deliveryMode: 'both',
+            tripVehicleType: (app.vehicleType || 'Auto').toLowerCase(),
+            vehicleType: (app.vehicleType || 'Auto').toLowerCase(),
             vehicleModel: app.vehicleModel,
             vehicleColor: app.vehicleColor,
             vehicleDetails: app.vehicleDetails,
@@ -1156,6 +1207,17 @@ async function showTripApplicationDetailsModal(u, users) {
           }
           t.update(fDoc(db, 'users', u.uid), updateData);
           t.update(fDoc(db, 'trip_applications', u.uid), { status: 'approved' });
+
+          // Log notification for user so the Cloud Function sends a push
+          const notificationRef = fDoc(collection(db, 'users', u.uid, 'notifications'));
+          t.set(notificationRef, {
+            type: 'driver_approved',
+            title: '✅ ¡Postulación Aprobada!',
+            body: '¡Felicitaciones! Tu postulación como chofer de viajes ha sido aprobada.',
+            status: 'unread',
+            url: '#/home',
+            createdAt: new Date()
+          });
         });
         showToast('¡Chofer aprobado correctamente!', 'success');
         location.reload();
@@ -1165,7 +1227,6 @@ async function showTripApplicationDetailsModal(u, users) {
 
   // Reject action
   modalEl.querySelector('#reject-trip-btn').onclick = () => {
-    closeModal();
     showConfirm({
       title: 'Rechazar Postulación de Chofer',
       message: `¿Confirmás el rechazo de la solicitud de chofer de <b>${app.fullName || u.displayName}</b>?`,

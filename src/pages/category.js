@@ -341,7 +341,7 @@ export async function renderCategoryPage(categoryName, content) {
             </div>
           `;
           html += resolvedProds.map(({ product: p, deliveryFee }, i) => {
-            const isOutOfStock = p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0;
+            const isOutOfStock = p.useGlobalFlavors ? false : (p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0);
             const isUnavailable = p.isAvailable === false || isOutOfStock;
 
             return `

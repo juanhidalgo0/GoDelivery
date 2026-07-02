@@ -11,8 +11,13 @@
   z-index: 10001; /* Above header elements */
   max-height: 400px;
   overflow-y: auto;
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px) scale(0.98);
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s;
   padding: 16px;
+  transform-origin: top center;
+  pointer-events: none;
 }
 
 /* Ensure background is opaque in dark mode too */
@@ -22,7 +27,10 @@
 }
 
 .search-suggestions-dropdown.active {
-  display: block;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
 }
 
 .search-suggestion-group {

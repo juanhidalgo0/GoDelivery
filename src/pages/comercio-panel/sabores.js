@@ -35,8 +35,9 @@ export async function renderComercioSabores() {
           </div>
         </div>
         <div style="display:flex; gap:8px; align-items:center; position:relative; z-index:2;">
-          <button class="hdr-icon-btn" id="add-sabor-btn" title="Agregar Sabor" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.1);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
-            ${icon('plus', 18)}
+          <button id="save-sabores-btn" style="display:none; height:38px; padding:0 16px; border-radius:12px; background:white; color:var(--color-primary); font-weight:800; border:none; cursor:pointer;">Guardar</button>
+          <button class="hdr-icon-btn" id="add-category-btn" title="Nuevo Grupo" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.1);color:white;height:38px;padding:0 12px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:6px;border:none;cursor:pointer;transition:all 0.2s;font-size:13px;font-weight:700;">
+            ${icon('plus', 14)} Nuevo Grupo
           </button>
         </div>
       </div>
@@ -57,14 +58,26 @@ export async function renderComercioSabores() {
   `;
 
   let sabores = [];
+  let draftSabores = [];
+  let hasUnsavedChanges = false;
   let isHeladeria = true; // Dynamic category detection
   const comercioRef = doc(db, 'comercios', comercioId);
+  
+  const setUnsavedChanges = (val) => {
+    hasUnsavedChanges = val;
+    const saveBtn = document.getElementById('save-sabores-btn');
+    if (saveBtn) saveBtn.style.display = val ? 'block' : 'none';
+  };
   
   const unsubscribe = onSnapshot(comercioRef, (snap) => {
     if (snap.exists()) {
       const data = snap.data();
-      sabores = data.sabores || [];
       isHeladeria = (data.category || '').toLowerCase().includes('helad');
+      
+      if (!hasUnsavedChanges) {
+        sabores = data.sabores || [];
+        draftSabores = JSON.parse(JSON.stringify(sabores));
+      }
 
       // Update Header Text and Placeholders dynamically based on category
       const titleEl = document.getElementById('sabores-title-text');
@@ -75,8 +88,9 @@ export async function renderComercioSabores() {
 
       const el = document.getElementById('sabores-commerce-name');
       if (el) el.textContent = isAdmin() ? `Adm: ${data.name}` : data.name;
-      
-      renderFlavors(sabores, document.getElementById('sabores-search')?.value || '');
+      if (!hasUnsavedChanges) {
+        renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
+      }
     }
   }, (err) => {
     console.error('[Sabores] Permission or fetch error:', err);
@@ -85,12 +99,12 @@ export async function renderComercioSabores() {
 
   // Filter search
   document.getElementById('sabores-search')?.addEventListener('input', (e) => {
-    renderFlavors(sabores, e.target.value);
+    renderFlavors(draftSabores, e.target.value);
   });
 
-  // Add flavor button click
-  document.getElementById('add-sabor-btn')?.addEventListener('click', () => {
-    openAddSaborModal();
+  // Add category button click
+  document.getElementById('add-category-btn')?.addEventListener('click', () => {
+    openAddCategoryModal();
   });
 
   function renderFlavors(list, searchFilter = '') {
@@ -139,19 +153,29 @@ export async function renderComercioSabores() {
         <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow-sm);">
           <div style="font-family:var(--font-display); font-size:14px; font-weight:900; color:var(--color-primary); letter-spacing:-0.01em; border-bottom:1px solid var(--color-border-light); padding-bottom:8px; display:flex; align-items:center; justify-content:between;">
             <span>${cat}</span>
-            <span style="font-size:11px; font-weight:800; background:var(--color-bg-secondary); color:var(--color-text-secondary); padding:2px 8px; border-radius:100px; margin-left:auto;">${flavorItems.length}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:11px; font-weight:800; background:var(--color-bg-secondary); color:var(--color-text-secondary); padding:2px 8px; border-radius:100px;">${flavorItems.length}</span>
+              <button class="add-flavor-to-group-btn" data-category="${cat}" style="width:26px; height:26px; border-radius:8px; border:none; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'" title="Agregar sabor a este grupo">${icon('plus', 14)}</button>
+            </div>
           </div>
           <div style="display:flex; flex-direction:column; gap:8px;">
-            ${flavorItems.map(f => `
+            ${flavorItems.map(f => {
+              const isOutOfStock = f.isAvailable && f.stock === 0;
+              return `
               <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--color-bg-secondary); margin-bottom:-1px;">
                 <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                  <span style="font-size:14px; font-weight:750; color:${f.isAvailable ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)'}; text-decoration:${f.isAvailable ? 'none' : 'line-through'}; text-align:left;">
+                  <span style="font-size:14px; font-weight:750; color:var(--color-text-primary); text-decoration:${isOutOfStock ? 'line-through' : 'none'}; text-align:left;">
                     ${f.name}
                   </span>
                 </div>
                 <div style="display:flex; align-items:center; gap:12px; flex-shrink:0;">
+                  <!-- Stock Input -->
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:10px; font-weight:700; color:var(--color-text-secondary); text-transform:uppercase;">Stock:</span>
+                    <input type="number" class="sabor-stock-input" data-id="${f.id}" value="${f.isAvailable && f.stock !== undefined && f.stock !== null ? f.stock : ''}" placeholder="∞" ${!f.isAvailable ? 'disabled' : ''} style="width:48px; height:26px; border-radius:6px; border:1px solid var(--color-border-light); background:${f.isAvailable ? 'var(--color-surface)' : 'transparent'}; text-align:center; font-size:12px; font-weight:700; color:var(--color-text-primary);" />
+                  </div>
                   <!-- Availability Toggle -->
-                  <label class="sabor-switch" style="width:40px; height:22px; cursor:pointer; position:relative; display:inline-block; margin:0;">
+                  <label class="sabor-switch" style="width:40px; height:22px; cursor:pointer; position:relative; display:inline-block; margin:0;" title="Limitar Stock">
                     <input type="checkbox" class="sabor-availability-toggle" data-id="${f.id}" ${f.isAvailable ? 'checked' : ''} style="opacity:0; width:0; height:0;" />
                     <span class="sabor-slider" style="position:absolute; inset:0; background-color:#cbd5e1; border-radius:34px; transition:0.2s; cursor:pointer;"></span>
                   </label>
@@ -161,7 +185,8 @@ export async function renderComercioSabores() {
                   </button>
                 </div>
               </div>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
         </div>
       `;
@@ -184,17 +209,53 @@ export async function renderComercioSabores() {
 
     // Toggle listener
     container.querySelectorAll('.sabor-availability-toggle').forEach(input => {
-      input.onchange = async () => {
+      input.onchange = () => {
         const id = input.dataset.id;
         const checked = input.checked;
-        try {
-          const updatedSabores = sabores.map(f => f.id === id ? { ...f, isAvailable: checked } : f);
-          await updateDoc(comercioRef, { sabores: updatedSabores });
-          showToast(checked ? (isHeladeria ? 'Sabor disponible' : 'Gusto disponible') : (isHeladeria ? 'Sabor no disponible (agotado)' : 'Gusto no disponible (agotado)'), 'success');
-        } catch (e) {
-          showToast('Error al actualizar disponibilidad', 'error');
-          input.checked = !checked;
+        
+        draftSabores = draftSabores.map(f => {
+          if (f.id === id) {
+            const nf = { ...f, isAvailable: checked };
+            if (!checked) {
+              delete nf.stock; // Infinite
+            } else {
+              if (nf.stock === undefined || nf.stock === null) nf.stock = 0;
+            }
+            return nf;
+          }
+          return f;
+        });
+        
+        setUnsavedChanges(true);
+        renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
+        
+        if (checked) {
+          const stockInput = container.querySelector(`.sabor-stock-input[data-id="${id}"]`);
+          if (stockInput) {
+            stockInput.focus();
+            stockInput.select();
+          }
         }
+      };
+    });
+
+    // Stock listener
+    container.querySelectorAll('.sabor-stock-input').forEach(input => {
+      input.oninput = () => {
+        const id = input.dataset.id;
+        const val = input.value === '' ? null : parseInt(input.value);
+        if (val !== null && isNaN(val)) return;
+        
+        draftSabores = draftSabores.map(f => {
+          if (f.id === id) {
+            const nf = { ...f };
+            if (val === null) delete nf.stock;
+            else nf.stock = val;
+            return nf;
+          }
+          return f;
+        });
+        setUnsavedChanges(true);
       };
     });
 
@@ -208,15 +269,62 @@ export async function renderComercioSabores() {
           message: `¿Querés eliminar permanentemente ${isHeladeria ? 'el sabor' : 'el gusto/variedad'} <b>${flavor.name}</b> de tu lista?`,
           danger: true,
           confirmText: 'Eliminar',
-          onConfirm: async () => {
-            const updatedSabores = sabores.filter(f => f.id !== id);
-            await updateDoc(comercioRef, { sabores: updatedSabores });
-            showToast(isHeladeria ? 'Sabor eliminado' : 'Variedad eliminada', 'info');
+          onConfirm: () => {
+            draftSabores = draftSabores.filter(f => f.id !== id);
+            setUnsavedChanges(true);
+            renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
           }
         });
       };
     });
+
+    // Add flavor to group listener
+    container.querySelectorAll('.add-flavor-to-group-btn').forEach(btn => {
+      btn.onclick = () => {
+        openAddSaborModal(btn.dataset.category);
+      };
+    });
   }
+
+  // Save changes button logic
+  document.getElementById('save-sabores-btn')?.addEventListener('click', async () => {
+    // Validate empty stock for limited flavors
+    const invalidFlavors = draftSabores.filter(f => f.isAvailable && (f.stock === undefined || f.stock === null || f.stock === 0));
+    
+    if (invalidFlavors.length > 0) {
+      const msg = `Atención: Hay sabores con "Limitar Stock" activado pero con cantidad 0 (o vacía). Aparecerán como AGOTADOS. ¿Deseas guardar de todos modos?`;
+      const proceed = confirm(msg);
+      if (!proceed) return;
+    }
+    
+    const saveBtn = document.getElementById('save-sabores-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Guardando...';
+    
+    try {
+      await updateDoc(comercioRef, { sabores: draftSabores });
+      setUnsavedChanges(false);
+      showToast('Cambios guardados', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Error al guardar', 'error');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar';
+    }
+  });
+
+  // Handle back navigation
+  document.querySelector('a[href="#/mi-comercio/' + comercioId + '"]')?.addEventListener('click', (e) => {
+    if (hasUnsavedChanges) {
+      e.preventDefault();
+      const leave = confirm('Tienes cambios sin guardar. ¿Estás seguro que deseas salir?');
+      if (leave) {
+        setUnsavedChanges(false);
+        location.hash = `#/mi-comercio/${comercioId}`;
+      }
+    }
+  });
 
   async function loadDefaultFlavors() {
     const iceCreamDefaults = [
@@ -277,28 +385,30 @@ export async function renderComercioSabores() {
         id: Math.random().toString(36).substr(2, 9),
         name: item.name,
         category: item.category,
-        isAvailable: true,
+        isAvailable: false, // Default to infinite stock
         createdAt: new Date().toISOString()
       }));
-      await updateDoc(comercioRef, { sabores: newSabores });
-      showToast(isHeladeria ? 'Catálogo tradicional cargado' : 'Gustos tradicionales cargados', 'success');
+      
+      draftSabores = [...draftSabores, ...newSabores];
+      setUnsavedChanges(true);
+      renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
+      showToast(isHeladeria ? 'Catálogo tradicional cargado en borrador' : 'Gustos cargados en borrador. No olvides Guardar.', 'info');
     } catch (e) {
       console.error(e);
       showToast('Error al cargar catálogo', 'error');
     }
   }
 
-  function openAddSaborModal() {
+  function openAddSaborModal(prefilledCategory = null) {
     const modalContent = document.createElement('div');
     modalContent.className = 'panel-form';
     modalContent.style.padding = '16px 20px 24px 20px';
 
-    modalContent.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:16px;">
-        <div class="input-group">
-          <label>${isHeladeria ? 'Nombre del Sabor *' : 'Nombre del Gusto/Variedad *'}</label>
-          <input type="text" class="input-premium" id="new-sabor-name" placeholder="${isHeladeria ? 'Ej: Super Chocolate con Nutella' : 'Ej: Jamón, Queso y Huevo'}" />
-        </div>
+    let categoryInputHTML = '';
+    if (prefilledCategory) {
+      categoryInputHTML = `<input type="hidden" id="new-sabor-cat" value="${prefilledCategory}" />`;
+    } else {
+      categoryInputHTML = `
         <div class="input-group">
           <label>Categoría *</label>
           <div style="display:flex; gap:8px; align-items:center;">
@@ -322,11 +432,21 @@ export async function renderComercioSabores() {
             </button>
           </div>
         </div>
+      `;
+    }
+
+    modalContent.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="input-group">
+          <label>${isHeladeria ? 'Nombre del Sabor *' : 'Nombre del Gusto/Variedad *'}</label>
+          <input type="text" class="input-premium" id="new-sabor-name" placeholder="${isHeladeria ? 'Ej: Super Chocolate con Nutella' : 'Ej: Jamón, Queso y Huevo'}" />
+        </div>
+        ${categoryInputHTML}
       </div>
     `;
 
     showModal({
-      title: isHeladeria ? 'Agregar Sabor' : 'Agregar Gusto/Variedad',
+      title: prefilledCategory ? `Agregar a ${prefilledCategory}` : (isHeladeria ? 'Agregar Sabor' : 'Agregar Gusto/Variedad'),
       content: modalContent,
       height: 'auto',
       footer: `
@@ -368,18 +488,77 @@ export async function renderComercioSabores() {
           id: Math.random().toString(36).substr(2, 9),
           name,
           category,
-          isAvailable: true,
+          isAvailable: false, // Default to infinite stock
           createdAt: new Date().toISOString()
         };
-        const updatedSabores = [...sabores, newSabor];
-        await updateDoc(comercioRef, { sabores: updatedSabores });
+        draftSabores = [...draftSabores, newSabor];
+        setUnsavedChanges(true);
+        renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
+        
         closeModal();
-        showToast(isHeladeria ? 'Sabor agregado con éxito' : 'Gusto agregado con éxito', 'success');
+        showToast(isHeladeria ? 'Sabor agregado (borrador)' : 'Gusto agregado (borrador)', 'success');
       } catch (e) {
-        showToast('Error al guardar', 'error');
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Guardar';
+        showToast('Error al agregar', 'error');
       }
+    });
+  }
+
+  function openAddCategoryModal() {
+    const modalContent = document.createElement('div');
+    modalContent.className = 'panel-form';
+    modalContent.style.padding = '16px 20px 24px 20px';
+
+    modalContent.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <p style="font-size:13px; color:var(--color-text-secondary); margin:0; line-height:1.4;">Para crear un nuevo grupo, debes agregar al menos un sabor a él.</p>
+        <div class="input-group">
+          <label>Nombre del Grupo (Categoría) *</label>
+          <input type="text" class="input-premium" id="new-category-name" placeholder="Ej: Bebidas, Tartas, etc." />
+        </div>
+        <div class="input-group">
+          <label>Primer sabor de este grupo *</label>
+          <input type="text" class="input-premium" id="new-category-sabor" placeholder="Ej: Coca Cola, Jamón y Queso, etc." />
+        </div>
+      </div>
+    `;
+
+    showModal({
+      title: 'Crear Nuevo Grupo',
+      content: modalContent,
+      height: 'auto',
+      footer: `
+        <button class="btn btn-ghost" id="add-cat-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="add-cat-save">Crear Grupo</button>
+      `
+    });
+
+    document.getElementById('add-cat-cancel')?.addEventListener('click', closeModal);
+
+    document.getElementById('add-cat-save')?.addEventListener('click', () => {
+      const catName = document.getElementById('new-category-name')?.value.trim();
+      const flavorName = document.getElementById('new-category-sabor')?.value.trim();
+
+      if (!catName || !flavorName) {
+        showToast('Debes ingresar el nombre del grupo y el primer sabor', 'warning');
+        return;
+      }
+
+      const saveBtn = document.getElementById('add-cat-save');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Guardando...';
+
+      const newSabor = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: flavorName,
+        category: catName,
+        isAvailable: false,
+        createdAt: new Date().toISOString()
+      };
+      draftSabores = [...draftSabores, newSabor];
+      setUnsavedChanges(true);
+      renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
+      closeModal();
+      showToast('Grupo creado (borrador)', 'success');
     });
   }
 

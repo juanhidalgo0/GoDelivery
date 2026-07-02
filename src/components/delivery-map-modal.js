@@ -41,8 +41,8 @@ export function showDeliveryMapModal(order, batch = null) {
     </div>
 
     <style>
-      .tracking-v5-viewport { height: 100%; display: flex; flex-direction: column; background: var(--color-bg); overflow: hidden; position: relative; }
-      .v5-header-overlay { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
+      .tracking-v5-viewport { height: 100%; display: flex; flex-direction: column; background: var(--color-bg-secondary); overflow: hidden; position: relative; }
+      .v5-header-overlay { position: absolute; top: max(16px, env(safe-area-inset-top)); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
       .v5-back-btn { pointer-events: auto; width: 44px; height: 44px; background: var(--color-surface); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--color-text); box-shadow: var(--shadow-md); border: 1px solid var(--color-border); cursor: pointer; }
       .v5-live-pill { background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: 8px 14px; border-radius: 100px; display: flex; align-items: center; gap: 6px; font-weight: 900; font-size: 11px; color: var(--color-primary); box-shadow: var(--shadow-sm); border: 1px solid var(--glass-border); }
       .v5-pulse-dot { width: 7px; height: 7px; background: var(--color-primary); border-radius: 50%; animation: pulse-v5 1.5s infinite; }
@@ -91,14 +91,14 @@ function updateBottomPanel(order, batch) {
 
   panel.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-      <div style="flex:1;">
-        <div style="font-size:11px; font-weight:800; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">${label}</div>
-        <h3 style="font-size:22px; font-weight:950; color:var(--color-text); margin:0; letter-spacing:-0.5px; line-height:1.1;">${isPickedUp ? userName : (order.comercioName || 'Comercio')}</h3>
+      <div style="flex:1; min-width:0; padding-right:12px;">
+        <div style="font-size:11px; font-weight:800; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${label}</div>
+        <h3 style="font-size:22px; font-weight:950; color:var(--color-text); margin:0; letter-spacing:-0.5px; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${isPickedUp ? userName : (order.comercioName || 'Comercio')}</h3>
       </div>
-      <div style="text-align:right;">
+      <div style="text-align:right; flex-shrink:0;">
         <div style="font-size:9px; font-weight:900; background:var(--color-bg-secondary); padding:4px 10px; border-radius:8px; color:var(--color-text-tertiary); border:1px solid var(--color-border-light); display:inline-block;">#${String(order.orderId || order.id || '').slice(-4).toUpperCase()}</div>
-        <div id="v5-distance-badge" style="font-size:12px; color:var(--color-success); font-weight:800; margin-top:8px; display:flex; align-items:center; justify-content:flex-end; gap:4px;">
-          ${icon('clock', 13)} <span id="v5-distance-text">Calculando...</span>
+        <div id="v5-distance-badge" style="font-size:12px; color:var(--color-success); font-weight:800; margin-top:8px; display:flex; align-items:center; justify-content:flex-end; gap:4px; white-space:nowrap;">
+          ${icon('clock', 13)} <span id="v5-distance-text">Buscando GPS...</span>
         </div>
       </div>
     </div>
@@ -115,7 +115,7 @@ function updateBottomPanel(order, batch) {
       </button>
     </div>
 
-    <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; padding:14px; background:rgba(var(--color-primary-rgb), 0.04); border-radius:18px; border:1px dashed rgba(var(--color-primary-rgb), 0.2);">
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; padding:14px; background:rgba(var(--color-primary-rgb), 0.04); border-radius:18px; border:1px dashed rgba(var(--color-primary-rgb), 0.2);">
       <div style="text-align:center;">
         <div style="font-size:7px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Subtotal</div>
         <div style="font-size:10px; font-weight:800; color:var(--color-text-secondary);">${formatPrice(order.subtotal)}</div>
@@ -127,10 +127,6 @@ function updateBottomPanel(order, batch) {
       <div style="text-align:center;">
         <div style="font-size:7px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Servicio</div>
         <div style="font-size:10px; font-weight:800; color:var(--color-text-secondary);">${formatPrice(serviceFee)}</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:7px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Gestión</div>
-        <div style="font-size:10px; font-weight:800; color:var(--color-text-secondary);">${formatPrice(pFee)}</div>
       </div>
       <div style="text-align:center;">
         <div style="font-size:7px; font-weight:800; color:var(--color-primary); text-transform:uppercase; margin-bottom:2px;">Cobrar</div>
@@ -222,7 +218,7 @@ async function initDeliveryMap(order, orders) {
 
   // 4. Geolocation Tracking
   if (navigator.geolocation) {
-    const geoOptions = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 };
+    const geoOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
     const onGeoSuccess = (pos) => {
       const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       updateRiderLocation(p.lat, p.lng, destCoords, orders, true);

@@ -1,9 +1,11 @@
 // GoDelivery — Notifications Page
 import { getState, subscribe, setState } from '../state.js';
 import { db } from '../firebase.js';
-import { collection, query, limit, getDocs, startAfter, updateDoc, doc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, limit, getDocs, startAfter, deleteDoc, doc, onSnapshot, orderBy } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { signInWithGoogle } from '../auth.js';
+import { initPushNotifications } from '../utils/notifications.js';
+import { showToast } from '../components/toast.js';
 
 let loadingMore = false;
 let hasMore = true;
@@ -78,6 +80,19 @@ function startListener() {
   });
 }
 
+function isNotifClickable(n) {
+  if (!n.url || n.url === '' || n.url === '#') return false;
+  if (n.url.includes('/pedido/')) {
+    const type = n.type || '';
+    if (type === 'order_completed' || type === 'order_cancelled') return false;
+    const text = ((n.title || '') + ' ' + (n.body || '')).toLowerCase();
+    if (text.includes('entregado') || text.includes('entregó') || text.includes('cancelado') || text.includes('canceló') || text.includes('disfrutes')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function renderItems() {
   const list = document.getElementById('notifications-list-full');
   if (!list) return;
@@ -134,28 +149,31 @@ function renderItems() {
     }
   });
 
-  const html = uniqueNotifications.map((n, index) => `
-    <div class="notif-card-premium ${n.status === 'unread' ? 'unread' : ''}" 
-      data-id="${n.id}" data-url="${n.url || ''}"
-      style="animation: fadeInUp 0.5s ease forwards ${index * 0.05}s;">
-      
-      <div class="notif-status-indicator"></div>
-      
-      <div class="notif-icon-v5" style="background: ${getNotificationColor(n.type)};">
-        ${getNotificationIcon(n.type)}
-      </div>
-
-      <div class="notif-body-v5">
-        <div class="notif-header-row">
-          <span class="notif-title-v5">${n.title || 'Aviso'}</span>
-          <span class="notif-time-v5">${formatTime(n.createdAt)}</span>
+  const html = uniqueNotifications.map((n, index) => {
+    const clickable = isNotifClickable(n);
+    return `
+      <div class="notif-card-premium ${n.status === 'unread' ? 'unread' : ''}" 
+        data-id="${n.id}" data-url="${n.url || ''}" data-clickable="${clickable}"
+        style="animation: fadeInUp 0.5s ease forwards ${index * 0.05}s; ${!clickable ? 'cursor: default; opacity: 0.85;' : 'cursor: pointer;'}">
+        
+        <div class="notif-status-indicator"></div>
+        
+        <div class="notif-icon-v5" style="background: ${getNotificationColor(n.type)};">
+          ${getNotificationIcon(n.type)}
         </div>
-        <div class="notif-text-v5">${n.body || ''}</div>
+        
+        <div class="notif-body-v5">
+          <div class="notif-header-row">
+            <span class="notif-title-v5">${n.title || 'Aviso'}</span>
+            <span class="notif-time-v5">${formatTime(n.createdAt)}</span>
+          </div>
+          <div class="notif-text-v5">${n.body || ''}</div>
+        </div>
+        
+        ${clickable ? `<div class="notif-arrow-v5">${icon('chevronRight', 18)}</div>` : ''}
       </div>
-      
-      ${n.url ? `<div class="notif-arrow-v5">${icon('chevronRight', 18)}</div>` : ''}
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   const loader = loadingMore ? '<div class="scroll-loader-v5"><div class="spinner-mini"></div></div>' : '';
   const footer = (!hasMore && notifications.length > 0) ? '<div class="end-list-v5">Eso es todo por ahora</div>' : '';
@@ -166,9 +184,12 @@ function renderItems() {
     item.onclick = async () => {
       const id = item.dataset.id;
       const url = item.dataset.url;
+      const clickable = item.dataset.clickable === 'true';
       try {
-        await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
+        await deleteDoc(doc(db, 'users', user.uid, 'notifications', id));
       } catch (e) {}
+      
+      if (!clickable) return;
       
       if (url) {
         // Validate route exists in orders/chats if it contains order ID
@@ -179,7 +200,13 @@ function renderItems() {
             const { getDoc, doc } = await import('firebase/firestore');
             const oDoc = await getDoc(doc(db, 'orders', orderId));
             if (!oDoc.exists()) {
-              console.warn('[Notifications] Order does not exist. Skipping navigation.');
+              showToast('El pedido no existe o fue eliminado', 'error');
+              return;
+            }
+            const orderData = oDoc.data();
+            const status = orderData.status;
+            if (status === 'completed' || status === 'cancelled' || status === 'entregado' || status === 'cancelado') {
+              showToast('Este pedido ya ha sido finalizado', 'info');
               return;
             }
           } catch (err) {
@@ -257,3 +284,4 @@ function formatTime(ts) {
   if (hrs < 24) return `${hrs}h`;
   return date.toLocaleDateString([], { day: '2-digit', month: 'short' });
 }
+

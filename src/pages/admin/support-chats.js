@@ -37,7 +37,7 @@ export async function renderAdminSupportChats() {
         <!-- Right Side: Chat Conversation Details -->
         <div id="chat-conversation-area" style="flex:1; display:none; flex-direction:column; background:var(--color-bg);">
           <!-- Active User Header -->
-          <div style="background:var(--color-surface); border-bottom:1px solid var(--color-border); padding:14px 20px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden;">
+          <div style="background:var(--color-surface); border-bottom:1px solid var(--color-border); padding:calc(14px + env(safe-area-inset-top, 0px)) 20px 14px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden;">
             <!-- Mobile Back Button to list -->
             <button id="chat-back-to-list-btn" style="background:none; border:none; color:var(--color-text); cursor:pointer; padding:0; display:none; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background:var(--color-bg-secondary); margin-right:4px;">
               ${icon('chevronLeft', 24)}
@@ -115,8 +115,8 @@ export async function renderAdminSupportChats() {
       @media (max-width: 768px) {
         #app-overlay {
           top: var(--header-height, 64px) !important;
-          bottom: var(--navbar-height, 60px) !important;
-          height: calc(100dvh - var(--header-height, 64px) - var(--navbar-height, 60px)) !important;
+          bottom: calc(var(--navbar-height, 68px) + env(safe-area-inset-bottom, 20px) + 12px) !important;
+          height: calc(100dvh - var(--header-height, 64px) - (var(--navbar-height, 68px) + env(safe-area-inset-bottom, 20px) + 12px)) !important;
         }
         #chats-list-sidebar { width: 100% !important; max-width: none !important; }
         #chat-conversation-area { position: absolute; inset: 0; z-index: 150; }
@@ -239,7 +239,7 @@ export async function renderAdminSupportChats() {
         return `
           <div style="display:flex; flex-direction:column; align-self: ${isUser ? 'flex-start' : 'flex-end'}; max-width:80%; margin-bottom:4px;">
             <div style="
-              padding:${msg.image ? '8px' : '12px 16px'}; 
+              padding:${(msg.image && !msg.audio) ? '8px' : '12px 16px'}; 
               border-radius:18px; 
               font-size:13px; 
               font-weight:600; 
@@ -248,7 +248,12 @@ export async function renderAdminSupportChats() {
               color:${isUser ? 'var(--color-text)' : 'white'};
               border-bottom-${isUser ? 'left' : 'right'}-radius:4px;
             ">
-              ${msg.image ? `
+              ${msg.audio ? `
+                <div style="display:flex;align-items:center;gap:10px;padding:4px 8px;">
+                  <div style="background:rgba(255,255,255,0.2);border-radius:50%;padding:8px;display:flex;align-items:center;justify-content:center;color:${isUser ? 'var(--color-text)' : 'white'};">${icon('mic', 16)}</div>
+                  <audio controls src="${msg.audio}" style="height:32px;max-width:180px;"></audio>
+                </div>
+              ` : msg.image ? `
                 <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
                 ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px;">${msg.text}</div>` : ''}
               ` : msg.text}
@@ -268,38 +273,138 @@ export async function renderAdminSupportChats() {
       `;
     } else {
       chatFooter.innerHTML = `
-        <div style="padding:12px 20px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:10px; align-items:center;">
-          <!-- Camera Button -->
-          <button id="admin-chat-image-btn" style="background:none; border:none; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; transition:background 0.2s;">
-            ${icon('camera', 20)}
-          </button>
-          <input type="file" id="admin-chat-image-input" accept="image/*" style="display:none;" />
-          <input type="text" id="admin-chat-input" placeholder="Escribí tu respuesta..." style="flex:1; height:46px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 16px; font-weight:700; font-size:13.5px; outline:none; background:var(--color-bg); color:var(--color-text);" />
-          <button id="admin-chat-send" style="width:46px; height:46px; border-radius:14px; border:none; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 6px 15px rgba(var(--color-primary-rgb),0.25);">
+        <div class="chat-input-bar" style="width:100%; box-sizing:border-box; position:relative;">
+          <button class="chat-attach-btn" id="admin-chat-attach-btn" title="Adjuntar imagen">${icon('camera', 20)}</button>
+          <input type="file" id="admin-chat-file-gallery" style="display:none;" accept="image/*" />
+          <input type="file" id="admin-chat-file-camera" style="display:none;" accept="image/*" capture="environment" />
+          <input type="text" id="admin-chat-input" class="chat-input" placeholder="Escribí tu respuesta..." autocomplete="off" />
+          <button class="chat-mic-btn" id="admin-chat-mic-btn" title="Grabar audio" style="color:var(--color-primary);">${icon('mic', 20)}</button>
+          <button class="chat-send-btn" id="admin-chat-send">
             ${icon('send', 20)}
           </button>
         </div>
+        <!-- Audio recording indicator -->
+        <div id="admin-audio-indicator" style="display:none; position:absolute; bottom: 85px; left: 50%; transform: translateX(-50%); background: var(--color-surface); border: 1.5px solid var(--color-border); padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); align-items: center; gap: 10px; z-index: 1000;">
+          <div class="recording-dot" style="width: 10px; height: 10px; background: red; border-radius: 50%; animation: pulse 1s infinite;"></div>
+          <span id="admin-audio-timer" style="font-weight: 700; font-size: 14px; color:var(--color-text);">0:00</span>
+          <span style="font-size: 11px; color: var(--color-text-tertiary); margin-left: 8px;">(Soltá para enviar)</span>
+        </div>
       `;
+
       // Rebind send listeners
       const input = chatFooter.querySelector('#admin-chat-input');
       const send = chatFooter.querySelector('#admin-chat-send');
-      const cameraBtn = chatFooter.querySelector('#admin-chat-image-btn');
-      const fileInput = chatFooter.querySelector('#admin-chat-image-input');
+      const attachBtn = chatFooter.querySelector('#admin-chat-attach-btn');
+      const fileInputGallery = chatFooter.querySelector('#admin-chat-file-gallery');
+      const fileInputCamera = chatFooter.querySelector('#admin-chat-file-camera');
+      const micBtn = chatFooter.querySelector('#admin-chat-mic-btn');
+      const audioIndicator = chatFooter.querySelector('#admin-audio-indicator');
+      const audioTimer = chatFooter.querySelector('#admin-audio-timer');
 
       send.onclick = handleSendResponse;
       input.onkeydown = (e) => {
         if (e.key === 'Enter') handleSendResponse();
       };
 
-      if (cameraBtn && fileInput) {
-        cameraBtn.onclick = () => fileInput.click();
-        fileInput.onchange = (e) => {
-          const file = e.target.files[0];
-          if (file) {
-            handleSendAdminImage(file);
-          }
+      if (attachBtn) {
+        attachBtn.onclick = () => {
+          import('../../components/modal.js').then(m => {
+            m.showModal({
+              title: 'Enviar imagen',
+              content: `
+                <div style="padding: 24px 20px; display: flex; flex-direction: column; gap: 16px;">
+                  <button id="btn-use-camera-admin" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+                    ${icon('camera', 20)} Tomar Foto (Cámara)
+                  </button>
+                  <button id="btn-use-gallery-admin" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border); color: var(--color-text-primary); font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer;">
+                    ${icon('image', 20)} Seleccionar de Galería
+                  </button>
+                </div>
+              `,
+              height: 'auto',
+              hideHeader: true,
+              onOpen: () => {
+                const btnCamera = document.getElementById('btn-use-camera-admin');
+                const btnGallery = document.getElementById('btn-use-gallery-admin');
+                if (btnCamera) btnCamera.onclick = () => { m.closeModal(); fileInputCamera?.click(); };
+                if (btnGallery) btnGallery.onclick = () => { m.closeModal(); fileInputGallery?.click(); };
+              }
+            });
+          });
         };
       }
+
+      if (fileInputGallery) fileInputGallery.onchange = (e) => handleSendAdminImage(e.target.files[0]);
+      if (fileInputCamera) fileInputCamera.onchange = (e) => handleSendAdminImage(e.target.files[0]);
+
+      // Audio recording handling
+      let mediaRecorder;
+      let audioChunks = [];
+      let recordStartTime;
+      let recordTimer;
+      let isRecording = false;
+
+      micBtn.addEventListener('pointerdown', async (e) => {
+        e.preventDefault();
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = ev => {
+              if (ev.data.size > 0) audioChunks.push(ev.data);
+            };
+
+            mediaRecorder.onstart = () => {
+              isRecording = true;
+              recordStartTime = Date.now();
+              audioIndicator.style.display = 'flex';
+              micBtn.style.color = 'red';
+              micBtn.style.transform = 'scale(1.2)';
+              recordTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
+                const m = Math.floor(elapsed / 60);
+                const s = (elapsed % 60).toString().padStart(2, '0');
+                audioTimer.textContent = `${m}:${s}`;
+              }, 1000);
+            };
+
+            mediaRecorder.onstop = async () => {
+              isRecording = false;
+              clearInterval(recordTimer);
+              audioIndicator.style.display = 'none';
+              micBtn.style.color = '';
+              micBtn.style.transform = '';
+              
+              stream.getTracks().forEach(track => track.stop());
+
+              if (audioChunks.length > 0) {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = () => {
+                  handleSendAdminAudio(reader.result);
+                };
+              }
+            };
+
+            mediaRecorder.start();
+          } catch (err) {
+            console.error("Mic access error:", err);
+            showToast('Permiso de micrófono denegado', 'danger');
+          }
+        }
+      });
+
+      const stopRecording = () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      };
+
+      micBtn.addEventListener('pointerup', stopRecording);
+      micBtn.addEventListener('pointerleave', stopRecording);
       input.focus();
     }
 
@@ -376,6 +481,33 @@ export async function renderAdminSupportChats() {
     } catch (err) {
       console.error('Error sending support admin image:', err);
       showToast('Error al enviar la imagen', 'danger');
+    }
+  };
+
+  const handleSendAdminAudio = async (base64Audio) => {
+    if (!selectedChatId) return;
+
+    try {
+      showToast('Enviando audio...', 'info');
+      const responseMessage = {
+        sender: 'admin',
+        text: '🎙 Mensaje de voz',
+        audio: base64Audio,
+        timestamp: Date.now()
+      };
+
+      await updateDoc(doc(db, 'support_chats', selectedChatId), {
+        status: 'approved',
+        unreadByUser: true,
+        unreadByAdmin: false,
+        lastMessageText: '🎙 Mensaje de voz',
+        lastMessageTime: serverTimestamp(),
+        messages: arrayUnion(responseMessage)
+      });
+      showToast('Audio enviado con éxito', 'success');
+    } catch (err) {
+      console.error('Error sending support admin audio:', err);
+      showToast('Error al enviar el audio', 'danger');
     }
   };
 

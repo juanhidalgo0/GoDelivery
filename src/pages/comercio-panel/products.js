@@ -13,6 +13,8 @@ import { isAdmin } from '../../auth.js';
 let panelFilteredProducts = [];
 let panelDisplayedCount = 20;
 let panelScrollObserver = null;
+let panelComercioData = null;
+let isSyncAllowed = false;
 
 export async function renderComercioProducts() {
   const content = document.getElementById('app-content');
@@ -76,7 +78,7 @@ export async function renderComercioProducts() {
   let categories = [];
   let currentCategoryId = 'all';
   let comercioData = null;
-  let isSyncAllowed = false;
+  isSyncAllowed = false;
 
   const updateTotalCount = () => {
     const totalEl = document.getElementById('products-total-count');
@@ -94,6 +96,7 @@ export async function renderComercioProducts() {
       location.hash = '#/profile';
       return;
     }
+    panelComercioData = comercioData;
     isSyncAllowed = (comercioId === '6R8ikb9wsjUCQuOANOMHuAZZxss2' || comercioData.ownerId === user.uid);
 
     const nameContainer = document.getElementById('panel-commerce-name');
@@ -148,7 +151,7 @@ export async function renderComercioProducts() {
       renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
     }, (newCat) => {
       renderCategoriesFilter(categories);
-    }, comercioData?.category);
+    }, comercioData);
   });
 
   // Import database
@@ -199,7 +202,7 @@ export async function renderComercioProducts() {
           renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
         }, (newCat) => {
           renderCategoriesFilter(categories);
-        }, comercioData?.category);
+        }, comercioData);
       }
     }
 
@@ -228,7 +231,6 @@ export async function renderComercioProducts() {
           } catch (err) {
             console.error('Error in local delete sync:', err);
             showToast('No se pudo dar de baja en Kiosco POS local. ¿El servidor está encendido?', 'warning');
-            throw err;
           }
         };
 
@@ -566,8 +568,16 @@ function renderProductsList(products, search, categoryId) {
     filtered = filtered.filter(p => p.categoryId === categoryId);
   }
   if (search) {
-    const s = search.toLowerCase();
-    filtered = filtered.filter(p => (p.name || '').toLowerCase().includes(s));
+    const s = search.toLowerCase().trim();
+    filtered = filtered.filter(p => {
+      if ((p.name || '').toLowerCase().includes(s)) return true;
+      if (p.barcode && String(p.barcode).toLowerCase().includes(s)) return true;
+      if (p.categoryId) {
+        const cat = categories.find(c => c.id === p.categoryId);
+        if (cat && (cat.name || '').toLowerCase().includes(s)) return true;
+      }
+      return false;
+    });
   }
 
   if (filtered.length === 0) {
@@ -588,7 +598,27 @@ function renderProductsList(products, search, categoryId) {
     const batch = panelFilteredProducts.slice(startIndex, startIndex + count);
     return batch.map(p => {
       let stockBadgeHtml = '';
-      if (p.stockMode === 'limited') {
+      if (p.useGlobalFlavors) {
+        let hasInfinite = false;
+        let totalQty = 0;
+        const activeFlavors = (p.allowedFlavors && p.allowedFlavors.length > 0)
+          ? (panelComercioData?.sabores || []).filter(s => p.allowedFlavors.includes(s.name))
+          : (panelComercioData?.sabores || []);
+        // Note: s.isAvailable means "is stock limited?". So !s.isAvailable means infinite stock.
+        hasInfinite = activeFlavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
+        
+        if (!hasInfinite) {
+          totalQty = activeFlavors.reduce((sum, s) => sum + (parseInt(s.stock) || 0), 0);
+          const threshold = p.stockThreshold !== undefined ? p.stockThreshold : 3;
+          if (totalQty <= 0) {
+            stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:900; background:rgba(239,68,68,0.12); color:#EF4444; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(239,68,68,0.25);">${icon('alertTriangle', 10)} Agotado</span>`;
+          } else if (totalQty <= threshold) {
+            stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:900; background:rgba(245,158,11,0.12); color:#F59E0B; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(245,158,11,0.25);">${icon('alertCircle', 10)} Stock Bajo: ${totalQty}</span>`;
+          } else {
+            stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:800; background:rgba(34,197,94,0.08); color:#22C55E; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(34,197,94,0.15);">Stock: ${totalQty}</span>`;
+          }
+        }
+      } else if (p.stockMode === 'limited') {
         const qty = p.stockQuantity || 0;
         const threshold = p.stockThreshold !== undefined ? p.stockThreshold : 3;
         if (qty <= 0) {
@@ -665,7 +695,8 @@ function renderProductsList(products, search, categoryId) {
   setupPanelSentinel();
 }
 
-function showProductModal(product, categories, comercioId, onSave, onCategoryAdded, comercioCategory = 'Comida') {
+function showProductModal(product, categories, comercioId, onSave, onCategoryAdded) {
+  const comercioCategory = panelComercioData?.category || 'Comida';
   let croppedImage = product?.image || '';
 
   const flavorGroup = product?.optionsGroups?.find(g => g.name === 'Elegí tu sabor');
@@ -905,6 +936,26 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
               <label>${(comercioCategory || '').toLowerCase().includes('helad') ? 'Límite de sabores (máx. permitido) *' : 'Límite de gustos/variedades (máx. permitido) *'}</label>
               <input type="number" class="input-premium" id="prod-flavors-max" value="${product?.maxSelections || ''}" placeholder="${(comercioCategory || '').toLowerCase().includes('helad') ? 'Ej: 4' : 'Ej: 12'}" min="1" />
             </div>
+
+            <div class="input-group" style="margin-top:16px;">
+              <label style="margin-bottom:8px;">Sabores disponibles para este producto</label>
+              <div style="font-size:11px; color:var(--color-text-secondary); margin-bottom:8px;">Selecciona el grupo y tilda los sabores que aplican a este producto.</div>
+              
+              <select id="prod-flavors-category-filter" class="input-premium" style="margin-bottom:12px; background-image:none;">
+                <option value="all">Ver todos los sabores mezclados</option>
+                ${[...new Set((panelComercioData?.sabores || []).map(s => s.category || 'Otros'))].sort().map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+              </select>
+
+              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; background:var(--color-surface); padding:12px; border-radius:8px; border:1px solid var(--color-border-light); max-height:200px; overflow-y:auto;" id="prod-flavors-checklist">
+                ${(panelComercioData?.sabores || []).map(s => `
+                  <label class="prod-flavor-item" data-category="${s.category || 'Otros'}" style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;" title="${s.name}">
+                    <input type="checkbox" class="prod-flavor-checkbox" value="${s.name}" ${(product?.allowedFlavors && product.allowedFlavors.includes(s.name)) ? 'checked' : ''} />
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</span>
+                  </label>
+                `).join('')}
+                ${!(panelComercioData?.sabores || []).length ? '<div style="font-size:12px; color:var(--color-text-tertiary); grid-column:1/-1;">No hay sabores creados en el Gestor.</div>' : ''}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -948,16 +999,19 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         </div>
         
         <div class="input-group" style="margin-bottom:var(--space-3);">
-          <label style="font-size:var(--font-xs);">Nombre del Grupo (ej: Extras, Sabores)</label>
-          <input type="text" class="input group-name-input" data-idx="${gIdx}" value="${group.name || ''}" placeholder="Ej: Elegí tu sabor" />
+          <label style="font-size:var(--font-xs);">Nombre del Grupo</label>
+          <input type="text" class="input group-name-input" data-idx="${gIdx}" value="${group.name || ''}" placeholder="Ej: Presentación" />
         </div>
 
-        <div style="display:flex; gap:var(--space-4); margin-bottom:var(--space-4); align-items:center;">
+        <div style="display:flex; flex-wrap:wrap; gap:var(--space-4); margin-bottom:var(--space-4); align-items:center;">
           <label style="display:flex; align-items:center; gap:var(--space-2); font-size:var(--font-xs); cursor:pointer;">
             <input type="checkbox" class="group-required-input" data-idx="${gIdx}" ${group.required ? 'checked' : ''} /> Obligatorio
           </label>
           <label style="display:flex; align-items:center; gap:var(--space-2); font-size:var(--font-xs); cursor:pointer;">
             <input type="checkbox" class="group-multi-input" data-idx="${gIdx}" ${group.multi ? 'checked' : ''} /> Multiselección
+          </label>
+          <label style="display:flex; align-items:center; gap:var(--space-2); font-size:var(--font-xs); cursor:pointer;" title="Si se marca, el precio de la opción seleccionada reemplaza al precio base del producto.">
+            <input type="checkbox" class="group-pricemode-input" data-idx="${gIdx}" ${group.priceMode === 'replace' ? 'checked' : ''} /> Reemplazar precio base
           </label>
           ${group.multi ? `
             <div style="display:flex; align-items:center; gap:6px; margin-left:var(--space-2);">
@@ -971,20 +1025,31 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
           <label style="font-size:var(--font-xs); font-weight:bold; color:var(--color-text-secondary); display:block; margin-bottom:var(--space-2);">OPCIONES</label>
           <div class="options-editor-list">
             ${(group.options || []).map((opt, oIdx) => `
-              <div style="display:flex; gap:var(--space-2); margin-top:var(--space-2); align-items:flex-end;">
-                <div style="flex:1.5; min-width:0;">
-                  <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase;">Nombre</span>
-                  <input type="text" class="input opt-name-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.name || ''}" placeholder="Ej: Cheddar" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-3);" />
+              <div style="display:flex; flex-wrap:wrap; gap:var(--space-2); margin-top:var(--space-3); padding-bottom:var(--space-3); border-bottom:1px solid var(--color-border-light); align-items:flex-end;">
+                <div style="flex:1 1 100%; display:flex; gap:var(--space-2); align-items:flex-end;">
+                  <div style="flex:1; min-width:0;">
+                    <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase;">Nombre</span>
+                    <input type="text" class="input opt-name-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.name || ''}" placeholder="Ej: Cheddar" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-3); width:100%; box-sizing:border-box;" />
+                  </div>
+                  <button class="btn btn-sm btn-ghost" data-action="remove-option" data-gidx="${gIdx}" data-oidx="${oIdx}" style="min-width:36px; height:36px; color:var(--color-text-tertiary); margin-bottom:1px;">${icon('close', 14)}</button>
                 </div>
-                <div style="flex:1; min-width:70px;">
-                  <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase;">Precio</span>
-                  <input type="number" class="input opt-price-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.price || ''}" placeholder="0" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-2);" />
+                <div style="flex:1 1 100%; display:flex; gap:var(--space-2); align-items:flex-end;">
+                  <div style="flex:1.5; min-width:0;">
+                    <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase;">Precio</span>
+                    <input type="number" class="input opt-price-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.price || ''}" placeholder="0" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-2); width:100%; box-sizing:border-box;" />
+                  </div>
+                  <div style="flex:1; min-width:0;">
+                    <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase;">Máx</span>
+                    <input type="number" class="input opt-maxqty-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.maxQty || 1}" placeholder="1" min="1" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-2); text-align:center; width:100%; box-sizing:border-box;" />
+                  </div>
+                  <div style="flex:1.2; min-width:0;">
+                    <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase; display:flex; align-items:center; gap:4px;" title="Multiplicador de Stock">
+                      Stock (x)
+                      <button type="button" onclick="alert('Esta es la cantidad de unidades físicas que se descontarán de tu inventario o del sabor cuando el cliente seleccione esta opción. Ejemplo: Si la opción es Media Docena, pon 6.')" style="border:none; padding:0; background:none; cursor:pointer; color:var(--color-primary); display:flex; align-items:center;">${icon('info', 12)}</button>
+                    </span>
+                    <input type="number" class="input opt-stockmult-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.stockMultiplier || 1}" placeholder="1" min="1" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-2); text-align:center; width:100%; box-sizing:border-box;" />
+                  </div>
                 </div>
-                <div style="flex:0.7; min-width:55px;">
-                  <span style="font-size:9px; color:var(--color-text-tertiary); margin-left:4px; text-transform:uppercase;">Máx</span>
-                  <input type="number" class="input opt-maxqty-input" data-gidx="${gIdx}" data-oidx="${oIdx}" value="${opt.maxQty || 1}" placeholder="1" min="1" style="font-size:var(--font-sm); min-height:36px; padding: var(--space-2) var(--space-2); text-align:center;" />
-                </div>
-                <button class="btn btn-sm btn-ghost" data-action="remove-option" data-gidx="${gIdx}" data-oidx="${oIdx}" style="min-width:36px; height:36px; color:var(--color-text-tertiary);">${icon('close', 14)}</button>
               </div>
             `).join('')}
           </div>
@@ -1021,6 +1086,9 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         }
       };
     });
+    container.querySelectorAll('.group-pricemode-input').forEach(input => {
+      input.onchange = () => { optionsGroups[input.dataset.idx].priceMode = input.checked ? 'replace' : 'add'; };
+    });
     container.querySelectorAll('.opt-name-input').forEach(input => {
       input.oninput = () => { optionsGroups[input.dataset.gidx].options[input.dataset.oidx].name = input.value; };
     });
@@ -1029,6 +1097,9 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     });
     container.querySelectorAll('.opt-maxqty-input').forEach(input => {
       input.oninput = () => { optionsGroups[input.dataset.gidx].options[input.dataset.oidx].maxQty = parseInt(input.value) || 1; };
+    });
+    container.querySelectorAll('.opt-stockmult-input').forEach(input => {
+      input.oninput = () => { optionsGroups[input.dataset.gidx].options[input.dataset.oidx].stockMultiplier = parseInt(input.value) || 1; };
     });
 
     // Remove group
@@ -1042,7 +1113,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     // Add option
     container.querySelectorAll('[data-action="add-option"]').forEach(btn => {
       btn.onclick = () => {
-        optionsGroups[btn.dataset.idx].options.push({ name: '', price: 0 });
+        optionsGroups[btn.dataset.idx].options.push({ name: '', price: 0, stockMultiplier: 1 });
         renderOptionsGroups();
       };
     });
@@ -1059,7 +1130,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
   setTimeout(renderOptionsGroups, 100);
 
   document.getElementById('add-option-group')?.addEventListener('click', () => {
-    optionsGroups.push({ name: '', required: false, multi: false, options: [{ name: '', price: 0, maxQty: 1 }] });
+    optionsGroups.push({ name: '', required: false, multi: false, priceMode: 'add', options: [{ name: '', price: 0, maxQty: 1, stockMultiplier: 1 }] });
     renderOptionsGroups();
   });
 
@@ -1073,12 +1144,87 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
   });
 
   // Reactive Global Flavors Toggle
-  document.getElementById('prod-use-global-flavors')?.addEventListener('change', (e) => {
-    const limitField = document.getElementById('prod-flavors-limit-field');
-    if (limitField) {
-      limitField.style.display = e.target.checked ? 'block' : 'none';
+  const updateFlavorsStockSum = () => {
+    const stockQuantityField = document.getElementById('prod-stock-quantity');
+    if (!stockQuantityField) return;
+    
+    const checkedCheckboxes = Array.from(document.querySelectorAll('.prod-flavor-checkbox:checked')).map(cb => cb.value);
+    
+    let total = 0;
+    let hasInfiniteStock = false;
+    
+    if (panelComercioData && panelComercioData.sabores) {
+      const activeFlavors = checkedCheckboxes.length > 0 
+        ? panelComercioData.sabores.filter(s => checkedCheckboxes.includes(s.name))
+        : panelComercioData.sabores;
+        
+      // Note: s.isAvailable means "is stock limited?". So !s.isAvailable means infinite stock.
+      hasInfiniteStock = activeFlavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
+      
+      if (!hasInfiniteStock) {
+        total = activeFlavors.reduce((sum, s) => sum + (parseInt(s.stock) || 0), 0);
+      }
     }
+    
+    if (hasInfiniteStock) {
+      stockQuantityField.value = '';
+      stockQuantityField.type = 'text'; // change temporarily to show infinity symbol easily if we want, or just placeholder
+      stockQuantityField.placeholder = '∞';
+    } else {
+      stockQuantityField.type = 'number';
+      stockQuantityField.value = total;
+      stockQuantityField.placeholder = 'Ej: 50';
+    }
+  };
+
+  const toggleGlobalFlavors = (isChecked) => {
+    const limitField = document.getElementById('prod-flavors-limit-field');
+    const stockQuantityField = document.getElementById('prod-stock-quantity');
+    
+    if (limitField) {
+      limitField.style.display = isChecked ? 'block' : 'none';
+    }
+    
+    if (isChecked && stockQuantityField) {
+      updateFlavorsStockSum();
+      stockQuantityField.setAttribute('readonly', 'readonly');
+      stockQuantityField.style.opacity = '0.6';
+      stockQuantityField.title = "El stock se calcula automáticamente sumando el stock de los sabores seleccionados.";
+    } else if (stockQuantityField) {
+      stockQuantityField.removeAttribute('readonly');
+      stockQuantityField.style.opacity = '1';
+      stockQuantityField.title = "";
+    }
+  };
+
+  document.getElementById('prod-use-global-flavors')?.addEventListener('change', (e) => {
+    toggleGlobalFlavors(e.target.checked);
   });
+  
+  document.querySelectorAll('.prod-flavor-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateFlavorsStockSum);
+  });
+  
+  document.getElementById('prod-flavors-category-filter')?.addEventListener('change', (e) => {
+    const selectedCat = e.target.value;
+    document.querySelectorAll('.prod-flavor-item').forEach(el => {
+      if (selectedCat === 'all' || el.dataset.category === selectedCat) {
+        el.style.display = 'flex';
+      } else {
+        el.style.display = 'none';
+      }
+    });
+  });
+  
+  // Initialize on open
+  if (product?.useGlobalFlavors) {
+    toggleGlobalFlavors(true);
+    const filter = document.getElementById('prod-flavors-category-filter');
+    if (filter && filter.options.length > 1) {
+      filter.value = filter.options[1].value;
+      filter.dispatchEvent(new Event('change'));
+    }
+  }
 
   // Inline Category Creation
   document.getElementById('prod-new-category-btn')?.addEventListener('click', () => {
@@ -1189,12 +1335,21 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
     if (!name) { showToast('Ingresá un nombre', 'warning'); return; }
     if (!price || price <= 0) { showToast('Ingresá un precio válido', 'warning'); return; }
+    if (!product && !croppedImage) { showToast('Es obligatorio subir una imagen para crear el producto', 'warning'); return; }
 
     const stockMode = document.getElementById('prod-stock-mode')?.value || 'unlimited';
     let stockQuantity = 0;
     let stockThreshold = 3;
 
-    if (stockMode === 'limited') {
+    const useGlobalFlavors = document.getElementById('prod-use-global-flavors')?.checked || false;
+    let maxSelections = null;
+    let allowedFlavors = [];
+    if (useGlobalFlavors) {
+      maxSelections = parseInt(document.getElementById('prod-flavors-max')?.value) || 4;
+      allowedFlavors = Array.from(document.querySelectorAll('.prod-flavor-checkbox:checked')).map(cb => cb.value);
+    }
+
+    if (stockMode === 'limited' && !useGlobalFlavors) {
       const qtyInput = document.getElementById('prod-stock-quantity')?.value;
       if (qtyInput === undefined || qtyInput === null || qtyInput.trim() === '') {
         showToast('Ingresá la cantidad disponible en stock', 'warning');
@@ -1211,17 +1366,18 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         showToast('La alerta de stock mínimo no puede ser negativa', 'warning');
         return;
       }
+    } else if (stockMode === 'limited' && useGlobalFlavors) {
+      // If using global flavors, the stock is handled by the flavors system
+      stockQuantity = null; 
+      const thresholdInput = document.getElementById('prod-stock-threshold')?.value;
+      stockThreshold = thresholdInput !== '' ? parseInt(thresholdInput) : 3;
     }
+    
     const saveBtn = document.getElementById('prod-save');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Guardando...';
 
     try {
-      const useGlobalFlavors = document.getElementById('prod-use-global-flavors')?.checked || false;
-      let maxSelections = null;
-      if (useGlobalFlavors) {
-        maxSelections = parseInt(document.getElementById('prod-flavors-max')?.value) || 4;
-      }
 
       const productData = {
         name,
@@ -1237,6 +1393,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         stockThreshold,
         useGlobalFlavors,
         maxSelections,
+        allowedFlavors,
         order: product?.order || 0,
         createdAt: product?.createdAt || new Date()
       };
@@ -1309,7 +1466,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       }
     } catch (e) {
       console.error('Error saving product:', e);
-      showToast('Error al guardar', 'error');
+      showToast('Error al guardar: ' + e.message, 'error');
       saveBtn.disabled = false;
       saveBtn.textContent = 'Guardar';
     }

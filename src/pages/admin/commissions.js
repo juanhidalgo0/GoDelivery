@@ -10,12 +10,12 @@ export async function renderAdminCommissions() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg);">
       <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
-        <a href="#/admin" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;position:relative;z-index:2;">
-          ${icon('chevronLeft', 24)}
+        <a href="#/admin" style="display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;position:relative;z-index:2;">
+          ${icon('arrowLeft', 26)}
         </a>
         <div style="flex:1;min-width:0;position:relative;z-index:2;">
           <h1 style="font-family:var(--font-display);font-weight:900;font-size:20px;color:white;margin:0;line-height:1.2;letter-spacing:-0.02em;">Comisiones</h1>
@@ -105,6 +105,22 @@ async function loadAndGroupOrders() {
       getDocs(collection(db, 'users'))
     ]);
 
+    groupedComercios = {};
+    comerciosSnap.docs.forEach(doc => {
+      const data = doc.data();
+      groupedComercios[doc.id] = {
+        id: doc.id,
+        name: data.name || 'Comercio sin nombre',
+        orders: [],
+        totalSales: 0,
+        totalCommission: 0,
+        totalAppFee: 0,
+        pendingCount: 0,
+        confirmedCount: 0,
+        completedCount: 0
+      };
+    });
+
     groupedDrivers = {};
     usersSnap.docs.forEach(doc => {
       const data = doc.data();
@@ -121,45 +137,50 @@ async function loadAndGroupOrders() {
       }
     });
 
-    const activeOrders = ordersSnap.docs
-      .map(doc => ({ id: doc.id, ...doc.data() }))
-      .filter(o => !o.isSettled);
+    const allOrders = ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     let globalAppFees = 0;
     let globalCommissions = 0;
 
-    activeOrders.forEach(order => {
-      globalAppFees += (order.appUsageFee || 0);
-      globalCommissions += (order.commissionAmount || 0);
-
-      const cid = order.comercioId;
-      // If order belongs to a commerce that for some reason isn't in 'comercios' collection, create it
-      if (!groupedComercios[cid]) {
-        groupedComercios[cid] = {
-          id: cid,
-          name: order.comercioName || 'Comercio desconocido',
-          orders: [],
-          totalSales: 0,
-          totalCommission: 0,
-          pendingCount: 0,
-          confirmedCount: 0,
-          completedCount: 0
-        };
-      }
-      
-      groupedComercios[cid].orders.push(order);
-      
+    allOrders.forEach(order => {
       if (order.status !== 'cancelled') {
-        groupedComercios[cid].totalSales += order.total;
-        groupedComercios[cid].totalCommission += (order.commissionAmount || 0);
+        if (!order.isSettled) {
+          globalCommissions += (order.commissionAmount || 0);
+        }
+        if (!order.isSettledDriver) {
+          globalAppFees += (order.appUsageFee || 0);
+        }
       }
-      
-      if (order.status === 'pending') groupedComercios[cid].pendingCount++;
-      if (order.status === 'confirmed') groupedComercios[cid].confirmedCount++;
-      if (order.status === 'completed') groupedComercios[cid].completedCount++;
 
-      // Also track orders for drivers if they are completed but not paid in debt
-      if (order.driverId && order.status === 'completed' && order.commissionStatus !== 'paid') {
+      // Group for commerce if not settled
+      if (!order.isSettled) {
+        const cid = order.comercioId;
+        if (!groupedComercios[cid]) {
+          groupedComercios[cid] = {
+            id: cid,
+            name: order.isFavor ? (order.favorType === 'gocash' ? 'Go Cash' : (order.favorType === 'mandado' ? 'GoFavor: Encomienda' : 'GoFavor: Mandado')) : (order.comercioName || 'Comercio desconocido'),
+            orders: [],
+            totalSales: 0,
+            totalCommission: 0,
+            totalAppFee: 0,
+            pendingCount: 0,
+            confirmedCount: 0,
+            completedCount: 0
+          };
+        }
+        groupedComercios[cid].orders.push(order);
+        if (order.status !== 'cancelled') {
+          groupedComercios[cid].totalSales += order.total;
+          groupedComercios[cid].totalCommission += (order.commissionAmount || 0);
+          groupedComercios[cid].totalAppFee += (order.appUsageFee || 0);
+        }
+        if (order.status === 'pending') groupedComercios[cid].pendingCount++;
+        if (order.status === 'confirmed') groupedComercios[cid].confirmedCount++;
+        if (order.status === 'completed') groupedComercios[cid].completedCount++;
+      }
+
+      // Track orders for drivers if they are completed but not paid/settled for the driver
+      if (order.driverId && order.status === 'completed' && !order.isSettledDriver) {
         if (groupedDrivers[order.driverId]) {
           groupedDrivers[order.driverId].orders.push(order);
         }
@@ -209,7 +230,7 @@ async function loadAndGroupOrders() {
 function renderComerciosList(filter = '') {
   const container = document.getElementById('comercios-list-container');
   const comercios = Object.values(groupedComercios).filter(c => 
-    c.name.toLowerCase().includes(filter)
+    c.name.toLowerCase().includes(filter) && c.totalCommission > 0
   );
 
   if (comercios.length === 0) {
@@ -267,8 +288,8 @@ function showOrdersDetail(commerceId) {
   overlay.innerHTML = `
     <div class="orders-detail-content page-enter" style="background: var(--color-bg); padding: 0;">
       <div class="detail-header" style="padding: 16px 20px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 16px;">
-        <button class="close-detail-btn" style="width: 40px; height: 40px; border-radius: 12px; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); color: var(--color-text); display: flex; align-items: center; justify-content: center; cursor: pointer;">
-          ${icon('back', 24)}
+        <button class="close-detail-btn" style="width: 44px; height: 44px; border-radius: 14px; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); color: var(--color-text); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+          ${icon('arrowLeft', 26, '', 'var(--color-text)')}
         </button>
         <h2 style="font-family:var(--font-display); font-size: 18px; font-weight: 800; letter-spacing: -0.02em; margin:0;">${comercio.name}</h2>
       </div>
@@ -321,7 +342,7 @@ function showOrdersDetail(commerceId) {
                 </div>
                 <div style="text-align: right;">
                   <div style="font-size: 9px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; margin-bottom: 2px;">Comisión</div>
-                  <div style="font-size: 16px; font-weight: 800; color: var(--color-primary);">${formatPrice(o.commissionAmount)}</div>
+                  <div style="font-size: 16px; font-weight: 800; color: var(--color-primary);">${formatPrice(o.commissionAmount || 0)}</div>
                 </div>
               </div>
 
@@ -403,8 +424,8 @@ async function showSettlementsHistory() {
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
-        <button class="close-settlements-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; z-index:2;">
-          ${icon('chevronLeft', 24)}
+        <button class="close-settlements-btn" style="width:44px; height:44px; border-radius:14px; background:rgba(255,255,255,0.15); border:none; color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; z-index:2;">
+          ${icon('arrowLeft', 26)}
         </button>
         <h2 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; flex:1; position:relative; z-index:2; letter-spacing:-0.02em;">Historial de Cobros</h2>
         <button id="clear-history-btn" title="Limpiar todo el historial" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; position:relative; z-index:2;">
@@ -714,7 +735,7 @@ function showDriverDetail(driverId) {
     <div class="orders-detail-content page-enter" style="background: var(--color-bg); padding: 0;">
       <div class="detail-header" style="padding: 16px 20px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 16px;">
         <button class="close-detail-btn" style="width: 44px; height: 44px; border-radius: 14px; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); color: var(--color-text); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-          ${icon('chevronLeft', 28, '', 'var(--color-text)')}
+          ${icon('arrowLeft', 26, '', 'var(--color-text)')}
         </button>
         <h2 style="font-family:var(--font-display); font-size: 18px; font-weight: 800; letter-spacing: -0.02em; margin:0;">${driver.name}</h2>
       </div>
@@ -724,14 +745,10 @@ function showDriverDetail(driverId) {
         <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding: 32px 24px; border-radius: 36px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); color: white; margin-bottom: 32px; position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,0.08);">
            <div style="position:absolute; top:-20px; right:-20px; width:120px; height:120px; background:var(--color-primary); filter:blur(60px); opacity:0.12; border-radius:50%;"></div>
            
-           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid rgba(255,255,255,0.06);">
-              <div>
-                <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; opacity:0.7;">Tarifa App</div>
+            <div style="display: flex; justify-content: center; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+              <div style="text-align: center;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; opacity:0.7;">Tarifa App Acumulada</div>
                 <div style="font-size: 20px; font-weight: 900; color: white;">${formatPrice(driver.orders.reduce((s, o) => s + (o.appUsageFee || 0), 0))}</div>
-              </div>
-              <div style="text-align: right;">
-                <div style="font-size: 10px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; opacity:1;">Comisiones</div>
-                <div style="font-size: 20px; font-weight: 900; color: var(--color-primary);">${formatPrice(driver.orders.reduce((s, o) => s + (o.commissionAmount || 0), 0))}</div>
               </div>
             </div>
             
@@ -754,27 +771,34 @@ function showDriverDetail(driverId) {
           ${icon('bike', 18)} Últimas Entregas
         </h3>
         <div class="orders-vertical-list" style="display: flex; flex-direction: column; gap: 12px;">
-          ${driver.orders.length > 0 ? driver.orders.map(o => `
-            <div style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 20px; padding: 16px; box-shadow: var(--shadow-sm);">
+          ${driver.orders.length > 0 ? driver.orders.map(o => {
+            const displayName = o.isFavor ? (o.favorType === 'gocash' ? 'Go Cash' : (o.favorType === 'mandado' ? 'GoFavor: Encomienda' : 'GoFavor: Mandado')) : (o.comercioName || 'Pedido');
+            return `
+            <div onclick="window.openAuditFromCommissions('${o.id}')" style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 20px; padding: 16px; box-shadow: var(--shadow-sm); cursor: pointer; transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
                 <div>
-                  <div style="font-weight: 800; color: var(--color-text); font-size: 14px; margin-bottom: 2px;">${o.comercioName}</div>
-                  <div style="font-size: 11px; color: var(--color-text-tertiary); font-weight: 600;">#${o.orderId || '---'} • ${formatDate(o.deliveredAt?.toDate())}</div>
+                  <div style="font-weight: 800; color: var(--color-text); font-size: 14px; margin-bottom: 2px;">${displayName}</div>
+                  <div style="font-size: 11px; color: var(--color-text-tertiary); font-weight: 600;">#${o.orderId || '---'} • ${formatDate(o.deliveredAt?.toDate() || o.createdAt?.toDate())}</div>
+                </div>
+                <div style="color: var(--color-text-tertiary); opacity: 0.5;">
+                  ${icon('chevronRight', 20)}
                 </div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-top: 12px; border-top: 1px dashed var(--color-border-light);">
-                <div>
-                  <div style="font-size: 9px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin-bottom: 2px;">Tarifa App</div>
-                  <div style="font-size: 15px; font-weight: 800; color: var(--color-text);">${formatPrice(o.appUsageFee || 0)}</div>
+              <div style="display: flex; justify-content: ${o.driverIncentiveAmount > 0 ? 'space-between' : 'flex-end'}; padding-top: 12px; border-top: 1px dashed var(--color-border-light);">
+                ${o.driverIncentiveAmount > 0 ? `
+                <div style="text-align: left;">
+                  <div style="font-size: 9px; font-weight: 800; color: var(--color-success); text-transform: uppercase; margin-bottom: 2px; display: flex; align-items: center; gap: 3px;">${icon('arrowUpRight', 10)} Incentivo Nocturno</div>
+                  <div style="font-size: 15px; font-weight: 800; color: var(--color-success);">${formatPrice(o.driverIncentiveAmount)}</div>
                 </div>
+                ` : ''}
                 <div style="text-align: right;">
-                  <div style="font-size: 9px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; margin-bottom: 2px;">Comisión</div>
-                  <div style="font-size: 15px; font-weight: 800; color: var(--color-primary);">${formatPrice(o.commissionAmount || 0)}</div>
+                  <div style="font-size: 9px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin-bottom: 2px;">Tarifa App</div>
+                  <div style="font-size: 15px; font-weight: 800; color: var(--color-primary);">${formatPrice(o.appUsageFee || 0)}</div>
                 </div>
               </div>
             </div>
-          `).join('') : `
+          `}).join('') : `
             <div style="text-align:center; padding: 3rem 1rem; color:var(--color-text-tertiary); font-size:14px; background:var(--color-bg-secondary); border-radius:24px; border:1px dashed var(--color-border-light);">
               No hay órdenes individuales pendientes, pero el balance de deuda es de ${formatPrice(driver.debt)}.
             </div>
@@ -873,6 +897,15 @@ async function settleDriver(driverId) {
         createdAt: serverTimestamp()
       });
 
+      // 4. Mark all driver orders as settled
+      driver.orders.forEach(o => {
+        batch.update(doc(db, 'orders', o.id), {
+          isSettledDriver: true,
+          driverCommissionStatus: 'paid',
+          driverSettledAt: serverTimestamp()
+        });
+      });
+
       await batch.commit();
       showToast('Liquidación registrada', 'success');
       closeModal();
@@ -889,3 +922,9 @@ async function settleDriver(driverId) {
     }
   };
 }
+window.openAuditFromCommissions = async (orderId) => {
+  if (!window.showOrderDetail) {
+    await import('./orders.js');
+  }
+  window.showOrderDetail(orderId);
+};

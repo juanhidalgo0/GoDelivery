@@ -34,7 +34,7 @@ export async function renderAdminOrders() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
       <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
@@ -255,8 +255,15 @@ function getStatusKey(status) {
   return 'pending';
 }
 
-window.showOrderDetail = async (id) => {
-  const o = allOrders.find(item => item.id === id);
+window.showOrderDetail = async (idOrObject) => {
+  let o = typeof idOrObject === 'string' ? allOrders.find(item => item.id === idOrObject) : idOrObject;
+  if (!o && typeof idOrObject === 'string') {
+    // Try to fetch from Firestore if not in local allOrders
+    const { doc, getDoc } = await import('firebase/firestore');
+    const { db } = await import('../../firebase.js');
+    const snap = await getDoc(doc(db, 'orders', idOrObject));
+    if (snap.exists()) o = { id: snap.id, ...snap.data() };
+  }
   if (!o) return;
 
   const detailHtml = document.createElement('div');
@@ -282,7 +289,7 @@ window.showOrderDetail = async (id) => {
        <div style="border-top:1px dashed var(--color-border); padding-top:15px; display:flex; flex-direction:column; gap:8px;">
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
            <span>Subtotal Productos</span>
-           <span>${formatPrice(o.subtotal || (o.total - (o.deliveryCost || 0) - (o.serviceFee || 0)))}</span>
+           <span>${formatPrice(o.subtotal || (o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0)))}</span>
          </div>
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
            <span>Costo de Envío</span>

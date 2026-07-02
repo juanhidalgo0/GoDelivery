@@ -1,6 +1,6 @@
 // GoDelivery — Comercio Panel Dashboard
 import { db } from '../../firebase.js';
-import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
@@ -21,15 +21,28 @@ export async function renderComercioDashboard() {
     return;
   }
 
+  // Calculate padding dynamically
+  const isNative = !!window.Capacitor;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const topPadding = isNative 
+    ? 'var(--status-bar-height, 24px)' 
+    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+
   // Pre-render shell
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg);">
       <!-- Premium Fixed Header -->
-      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:16px;padding:16px 20px;background:var(--color-primary);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
-        <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);flex-shrink:0;text-decoration:none;transition:all 0.2s;">${icon('back', 20)}</a>
+      <div style="width:100%; padding-top: ${topPadding}; background: var(--color-primary); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        <div style="display:flex;align-items:center;gap:12px;padding: 12px 16px 20px 16px; position:relative;overflow:hidden;color:white;">
+          <!-- Decorative Circles -->
+          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
+          
+          <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;background:none;color:white;border:none;cursor:pointer;padding:0;text-decoration:none;position:relative;z-index:2;">${icon('chevronLeft', 28)}</a>
         <div style="flex:1;min-width:0;">
-          <h1 style="font-family:var(--font-display);font-weight:900;font-size:20px;color:inherit;margin:0;line-height:1.1;letter-spacing:-0.03em;">${isAdmin() ? 'Adm: Panel de Gestión' : 'Panel de Gestión'}</h1>
-          <p id="panel-commerce-name" style="font-size:12px;color:rgba(255,255,255,0.85);font-weight:800;margin:4px 0 0;text-transform:uppercase;letter-spacing:0.02em;">Cargando...</p>
+          <h1 style="font-family:var(--font-display);font-weight:800;font-size:20px;color:inherit;margin:0;line-height:1.2;letter-spacing:-0.02em;">${isAdmin() ? 'Adm: Panel de Gestión' : 'Panel de Gestión'}</h1>
+          <p id="panel-commerce-name" style="font-size:10px;color:rgba(255,255,255,0.85);font-weight:700;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Cargando...</p>
+        </div>
         </div>
       </div>
 
@@ -95,11 +108,11 @@ export async function renderComercioDashboard() {
     </div>
   `;
 
-  const q = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
-
   let commerceData = null;
   let isInitialLoad = true;
-  ordersUnsub = onSnapshot(q, (snap) => {
+  let q;
+
+  const handleSnapshot = (snap) => {
     const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     updateDashboardData(orders, comercioId, commerceData);
     
@@ -112,7 +125,23 @@ export async function renderComercioDashboard() {
       });
     }
     isInitialLoad = false;
-  });
+  };
+
+  const attemptOptimizedQuery = () => {
+    q = query(collection(db, 'orders'), where('comercioId', '==', comercioId), orderBy('createdAt', 'desc'), limit(150));
+    ordersUnsub = onSnapshot(q, handleSnapshot, (err) => {
+      if (err.message && err.message.includes('index')) {
+        console.warn('Falta índice compuesto. Intentando fallback sin límite en dashboard...', err.message);
+        if (ordersUnsub) ordersUnsub();
+        q = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
+        ordersUnsub = onSnapshot(q, handleSnapshot);
+      } else {
+        console.error('Error listening to dashboard orders:', err);
+      }
+    });
+  };
+
+  attemptOptimizedQuery();
 
   // 3. Audio Context Unlocker (Required by Browsers)
   const unlockAudio = () => {

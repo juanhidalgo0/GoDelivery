@@ -1,5 +1,6 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -260,8 +261,12 @@ async function sendPush(tokens, notification, data = {}) {
   };
 
   if (data.imageUrl && (data.imageUrl.startsWith("http://") || data.imageUrl.startsWith("https://"))) {
-    message.notification.image = data.imageUrl;
+    // Set platform-specific image fields to prevent FCM delivery validation failures on Web/PWA
+    message.android.notification.image = data.imageUrl;
     message.webpush.notification.image = data.imageUrl;
+    message.apns.fcmOptions = {
+      imageUrl: data.imageUrl
+    };
   }
 
   try {
@@ -272,6 +277,7 @@ async function sendPush(tokens, notification, data = {}) {
       const tokensToDelete = [];
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
+          logger.error(`[FCM Error] Failed to send to token index ${idx} (${tokens[idx].substring(0, 10)}...):`, resp.error);
           const errorCode = resp.error?.code;
           if (errorCode === "messaging/invalid-registration-token" || 
               errorCode === "messaging/registration-token-not-registered") {
@@ -319,18 +325,11 @@ async function getOnlineDeliveryTokens() {
     let tokens = [];
     for (const doc of snap.docs) {
       const data = doc.data();
-      const isDel = (data.isDelivery === true || data.isDelivery === "true" || data.role === "delivery") && data.deliveryStatus === "approved";
+      const isDel = (data.isDelivery === true || data.isDelivery === "true" || data.role === "delivery" || data.role === "driver" || data.role === "repartidor") && 
+                    (data.deliveryStatus === "approved" || data.tripStatus === "approved");
       if (isDel) {
-        // Only include drivers who do NOT have any active/ongoing orders in progress
-        const activeOrdersCountSnap = await db.collection("orders")
-          .where("driverId", "==", doc.id)
-          .where("status", "in", ["confirmed", "ready", "delivering"])
-          .get();
-          
-        if (activeOrdersCountSnap.empty) {
-          const userTokens = await getUserTokens(doc.id);
-          tokens = tokens.concat(userTokens);
-        }
+        const userTokens = await getUserTokens(doc.id);
+        tokens = tokens.concat(userTokens);
       }
     }
     return [...new Set(tokens)];
@@ -373,11 +372,30 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
     if (order.isFavor) {
       const driverTokens = await getOnlineDeliveryTokens();
       if (driverTokens.length > 0) {
-        const orderType = order.favorType === "compra" ? "compra" : "mandado";
+        let orderType = "go favor";
+        if (order.favorType === "compra") {
+          orderType = "mandado / compra";
+        } else if (order.favorType === "mandado") {
+          orderType = "encomienda";
+        } else if (order.favorType === "gocash") {
+          orderType = "go cash";
+        }
         await sendPush(driverTokens, {
           title: `🛵 ¡Nuevo GoFavor Disponible!`,
-          body: `Hay un nuevo GoFavor (${orderType.toUpperCase()}) listo para tomar.`
+          body: `Hay un nuevo pedido de tipo ${orderType.toUpperCase()} listo para tomar.`
         }, { tag: `new-favor-${orderId}`, url: "#/delivery" });
+      }
+      return;
+    }
+
+    // 1.5 If it's a Trip order (Go Viaje), notify all online drivers immediately
+    if (order.isTrip) {
+      const driverTokens = await getOnlineDeliveryTokens();
+      if (driverTokens.length > 0) {
+        await sendPush(driverTokens, {
+          title: `🚗 ¡Nuevo Viaje Disponible!`,
+          body: `Hay un nuevo traslado disponible para tomar.`
+        }, { tag: `new-trip-${orderId}`, url: "#/delivery" });
       }
       return;
     }
@@ -481,6 +499,80 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
     logger.error("Error in onNewChatMessage:", err);
   }
 });
+
+/**
+ * Trigger: Nuevo chat de Marketplace creado (Comprador inicia contacto) → Notificar a Vendedor
+ */
+exports.onNewMarketplaceChat = onDocumentCreated("marketplace_chats/{chatId}", async (event) => {
+  const chat = event.data.data();
+  if (!chat) return;
+
+  try {
+    const sellerTokens = await getUserTokens(chat.sellerId);
+    if (sellerTokens.length > 0) {
+      await sendPush(sellerTokens, {
+        title: "💬 Interés en tu producto",
+        body: `${chat.buyerName} quiere contactarte por "${chat.productTitle}".`
+      }, { tag: `market-chat-new-${event.params.chatId}`, url: `#/marketplace/chat/${event.params.chatId}` });
+    }
+  } catch (err) {
+    logger.error("Error in onNewMarketplaceChat:", err);
+  }
+});
+
+/**
+ * Trigger: Nuevo mensaje en chat de Marketplace → Notificar al participante receptor
+ */
+exports.onNewMarketplaceMessage = onDocumentCreated("marketplace_chats/{chatId}/messages/{messageId}", async (event) => {
+  const message = event.data.data();
+  const chatId = event.params.chatId;
+  if (!message || !message.senderId) return;
+
+  try {
+    const chatDoc = await db.collection("marketplace_chats").doc(chatId).get();
+    if (!chatDoc.exists) return;
+    const chatData = chatDoc.data();
+
+    // El destinatario es el participante que NO envió el mensaje
+    const recipientId = message.senderId === chatData.buyerId ? chatData.sellerId : chatData.buyerId;
+    const recipientTokens = await getUserTokens(recipientId);
+
+    if (recipientTokens.length > 0) {
+      await sendPush(recipientTokens, {
+        title: `💬 Mensaje de ${message.senderName}`,
+        body: message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text
+      }, { tag: `market-msg-${chatId}`, url: `#/marketplace/chat/${chatId}` });
+    }
+  } catch (err) {
+    logger.error("Error in onNewMarketplaceMessage:", err);
+  }
+});
+
+/**
+ * Trigger: Venta de producto en Marketplace (status == 'sold') → Notificar a las partes implicadas
+ */
+exports.onMarketplaceProductUpdated = onDocumentUpdated("marketplace_products/{productId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after) return;
+
+  // Si el estado cambia a 'sold' y se registró un comprador
+  if (before.status !== "sold" && after.status === "sold" && after.buyerId) {
+    try {
+      // Notificar al vendedor sobre la confirmación de la compra
+      const sellerTokens = await getUserTokens(after.sellerId);
+      if (sellerTokens.length > 0) {
+        await sendPush(sellerTokens, {
+          title: "🎉 ¡Venta Confirmada!",
+          body: `${after.buyerName} ha confirmado la compra de tu producto "${after.title}".`
+        }, { tag: `market-sold-${event.params.productId}`, url: "#/profile/publications" });
+      }
+    } catch (err) {
+      logger.error("Error in onMarketplaceProductUpdated:", err);
+    }
+  }
+});
+
 
 /**
  * Trigger: Order status change → Notify relevant parties
@@ -635,6 +727,21 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             title: "🎉 ¡Pedido Entregado!",
             body: "El repartidor ya entregó tu pedido. ¡Que lo disfrutes!"
           }, { tag: `order-${orderId}-delivered`, url: `#/pedido/${orderId}`, persistent: "true" });
+
+          // 2. Increment driver's debt by appUsageFee if applicable
+          if (after.driverId) {
+            const appFee = after.appUsageFee || 0;
+            if (appFee > 0) {
+              try {
+                await db.collection("users").doc(after.driverId).update({
+                  deliveryDebt: admin.firestore.FieldValue.increment(appFee)
+                });
+                logger.info(`Added app usage fee ${appFee} to driver ${after.driverId} debt.`);
+              } catch (err) {
+                logger.error(`Error updating driver ${after.driverId} debt:`, err);
+              }
+            }
+          }
           break;
         }
         case "cancelled": {
@@ -653,9 +760,10 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
     if (before.status === after.status && 
         (JSON.stringify(before.items) !== JSON.stringify(after.items) || before.total !== after.total)) {
       const clientTokens = await getUserTokens(after.userId);
+      const modifierName = after.isFavor ? "El repartidor" : (after.comercioName || "El comercio");
       await sendPush(clientTokens, {
         title: "📝 Pedido Modificado",
-        body: `${after.comercioName} modificó tu pedido #${orderNum}. Nuevo total: $${after.total}`
+        body: `${modifierName} modificó tu pedido #${orderNum}. Nuevo total: $${after.total}`
       }, { tag: `order-${orderId}-modified`, url: `#/pedido/${orderId}` });
     }
 
@@ -693,8 +801,9 @@ async function checkIfRainingInMagdalena() {
     const data = await res.json();
     const rain = data?.current?.rain || 0;
     const code = data?.current?.weather_code || 0;
-    const rainCodes = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82];
-    const isRaining = rain > 0 || rainCodes.includes(code);
+    // Exclude very light drizzle (51, 56) to prevent false positives
+    const rainCodes = [53, 55, 57, 61, 63, 65, 66, 67, 80, 81, 82];
+    const isRaining = rain >= 0.5 || rainCodes.includes(code);
     logger.info(`[Backend Weather] Rain: ${rain}mm, Weather Code: ${code}. Raining: ${isRaining}`);
     return isRaining;
   } catch (err) {
@@ -732,8 +841,6 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
   }
 
   try {
-    const isRaining = await checkIfRainingInMagdalena();
-
     // Fetch active offers for the cart's commerce IDs (done before transaction to prevent Firestore errors)
     const commerceIds = [...new Set(cart.map(item => item.comercioId))];
     let activeOffers = [];
@@ -760,6 +867,21 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       // Fetch global settings for deliveryCost, deliveryRainSurcharge, etc.
       const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
       const globalSettings = globalSettingsSnap.exists ? globalSettingsSnap.data() : {};
+
+      // Fetch current weather status
+      const weatherSnap = await transaction.get(db.collection("settings").doc("weather"));
+      const weatherData = weatherSnap.exists ? weatherSnap.data() : {};
+
+      const rainMode = globalSettings.rainMode || "auto";
+      let isRaining = false;
+      if (rainMode === "on") {
+        isRaining = true;
+      } else if (rainMode === "off") {
+        isRaining = false;
+      } else {
+        isRaining = weatherData.isRaining || false;
+      }
+
       const baseRainSurcharge = globalSettings.deliveryRainSurcharge !== undefined ? globalSettings.deliveryRainSurcharge : 300;
       const activeRainSurcharge = isRaining ? baseRainSurcharge : 0;
 
@@ -1162,7 +1284,7 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
   }
 
   const uid = decodedToken.uid;
-  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, total } = req.body;
+  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total } = req.body;
 
   if (!pickupAddress || !deliveryAddress || !details) {
     return res.status(400).json({ error: "Faltan campos obligatorios (direcciones o detalles)" });
@@ -1240,11 +1362,20 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
         finalAppUsageFee = secureAppUsageFee;
       }
 
-      const secureTotal = finalDeliveryCost + finalPurchaseFee + finalAppUsageFee;
+      const secureTotal = finalDeliveryCost + finalPurchaseFee + finalAppUsageFee + Number(extraStopsFee || 0);
       let finalTotal = Number(total);
       if (finalTotal < 0.9 * secureTotal) {
          logger.warn(`GoFavor Total fee tampering detected! Client: ${finalTotal}, calculated: ${secureTotal}. Overwriting.`);
          finalTotal = secureTotal;
+      }
+
+      // Extract address notes from deliveryAddress if formatted as "Address (Detalle: Notes)"
+      let finalDeliveryAddress = deliveryAddress;
+      let addressNotesVal = "";
+      const matchDetails = deliveryAddress.match(/^(.*?)\s*\(Detalle:\s*(.*?)\)$/i);
+      if (matchDetails) {
+        finalDeliveryAddress = matchDetails[1].trim();
+        addressNotesVal = matchDetails[2].trim();
       }
 
       const orderData = {
@@ -1256,12 +1387,15 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
         userPhone: userData.phone || "",
         pickupAddress: pickupAddress,
         pickupCoords: pickupCoords || null,
-        deliveryAddress: deliveryAddress,
+        deliveryAddress: finalDeliveryAddress,
         deliveryCoords: deliveryCoords || null,
+        addressNotes: addressNotesVal,
         details: details,
         deliveryCost: finalDeliveryCost,
         purchaseFee: finalPurchaseFee,
         appUsageFee: finalAppUsageFee,
+        extraStopsFee: Number(extraStopsFee || 0),
+        stopsCount: Number(stopsCount || 1),
         total: finalTotal,
         status: 'pending',
         paymentMethod: 'efectivo',
@@ -1441,7 +1575,7 @@ exports.onFCMTokenRegistered = onDocumentCreated("users/{userId}/fcmTokens/{toke
     if (role === "admin" || role === "client") {
       await admin.messaging().subscribeToTopic(token, "clients_broadcast");
       logger.info(`[Pub/Sub] Subscribed token to clients_broadcast: ${token}`);
-    } else if (role === "driver" || role === "repartidor") {
+    } else if (role === "driver" || role === "repartidor" || role === "delivery" || userData.isDelivery === true || userData.deliveryStatus === "approved") {
       await admin.messaging().subscribeToTopic(token, "drivers_broadcast");
       logger.info(`[Pub/Sub] Subscribed token to drivers_broadcast: ${token}`);
     } else if (role === "commerce" || role === "comercio") {
@@ -1461,8 +1595,15 @@ exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/
   const userId = event.params.userId;
   if (!notification) return;
 
-  // Protect from loop: Only trigger push notifications for direct P2P points transfer or weekly challenge completions
-  if (notification.type !== 'points_received' && notification.type !== 'challenge_completion') {
+  // Protect from loop: Only trigger push notifications for direct P2P points transfer, weekly challenge completions, driver/delivery approvals, or scheduled trip events
+  if (
+    notification.type !== 'points_received' && 
+    notification.type !== 'challenge_completion' && 
+    notification.type !== 'driver_approved' && 
+    notification.type !== 'delivery_approved' &&
+    notification.type !== 'scheduled_trip_accepted' &&
+    notification.type !== 'scheduled_trip_cancelled'
+  ) {
     return;
   }
 
@@ -1626,8 +1767,332 @@ function chunkArray(array, size) {
   return chunks;
 }
 
+// ═══════════════════════════════════════════════════
+// NEW CRON JOBS & PUSH TRIGGERS
+// ═══════════════════════════════════════════════════
+
+// Helper to get all delivery drivers reliably (handles all role names and status fields)
+async function getAllDeliveryDrivers() {
+  const snaps = await Promise.all([
+    db.collection("users").where("role", "in", ["delivery", "driver", "repartidor"]).get(),
+    db.collection("users").where("isDelivery", "==", true).get(),
+    db.collection("users").where("deliveryStatus", "==", "approved").get()
+  ]);
+  const driversMap = new Map();
+  for (const snap of snaps) {
+    for (const doc of snap.docs) {
+      driversMap.set(doc.id, doc);
+    }
+  }
+  return Array.from(driversMap.values());
+}
+
+exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
+  try {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const snap = await db.collection("users")
+      .where("isOnline", "==", true)
+      .get();
+
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const isDel = (data.isDelivery === true || data.isDelivery === "true" || data.role === "delivery" || data.role === "driver" || data.role === "repartidor" || data.deliveryStatus === "approved");
+      if (!isDel) continue;
+
+      // FIX: Check lastActivityAt (updated by heartbeat/actions) instead of lastActiveTime
+      const lastActiveTime = data.lastActivityAt ? data.lastActivityAt.toDate() : new Date(0);
+      
+      if (lastActiveTime < oneHourAgo) {
+        const activeOrdersSnap = await db.collection("orders")
+          .where("driverId", "==", doc.id)
+          .where("status", "in", ["confirmed", "ready", "delivering"])
+          .get();
+          
+        if (activeOrdersSnap.empty) {
+          await doc.ref.update({ isOnline: false });
+          const settingsSnap = await db.collection("settings").doc("global").get();
+          const msgs = settingsSnap.exists ? settingsSnap.data().pushMessages : {};
+          const title = msgs?.disconnect?.title || "Zzz... Sesión pausada";
+          const body = msgs?.disconnect?.body || "Te desconectamos porque pasó 1 hora sin que tomaras pedidos.";
+          
+          const tokens = await getUserTokens(doc.id);
+          if (tokens.length > 0) {
+            await sendPush(tokens, { title, body }, { tag: "auto-disconnect", url: "#/delivery" });
+          }
+          logger.info(`Auto-disconnected driver ${doc.id}`);
+        }
+      }
+    }
+  } catch (e) {
+    logger.error("Error in autoDisconnectDrivers:", e);
+  }
+});
+
+exports.checkWeatherPeriodic = onSchedule("*/15 * * * *", async (event) => {
+  try {
+    const settingsSnap = await db.collection("settings").doc("global").get();
+    const globalSettings = settingsSnap.exists ? settingsSnap.data() : {};
+    const rainMode = globalSettings.rainMode || "auto";
+
+    let isRaining = false;
+    if (rainMode === "on") {
+      isRaining = true;
+    } else if (rainMode === "off") {
+      isRaining = false;
+    } else {
+      isRaining = await checkIfRainingInMagdalena();
+    }
+
+    const weatherRef = db.collection("settings").doc("weather");
+    const weatherSnap = await weatherRef.get();
+    const wasRaining = weatherSnap.exists ? weatherSnap.data().isRaining : false;
+
+    if (isRaining !== wasRaining) {
+      await weatherRef.set({ isRaining, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      
+      if (isRaining) {
+        const msgs = globalSettings.pushMessages || {};
+        const title = msgs?.rain?.title || "🌧 ¡Empezó a llover!";
+        const body = msgs?.rain?.body || "El recargo por lluvia está activo. ¡Conducí con cuidado!";
+        
+        // Notify all deliveries
+        const driverDocs = await getAllDeliveryDrivers();
+        let allDriverTokens = [];
+        for (const doc of driverDocs) {
+           const t = await getUserTokens(doc.id);
+           allDriverTokens = allDriverTokens.concat(t);
+        }
+        allDriverTokens = [...new Set(allDriverTokens)];
+
+        if (allDriverTokens.length > 0) {
+          await sendPush(allDriverTokens, { title, body }, { tag: "rain-surcharge", url: "#/delivery" });
+        }
+      }
+    }
+  } catch (e) {
+    logger.error("Error in checkWeatherPeriodic:", e);
+  }
+});
+
+exports.onOfferCreated = onDocumentCreated("offers/{offerId}", async (event) => {
+  const offer = event.data.data();
+  if (!offer) return;
+  const title = offer.title || "¡Nueva Oferta!";
+  const body = offer.description || "Aprovechá esta oferta especial.";
+  try {
+    const tokensSnap = await db.collectionGroup("fcmTokens").get();
+    const tokens = [...new Set(tokensSnap.docs.map(d => d.data().token).filter(Boolean))];
+    
+    if (tokens.length > 0) {
+      await sendPush(tokens, { title, body }, { tag: `offer-${event.params.offerId}`, url: "#/" });
+    }
+  } catch (e) {
+    logger.error("Error sending offer push:", e);
+  }
+});
+
+exports.onAdCreated = onDocumentCreated("ads/{adId}", async (event) => {
+  const ad = event.data.data();
+  if (!ad) return;
+  const title = ad.title || "¡Nueva Publicidad!";
+  const body = ad.body || "Mirá lo que hay de nuevo para vos.";
+  try {
+    const tokensSnap = await db.collectionGroup("fcmTokens").get();
+    const tokens = [...new Set(tokensSnap.docs.map(d => d.data().token).filter(Boolean))];
+    
+    if (tokens.length > 0) {
+      await sendPush(tokens, { title, body }, { tag: `ad-${event.params.adId}`, url: "#/" });
+    }
+  } catch (e) {
+    logger.error("Error sending ad push:", e);
+  }
+});
+
+exports.onSettingsUpdated = onDocumentUpdated("settings/global", async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  const msgs = after.pushMessages || {};
+  
+  try {
+    // Check Night Surcharge
+    if (!before.nightSurchargeConfig?.enabled && after.nightSurchargeConfig?.enabled) {
+      const title = msgs.night?.title || "🌙 Recargo Nocturno Activo";
+      const body = msgs.night?.body || "Comenzó el horario de recargo nocturno.";
+      
+      const driverDocs = await getAllDeliveryDrivers();
+      let allDriverTokens = [];
+      for (const doc of driverDocs) {
+         const t = await getUserTokens(doc.id);
+         allDriverTokens = allDriverTokens.concat(t);
+      }
+      allDriverTokens = [...new Set(allDriverTokens)];
+      
+      if (allDriverTokens.length > 0) {
+        await sendPush(allDriverTokens, { title, body }, { tag: "night-surcharge", url: "#/delivery" });
+      }
+    }
+    
+    // Check Driver Incentive
+    if (!before.driverIncentiveConfig?.enabled && after.driverIncentiveConfig?.enabled) {
+      const title = msgs.incentive?.title || "🚀 ¡Incentivo Activo!";
+      const body = msgs.incentive?.body || "Salí a repartir ahora y ganá un extra por cada pedido.";
+      
+      const driverDocs = await getAllDeliveryDrivers();
+      let allDriverTokens = [];
+      for (const doc of driverDocs) {
+         const t = await getUserTokens(doc.id);
+         allDriverTokens = allDriverTokens.concat(t);
+      }
+      allDriverTokens = [...new Set(allDriverTokens)];
+      
+      if (allDriverTokens.length > 0) {
+        await sendPush(allDriverTokens, { title, body }, { tag: "incentive-surcharge", url: "#/delivery" });
+      }
+    }
+  } catch (e) {
+    logger.error("Error sending settings push:", e);
+  }
+});
 
 
+// ═══════════════════════════════════════════════════
+// SCHEDULED TRIPS - Periodic Checker (every 10 min)
+// ═══════════════════════════════════════════════════
+exports.checkScheduledTrips = onSchedule({
+  schedule: "every 10 minutes",
+  timeZone: "America/Argentina/Buenos_Aires",
+  memory: "256Mi"
+}, async (event) => {
+  try {
+    const now = admin.firestore.Timestamp.now();
+    const nowMs = now.toMillis();
+    
+    // Window: trips scheduled between now and 2h10m from now (to catch within each 10-min cycle)
+    const twoHoursFromNow = new admin.firestore.Timestamp(
+      Math.floor((nowMs + 2 * 60 * 60 * 1000) / 1000), 0
+    );
+    const twoHoursTenFromNow = new admin.firestore.Timestamp(
+      Math.floor((nowMs + 2 * 60 * 60 * 1000 + 10 * 60 * 1000) / 1000), 0
+    );
+
+    // 1. Send 2-hour reminders to assigned drivers
+    const reminderSnap = await db.collection("orders")
+      .where("status", "==", "scheduled")
+      .where("isTrip", "==", true)
+      .where("scheduledFor", ">=", twoHoursFromNow)
+      .where("scheduledFor", "<=", twoHoursTenFromNow)
+      .get();
+
+    for (const doc of reminderSnap.docs) {
+      const trip = doc.data();
+      if (!trip.driverId) continue;
+      if (trip._reminderSent) continue; // Already sent
+
+      const tokens = await getUserTokens(trip.driverId);
+      if (tokens.length > 0) {
+        const scheduledTime = trip.scheduledFor.toDate();
+        const timeStr = scheduledTime.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+        
+        await sendPush(tokens, {
+          title: "⏰ Recordatorio: Viaje en 2 horas",
+          body: `Tenés un viaje programado a las ${timeStr}. Destino: ${trip.deliveryAddress || "sin dirección"}.`
+        }, { tag: "scheduled-trip-reminder", url: "#/delivery" });
+      }
+
+      // Also notify the passenger
+      if (trip.userId) {
+        const userTokens = await getUserTokens(trip.userId);
+        if (userTokens.length > 0) {
+          await sendPush(userTokens, {
+            title: "🚗 Tu viaje programado es en 2 horas",
+            body: `Preparate: tu viaje hacia ${trip.deliveryAddress || "tu destino"} comienza pronto.`
+          }, { tag: "scheduled-trip-passenger-reminder", url: `#/pedido/${doc.id}` });
+        }
+      }
+
+      // Mark as reminded to avoid duplicate sends
+      await doc.ref.update({ _reminderSent: true });
+      logger.info(`Sent 2h reminder for scheduled trip ${doc.id}`);
+    }
+
+    // 2. Activate trips whose scheduled time has arrived (convert to 'ready')
+    const activateSnap = await db.collection("orders")
+      .where("status", "==", "scheduled")
+      .where("isTrip", "==", true)
+      .where("scheduledFor", "<=", now)
+      .get();
+
+    for (const doc of activateSnap.docs) {
+      const trip = doc.data();
+      
+      if (trip.driverId) {
+        // Has an assigned driver → set status to 'ready' so the driver can start
+        await doc.ref.update({ status: "ready" });
+        
+        const tokens = await getUserTokens(trip.driverId);
+        if (tokens.length > 0) {
+          await sendPush(tokens, {
+            title: "🚗 ¡Tu viaje programado comienza AHORA!",
+            body: `Dirigite a buscar al pasajero en: ${trip.pickupAddress || "la dirección indicada"}.`
+          }, { tag: "scheduled-trip-start", url: "#/delivery" });
+        }
+        logger.info(`Activated scheduled trip ${doc.id} (has driver ${trip.driverId})`);
+      } else {
+        // No driver assigned → cancel and notify user
+        await doc.ref.update({ status: "cancelled", cancelReason: "No se encontró chofer disponible para el viaje programado." });
+        
+        if (trip.userId) {
+          const userTokens = await getUserTokens(trip.userId);
+          if (userTokens.length > 0) {
+            await sendPush(userTokens, {
+              title: "❌ Viaje programado cancelado",
+              body: "Lamentablemente no se encontró un chofer disponible para tu viaje. Intentá solicitar uno nuevo."
+            }, { tag: "scheduled-trip-cancelled", url: "#/viajes" });
+          }
+
+          // Create notification in Firestore for the user
+          await db.collection("users").doc(trip.userId).collection("notifications").add({
+            title: "❌ Viaje programado cancelado",
+            body: "No se encontró chofer disponible para tu viaje programado. Por favor, intentá solicitar uno nuevo.",
+            type: "scheduled_trip_cancelled",
+            orderId: doc.id,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            read: false
+          });
+        }
+        logger.info(`Cancelled unassigned scheduled trip ${doc.id}`);
+      }
+    }
+
+    logger.info(`Scheduled trip check completed. Reminders: ${reminderSnap.size}, Activations: ${activateSnap.size}`);
+  } catch (err) {
+    logger.error("Error in checkScheduledTrips:", err);
+  }
+});
+
+/**
+ * Trigger: Nuevo producto creado en el Marketplace → Notificar a Administradores
+ */
+exports.onMarketplaceProductCreated = onDocumentCreated("marketplace_products/{productId}", async (event) => {
+  const product = event.data.data();
+  if (!product) return;
+
+  // Solo notificar si se crea en estado pendiente
+  if (product.status === "pending") {
+    try {
+      const adminTokens = await getAdminTokens();
+      if (adminTokens.length > 0) {
+        await sendPush(adminTokens, {
+          title: "🏷️ Nueva publicación pendiente",
+          body: `El producto "${product.title}" requiere aprobación de moderación.`
+        }, { tag: `moderation-product-${event.params.productId}`, url: "#/admin/marketplace" });
+      }
+      logger.info(`Admin notification push sent for pending product ${event.params.productId}`);
+    } catch (err) {
+      logger.error("Error sending marketplace moderation push notification:", err);
+    }
+  }
+});
 
 
 

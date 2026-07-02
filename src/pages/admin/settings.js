@@ -12,6 +12,39 @@ export async function renderAdminSettings() {
   const content = document.getElementById('app-content');
   if (!content) return;
 
+  window.showDeliveryConfigHelp = (type) => {
+    let title = '';
+    let description = '';
+    switch(type) {
+      case 'base':
+        title = 'Costo Base';
+        description = 'Es la tarifa inicial y fija que se aplica a cada envío, independientemente de la distancia recorrida. Se sumará al costo calculado por distancia.';
+        break;
+      case 'min':
+        title = 'Costo Mínimo';
+        description = 'Es el precio mínimo total que pagará el cliente por el envío. Si el cálculo de (Costo Base + Kilómetros * Tarifa por KM) da un valor menor a este costo mínimo, se cobrará automáticamente el costo mínimo.';
+        break;
+      case 'km':
+        title = 'Extra por KM';
+        description = 'Monto adicional que se suma por cada kilómetro recorrido desde el origen del comercio hasta el domicilio de entrega.';
+        break;
+      case 'stop':
+        title = 'Parada Extra';
+        description = 'Cargo que se añade automáticamente al costo de envío por cada comercio intermedio o destino adicional agregado al mismo pedido (pedidos combinados).';
+        break;
+      case 'rain':
+        title = 'Recargo por Lluvia';
+        description = 'Monto adicional fijo que se aplica al costo de envío durante días de lluvia o mal clima para incentivar a los repartidores disponibles.';
+        break;
+    }
+    showModal({
+      title: `<div style="display:flex;align-items:center;gap:8px;">💡 ${title}</div>`,
+      height: 'auto',
+      content: `<div style="font-size:14px;color:var(--color-text-secondary);line-height:1.6;padding:12px 0;">${description}</div>`,
+      footer: `<button onclick="closeModal()" class="btn btn-primary" style="width:100%;height:46px;border-radius:12px;font-weight:800;">¡Entendido!</button>`
+    });
+  };
+
   if (!isAdmin()) {
     content.innerHTML = `<div class="empty-state"><p>No tenés acceso a esta sección.</p></div>`;
     return;
@@ -20,7 +53,7 @@ export async function renderAdminSettings() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;width:100%;position:fixed;top:0;left:0;z-index:1000;overflow:hidden;background:var(--color-bg);">
       <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
@@ -34,7 +67,7 @@ export async function renderAdminSettings() {
       </div>
 
       <!-- Scrollable Content -->
-      <div style="flex:1;overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch;">
+      <div style="flex:1;overflow-y:auto;padding:20px 20px calc(20px + env(safe-area-inset-bottom, 0px));-webkit-overflow-scrolling:touch;">
         <div style="display:flex;flex-direction:column;gap:16px;padding-bottom:40px;">
 
           <!-- 1. Logistics Section -->
@@ -47,30 +80,54 @@ export async function renderAdminSettings() {
               </div>
               <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
             </button>
-            <div id="section-logistics" class="settings-section-body" style="display:none;padding:0 20px 20px;display:flex;flex-direction:column;gap:18px;">
+            <div id="section-logistics" class="settings-section-body" style="display:none;padding:0 20px 20px;">
+              <div style="display:flex;flex-direction:column;gap:18px;">
               <!-- Delivery General -->
               <div style="border-bottom:1px dashed var(--color-border-light);padding-bottom:14px;">
                 <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Delivery General</h4>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
                   <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Base ($)</label>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
+                      Costo Base ($)
+                      <button type="button" onclick="showDeliveryConfigHelp('base')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
+                    </label>
                     <input type="number" class="input" id="global-delivery-base" value="${getState().deliveryBasePrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                   </div>
                   <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Mín. ($)</label>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
+                      Costo Mín. ($)
+                      <button type="button" onclick="showDeliveryConfigHelp('min')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
+                    </label>
                     <input type="number" class="input" id="global-delivery-min" value="${getState().deliveryMinPrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                   </div>
                   <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Extra por KM ($)</label>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
+                      Extra por KM ($)
+                      <button type="button" onclick="showDeliveryConfigHelp('km')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
+                    </label>
                     <input type="number" class="input" id="global-delivery-km" value="${getState().deliveryPricePerKm || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                   </div>
                   <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Parada Extra ($)</label>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
+                      Parada Extra ($)
+                      <button type="button" onclick="showDeliveryConfigHelp('stop')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
+                    </label>
                     <input type="number" class="input" id="global-delivery-extra-stop" value="${getState().deliveryExtraStopFee || 500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                   </div>
-                  <div style="grid-column: span 2;">
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Recargo por Lluvia ($)</label>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
+                      Recargo por Lluvia ($)
+                      <button type="button" onclick="showDeliveryConfigHelp('rain')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
+                    </label>
                     <input type="number" class="input" id="global-delivery-rain-surcharge" value="${getState().deliveryRainSurcharge || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Modo del Recargo</label>
+                    <select id="global-rain-mode" class="input" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:14px;background:var(--color-surface);border:1px solid var(--color-border-light);">
+                      <option value="auto" ${getState().rainMode === 'auto' ? 'selected' : ''}>Automático (API)</option>
+                      <option value="on" ${getState().rainMode === 'on' ? 'selected' : ''}>Siempre Activo (Forzado)</option>
+                      <option value="off" ${getState().rainMode === 'off' ? 'selected' : ''}>Siempre Desactivado (Forzado)</option>
+                    </select>
                   </div>
                 </div>
               </div>
@@ -103,6 +160,7 @@ export async function renderAdminSettings() {
                     <input type="number" class="input" id="global-trip-km" value="${getState().tripPricePerKm !== undefined ? getState().tripPricePerKm : 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                   </div>
                 </div>
+              </div>
               </div>
             </div>
           </div>
@@ -137,7 +195,102 @@ export async function renderAdminSettings() {
             </div>
           </div>
 
-          <!-- 3. GoPoints Section -->
+          <!-- 3. Dynamic Schedule Pricing -->
+          <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;overflow:hidden;">
+            <button class="settings-section-toggle" data-target="section-dynamic-pricing" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
+              <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#e0e7ff,#c7d2fe);color:#4f46e5;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${icon('clock', 22)}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-family:var(--font-display);font-size:15px;font-weight:900;color:var(--color-text);letter-spacing:-0.01em;">Tarifas Dinámicas (Horarios)</div>
+                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;font-weight:600;">Recargos nocturnos e incentivos a repartidores</div>
+              </div>
+              <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
+            </button>
+            <div id="section-dynamic-pricing" class="settings-section-body" style="display:none;padding:0 20px 20px;">
+              
+              <style>
+                .settings-switch { position: relative; display: inline-block; width: 44px; height: 24px; margin: 0; flex-shrink: 0; }
+                .settings-switch input { opacity: 0; width: 0; height: 0; }
+                .settings-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s; border-radius: 24px; }
+                .settings-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+                .settings-switch input:checked + .settings-slider { background-color: var(--color-primary); }
+                .settings-switch input:checked + .settings-slider:before { transform: translateX(20px); }
+              </style>
+              <div style="border-top:1px dashed var(--color-border-light);padding-top:18px;margin-bottom:20px;">
+                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin-bottom:14px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Recargo Nocturno (Lo paga el cliente)</h4>
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <span style="font-size:13px;font-weight:800;color:var(--color-text);">Activar Recargo Nocturno</span>
+                    <label class="settings-switch">
+                      <input type="checkbox" id="global-night-surcharge-enabled" ${getState().nightSurchargeConfig?.enabled ? 'checked' : ''}>
+                      <span class="settings-slider"></span>
+                    </label>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Hora Inicio (ej 00:00)</label>
+                      <input type="time" class="input" id="global-night-surcharge-start" value="${getState().nightSurchargeConfig?.start || '00:00'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;" />
+                    </div>
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Hora Fin (ej 06:00)</label>
+                      <input type="time" class="input" id="global-night-surcharge-end" value="${getState().nightSurchargeConfig?.end || '06:00'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;" />
+                    </div>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Tipo</label>
+                      <select class="input" id="global-night-surcharge-type" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;background:var(--color-surface);">
+                        <option value="fixed" ${getState().nightSurchargeConfig?.type === 'fixed' ? 'selected' : ''}>Monto Fijo ($)</option>
+                        <option value="percentage" ${getState().nightSurchargeConfig?.type === 'percentage' ? 'selected' : ''}>Porcentaje (%)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Valor</label>
+                      <input type="number" class="input" id="global-night-surcharge-value" value="${getState().nightSurchargeConfig?.value || 0}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="border-top:1px dashed var(--color-border-light);padding-top:18px;">
+                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin-bottom:14px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Incentivo Repartidor (Lo absorbe GoDelivery)</h4>
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                    <span style="font-size:13px;font-weight:800;color:var(--color-text);">Activar Incentivo</span>
+                    <label class="settings-switch">
+                      <input type="checkbox" id="global-driver-incentive-enabled" ${getState().driverIncentiveConfig?.enabled ? 'checked' : ''}>
+                      <span class="settings-slider"></span>
+                    </label>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Hora Inicio (ej 20:00)</label>
+                      <input type="time" class="input" id="global-driver-incentive-start" value="${getState().driverIncentiveConfig?.start || '20:00'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;" />
+                    </div>
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Hora Fin (ej 23:59)</label>
+                      <input type="time" class="input" id="global-driver-incentive-end" value="${getState().driverIncentiveConfig?.end || '23:59'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;" />
+                    </div>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Tipo</label>
+                      <select class="input" id="global-driver-incentive-type" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;background:var(--color-surface);">
+                        <option value="fixed" ${getState().driverIncentiveConfig?.type === 'fixed' ? 'selected' : ''}>Monto Fijo ($)</option>
+                        <option value="percentage" ${getState().driverIncentiveConfig?.type === 'percentage' ? 'selected' : ''}>Porcentaje (%)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Valor extra a pagar</label>
+                      <input type="number" class="input" id="global-driver-incentive-value" value="${getState().driverIncentiveConfig?.value || 0}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:14px;" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+            </div>
+          </div>
+
+          <!-- 4. GoPoints Section -->
           <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;overflow:hidden;">
             <button class="settings-section-toggle" data-target="section-gopoints" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
               <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#fef3c7,#fde68a);color:#d97706;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${icon('sparkles', 22)}</div>
@@ -266,6 +419,71 @@ export async function renderAdminSettings() {
             </div>
           </div>
 
+          <!-- 5. Push Notifications Texts -->
+          <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;overflow:hidden;margin-bottom:20px;">
+            <button class="settings-section-toggle" data-target="section-push-texts" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
+              <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#e0e7ff,#c7d2fe);color:#4f46e5;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${icon('bell', 22)}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-family:var(--font-display);font-size:15px;font-weight:900;color:var(--color-text);letter-spacing:-0.01em;">Textos de Notificaciones Push</div>
+                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;font-weight:600;">Personalizar mensajes automáticos</div>
+              </div>
+              <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
+            </button>
+            <div id="section-push-texts" class="settings-section-body" style="display:none;padding:0 20px 20px;">
+              <div style="display:grid;grid-template-columns:1fr;gap:14px;">
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Desconexión por Inactividad</label>
+                  <input type="text" id="push-text-disconnect-title" placeholder="Título (ej: Sesión Cerrada)" value="${getState().pushMessages?.disconnect?.title || 'Zzz... Sesión pausada'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:13px;margin-bottom:8px;border:1px solid var(--color-border-light);background:var(--color-surface);" />
+                  <textarea id="push-text-disconnect-body" placeholder="Cuerpo del mensaje" style="width:100%;height:56px;border-radius:10px;padding:8px 10px;font-weight:500;font-size:12px;resize:none;line-height:1.4;border:1px solid var(--color-border-light);background:var(--color-surface);">${getState().pushMessages?.disconnect?.body || 'Te desconectamos porque pasó 1 hora sin que tomaras pedidos.'}</textarea>
+                </div>
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Nueva Oferta / Anuncio</label>
+                  <input type="text" id="push-text-offer-title" placeholder="Título" value="${getState().pushMessages?.offer?.title || '¡Nueva Oferta!'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:13px;margin-bottom:8px;border:1px solid var(--color-border-light);background:var(--color-surface);" />
+                  <textarea id="push-text-offer-body" placeholder="Cuerpo del mensaje" style="width:100%;height:56px;border-radius:10px;padding:8px 10px;font-weight:500;font-size:12px;resize:none;line-height:1.4;border:1px solid var(--color-border-light);background:var(--color-surface);">${getState().pushMessages?.offer?.body || 'Aprovechá esta nueva oferta en GoDelivery.'}</textarea>
+                </div>
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Recargo por Lluvia</label>
+                  <input type="text" id="push-text-rain-title" placeholder="Título" value="${getState().pushMessages?.rain?.title || '🌧 ¡Empezó a llover!'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:13px;margin-bottom:8px;border:1px solid var(--color-border-light);background:var(--color-surface);" />
+                  <textarea id="push-text-rain-body" placeholder="Cuerpo del mensaje" style="width:100%;height:56px;border-radius:10px;padding:8px 10px;font-weight:500;font-size:12px;resize:none;line-height:1.4;border:1px solid var(--color-border-light);background:var(--color-surface);">${getState().pushMessages?.rain?.body || 'El recargo por lluvia está activo. ¡Conducí con cuidado!'}</textarea>
+                </div>
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Recargo Nocturno</label>
+                  <input type="text" id="push-text-night-title" placeholder="Título" value="${getState().pushMessages?.night?.title || '🌙 Recargo Nocturno Activo'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:13px;margin-bottom:8px;border:1px solid var(--color-border-light);background:var(--color-surface);" />
+                  <textarea id="push-text-night-body" placeholder="Cuerpo del mensaje" style="width:100%;height:56px;border-radius:10px;padding:8px 10px;font-weight:500;font-size:12px;resize:none;line-height:1.4;border:1px solid var(--color-border-light);background:var(--color-surface);">${getState().pushMessages?.night?.body || 'Comenzó el horario de recargo nocturno.'}</textarea>
+                </div>
+                <div style="background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                  <label style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px;display:block;font-weight:700;text-transform:uppercase;">Incentivo Extra</label>
+                  <input type="text" id="push-text-incentive-title" placeholder="Título" value="${getState().pushMessages?.incentive?.title || '🚀 ¡Incentivo Activo!'}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:13px;margin-bottom:8px;border:1px solid var(--color-border-light);background:var(--color-surface);" />
+                  <textarea id="push-text-incentive-body" placeholder="Cuerpo del mensaje" style="width:100%;height:56px;border-radius:10px;padding:8px 10px;font-weight:500;font-size:12px;resize:none;line-height:1.4;border:1px solid var(--color-border-light);background:var(--color-surface);">${getState().pushMessages?.incentive?.body || 'Salí a repartir ahora y ganá un extra por cada pedido.'}</textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5.5 Brand Theme Section -->
+          <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;overflow:hidden;margin-bottom:16px;">
+            <button class="settings-section-toggle" data-target="section-brand-theme" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
+              <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#e2e8f0,#cbd5e1);color:#1e293b;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${icon('settings', 22)}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-family:var(--font-display);font-size:15px;font-weight:900;color:var(--color-text);letter-spacing:-0.01em;">Tema de Marca (Colores)</div>
+                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;font-weight:600;">Personalizar el color de la aplicación</div>
+              </div>
+              <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
+            </button>
+            <div id="section-brand-theme" class="settings-section-body" style="display:none;padding:0 20px 20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);">
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                  <span style="font-size:13px;font-weight:800;color:var(--color-text);">Activar Tema Oscuro de Marca</span>
+                  <span style="font-size:11px;color:var(--color-text-secondary);font-weight:500;">Reemplaza todos los detalles rojos de la app por el color oscuro (Negro/Slate)</span>
+                </div>
+                <label class="settings-switch">
+                  <input type="checkbox" id="global-use-dark-brand-theme" ${getState().useDarkBrandTheme ? 'checked' : ''}>
+                  <span class="settings-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <!-- 6. Danger Zone -->
           <div class="settings-section" style="background:rgba(239,68,68,0.03);border:1.5px solid rgba(239,68,68,0.15);border-radius:24px;overflow:hidden;">
             <button class="settings-section-toggle" data-target="section-danger" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
@@ -335,6 +553,7 @@ export async function renderAdminSettings() {
     const deliveryPricePerKm = parseFloat(document.getElementById('global-delivery-km').value) || 0;
     const deliveryExtraStopFee = parseFloat(document.getElementById('global-delivery-extra-stop').value) || 0;
     const deliveryRainSurcharge = parseFloat(document.getElementById('global-delivery-rain-surcharge').value) || 0;
+    const rainMode = document.getElementById('global-rain-mode').value || 'auto';
     const tripBasePrice = parseFloat(document.getElementById('global-trip-base').value) || 0;
     const tripMinPrice = parseFloat(document.getElementById('global-trip-min').value) || 0;
     const tripPricePerKm = parseFloat(document.getElementById('global-trip-km').value) || 0;
@@ -345,6 +564,7 @@ export async function renderAdminSettings() {
     const pointsPerDollar = (parseFloat(document.getElementById('global-points-rate').value) || 1) / 100;
     const dollarPerPoint = parseFloat(document.getElementById('global-point-value').value) || 1;
     const referralPoints = parseFloat(document.getElementById('global-referral-points').value) || 500;
+    const useDarkBrandTheme = document.getElementById('global-use-dark-brand-theme').checked;
 
     btn.disabled = true;
     btn.innerHTML = icon('loader', 16, 'animate-spin');
@@ -376,11 +596,36 @@ export async function renderAdminSettings() {
         });
       });
 
+      const nightSurchargeConfig = {
+        enabled: document.getElementById('global-night-surcharge-enabled').checked,
+        start: document.getElementById('global-night-surcharge-start').value,
+        end: document.getElementById('global-night-surcharge-end').value,
+        type: document.getElementById('global-night-surcharge-type').value,
+        value: parseFloat(document.getElementById('global-night-surcharge-value').value) || 0
+      };
+
+      const driverIncentiveConfig = {
+        enabled: document.getElementById('global-driver-incentive-enabled').checked,
+        start: document.getElementById('global-driver-incentive-start').value,
+        end: document.getElementById('global-driver-incentive-end').value,
+        type: document.getElementById('global-driver-incentive-type').value,
+        value: parseFloat(document.getElementById('global-driver-incentive-value').value) || 0
+      };
+
+      const pushMessages = {
+        disconnect: { title: document.getElementById('push-text-disconnect-title').value, body: document.getElementById('push-text-disconnect-body').value },
+        offer: { title: document.getElementById('push-text-offer-title').value, body: document.getElementById('push-text-offer-body').value },
+        rain: { title: document.getElementById('push-text-rain-title').value, body: document.getElementById('push-text-rain-body').value },
+        night: { title: document.getElementById('push-text-night-title').value, body: document.getElementById('push-text-night-body').value },
+        incentive: { title: document.getElementById('push-text-incentive-title').value, body: document.getElementById('push-text-incentive-body').value }
+      };
+
       await setDoc(doc(db, 'settings', 'global'), {
         deliveryBasePrice, deliveryMinPrice, deliveryPricePerKm, deliveryExtraStopFee, deliveryRainSurcharge,
         tripBasePrice, tripMinPrice, tripPricePerKm,
         commissionRate, appUsageFeeRate, pointsPerDollar, dollarPerPoint, referralPoints, weeklyChallenges,
-        favorPurchaseFee, whatsappPayments
+        favorPurchaseFee, whatsappPayments, nightSurchargeConfig, driverIncentiveConfig, pushMessages,
+        rainMode, useDarkBrandTheme
       }, { merge: true });
 
       await setDoc(doc(db, 'settings', 'levels'), currentLevels);
@@ -402,8 +647,22 @@ export async function renderAdminSettings() {
       setState('weeklyChallenges', weeklyChallenges);
       setState('favorPurchaseFee', favorPurchaseFee);
       setState('whatsappPayments', whatsappPayments);
+      setState('nightSurchargeConfig', nightSurchargeConfig);
+      setState('driverIncentiveConfig', driverIncentiveConfig);
+      setState('pushMessages', pushMessages);
+      setState('useDarkBrandTheme', useDarkBrandTheme);
 
-      showToast('Configuración guardada', 'success');
+      showModal({
+        title: '<div style="text-align:center;">¡Cambios Guardados!</div>',
+        height: 'auto',
+        content: `
+          <div style="text-align: center; padding: 20px 10px;">
+            <div style="color: #10b981; margin-bottom: 16px;">${icon('checkCircle', 56)}</div>
+            <p style="font-size: 15px; color: var(--color-text-secondary); margin: 0;">La configuración global se ha actualizado correctamente en todos los dispositivos.</p>
+          </div>
+        `,
+        footer: `<button onclick="this.closest('.modal').querySelector('.modal-close').click()" class="btn btn-primary" style="width:100%; border-radius:12px; height:48px; font-weight:800; font-size: 15px;">Genial</button>`
+      });
     } catch (e) {
       console.error('Error saving settings:', e);
       showToast('Error al guardar', 'error');

@@ -2,27 +2,58 @@
 import { registerRoutes, initRouter, routerReady } from './router.js';
 import { initAuth, isDelivery, isComercio } from './auth.js';
 import { initTheme, loadCart, getState, initSettings } from './state.js';
-import { initHeader } from './components/header.js';
-import { initNavbar } from './components/navbar.js';
-import { initActiveOrderBanner } from './components/active-order-banner.js';
-import { initDeliveryMonitor } from './components/delivery-monitor.js';
-import { initCommerceMonitor } from './components/commerce-monitor.js';
 import { initPushNotifications } from './utils/notifications.js';
-import { initChatNotifier } from './components/chat-notifier.js';
-import { initNotificationsDrawer } from './components/notifications-drawer.js';
-import { clearAllBanners } from './components/banner-manager.js';
-import { ensureAppInstalled } from './components/install-lock.js';
 import { AudioManager } from './utils/audio-manager.js';
 import { db } from './firebase.js';
 import { icon } from './utils/icons.js';
-import { evictExpiredCache } from './utils/firestore-cache.js';
-import { trackUserVisit } from './utils/analytics.js';
+import { initScrollAnimations } from './utils/scroll-animations.js';
 
 // Initialize audio system
 AudioManager.init();
 
 // Initialize app
 async function init() {
+  if (window.Capacitor) {
+    document.body.classList.add('platform-capacitor');
+    
+    // Hide native splash screen immediately to transition to the animated HTML splash / login wall
+    import('@capacitor/splash-screen').then(({ SplashScreen }) => {
+      SplashScreen.hide();
+    }).catch(err => console.warn('GoDelivery: Failed to hide native splash screen:', err));
+    
+    // Check for App Updates in Play Store (Android)
+    import('@capawesome/capacitor-app-update').then(async ({ AppUpdate }) => {
+      try {
+        const result = await AppUpdate.getAppUpdateInfo();
+        if (result.updateAvailability === 2) { // 2 = UPDATE_AVAILABLE
+          console.log('[Version] Mandatory update found on Play Store. Forcing update...');
+          await AppUpdate.performImmediateUpdate();
+        }
+      } catch (err) {
+        console.warn('GoDelivery: Failed to check for Play Store updates:', err);
+      }
+    }).catch(err => console.warn('Failed to load AppUpdate plugin:', err));
+
+    import('@capacitor/app').then(({ App }) => {
+      App.addListener('backButton', () => {
+        const hash = window.location.hash || '#/';
+        const isHome = hash === '#/' || hash === '#' || hash === '' || hash === '#/profile' || hash === '#/notifications' || hash === '#/cart' || hash === '#/gofavores';
+        
+        // Close modal first if any is open
+        const openModal = document.querySelector('.modal-container-v2') || document.querySelector('.modal-container');
+        if (openModal) {
+          import('./components/modal.js').then(m => m.closeModal());
+          return;
+        }
+
+        if (!isHome) {
+          window.history.back();
+        } else {
+          App.exitApp();
+        }
+      });
+    }).catch(err => console.warn('Failed to load Capacitor App plugin:', err));
+  }
   // Seed Database: Pizzería category and Dany's Pizza categories
   try {
     const runOnceKey = 'gd_seed_pizzeria_danys_pizza_2026_06_11';
@@ -179,16 +210,19 @@ async function init() {
   import('./components/install-prompt.js');
 
   // Enforce App Installation
-  ensureAppInstalled();
+  import('./components/install-lock.js').then(m => m.ensureAppInstalled());
 
   // Run cache eviction sweep
-  evictExpiredCache();
+  import('./utils/firestore-cache.js').then(m => m.evictExpiredCache());
 
   // Theme
   initTheme();
 
+  // Scroll animations
+  initScrollAnimations();
+
   // Clear any leftover banners
-  clearAllBanners();
+  import('./components/banner-manager.js').then(m => m.clearAllBanners());
 
   // Load saved cart
   loadCart();
@@ -202,18 +236,20 @@ async function init() {
     const { isAdmin } = await import('./auth.js');
     if (isAdmin()) {
       try {
-        const { doc, getDoc } = await import('firebase/firestore');
+        const { doc, getDoc, updateDoc } = await import('firebase/firestore');
         const { db } = await import('./firebase.js');
         const snap = await getDoc(doc(db, 'comercios', comercioId));
         if (snap.exists()) {
-          const name = (snap.data().name || '').toLowerCase();
+          const data = snap.data();
+          const name = (data.name || '').toLowerCase();
           if (name.includes('go!') && name.includes('market')) {
-            console.log(`[Admin Ownership Sync] Syncing ownerId for Go Market (${comercioId}) to admin ${user.uid}`);
-            const res = await fetch(`https://us-central1-godelivery-magdalena.cloudfunctions.net/setCommerceOwner?comercioId=${comercioId}&ownerId=${user.uid}`);
-            const text = await res.text();
-            console.log('[Admin Ownership Sync] Result:', text);
-          } else {
-            console.log(`[Admin Ownership Sync] Skipping sync for non-GoMarket commerce (${comercioId}: ${snap.data().name})`);
+            if (data.ownerId !== user.uid) {
+              console.log(`[Admin Ownership Sync] Syncing ownerId for Go Market (${comercioId}) to admin ${user.uid}`);
+              // Fire and forget so it doesn't block loading
+              updateDoc(doc(db, 'comercios', comercioId), { ownerId: user.uid })
+                .then(() => console.log('[Admin Ownership Sync] Result: Success'))
+                .catch(err => console.warn('[Admin Ownership Sync] Update Failed:', err));
+            }
           }
         }
       } catch (err) {
@@ -427,6 +463,7 @@ async function init() {
     '/': (c) => import('./pages/home.js').then(m => m.renderHome(c)),
     '/comercio/:id': (c) => import('./pages/comercio.js').then(m => m.renderComercio(c)),
     '/cart': (c) => import('./pages/cart.js').then(m => m.renderCart(c)),
+    '/mis-chats': (c) => import('./pages/mis-chats.js').then(m => m.renderMisChats(c)),
     '/profile': (c) => import('./pages/profile.js').then(m => m.renderProfile(c)),
     '/profile/orders': (c) => import('./pages/profile/orders.js').then(m => m.renderProfileOrders(c)),
     '/admin': (c) => import('./pages/admin/dashboard.js').then(m => m.renderAdminDashboard(c)),
@@ -541,7 +578,21 @@ async function init() {
     '/pedido/:id': (c) => {
       const { id } = (window.location.hash.match(/#\/pedido\/([^/]+)/) || [])[1] ? { id: window.location.hash.split('/').pop() } : { id: null };
       return import('./pages/order-tracking.js').then(m => m.renderOrderTracking(id, c));
-    }
+    },
+    '/marketplace': (c) => import('./pages/marketplace.js').then(m => m.renderMarketplace(c)),
+    '/marketplace/publish': (c) => import('./pages/marketplace-publish.js').then(m => m.renderPublishProduct(c)),
+    '/marketplace/product/:id': (c) => {
+      const parts = window.location.hash.split('/');
+      const id = parts[parts.length - 1]?.split('?')[0];
+      return import('./pages/marketplace-detail.js').then(m => m.renderProductDetail(id, c));
+    },
+    '/marketplace/chat/:id': (c) => {
+      const parts = window.location.hash.split('/');
+      const id = parts[parts.length - 1]?.split('?')[0];
+      return import('./pages/marketplace-chat.js').then(m => m.renderMarketplaceChat(id, c));
+    },
+    '/profile/publications': (c) => import('./pages/marketplace-manage.js').then(m => m.renderMyPublications(c)),
+    '/admin/marketplace': (c) => import('./pages/admin/marketplace.js').then(m => m.renderAdminMarketplace(c))
   });
 
   // Handle startup redirect query parameter (from PWA push notification clicks)
@@ -614,7 +665,7 @@ async function init() {
         const reviewerBtn = document.getElementById('reviewer-login-btn');
         reviewerBtn?.addEventListener('click', () => {
           const modalEl = document.createElement('div');
-          modalEl.style.cssText = 'padding: 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
+          modalEl.style.cssText = 'padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 16px)) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
           modalEl.innerHTML = `
             <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
             <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales proporcionadas para revisar la aplicación.</p>
@@ -718,18 +769,26 @@ async function init() {
       const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
 
       // USER IS LOGGED IN -> Initialize UI
-      initHeader();
+      import('./components/header.js').then(m => m.initHeader());
       if (!isPreview) {
-        trackUserVisit(user.uid).catch(e => console.warn('Telemetry visit tracking failed:', e));
-        initNotificationsDrawer();
-        initNavbar();
-        initActiveOrderBanner();
-        initDeliveryMonitor();
-        initCommerceMonitor();
-        initChatNotifier();
+        import('./utils/analytics.js').then(m => m.trackUserVisit(user.uid)).catch(e => console.warn('Telemetry visit tracking failed:', e));
+        import('./components/notifications-drawer.js').then(m => m.initNotificationsDrawer());
+        import('./components/navbar.js').then(m => m.initNavbar());
+        import('./components/active-order-banner.js').then(m => m.initActiveOrderBanner());
+        import('./components/delivery-monitor.js').then(m => m.initDeliveryMonitor());
+        import('./components/commerce-monitor.js').then(m => m.initCommerceMonitor());
+        import('./components/chat-notifier.js').then(m => m.initChatNotifier());
         
         // Initialize floating support chatbot dynamically
         import('./components/support-bot.js').then(m => m.initSupportBot()).catch(err => console.warn('Failed to load support bot:', err));
+
+        // Check for pending notification deep-link redirection
+        const pendingUrl = localStorage.getItem('gd_pending_notification_url');
+        if (pendingUrl) {
+          localStorage.removeItem('gd_pending_notification_url');
+          console.log('[Push] Redirecting to pending notification URL:', pendingUrl);
+          window.location.hash = pendingUrl;
+        }
       }
 
       const header = document.getElementById('app-header');
@@ -868,10 +927,9 @@ async function init() {
           import('./auth.js').then(m => m.checkAndShowReferralWelcome());
         };
 
-        import('./components/onboarding.js')
-          .then(m => {
-            m.showOnboarding(() => {
+        const continueAfterGuide = () => {
               initPushNotifications();
+              checkAppUpdate();
               if (user && !getState().deliveryAddress) {
                 import('./components/address-modal.js').then(m => {
                   m.ensureAddress(() => {
@@ -881,20 +939,31 @@ async function init() {
               } else {
                 triggerReferralModal();
               }
+        };
+
+        import('./components/onboarding.js')
+          .then(m => {
+            m.showOnboarding(() => {
+              // After onboarding, show the interactive app guide
+              import('./components/app-guide.js').then(g => {
+                g.showAppGuide(() => {
+                  continueAfterGuide();
+                });
+              }).catch(err => {
+                console.warn('App guide failed to load', err);
+                continueAfterGuide();
+              });
             });
           })
           .catch(err => {
             console.error('Onboarding failed to load', err);
-            initPushNotifications();
-            if (user && !getState().deliveryAddress) {
-              import('./components/address-modal.js').then(m => {
-                m.ensureAddress(() => {
-                  triggerReferralModal();
-                });
+            import('./components/app-guide.js').then(g => {
+              g.showAppGuide(() => {
+                continueAfterGuide();
               });
-            } else {
-              triggerReferralModal();
-            }
+            }).catch(() => {
+              continueAfterGuide();
+            });
           });
       };
 
@@ -1059,21 +1128,134 @@ async function init() {
     } catch (err) {
       console.error('GoDelivery: Error during initialization', err);
     } finally {
-      routerReady();
-      const splash = document.getElementById('splash-screen');
-      if (splash) {
-        const elapsedTime = Date.now() - startTime;
-        const minDuration = 2400; // Wait for the 2.2s + 0.1s circle expansion to complete fully
-        const remainingTime = Math.max(0, minDuration - elapsedTime);
-        setTimeout(() => {
-          splash.classList.add('fade-out');
-          document.getElementById('app')?.classList.add('ready');
-        }, remainingTime);
+      let updateRequired = false;
+      try {
+        updateRequired = await checkAppUpdate();
+      } catch (err) {
+        console.warn('GoDelivery: Update check failed', err);
+      }
+
+      if (!updateRequired) {
+        routerReady();
+        const splash = document.getElementById('splash-screen');
+        if (splash) {
+          const elapsedTime = Date.now() - startTime;
+          const minDuration = 1200; // Reduced for faster perceived load
+          const remainingTime = Math.max(0, minDuration - elapsedTime);
+          setTimeout(() => {
+            splash.classList.add('fade-out');
+            document.getElementById('app')?.classList.add('ready');
+          }, remainingTime);
+        }
       }
     }
   });
 }
 
+async function checkAppUpdate() {
+  if (!window.Capacitor) {
+    console.log('[VersionCheck] Browser environment - skipping App Store / Play Store update check.');
+    return false;
+  }
+
+  try {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const settingsDoc = await getDoc(doc(db, 'settings', 'global'));
+    if (settingsDoc.exists()) {
+      const settings = settingsDoc.data();
+      const minVersion = settings.minAndroidVersionCode || 0;
+      
+      const { App } = await import('@capacitor/app');
+      const info = await App.getInfo();
+      const localVersion = parseInt(info.build, 10) || 0;
+      
+      console.log(`[VersionCheck] Local Version Code: ${localVersion}, Required Minimum: ${minVersion}`);
+      
+      if (localVersion < minVersion) {
+        const storeUrl = settings.playStoreUrl || 'https://play.google.com/store/apps/details?id=com.godelivery.magdalena';
+        console.log(`[VersionCheck] Version outdated. Displaying floating update banner pointing to: ${storeUrl}`);
+        showUpdateFloatingBanner(storeUrl);
+        return false; // Do not block app load
+      } else {
+        console.log('[VersionCheck] App is up to date.');
+      }
+    } else {
+      console.warn('[VersionCheck] Global settings document not found in Firestore.');
+    }
+  } catch (err) {
+    console.warn('[VersionCheck] Update check failed:', err);
+  }
+  return false;
+}
+
+function showUpdateFloatingBanner(storeUrl) {
+  if (document.getElementById('pwa-update-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'pwa-update-banner';
+  banner.style.cssText = `
+    position: fixed;
+    bottom: calc(var(--navbar-height, 60px) + 16px + env(safe-area-inset-bottom, 0px));
+    left: 16px;
+    right: 16px;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 18px;
+    box-shadow: 0 10px 25px rgba(225, 29, 72, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    z-index: 9999;
+    animation: slideUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  `;
+
+  banner.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+      <span style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: rgba(255,255,255,0.2); border-radius: 10px; flex-shrink: 0;">
+        ${icon('download', 18, '', '#ffffff')}
+      </span>
+      <div style="display: flex; flex-direction: column; min-width: 0;">
+        <span style="font-size: 13.5px; font-weight: 800; letter-spacing: -0.02em;">¡Nueva versión disponible!</span>
+        <span style="font-size: 11px; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Actualizá para recibir las últimas mejoras</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <a href="#" id="update-app-btn" style="background: white; color: var(--color-primary); padding: 6px 12px; border-radius: 10px; font-size: 12px; font-weight: 900; text-decoration: none; display: inline-flex; align-items: center; box-shadow: var(--shadow-sm); height: 28px; box-sizing: border-box;">
+        Actualizar
+      </a>
+      <button id="close-update-banner" style="background: none; border: none; color: white; opacity: 0.7; cursor: pointer; padding: 4px; display: flex; align-items: center;">
+        ${icon('close', 14, '', '#ffffff')}
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(banner);
+
+  const updateBtn = document.getElementById('update-app-btn');
+  if (updateBtn) {
+    updateBtn.onclick = (e) => {
+      e.preventDefault();
+      console.log(`[VersionCheck] Redirecting user to store URL: ${storeUrl}`);
+      if (window.Capacitor) {
+        window.open(storeUrl, '_system');
+      } else {
+        window.open(storeUrl, '_blank');
+      }
+    };
+  }
+
+  const closeBtn = document.getElementById('close-update-banner');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      banner.style.animation = 'fadeOut 0.3s ease forwards';
+      setTimeout(() => banner.remove(), 300);
+      sessionStorage.setItem('update_banner_dismissed', 'true');
+    };
+  }
+}
+
 // Start
-console.log('🚀 Go Delivery v1.3.3 - Ready');
+console.log('🚀 Go Delivery v1.3.4 - Ready');
 init();

@@ -22,10 +22,118 @@ export async function initPushNotifications() {
   // We run this on every session to ensure the token is updated in Firestore
   // but we use a flag to avoid double-attaching onMessage listeners.
 
-  const user = getState().user;
+  let user = getState().user;
+  if (!user) {
+    try {
+      const { auth } = await import('../firebase.js');
+      user = auth.currentUser;
+    } catch (e) {}
+  }
   if (!user) return;
 
   try {
+    const isNativeApp = window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web';
+    if (isNativeApp) {
+      console.log('[Push] Initializing Native Push Notifications...');
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      
+      let permStatus = await PushNotifications.checkPermissions();
+      if (permStatus.receive !== 'granted') {
+        permStatus = await PushNotifications.requestPermissions();
+      }
+      
+      if (permStatus.receive === 'granted') {
+        if (window.Capacitor.getPlatform() === 'android') {
+          try {
+            await PushNotifications.createChannel({
+              id: 'default',
+              name: 'GoDelivery',
+              description: 'Notificaciones de pedidos y mensajes',
+              importance: 5,
+              visibility: 1,
+              vibration: true
+            });
+          } catch(e) { console.warn('Channel creation error', e); }
+        }
+        await PushNotifications.register();
+      } else {
+        console.warn('[Push] Push permission denied by user. Enforcing native lock screen...');
+        // OBLIGATORY PUSH LOCK SCREEN FOR NATIVE APK
+        showPushRequiredLockScreen();
+        return;
+      }
+      
+      if (!listenersAttached) {
+        listenersAttached = true;
+        
+        PushNotifications.addListener('registration', async (token) => {
+          console.log('[Push] Native token registration success:', token.value);
+          localStorage.setItem('gd_last_fcm_token', token.value);
+          localStorage.setItem('gd_fcm_registration_status', 'success');
+          localStorage.removeItem('gd_fcm_error');
+          await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
+            token: token.value,
+            lastSession: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            platform: 'android-native'
+          }, { merge: true });
+        });
+
+        PushNotifications.addListener('registrationError', (error) => {
+          console.error('[Push] Native registration error:', error);
+          localStorage.setItem('gd_fcm_registration_status', 'error');
+          localStorage.setItem('gd_fcm_error', JSON.stringify(error) || String(error));
+        });
+
+        PushNotifications.addListener('pushNotificationReceived', async (notification) => {
+          console.log('[Push] Native push received in foreground:', notification);
+          const { title, body } = notification;
+          if (title) {
+            showToast(`${title}: ${body}`, 'info');
+            AudioManager.playSound('/assets/sounds/notification.mp3');
+          }
+          await addDoc(collection(db, 'users', user.uid, 'notifications'), {
+            title: title || '',
+            body: body || '',
+            type: 'system',
+            status: 'unread',
+            createdAt: serverTimestamp()
+          });
+        });
+
+        PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+          console.log('[Push] Native push action performed:', action);
+          const data = action.notification?.data;
+          if (data && data.url) {
+            let url = data.url;
+            if (url.includes('localhost') || url.includes('127.0.0.1')) {
+              url = url.replace(/^https?:\/\/[^\/]+/, 'https://godelivery-magdalena.web.app');
+            }
+            let targetHash = '';
+            if (url.includes('#')) {
+              targetHash = url.split('#')[1];
+            } else if (url.startsWith('/')) {
+              targetHash = url;
+            }
+
+            if (targetHash) {
+              const loggedIn = getState().user;
+              if (loggedIn) {
+                console.log('[Push] Navigating directly to hash:', targetHash);
+                window.location.hash = targetHash;
+              } else {
+                console.log('[Push] Deferring navigation, saving to pending URL:', targetHash);
+                localStorage.setItem('gd_pending_notification_url', targetHash);
+              }
+            }
+          }
+        });
+      }
+      
+      initialized = true;
+      return;
+    }
+
     const messaging = await getMessagingInstance();
     if (!messaging) {
       console.warn('Push notifications not supported in this browser');
@@ -39,18 +147,21 @@ export async function initPushNotifications() {
     }
 
     if (Notification.permission === 'default') {
-      // Show smart prompt instead of immediate raw request
-      const { showNotificationPrompt } = await import('../components/notification-prompt.js');
-      showNotificationPrompt(() => {
-        // Callback if granted - re-run init to get token
-        initialized = false;
-        initPushNotifications();
-      });
+      console.log('[Push] Skipping prompt on Web/PWA to avoid conflicts with browser permissions.');
       return;
     }
 
-    // Use existing registration from main.js
-    const swRegistration = await navigator.serviceWorker.ready;
+    // Use existing registration from main.js with safety catch
+    let swRegistration;
+    try {
+      swRegistration = await navigator.serviceWorker.ready;
+      if (!swRegistration) {
+        throw new Error('Service Worker registration not found');
+      }
+    } catch (swErr) {
+      console.warn('[Push] Service Worker not available or ready check failed (this can happen due to private browsing, cookie restrictions, or low device storage):', swErr);
+      return;
+    }
 
     // Get FCM token
     const token = await getToken(messaging, {
@@ -173,4 +284,65 @@ export async function sendLocalNotification(title, body, options = {}) {
   if (navigator.vibrate) {
     navigator.vibrate([200, 100, 200, 100, 300]);
   }
+}
+
+function showPushRequiredLockScreen() {
+  if (document.getElementById('push-permission-lock-screen')) return;
+
+  const lockScreen = document.createElement('div');
+  lockScreen.id = 'push-permission-lock-screen';
+  lockScreen.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: var(--color-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 24px;
+    text-align: center;
+  `;
+
+  lockScreen.innerHTML = `
+    <div style="max-width: 340px; width: 100%; display: flex; flex-direction: column; align-items: center;">
+      <div style="width: 90px; height: 90px; border-radius: 50%; background: rgba(225, 29, 72, 0.1); color: var(--color-primary); display: flex; align-items: center; justify-content: center; margin-bottom: 28px; animation: pulse 2s infinite;">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      </div>
+      <h2 style="font-family: var(--font-display); font-size: 24px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 12px 0;">Notificaciones Requeridas</h2>
+      <p style="font-size: 14.5px; color: var(--color-text-secondary); line-height: 1.6; margin: 0 0 32px 0; font-weight: 600;">
+        Para poder usar la aplicación y recibir avisos en tiempo real sobre tus pedidos, es obligatorio habilitar las notificaciones de GoDelivery.
+      </p>
+      <button id="push-permission-grant-btn" style="width: 100%; height: 56px; border: none; background: var(--color-primary); color: white; border-radius: 16px; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 8px 24px rgba(225, 29, 72, 0.3);">
+        Habilitar Notificaciones
+      </button>
+    </div>
+    <style>
+      @keyframes pulse {
+        0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.4); }
+        70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(225, 29, 72, 0); }
+        100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(225, 29, 72, 0); }
+      }
+    </style>
+  `;
+
+  document.body.appendChild(lockScreen);
+
+  document.getElementById('push-permission-grant-btn').onclick = async () => {
+    try {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      let status = await PushNotifications.requestPermissions();
+      if (status.receive === 'granted') {
+        lockScreen.remove();
+        await PushNotifications.register();
+        // Force reload page to resume flows
+        window.location.reload();
+      } else {
+        showToast('Permiso denegado. Es obligatorio para continuar.', 'danger');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error al solicitar permisos', 'danger');
+    }
+  };
 }

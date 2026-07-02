@@ -107,12 +107,70 @@ export function calculateDynamicFee(distanceKm) {
   return Math.ceil(total / 10) * 10;
 }
 
+const LOCAL_GEO_DICT = [
+  {
+    keys: ['eva peron', 'barrio eva'],
+    address: 'Barrio Eva Perón, Magdalena',
+    displayName: 'Barrio Eva Perón, Magdalena, Buenos Aires, Argentina',
+    lat: -35.0667,
+    lng: -57.5378
+  },
+  {
+    keys: ['san jose', 'barrio san jose'],
+    address: 'Barrio San José, Magdalena',
+    displayName: 'Barrio San José, Magdalena, Buenos Aires, Argentina',
+    lat: -35.0744,
+    lng: -57.5255
+  },
+  {
+    keys: ['bavio', 'general mansilla', 'mansilla'],
+    address: 'General Mansilla (Bavio), Magdalena',
+    displayName: 'General Mansilla (Bavio), Magdalena, Buenos Aires, Argentina',
+    lat: -35.0761,
+    lng: -57.7536
+  },
+  {
+    keys: ['atalaya'],
+    address: 'Atalaya, Magdalena',
+    displayName: 'Atalaya, Magdalena, Buenos Aires, Argentina',
+    lat: -35.0225,
+    lng: -57.5369
+  },
+  {
+    keys: ['vieytes', 'hipolito vieytes'],
+    address: 'Hipólito Vieytes, Magdalena',
+    displayName: 'Hipólito Vieytes, Magdalena, Buenos Aires, Argentina',
+    lat: -35.2815,
+    lng: -57.5758
+  }
+];
+
 /**
  * Searches OpenStreetMap Nominatim for local address suggestions,
  * automatically scoping the query to Magdalena, Buenos Aires, Argentina.
  */
 export async function searchAddressSuggestions(term) {
   if (!term || term.trim().length < 3) return [];
+  
+  // 1. Check local dictionary first
+  const normalizedTerm = term.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const localMatches = [];
+  
+  for (const item of LOCAL_GEO_DICT) {
+    const matchesKey = item.keys.some(k => normalizedTerm.includes(k));
+    if (matchesKey) {
+      let cleanTyped = term.trim();
+      cleanTyped = cleanTyped.replace(/,?\s*magdalena.*/i, '');
+      
+      localMatches.push({
+        lat: item.lat,
+        lng: item.lng,
+        address: `${cleanTyped}, Magdalena`,
+        displayName: `${cleanTyped}, Magdalena, Buenos Aires, Argentina (Barrio Local)`
+      });
+    }
+  }
+
   try {
     let query = term;
     if (!query.toLowerCase().includes('magdalena')) {
@@ -202,9 +260,9 @@ export async function searchAddressSuggestions(term) {
             }
           }));
           const filtered = results.filter(Boolean);
-          if (filtered.length > 0) {
-            console.log('[Autocomplete] Returning Google predictions:', filtered.length);
-            return filtered;
+          if (filtered.length > 0 || localMatches.length > 0) {
+            console.log('[Autocomplete] Returning Google predictions:', filtered.length, 'local matches:', localMatches.length);
+            return [...localMatches, ...filtered];
           }
         }
       } catch (gErr) {
@@ -221,7 +279,7 @@ export async function searchAddressSuggestions(term) {
     });
     const data = await response.json();
     console.log('[Autocomplete] Nominatim returned results:', data.length);
-    return data.map(item => {
+    const mapped = data.map(item => {
       const a = item.address;
       const street = a.road || a.pedestrian || a.suburb || '';
       const number = a.house_number || '';
@@ -239,9 +297,10 @@ export async function searchAddressSuggestions(term) {
         displayName: item.display_name
       };
     });
+    return [...localMatches, ...mapped];
   } catch (err) {
     console.error('Error searching suggestions:', err);
-    return [];
+    return localMatches;
   }
 }
 

@@ -173,12 +173,23 @@
 
 .card-interactive {
   cursor: pointer;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
+  will-change: transform;
 }
 
 .card-interactive:active {
-  transform: scale(0.97);
-  box-shadow: var(--shadow-xs);
+  transform: scale(0.95);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+}
+
+@keyframes springUp {
+  0% { transform: translateY(100%) scale(0.95); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes springDown {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(100%) scale(0.95); opacity: 0; }
 }
 
 .card-body {
@@ -759,7 +770,7 @@ select.input {
 }
 
 .modal-footer {
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-5) calc(var(--space-4) + env(safe-area-inset-bottom, 28px));
   border-top: 1px solid var(--color-border-light);
   display: flex;
   gap: var(--space-3);
@@ -2027,4 +2038,36 @@ select.input {
 /* Premium Cart Bounce & Haptic Anim */
 .cart-bounce-active {
   animation: cartBounce 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── Comercio Sticky Header ── */
+.comercio-sticky-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding-left: 16px;
+  padding-right: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  opacity: 0;
+  transform: translateY(-20px);
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+[data-theme="dark"] .comercio-sticky-header {
+  background: rgba(26, 26, 26, 0.85);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.comercio-sticky-header.visible {
+  pointer-events: auto;
 }

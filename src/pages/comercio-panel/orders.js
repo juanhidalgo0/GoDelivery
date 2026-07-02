@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, serverTimestamp, addDoc, getDocs, orderBy, setDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, serverTimestamp, addDoc, getDocs, orderBy, setDoc, limit } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { isAdmin } from '../../auth.js';
@@ -129,10 +129,17 @@ export async function renderComercioOrders(manualId = null) {
       const headerTitle = isAdmin() ? `Adm: ${comercioName}` : 'Gestión de Pedidos';
 
       // Render instantly with what we have
+      const isNative = !!window.Capacitor;
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+
       headerContainer.innerHTML = `
-        <div class="orders-sticky-header" style="position: relative; overflow: hidden;">
-          <!-- Decorative Circles -->
-          <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+        <div class="orders-sticky-header-container" style="padding-top: ${topPadding};">
+          <div class="orders-sticky-header" style="position: relative; overflow: hidden;">
+            <!-- Decorative Circles -->
+            <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+
           
           <div class="orders-header-left" style="position: relative; z-index: 2; display: flex; align-items: center;">
             ${window.innerWidth >= 1024 ? `
@@ -166,6 +173,7 @@ export async function renderComercioOrders(manualId = null) {
               ${icon('grid', 18)}
             </a>
           </div>
+          </div>
         </div>
       `;
 
@@ -191,12 +199,19 @@ export async function renderComercioOrders(manualId = null) {
 
       // Panic toggle removed from header — now lives in Settings page
     } else {
+      const isNative = !!window.Capacitor;
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+
       headerContainer.innerHTML = `
-        <div class="orders-sticky-header history-header">
-          <button class="hdr-icon-btn" id="back-to-mgmt" title="Volver">${icon('back', 18)}</button>
-          <div class="orders-header-info">
-            <h1 class="orders-header-title">Historial</h1>
-            <p class="orders-header-subtitle">Pedidos finalizados y cancelados</p>
+        <div class="orders-sticky-header-container" style="padding-top: ${topPadding};">
+          <div class="orders-sticky-header history-header">
+            <button class="hdr-icon-btn" id="back-to-mgmt" title="Volver">${icon('back', 18)}</button>
+            <div class="orders-header-info">
+              <h1 class="orders-header-title">Historial</h1>
+              <p class="orders-header-subtitle">Pedidos finalizados y cancelados</p>
+            </div>
           </div>
         </div>
       `;
@@ -271,8 +286,8 @@ export async function renderComercioOrders(manualId = null) {
   };
 
   let isInitial = true;
-  const q = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
-  ordersUnsub = onSnapshot(q, (snap) => {
+  
+  const handleSnapshot = (snap) => {
     const newOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
       .sort((a, b) => {
         const aSched = !!a.isScheduled;
@@ -299,7 +314,38 @@ export async function renderComercioOrders(manualId = null) {
     isInitial = false;
     allOrders = newOrders;
     renderView();
-  });
+
+    // Auto-open specific order if orderId query param matches in the hash
+    const hashQuery = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+    const hashParams = new URLSearchParams(hashQuery);
+    const targetOrderId = hashParams.get('orderId');
+    if (targetOrderId) {
+      const order = allOrders.find(o => o.id === targetOrderId);
+      if (order) {
+        // Strip the orderId parameter from URL to prevent infinite reopening loops without triggering hashchange
+        const cleanHash = window.location.hash.split('?')[0];
+        window.history.replaceState(null, '', window.location.pathname + cleanHash);
+        showOrderDetailModal(order);
+      }
+    }
+  };
+
+  const attemptOptimizedQuery = () => {
+    const qOpt = query(collection(db, 'orders'), where('comercioId', '==', comercioId), orderBy('createdAt', 'desc'), limit(150));
+    ordersUnsub = onSnapshot(qOpt, handleSnapshot, (err) => {
+      if (err.message && err.message.includes('index')) {
+        console.warn('Falta índice compuesto. Intentando fallback sin límite...', err.message);
+        if (ordersUnsub) ordersUnsub();
+        // Fallback to the original unoptimized query if the index hasn't been created yet
+        const qFallback = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
+        ordersUnsub = onSnapshot(qFallback, handleSnapshot);
+      } else {
+        console.error('Error listening to orders:', err);
+      }
+    });
+  };
+
+  attemptOptimizedQuery();
 
   const unreadUnsub = onUnreadChange(() => {
     updateAllUnreadBadges(allOrders);
@@ -1408,13 +1454,18 @@ function getOrderStyles() {
     /* ── STICKY HEADER ───────────────────────────── */
     .orders-sticky-header {
       display:flex; align-items:center; justify-content:space-between;
-      gap:16px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px;
-      background:var(--color-primary);
+      gap:16px; padding: 12px 16px 20px 16px;
+      background:none;
       flex-shrink:0;
-      box-shadow: 0 4px 15px rgba(225, 29, 72, 0.12);
+      z-index: 2;
+    }
+    .orders-sticky-header-container {
+      background:var(--color-primary);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
       position: sticky;
       top: 0;
       z-index: 50;
+      width: 100%;
     }
     .orders-sticky-header.history-header { gap:14px; justify-content:flex-start; }
 
@@ -1607,7 +1658,7 @@ function getOrderStyles() {
     .detail-address-box { background:var(--color-bg-card); border:1px solid var(--color-border-light); padding:18px; border-radius:20px; display:flex; gap:14px; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,0.02); }
     .address-text { font-size:14px; color:var(--color-text-secondary); font-weight:600; line-height:1.5; word-break:break-word; flex:1; }
 
-    .detail-footer-dock { flex-shrink:0; background:var(--color-bg-card); border-top:1.5px solid var(--color-border-light); padding:16px 24px; }
+    .detail-footer-dock { flex-shrink:0; background:var(--color-bg-card); border-top:1.5px solid var(--color-border-light); padding:16px 24px calc(16px + env(safe-area-inset-bottom, 20px)) 24px; }
     .price-summary-card { display:flex; flex-direction:column; gap:6px; }
     .summary-row { display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-tertiary); font-weight:700; }
     .total-row { font-size:20px; font-weight:900; color:var(--color-text-primary); margin-top:4px; padding-top:8px; border-top:1.5px solid var(--color-border-light); }
@@ -1653,7 +1704,7 @@ function getOrderStyles() {
     .address-label { font-size:10px; font-weight:800; text-transform:uppercase; color:var(--color-text-tertiary); letter-spacing:0.05em; }
     .address-text { font-size:13px; font-weight:600; color:var(--color-text); line-height:1.3; }
 
-    .detail-footer-dock-premium { background:var(--color-bg); padding:10px 16px 12px 16px; border-top:1px solid var(--color-border-light); box-shadow:0 -10px 30px rgba(0,0,0,0.05); position:relative; z-index:10; }
+    .detail-footer-dock-premium { background:var(--color-bg); padding:10px 16px calc(28px + env(safe-area-inset-bottom, 0px)) 16px; border-top:1px solid var(--color-border-light); box-shadow:0 -10px 30px rgba(0,0,0,0.05); position:relative; z-index:10; }
     .price-summary-card-premium { background:var(--color-bg-secondary); padding:10px 14px; border-radius:14px; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; border:1px solid var(--color-border-light); }
     .summary-row { display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary); font-weight:600; }
     .summary-divider { height:1px; background:var(--color-border-light); margin:2px 0; }

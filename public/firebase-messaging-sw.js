@@ -39,6 +39,9 @@ self.addEventListener('push', (event) => {
       
       // URLs
       let targetUrl = fcmData.url || nestedData.url || (payload.data && payload.data.url) || '/#/';
+      if (targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1')) {
+        targetUrl = targetUrl.replace(/^https?:\/\/[^\/]+/, 'https://godelivery-magdalena.web.app');
+      }
       if (targetUrl.startsWith('#') || targetUrl.startsWith('/#')) {
         targetUrl = "https://godelivery-magdalena.web.app/" + targetUrl.replace(/^\//, "");
       }
@@ -70,7 +73,7 @@ self.addEventListener('push', (event) => {
         const options = {
           body: body,
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
-          badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
+          badge: 'https://godelivery-magdalena.web.app/badge-icon.svg',
           vibrate: [300, 100, 300, 100, 300], // Indispensable for Heads-up on Android
           requireInteraction: true, // High importance
           renotify: true, // Forces wakeup/vibration even on same tag
@@ -101,7 +104,7 @@ self.addEventListener('push', (event) => {
         await self.registration.showNotification("Go Delivery", {
           body: "Tenés novedades en tu pedido. Entrá a la app para ver los detalles.",
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
-          badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
+          badge: 'https://godelivery-magdalena.web.app/badge-icon.svg',
           vibrate: [300, 100, 300],
           requireInteraction: true,
           data: { url: 'https://godelivery-magdalena.web.app/#/' }
@@ -132,7 +135,7 @@ const ASSETS_TO_CACHE = [
   '/manifest.json',
   '/logo-pwa.png',
   '/logo-brand.jpg',
-  '/badge-icon.png',
+  '/badge-icon.svg',
   '/icons.svg',
 ];
 
@@ -252,6 +255,10 @@ self.addEventListener('notificationclick', (event) => {
                || event.notification.data?.FCM_MSG?.notification?.data?.url
                || event.notification.data?.FCM_MSG?.data?.url
                || '/';
+  
+  if (urlToOpen.includes('localhost') || urlToOpen.includes('127.0.0.1')) {
+    urlToOpen = urlToOpen.replace(/^https?:\/\/[^\/]+/, 'https://godelivery-magdalena.web.app');
+  }
   
   // Extract hash route (e.g. "pedido/XXXX" or "profile")
   let hashRoute = '';

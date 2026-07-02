@@ -6,7 +6,7 @@ let deferredPrompt = null;
 let isInstalled = false;
 
 // Check if app is already running in standalone mode or native Capacitor wrapper
-if (window.Capacitor || window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+if ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web') || window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
   isInstalled = true;
 }
 
@@ -34,7 +34,13 @@ export function getDeferredPrompt() {
 }
 
 export function checkIfInstalled() {
-  return isInstalled;
+  if (isInstalled) return true;
+  // Also check dynamically in case Capacitor was initialized after module load
+  if (window.Capacitor && window.Capacitor.isNative) return true;
+  if (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web') return true;
+  if (window.matchMedia('(display-mode: standalone)').matches) return true;
+  if (window.navigator.standalone === true) return true;
+  return false;
 }
 
 export function isIOS() {

@@ -1,7 +1,7 @@
 // GoDelivery — Premium Notification Drawer (Robust & Professional)
 import { getState, subscribe, setState } from '../state.js';
 import { db } from '../firebase.js';
-import { collection, query, limit, getDocs, startAfter, updateDoc, doc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, limit, getDocs, startAfter, updateDoc, deleteDoc, doc, onSnapshot, orderBy } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { signInWithGoogle } from '../auth.js';
 
@@ -103,6 +103,21 @@ function startListener() {
   });
 }
 
+import { showToast } from './toast.js';
+
+function isNotifClickable(n) {
+  if (!n.url || n.url === '' || n.url === '#') return false;
+  if (n.url.includes('/pedido/')) {
+    const type = n.type || '';
+    if (type === 'order_completed' || type === 'order_cancelled') return false;
+    const text = ((n.title || '') + ' ' + (n.body || '')).toLowerCase();
+    if (text.includes('entregado') || text.includes('entregó') || text.includes('cancelado') || text.includes('canceló') || text.includes('disfrutes')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function renderItems() {
   const scrollArea = document.getElementById('notifications-scroll-area');
   if (!scrollArea) return;
@@ -148,22 +163,25 @@ function renderItems() {
     return;
   }
 
-  const html = notifications.map((n, index) => `
-    <div class="notification-item ${n.status === 'unread' ? 'unread' : ''}" 
-      data-id="${n.id}" data-url="${n.url || ''}"
-      style="animation: slideUpSubtle 0.4s ease forwards ${index * 0.02}s;">
+  const html = notifications.map((n, index) => {
+    const clickable = isNotifClickable(n);
+    return `
+      <div class="notification-item ${n.status === 'unread' ? 'unread' : ''}" 
+        data-id="${n.id}" data-url="${n.url || ''}" data-clickable="${clickable}"
+        style="animation: slideUpSubtle 0.4s ease forwards ${index * 0.02}s; ${!clickable ? 'cursor: default; opacity: 0.85;' : 'cursor: pointer;'}">
 
-      <div class="notification-icon-box" style="background: ${getNotificationColor(n.type)}; border: 1px solid ${getIconColor(n.type)}20;">
-        ${getNotificationIcon(n.type)}
-      </div>
+        <div class="notification-icon-box" style="background: ${getNotificationColor(n.type)}; border: 1px solid ${getIconColor(n.type)}20;">
+          ${getNotificationIcon(n.type)}
+        </div>
 
-      <div class="notification-content">
-        <div class="notification-title">${n.title || 'Aviso'}</div>
-        <div class="notification-body">${n.body || ''}</div>
-        <div class="notification-time">${formatTime(n.createdAt)}</div>
+        <div class="notification-content">
+          <div class="notification-title">${n.title || 'Aviso'}</div>
+          <div class="notification-body">${n.body || ''}</div>
+          <div class="notification-time">${formatTime(n.createdAt)}</div>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   const loader = loadingMore ? '<div class="scroll-loader"><div class="spinner-mini"></div></div>' : '';
   const footer = (!hasMore && notifications.length > 0) ? '<div class="end-of-list">Fin del historial</div>' : '';
@@ -174,12 +192,16 @@ function renderItems() {
     item.onclick = async () => {
       const id = item.dataset.id;
       const url = item.dataset.url;
+      const clickable = item.dataset.clickable === 'true';
       const user = getState().user;
       try {
         if (user) {
-          await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
+          await deleteDoc(doc(db, 'users', user.uid, 'notifications', id));
         }
       } catch (e) { }
+      
+      if (!clickable) return;
+
       if (url) {
         // Validate route exists in orders/chats if it contains order ID
         const orderMatch = url.match(/#\/pedido\/([^/]+)/);
@@ -189,7 +211,13 @@ function renderItems() {
             const { getDoc, doc } = await import('firebase/firestore');
             const oDoc = await getDoc(doc(db, 'orders', orderId));
             if (!oDoc.exists()) {
-              console.warn('[NotificationsDrawer] Order does not exist. Skipping navigation.');
+              showToast('El pedido no existe o fue eliminado', 'error');
+              return;
+            }
+            const orderData = oDoc.data();
+            const status = orderData.status;
+            if (status === 'completed' || status === 'cancelled' || status === 'entregado' || status === 'cancelado') {
+              showToast('Este pedido ya ha sido finalizado', 'info');
               return;
             }
           } catch (err) {

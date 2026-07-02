@@ -692,6 +692,66 @@
         font-size: 1.6rem;
       }
     }
+
+    /* Live monitoring and quick action styles */
+    .live-status-container {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+    }
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.15rem 0.4rem;
+      border-radius: 0.35rem;
+      text-transform: uppercase;
+    }
+    .live-badge.online {
+      background: rgba(16, 185, 129, 0.1);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+    .live-badge.offline {
+      background: rgba(148, 163, 184, 0.1);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .action-badge-btn {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.35rem;
+      border: 1px solid var(--border-color);
+      background: var(--card-inner);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .action-badge-btn:hover {
+      background: var(--indigo);
+      border-color: var(--indigo);
+      transform: scale(1.05);
+    }
+    .action-badge-btn.permanent {
+      border-color: rgba(245, 158, 11, 0.3);
+      color: var(--amber);
+    }
+    .action-badge-btn.permanent:hover {
+      background: var(--amber);
+      color: #fff;
+    }
+    .action-badge-btn.cut {
+      border-color: rgba(225, 29, 72, 0.3);
+      color: var(--rose);
+    }
+    .action-badge-btn.cut:hover {
+      background: var(--rose);
+      color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -841,6 +901,7 @@
               <select id="select-duration" onchange="changeDuration()">
                 <option value="1M">1 Mes</option>
                 <option value="1W">1 Semana</option>
+                <option value="LIFETIME">Permanente (De por vida)</option>
               </select>
             </div>
             <div class="form-group" id="group-period">
@@ -886,6 +947,7 @@
                 <option value="1M">1 Mes (30 días)</option>
                 <option value="1W">1 Semana (7 días)</option>
                 <option value="DEMO">Licencia DEMO (7 días)</option>
+                <option value="LIFETIME">Permanente (Sin límite)</option>
               </select>
             </div>
             <!-- Select Client Dropdown for Universal Key -->
@@ -1041,6 +1103,11 @@
           option.textContent = d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }).toUpperCase();
           select.appendChild(option);
         }
+      } else if (duration === 'LIFETIME') {
+        const option = document.createElement('option');
+        option.value = 'PERMANENT';
+        option.textContent = 'DE POR VIDA / SIN LÍMITE';
+        select.appendChild(option);
       } else {
         // 10 Weeks ahead
         for (let i = 0; i < 10; i++) {
@@ -1192,9 +1259,14 @@
         let formattedExpiry = 'Nunca';
         if (cust.expiresAt) {
           const date = new Date(cust.expiresAt);
-          formattedExpiry = date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+          if (date.getFullYear() >= 2100) {
+            formattedExpiry = 'Permanente';
+          } else {
+            formattedExpiry = date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+          }
         }
 
+        const isOnline = cust.lastActive && (new Date() - new Date(cust.lastActive)) < 45000;
         const pbClass = statusInfo.class === 'status-active' ? 'progress-bar-active' : 
                         statusInfo.class === 'status-expiring' ? 'progress-bar-expiring' : 
                         statusInfo.class === 'status-trial' ? 'progress-bar-trial' : 'progress-bar-expired';
@@ -1202,10 +1274,19 @@
         div.innerHTML = `
           <div class="customer-header">
             <div class="customer-info">
-              <h4>${cust.name}</h4>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <h4 style="display: flex; align-items: center; gap: 0.25rem;">
+                  ${cust.name}
+                  <span onclick="editCustomerName(event, '${cust.id}')" style="cursor: pointer; font-size: 0.8rem; margin-left: 0.25rem;" title="Editar Nombre">✏️</span>
+                </h4>
+                <span class="live-badge ${isOnline ? 'online' : 'offline'}">
+                  ${isOnline ? '🟢 En línea' : '⚪'}
+                </span>
+              </div>
               <p>${cust.uuid}</p>
+              ${cust.computerName ? `<p style="font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem;">💻 ${cust.osUser || 'cajero'}@${cust.computerName}</p>` : ''}
             </div>
-            <span class="status-badge ${statusInfo.class}">${statusInfo.label}</span>
+            <span class="status-badge ${statusInfo.class}">${formattedExpiry === 'Permanente' ? 'Permanente' : statusInfo.label}</span>
           </div>
 
           <div style="display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.1rem;">
@@ -1214,11 +1295,19 @@
               <span>Exp: ${formattedExpiry}</span>
             </div>
             <div class="progress-container">
-              <div class="progress-bar ${pbClass}" style="width: ${statusInfo.percent}%;"></div>
+              <div class="progress-bar ${pbClass}" style="width: ${formattedExpiry === 'Permanente' ? 100 : statusInfo.percent}%;"></div>
             </div>
           </div>
 
-          <div class="customer-footer">
+          <div style="display: flex; gap: 0.25rem; margin-top: 0.5rem; flex-wrap: wrap; border-top: 1px solid var(--border-color); padding-top: 0.5rem;">
+            <button class="action-badge-btn" onclick="quickModifyExpiry(event, '${cust.id}', 1)" title="Sumar 1 día">+1d</button>
+            <button class="action-badge-btn" onclick="quickModifyExpiry(event, '${cust.id}', 7)" title="Sumar 1 semana">+7d</button>
+            <button class="action-badge-btn" onclick="quickModifyExpiry(event, '${cust.id}', 30)" title="Sumar 30 días">+30d</button>
+            <button class="action-badge-btn permanent" onclick="quickModifyExpiry(event, '${cust.id}', 'LIFETIME')" title="Hacer permanente">Permanente</button>
+            <button class="action-badge-btn cut" onclick="quickModifyExpiry(event, '${cust.id}', 'CUT')" title="Cortar licencia inmediatamente">Cortar</button>
+          </div>
+
+          <div class="customer-footer" style="margin-top: 0.5rem;">
             <span>📞 ${cust.phone || 'Sin teléfono'}</span>
             <div class="customer-actions">
               <button class="icon-btn" onclick="deleteCustomer(event, '${cust.id}')" title="Eliminar Cliente">🗑️</button>
@@ -1234,6 +1323,62 @@
     function selectCustomer(id) {
       selectedCustomerId = id;
       updateGeneratedCode();
+    }
+
+    function editCustomerName(event, customerId) {
+      if (event) event.stopPropagation();
+      const cust = customers.find(c => c.id === customerId);
+      if (!cust) return;
+      
+      const newName = prompt('Ingrese el nuevo nombre para este cliente:', cust.name);
+      if (newName === null) return; // Cancelled
+      const cleanName = newName.trim();
+      if (!cleanName) {
+        alert('El nombre no puede estar vacío.');
+        return;
+      }
+
+      db.collection('customers').doc(customerId).update({
+        name: cleanName
+      }).then(() => {
+        console.log('Nombre de cliente actualizado con éxito');
+      }).catch(err => {
+        console.error('Error al actualizar el nombre:', err);
+        alert('Error al actualizar el nombre: ' + err.message);
+      });
+    }
+
+    function quickModifyExpiry(event, customerId, action) {
+      if (event) event.stopPropagation();
+      
+      const cust = customers.find(c => c.id === customerId);
+      if (!cust) return;
+
+      let newExpiry;
+      if (action === 'LIFETIME') {
+        newExpiry = new Date();
+        newExpiry.setFullYear(newExpiry.getFullYear() + 100);
+      } else if (action === 'CUT') {
+        newExpiry = new Date(0);
+      } else {
+        // Add days
+        let baseDate = new Date();
+        if (cust.expiresAt) {
+          const currentExpiry = new Date(cust.expiresAt);
+          if (currentExpiry > baseDate) {
+            baseDate = currentExpiry;
+          }
+        }
+        newExpiry = new Date(baseDate.getTime() + action * 24 * 60 * 60 * 1000);
+      }
+
+      db.collection('customers').doc(customerId).update({
+        expiresAt: newExpiry.toISOString()
+      }).then(() => {
+        console.log(`Licencia modificada para ${cust.name}`);
+      }).catch(err => {
+        alert("Error al modificar licencia: " + err.message);
+      });
     }
 
     function addCustomer(e) {
@@ -1346,7 +1491,9 @@
 
       // Automatically update the client's online expiresAt
       let expiryDate = new Date();
-      if (duration === '1M') {
+      if (duration === 'LIFETIME') {
+        expiryDate.setFullYear(expiryDate.getFullYear() + 100);
+      } else if (duration === '1M') {
         expiryDate.setDate(expiryDate.getDate() + 30);
       } else {
         expiryDate.setDate(expiryDate.getDate() + 7);
@@ -1400,7 +1547,7 @@
 
       const secret = document.getElementById('secret-key').value;
       const duration = document.getElementById('select-universal-duration').value;
-      const prefix = duration === 'DEMO' ? 'D' : (duration === '1W' ? 'W' : 'U');
+      const prefix = duration === 'DEMO' ? 'D' : (duration === '1W' ? 'W' : (duration === 'LIFETIME' ? 'L' : 'U'));
 
       // Signature format: UNIVERSAL-${typeStr}-${keyId}-${SECRET_WORD}
       const input = `UNIVERSAL-${duration}-${keyId}-${secret}`;
@@ -1420,7 +1567,7 @@
       if (selectedTrialClientId) {
         const client = customers.find(c => c.id === selectedTrialClientId);
         if (client) {
-          const days = (duration === '1W' || duration === 'DEMO') ? 7 : 30;
+          const days = (duration === '1W' || duration === 'DEMO') ? 7 : (duration === 'LIFETIME' ? 36500 : 30);
           const expiryDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
           
           db.collection('customers').doc(client.id).update({

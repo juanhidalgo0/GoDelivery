@@ -1,5 +1,5 @@
 import { db } from '../firebase.js';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { getState } from '../state.js';
 import { formatPrice } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
@@ -48,7 +48,7 @@ export async function renderViajes(content) {
     <div class="viajes-page page-enter" style="display:flex; flex-direction:column; height: 100dvh; background: var(--color-bg); overflow: hidden; position:relative;">
       
       <!-- Premium Red Header with smooth gradient -->
-      <div style="background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%); padding:18px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(225, 29, 72, 0.2); z-index:100;">
+      <div style="background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%); padding:calc(18px + env(safe-area-inset-top, 0px)) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(225, 29, 72, 0.2); z-index:100;">
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         <button onclick="history.back()" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
           ${icon('chevronLeft', 24)}
@@ -323,6 +323,175 @@ export async function renderViajes(content) {
     updateCostDisplay();
   };
 
+  // ── Helper: Check if any driver is online for the selected vehicle type ──
+  async function checkDriverAvailability(vehicleType) {
+    try {
+      const driversQ = query(
+        collection(db, 'users'),
+        where('tripStatus', '==', 'approved'),
+        where('isOnline', '==', true),
+        where('tripVehicleType', '==', vehicleType)
+      );
+      const snap = await getDocs(driversQ);
+      return snap.size > 0;
+    } catch (err) {
+      console.warn('Error checking driver availability:', err);
+      return true; // Allow trip if check fails
+    }
+  }
+
+  // ── Helper: Show schedule trip modal ──
+  function showScheduleModal(cost, vehicleType) {
+    const now = new Date();
+    const maxDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    const formatDateInput = (d) => d.toISOString().split('T')[0];
+    const minDate = formatDateInput(now);
+    const maxDateStr = formatDateInput(maxDate);
+
+    // Build hours for the time selector
+    const hours = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 30) {
+        const hh = String(h).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        hours.push(`${hh}:${mm}`);
+      }
+    }
+
+    const modalContent = document.createElement('div');
+    modalContent.innerHTML = `
+      <div style="padding:24px 20px; display:flex; flex-direction:column; gap:20px;">
+        <div style="text-align:center;">
+          <div style="font-size:48px; margin-bottom:8px; animation: guideIconFloat 3s ease-in-out infinite;">📅</div>
+          <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0 0 6px; color:var(--color-text-primary);">No hay choferes disponibles</h3>
+          <p style="font-size:13px; color:var(--color-text-secondary); margin:0; line-height:1.5;">En este momento no hay choferes de <strong>${vehicleType === 'moto' ? 'moto 🏍️' : 'auto 🚗'}</strong> online. Podés programar tu viaje para los próximos 3 días.</p>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:10px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Fecha del viaje</label>
+            <input type="date" id="schedule-date" min="${minDate}" max="${maxDateStr}" value="${minDate}"
+              style="width:100%; height:50px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-bg-secondary); font-size:14px; font-weight:700; color:var(--color-text-primary); font-family:var(--font-body); box-sizing:border-box;" />
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:10px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Hora del viaje</label>
+            <select id="schedule-time"
+              style="width:100%; height:50px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-bg-secondary); font-size:14px; font-weight:700; color:var(--color-text-primary); font-family:var(--font-body); appearance:none; -webkit-appearance:none; box-sizing:border-box;">
+              ${hours.map(h => {
+                const [hh] = h.split(':');
+                const selected = parseInt(hh) === now.getHours() + 2 ? 'selected' : '';
+                return `<option value="${h}" ${selected}>${h} hs</option>`;
+              }).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="background:rgba(var(--color-primary-rgb),0.06); border:1px solid rgba(var(--color-primary-rgb),0.12); border-radius:16px; padding:14px; display:flex; gap:10px; align-items:flex-start;">
+          <span style="font-size:16px;">💡</span>
+          <div style="font-size:11.5px; color:var(--color-text-secondary); line-height:1.5;">
+            <strong style="color:var(--color-text-primary);">¿Cómo funciona?</strong><br>
+            Un chofer disponible aceptará tu viaje programado. Recibirás una notificación cuando sea aceptado y otra como recordatorio antes de la hora del viaje.
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+          <button id="schedule-cancel-btn" style="flex:1; height:52px; border-radius:16px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); font-weight:800; font-size:14px; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s;">Cancelar</button>
+          <button id="schedule-confirm-btn" style="flex:2; height:52px; border-radius:16px; background:linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%); border:none; font-weight:900; font-size:14px; color:white; cursor:pointer; box-shadow:0 6px 20px rgba(var(--color-primary-rgb),0.25); display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">${icon('calendar', 18)} Programar Viaje</button>
+        </div>
+      </div>
+    `;
+
+    const modal = showModal({
+      title: '',
+      content: modalContent,
+      hideHeader: true,
+      height: 'auto'
+    });
+
+    modalContent.querySelector('#schedule-cancel-btn').onclick = () => modal.close();
+    modalContent.querySelector('#schedule-confirm-btn').onclick = async () => {
+      const dateVal = modalContent.querySelector('#schedule-date').value;
+      const timeVal = modalContent.querySelector('#schedule-time').value;
+
+      if (!dateVal || !timeVal) {
+        showToast('Seleccioná una fecha y hora válidas.', 'warning');
+        return;
+      }
+
+      const [year, month, day] = dateVal.split('-').map(Number);
+      const [hour, minute] = timeVal.split(':').map(Number);
+      const scheduledDate = new Date(year, month - 1, day, hour, minute, 0);
+
+      if (scheduledDate <= new Date()) {
+        showToast('La fecha/hora debe ser posterior al momento actual.', 'warning');
+        return;
+      }
+
+      const diffMs = scheduledDate.getTime() - Date.now();
+      if (diffMs > 3 * 24 * 60 * 60 * 1000) {
+        showToast('Máximo 3 días de anticipación.', 'warning');
+        return;
+      }
+
+      const confirmBtn = modalContent.querySelector('#schedule-confirm-btn');
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = `<span class="spinner"></span> Programando...`;
+
+      try {
+        const tripOrder = {
+          userId: user.uid,
+          userName: user.displayName || user.name || 'Cliente',
+          userPhone: user.phone || '',
+          driverId: null,
+          driverName: null,
+          pickupAddress: originData.address,
+          pickupCoords: originData.coords,
+          deliveryAddress: destData.address,
+          deliveryCoords: destData.coords,
+          deliveryCost: cost,
+          appUsageFee: Math.ceil((cost * (getState().appUsageFeeRate || 0.05)) / 10) * 10,
+          total: cost,
+          status: 'scheduled',
+          isTrip: true,
+          tripType: vehicleType,
+          scheduledFor: Timestamp.fromDate(scheduledDate),
+          createdAt: serverTimestamp()
+        };
+
+        const docRef = await addDoc(collection(db, 'orders'), tripOrder);
+
+        // Save last address
+        try {
+          const { doc, updateDoc } = await import('firebase/firestore');
+          const userRef = doc(db, 'users', user.uid);
+          await updateDoc(userRef, {
+            lastAddress: {
+              address: destData.address,
+              notes: '',
+              coords: destData.coords || null
+            }
+          });
+        } catch (e) {
+          console.error('Error saving lastAddress:', e);
+        }
+
+        modal.close();
+        showToast('¡Viaje programado con éxito! Te notificaremos cuando un chofer lo acepte.', 'success');
+
+        setTimeout(() => {
+          location.hash = `#/pedido/${docRef.id}`;
+        }, 150);
+
+      } catch (err) {
+        console.error('Error scheduling trip:', err);
+        showToast('Error al programar el viaje: ' + err.message, 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = `${icon('calendar', 18)} Programar Viaje`;
+      }
+    };
+  }
+
   // Submit Trip
   requestBtn.onclick = async () => {
     if (!originData) {
@@ -349,6 +518,23 @@ export async function renderViajes(content) {
     }
 
     const cost = calculateTripCost(calculatedDistance, selectedVehicle);
+
+    // Check if there are online drivers for the selected vehicle type
+    requestBtn.disabled = true;
+    requestBtn.innerHTML = `${icon('loader', 20, 'animate-spin')} Verificando choferes...`;
+
+    const hasDrivers = await checkDriverAvailability(selectedVehicle);
+
+    if (!hasDrivers) {
+      // No drivers available — show schedule modal
+      requestBtn.disabled = false;
+      requestBtn.innerHTML = `${icon('zap', 18)} Pedir Viaje`;
+      showScheduleModal(cost, selectedVehicle);
+      return;
+    }
+
+    requestBtn.disabled = false;
+    requestBtn.innerHTML = `${icon('zap', 18)} Pedir Viaje`;
 
     showConfirm({
       title: '🚕 ¿Confirmar viaje?',

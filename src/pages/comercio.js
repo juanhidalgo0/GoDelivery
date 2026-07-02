@@ -12,6 +12,8 @@ import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { openProductModal } from '../components/product-modal.js';
 
+let currentComercio = null;
+
 export async function renderComercio(content) {
   if (!content) content = document.getElementById('app-content');
   const params = getRouteParams();
@@ -58,6 +60,7 @@ export async function renderComercio(content) {
     return;
   }
 
+  currentComercio = comercio;
   const resolvedComercioId = comercio.id;
   let unsubComercios = null;
 
@@ -98,6 +101,8 @@ export async function renderComercio(content) {
             localStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify(parsed));
           }
         } catch (e) {}
+        
+        currentComercio = comercio;
       }
     });
   } catch (err) {
@@ -295,6 +300,19 @@ export async function renderComercio(content) {
       }
     }
 
+    // Helper for smooth scrolling when filtering prevents layout snapping
+    const smoothScrollToProductsTop = () => {
+      const scrollY = window.scrollY || document.documentElement.scrollTop;
+      if (scrollY > 120) {
+        const currentHeight = document.body.offsetHeight;
+        document.body.style.minHeight = `${currentHeight}px`;
+        window.scrollTo({ top: 120, behavior: 'smooth' });
+        setTimeout(() => {
+          document.body.style.minHeight = '';
+        }, 500);
+      }
+    };
+
     // Category filter handler
     document.getElementById('comercio-categories')?.addEventListener('click', async (e) => {
       const pill = e.target.closest('.tab-pill');
@@ -304,6 +322,12 @@ export async function renderComercio(content) {
 
       document.querySelectorAll('#comercio-categories .tab-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
+
+      // Smoothly scroll the pill to the left position (like "Todos")
+      if (pill.parentElement) {
+        const container = pill.parentElement;
+        container.scrollTo({ left: pill.offsetLeft - 16, behavior: 'smooth' });
+      }
 
       // Update subcategories container dynamically
       const subCats = categories.filter(c => c.parentCategoryId === activeCategory);
@@ -373,6 +397,7 @@ export async function renderComercio(content) {
       activeBrand = updateBrandDropdown(products, activeCategory, activeSubCategory, categories, activeBrand, activeOffers);
 
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      smoothScrollToProductsTop();
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
     });
 
@@ -385,6 +410,12 @@ export async function renderComercio(content) {
       document.querySelectorAll('.sub-tab-pill').forEach(p => p.classList.remove('active'));
       subPill.classList.add('active');
       
+      // Smoothly scroll the sub-pill to the left position
+      if (subPill.parentElement) {
+        const container = subPill.parentElement;
+        container.scrollTo({ left: subPill.offsetLeft, behavior: 'smooth' });
+      }
+      
       document.querySelectorAll('.sub-tab-pill').forEach(p => {
         const isActive = p.dataset.subcatId === activeSubCategory;
         p.style.borderColor = isActive ? 'var(--color-primary)' : 'var(--color-border-light)';
@@ -396,6 +427,7 @@ export async function renderComercio(content) {
       activeBrand = updateBrandDropdown(products, activeCategory, activeSubCategory, categories, activeBrand, activeOffers);
 
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      smoothScrollToProductsTop();
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
     });
 
@@ -404,6 +436,7 @@ export async function renderComercio(content) {
       if (e.target.id === 'comercio-brand-select') {
         activeBrand = e.target.value;
         const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+        smoothScrollToProductsTop();
         renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
       }
     });
@@ -412,6 +445,7 @@ export async function renderComercio(content) {
     document.getElementById('comercio-sort-select')?.addEventListener('change', (e) => {
       activeSort = e.target.value;
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      smoothScrollToProductsTop();
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
     });
 
@@ -450,7 +484,7 @@ export async function renderComercio(content) {
         const productId = card.dataset.productId;
         const product = products.find(p => p.id === productId);
 
-        if (!product || product.isAvailable === false || (product.stockMode === 'limited' && (product.stockQuantity || 0) <= 0)) return;
+        if (!product || card.classList.contains('product-unavailable')) return;
 
         // If quick-add button clicked AND product has no required options/extras
         const hasOptions = (product.optionsGroups && product.optionsGroups.length > 0) || product.useGlobalFlavors === true;
@@ -600,62 +634,77 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
 
   content.innerHTML = `
     <div class="comercio-page">
-      <div class="comercio-header">
-        ${comercio.banner ? `<img src="${comercio.banner}" alt="${comercio.name}" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
-        <div class="comercio-header-overlay"></div>
-        <button class="comercio-header-back" onclick="history.back()">${icon('back', 20)}</button>
+      <!-- Minimal Sticky Navbar -->
+      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: flex-end; padding: 0 16px 10px 16px; box-sizing: border-box; transition: background 0.3s, box-shadow 0.3s; background: transparent;">
+        <button class="comercio-header-back" id="comercio-nav-back" onclick="history.back()" style="position: relative; top: 0; left: 0; margin: 0; z-index: 10; border: none; background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: background 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: #000;">${icon('back', 20)}</button>
+        <div id="comercio-nav-title" style="display: flex; align-items: center; gap: 10px; margin-left: 14px; opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(4px); overflow: hidden; flex: 1; height: 36px;">
+          ${comercio.logo 
+            ? `<img src="${comercio.logo}" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--color-surface); flex-shrink: 0;" />`
+            : `<div style="width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary-light); color: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1.5px solid var(--color-surface);">${icon('store', 14)}</div>`
+          }
+          <div style="font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); font-weight: 700; line-height: normal; transform: translateY(-1px);">${comercio.name}</div>
+        </div>
       </div>
-      
-      <div class="comercio-info">
-        <div class="comercio-info-card" style="position: relative;">
+
+      <!-- Banner Layer -->
+      <div class="comercio-header" style="position: relative; height: 50vw; max-height: 250px; margin-top: calc(-56px - env(safe-area-inset-top, 0px)); overflow: hidden;">
+        ${comercio.banner ? `<img id="comercio-banner-img" src="${comercio.banner}" alt="${comercio.name}" style="width: 100%; height: 100%; object-fit: cover; will-change: transform;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
+        <div class="comercio-header-overlay" style="position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%);"></div>
+      </div>
+    
+      <!-- Info Card Layer -->
+      <div class="comercio-info" style="position: relative; z-index: 2; margin-top: -40px; padding: 0 16px;">
+        <div class="comercio-info-card" style="background: var(--color-surface); border-radius: 24px; padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); position: relative;">
           ${(() => {
             const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
             return `
-              <div style="position: absolute; top: 20px; right: 20px; font-size: 11px; font-weight: 900; padding: 6px 14px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.05em; z-index: 10; display: flex; align-items: center; gap: 6px; background: ${isOpen ? '#10b981' : '#64748b'}; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: none; font-family: var(--font-display);">
+              <div style="position: absolute; top: -16px; right: 24px; font-size: 11px; font-weight: 900; padding: 6px 14px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; background: ${isOpen ? '#10b981' : '#64748b'}; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
                 <span style="width: 6px; height: 6px; border-radius: 50%; background: white; display: inline-block; ${isOpen ? 'animation: pulse 1.8s infinite;' : ''}"></span>
                 ${isOpen ? 'Abierto' : 'Cerrado'}
               </div>
             `;
           })()}
-          <div class="comercio-info-top">
+          
+          <div style="display: flex; align-items: center; gap: 16px;">
             ${comercio.logo
-      ? `<img src="${comercio.logo}" alt="" class="comercio-detail-logo" />`
-      : `<div class="comercio-detail-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-primary-light);">${icon('store', 28)}</div>`
-    }
-            <div class="comercio-info-text">
-              <h1 style="padding-right: 80px;">${comercio.name}</h1>
+              ? `<img src="${comercio.logo}" alt="" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: white;" />`
+              : `<div style="width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--color-surface); margin-top: -48px; display:flex;align-items:center;justify-content:center;background:var(--color-primary-light); box-shadow: 0 4px 12px rgba(0,0,0,0.1);">${icon('store', 28)}</div>`
+            }
+            <div style="display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-top: 8px;">
+              <h1 id="comercio-main-title" style="margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 24px; font-weight: 800; color: var(--color-text);">${comercio.name}</h1>
               <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-top:6px;">
-                <span style="font-size: 11px; font-weight: 850; color: white; background: var(--color-primary); padding: 4px 12px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-display); border: none; box-shadow: 0 2px 6px rgba(225,29,72,0.15);">${comercio.category || 'Comercio'}</span>
-                <button id="rate-comercio-btn" style="background: #f59e0b; border: none; border-radius: 8px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 850; color: white; cursor: pointer; transition: all 0.2s; outline: none; text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-display); box-shadow: 0 2px 6px rgba(245,158,11,0.2);">
+                <span style="font-size: 11px; font-weight: 850; color: white; background: var(--color-primary); padding: 4px 12px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.03em;">${comercio.category || 'Comercio'}</span>
+                <button id="rate-comercio-btn" style="background: #f59e0b; border: none; border-radius: 8px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 850; color: white; cursor: pointer; text-transform: uppercase; box-shadow: 0 2px 6px rgba(245,158,11,0.2);">
                   ⭐ ${comercio.ratingAverage !== undefined && comercio.ratingAverage > 0 ? `${comercio.ratingAverage.toFixed(1)} (${comercio.ratingCount || 0})` : 'Puntuar'}
                 </button>
               </div>
             </div>
-
           </div>
-          ${comercio.description ? `<p class="comercio-description">${comercio.description}</p>` : ''}
-          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border-light); color: var(--color-text-secondary); font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-            ${comercio.address ? `
-              <span style="display: inline-flex; align-items: center; color: var(--color-primary); margin-right: 2px;">${icon('mapPin', 14)}</span>
-              <span style="font-weight: 600; margin-right: 4px; white-space: nowrap;">${comercio.address}</span>
-            ` : ''}
-            
-            ${comercio.address ? `<span style="color: var(--color-text-tertiary); margin-right: 4px;">•</span>` : ''}
-            <span style="display: inline-flex; align-items: center; color: var(--color-primary); margin-right: 2px;">${icon('clock', 13)}</span>
-            <span style="font-weight: 700; white-space: nowrap;">
-              Horarios: ${comercio.schedules && comercio.schedules.length > 0
-                ? comercio.schedules.map(s => `${s.open} - ${s.close}`).join(', ')
-                : (comercio.schedule ? `${comercio.schedule.open} - ${comercio.schedule.close}` : '19:00 - 23:30')
-              }
-            </span>
+          
+          <div style="margin-top: 16px;">
+            ${comercio.description ? `<p style="margin: 0 0 12px 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.5;">${comercio.description}</p>` : ''}
+            <div style="padding-top: 12px; border-top: 1px solid var(--color-border-light); color: var(--color-text-secondary); font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              ${comercio.address ? `
+              <span style="display: inline-flex; align-items: center; color: var(--color-primary);">${icon('mapPin', 14)}</span>
+              <span style="font-weight: 600;">${comercio.address.split(',')[0]}</span>
+              <span style="color: var(--color-border); margin: 0 4px;">•</span>
+              ` : ''}
+              <span style="display: inline-flex; align-items: center; color: var(--color-primary);">${icon('clock', 14)}</span>
+              <span style="font-weight: 700;">
+                ${comercio.schedules && comercio.schedules.length > 0
+                  ? comercio.schedules.map(s => `${s.open} - ${s.close}`).join(', ')
+                  : (comercio.schedule ? `${comercio.schedule.open} - ${comercio.schedule.close}` : '19:00 - 23:30')
+                }
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
-
-      <div class="comercio-products">
+      <div class="comercio-products" style="min-height: 100vh; padding-top: 16px;">
+        <div id="comercio-sticky-filters" style="position: sticky; top: 56px; z-index: 90; background: var(--color-bg); padding-top: 8px; padding-bottom: 8px;">
         <!-- Search bar -->
-        <div class="comercio-search-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3);">
+        <div class="comercio-search-container scroll-reveal reveal-fade-up reveal-delay-1" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); margin-top: 12px;">
           <div style="position:relative; width: 100%; display:flex; align-items:center; background:var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius:16px; padding:0 16px; height:46px; box-shadow:var(--shadow-xs); transition: all 0.2s;">
             <span style="color:var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; margin-right:10px;">${icon('search', 18)}</span>
             <input type="text" id="comercio-product-search" placeholder="Buscar productos..." style="flex:1; border:none; background:transparent; font-size:13px; font-weight:700; color:var(--color-text); outline:none;" />
@@ -663,7 +712,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
           </div>
         </div>
 
-        <div class="tab-pills" id="comercio-categories" style="margin-bottom:var(--space-3); padding-left: var(--space-4); padding-right: var(--space-4);">
+        <div class="tab-pills scroll-reveal reveal-fade-up reveal-delay-2" id="comercio-categories" style="margin-bottom:var(--space-3); padding-left: var(--space-4); padding-right: var(--space-4); position: relative;">
           <button class="tab-pill ${activeCategory === 'all' ? 'active' : ''}" data-cat-id="all">Todos</button>
           <button class="tab-pill ${activeCategory === 'favorites' ? 'active' : ''}" data-cat-id="favorites" style="display:inline-flex; align-items:center; gap:6px;">
             <span style="display:inline-flex; align-items:center; transform:translateY(0.5px);">${icon('heart', 12, 'fav-active')}</span> Favoritos
@@ -677,8 +726,8 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
         </div>
 
         <!-- Subcategories container -->
-        <div id="comercio-subcategories-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: ${subCats.length > 0 ? 'block' : 'none'};">
-          <div class="tab-pills sub-tab-pills" id="comercio-subcategories" style="display: flex; gap: var(--space-2); overflow-x: auto; padding: 4px 0 var(--space-2) 0; border-bottom: none;">
+        <div id="comercio-subcategories-container" class="scroll-reveal reveal-fade-up reveal-delay-2" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: ${subCats.length > 0 ? 'block' : 'none'};">
+          <div class="tab-pills sub-tab-pills" id="comercio-subcategories" style="display: flex; gap: var(--space-2); overflow-x: auto; padding: 4px 0 var(--space-2) 0; border-bottom: none; position: relative;">
             <button class="sub-tab-pill ${activeSubCategory === 'all' ? 'active' : ''}" data-subcat-id="all" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid ${activeSubCategory === 'all' ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${activeSubCategory === 'all' ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color: ${activeSubCategory === 'all' ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">Ver Todo</button>
             ${subCats.map(sub => `
               <button class="sub-tab-pill ${activeSubCategory === sub.id ? 'active' : ''}" data-subcat-id="${sub.id}" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid ${activeSubCategory === sub.id ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${activeSubCategory === sub.id ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color: ${activeSubCategory === sub.id ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">${sub.name}</button>
@@ -686,12 +735,10 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
           </div>
         </div>
 
-        <div class="comercio-sort-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); border-bottom: 1px solid var(--color-border-light); padding-bottom: 12px;">
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); display: flex; align-items: center; gap: 6px;">
-              <span style="color: var(--color-text-tertiary); display: inline-flex;">${icon('sliders', 14)}</span> Ordenar por:
-            </div>
-            <select id="comercio-sort-select" style="border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text); border-radius: 12px; padding: 6px 12px; font-size: 12px; font-weight: 700; outline: none; cursor: pointer; box-shadow: var(--shadow-xs); transition: all 0.2s;">
+        <div class="comercio-sort-container scroll-reveal reveal-fade-up reveal-delay-3" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: flex; flex-direction: row; gap: 8px; border-bottom: 1px solid var(--color-border-light); padding-bottom: 12px;">
+          <div style="flex: 1; display: flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 10px; padding-left: 8px; box-shadow: var(--shadow-xs); overflow: hidden;">
+            <span style="color: var(--color-text-tertiary); display: flex; align-items: center; flex-shrink: 0;">${icon('sliders', 14)}</span>
+            <select id="comercio-sort-select" style="flex: 1; border: none; background: transparent; color: var(--color-text); padding: 8px 6px; font-size: 11.5px; font-weight: 700; outline: none; cursor: pointer; width: 100%; text-overflow: ellipsis;">
               <option value="default" ${activeSort === 'default' ? 'selected' : ''}>Recomendados</option>
               <option value="price-asc" ${activeSort === 'price-asc' ? 'selected' : ''}>Menor precio</option>
               <option value="price-desc" ${activeSort === 'price-desc' ? 'selected' : ''}>Mayor precio</option>
@@ -700,17 +747,15 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
             </select>
           </div>
 
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); display: flex; align-items: center; gap: 6px;">
-              <span style="color: var(--color-text-tertiary); display: inline-flex;">${icon('tag', 14)}</span> Filtrar por marca:
-            </div>
-            <select id="comercio-brand-select" style="border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text); border-radius: 12px; padding: 6px 12px; font-size: 12px; font-weight: 700; outline: none; cursor: pointer; box-shadow: var(--shadow-xs); transition: all 0.2s; max-width: 180px;">
+          <div style="flex: 1; display: flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 10px; padding-left: 8px; box-shadow: var(--shadow-xs); overflow: hidden;">
+            <span style="color: var(--color-text-tertiary); display: flex; align-items: center; flex-shrink: 0;">${icon('tag', 14)}</span>
+            <select id="comercio-brand-select" style="flex: 1; border: none; background: transparent; color: var(--color-text); padding: 8px 6px; font-size: 11.5px; font-weight: 700; outline: none; cursor: pointer; width: 100%; text-overflow: ellipsis;">
               <option value="all" ${activeBrand === 'all' ? 'selected' : ''}>Todas las marcas</option>
               ${getUniqueBrandsForCategory(products, activeCategory, activeSubCategory, categories, activeOffers).map(brand => `<option value="${brand}" ${activeBrand === brand ? 'selected' : ''}>${brand}</option>`).join('')}
             </select>
           </div>
         </div>
-
+        </div>
         <div class="products-grid" id="comercio-products">
         </div>
       </div>
@@ -730,6 +775,66 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
   document.getElementById('rate-comercio-btn')?.addEventListener('click', () => {
     openRatingModal(comercio);
   });
+
+  // Modern, flicker-free sticky navbar logic
+  const navbar = document.getElementById('comercio-navbar');
+  const navTitle = document.getElementById('comercio-nav-title');
+  const navBack = document.getElementById('comercio-nav-back');
+  const bannerImg = document.getElementById('comercio-banner-img');
+  
+  if (navbar) {
+    if (window._comercioScrollHandler) {
+      window.removeEventListener('scroll', window._comercioScrollHandler, { capture: true });
+    }
+
+    window._comercioScrollHandler = (e) => {
+      if (!window.location.hash.startsWith('#/comercio/')) return;
+      const target = e.target;
+      const isPanel = target.classList && (target.classList.contains('slide-panel') || target.classList.contains('slide-overlay'));
+      const isDocument = target === document || target === window;
+      if (!isPanel && !isDocument) return;
+
+      let scrollTop = isPanel ? target.scrollTop : (window.scrollY || document.documentElement.scrollTop);
+      
+      // Parallax effect on banner image
+      if (bannerImg && scrollTop < 300) {
+        bannerImg.style.transform = `translateY(${scrollTop * 0.4}px)`;
+      }
+
+      // Navbar fade in
+      if (scrollTop > 100) {
+        navbar.style.background = 'var(--color-primary)';
+        navbar.style.boxShadow = '0 6px 20px rgba(225, 29, 72, 0.2)';
+        if (navTitle) {
+          navTitle.style.opacity = '1';
+          navTitle.style.transform = 'translateY(0)';
+          const textEl = navTitle.querySelector('div');
+          if (textEl) textEl.style.color = '#ffffff';
+        }
+        if (navBack) {
+          navBack.style.background = 'rgba(255, 255, 255, 0.2)';
+          navBack.style.boxShadow = 'none';
+          navBack.style.color = '#ffffff';
+        }
+      } else {
+        navbar.style.background = 'transparent';
+        navbar.style.boxShadow = 'none';
+        if (navTitle) {
+          navTitle.style.opacity = '0';
+          navTitle.style.transform = 'translateY(4px)';
+        }
+        if (navBack) {
+          navBack.style.background = 'rgba(255, 255, 255, 0.8)';
+          navBack.style.boxShadow = '0 2px 5px rgba(0,0,0,0.1)';
+          navBack.style.color = '#000000';
+        }
+      }
+    };
+
+    window.addEventListener('scroll', window._comercioScrollHandler, { passive: true, capture: true });
+    // Trigger once to set initial state
+    window._comercioScrollHandler({ target: document });
+  }
 }
 
 async function openRatingModal(comercio) {
@@ -892,9 +997,18 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
     filtered = filtered.filter(p => getProductBrand(p) === activeBrand);
   }
 
-  // Search filter
+  // Search filter (Name, Barcode, or Category)
   if (searchQuery) {
-    filtered = filtered.filter(p => p.name.toLowerCase().includes(searchQuery));
+    const q = searchQuery.toLowerCase().trim();
+    filtered = filtered.filter(p => {
+      if ((p.name || '').toLowerCase().includes(q)) return true;
+      if (p.barcode && String(p.barcode).toLowerCase().includes(q)) return true;
+      if (p.categoryId) {
+        const cat = categories.find(c => c.id === p.categoryId);
+        if (cat && (cat.name || '').toLowerCase().includes(q)) return true;
+      }
+      return false;
+    });
   }
 
   // Sort
@@ -969,18 +1083,34 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
 
     return batch.map((p, i) => {
       const offer = activeOffers.find(o => o.productIds && o.productIds.includes(p.id));
-      const isOutOfStock = p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0;
+      
+      let isOutOfStock = p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0;
+      if (p.useGlobalFlavors && currentComercio) {
+        const activeFlavors = (p.allowedFlavors && p.allowedFlavors.length > 0)
+          ? (currentComercio.sabores || []).filter(s => p.allowedFlavors.includes(s.name))
+          : (currentComercio.sabores || []);
+          
+        // Note: s.isAvailable means "is stock limited?". So !s.isAvailable means infinite stock.
+        const hasInfinite = activeFlavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
+        if (hasInfinite) {
+          isOutOfStock = false;
+        } else {
+          const totalQty = activeFlavors.reduce((acc, s) => acc + (s.stock || 0), 0);
+          isOutOfStock = totalQty <= 0;
+        }
+      }
+      
       const isUnavailable = p.isAvailable === false || isOutOfStock;
 
       return `
-        <div class="product-card card-interactive page-enter stagger-${Math.min(i + 1, 6)} ${isUnavailable ? 'product-unavailable' : ''}" 
+        <div class="product-card card-interactive scroll-reveal reveal-fade-up reveal-delay-${Math.min(i + 1, 5)} ${isUnavailable ? 'product-unavailable' : ''}" 
              data-product-id="${p.id}"
              style="position:relative; display:flex; justify-content:space-between; gap:16px; padding:16px; background:var(--color-surface); border-radius:20px; border:1px solid var(--color-border-light); box-shadow:var(--shadow-xs); transition:all 0.2s ease;">
           
           <!-- Left side: Text Details -->
           <div style="flex:1; display:flex; flex-direction:column; justify-content:space-between; min-width:0; text-align:left;">
             <div>
-              <div style="font-family:var(--font-display); font-size:15px; font-weight:800; color:var(--color-text); margin-bottom:4px; line-height:1.2;">${p.name}</div>
+              <div style="font-family:var(--font-display); font-size:15px; font-weight:800; color:var(--color-text); margin-bottom:4px; line-height:1.2; overflow-wrap: break-word; word-break: break-word;">${p.name}</div>
               ${p.description ? `<div style="font-size:12px; color:var(--color-text-secondary); line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin-bottom:8px;">${p.description}</div>` : ''}
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
@@ -1073,7 +1203,7 @@ function updateFAB() {
 
   if (count > 0) {
     container.innerHTML = `
-      <a href="#/cart" class="fab" title="Ver carrito">
+      <a href="#/cart" class="fab" title="Ver carrito" style="bottom: 16px !important; right: 16px !important;">
         ${icon('cart', 26)}
         <span class="fab-badge">${count}</span>
       </a>

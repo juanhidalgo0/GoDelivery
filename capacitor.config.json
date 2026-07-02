@@ -1,5 +1,21 @@
 {
   "appId": "com.godelivery.magdalena",
-  "appName": "GoDelivery",
-  "webDir": "dist"
+  "appName": "GO!",
+  "webDir": "dist",
+  "plugins": {
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      "clientId": "848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    },
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "backgroundColor": "#E11D48",
+      "showSpinner": false,
+      "androidSplashResourceName": "splash"
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
 }

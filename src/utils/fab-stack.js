@@ -120,7 +120,7 @@ export const FABStack = {
     fabs.forEach(id => {
       const el = document.getElementById(id);
       if (el && el.style.opacity !== '0') {
-        el.style.bottom = `${bottomBase + currentOffset}px`;
+        el.style.bottom = `calc(${bottomBase + currentOffset}px + env(safe-area-inset-bottom, 0px))`;
         currentOffset += step;
 
         // Auto-wire toggle logic if not already done

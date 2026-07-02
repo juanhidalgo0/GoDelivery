@@ -173,8 +173,8 @@
 
 .main-slider {
   display: flex;
-  width: 100vw;
-  height: calc(100vh - var(--header-height) - var(--navbar-height));
+  width: 100%;
+  height: calc(100vh - var(--header-height));
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
@@ -187,10 +187,12 @@
 }
 
 .slide-panel {
-  flex: 0 0 100vw;
-  width: 100vw;
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   scroll-snap-align: start;
   scroll-snap-stop: always;
   background: var(--color-bg);
@@ -247,7 +249,13 @@ body.header-hidden .slide-overlay {
 
 /* ── Notifications Page (Premium) ── */
 .notifications-page {
-  padding-bottom: calc(var(--navbar-height) + var(--space-8));
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 9999;
+  background: var(--color-bg) !important;
+  padding-bottom: 80px;
   min-height: 100dvh;
 }
 
@@ -925,13 +933,11 @@ body.header-hidden .slide-overlay {
   display: flex;
   align-items: center;
   justify-content: space-around;
-  background: var(--footer-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--color-surface);
   border-top: 1px solid var(--footer-border);
 
-  height: calc(var(--navbar-height) + env(safe-area-inset-bottom, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  height: calc(var(--navbar-height) + env(safe-area-inset-bottom, 20px) + 12px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 12px);
   position: fixed;
   bottom: 0;
   left: 0;
@@ -1034,10 +1040,9 @@ body.header-hidden .slide-overlay {
   color: var(--color-primary);
 }
 
-/* ── 2. Home Page ── */
 .home-page {
   animation: fadeIn 0.3s ease;
-  padding-bottom: calc(var(--navbar-height) + var(--space-4));
+  padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 20px) + 32px) !important;
 }
 
 .home-hero {
@@ -2415,7 +2420,7 @@ body.header-hidden .slide-overlay {
 .comercios-grid,
 .products-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   padding: 0 var(--space-4);
   margin-top: var(--space-4);
@@ -2732,19 +2737,21 @@ body.header-hidden .slide-overlay {
   justify-content: flex-end;
   padding: 0;
   /* REMOVED PADDING */
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  height: 0;
+  overflow: visible;
 }
 
 #active-order-banner-container:not(.active) {
-  transform: translateY(200%);
+  display: none;
 }
 
 #active-order-banner-container.active {
-  pointer-events: auto;
-  transform: translateY(0);
+  pointer-events: none;
+  display: flex;
 }
 
 .active-order-banner {
+  pointer-events: auto;
   width: 100%;
   max-width: 500px;
   border-radius: var(--radius-2xl);
@@ -3455,17 +3462,13 @@ body.header-hidden .slide-overlay {
 
 /* Glassmorphic Mobile Bottom Navbar */
 #app-navbar, .bottom-nav {
-  background: rgba(255, 255, 255, 0.76) !important;
-  backdrop-filter: blur(24px) !important;
-  -webkit-backdrop-filter: blur(24px) !important;
-  border-top: 1px solid rgba(226, 232, 240, 0.5) !important;
-  box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.04) !important;
+  background: #FFFFFF !important;
+  border-top: 1px solid rgba(226, 232, 240, 0.9) !important;
+  box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.08) !important;
 }
 
 [data-theme="dark"] #app-navbar, [data-theme="dark"] .bottom-nav {
-  background: rgba(10, 15, 29, 0.76) !important;
-  backdrop-filter: blur(24px) !important;
-  -webkit-backdrop-filter: blur(24px) !important;
+  background: #0A0F1D !important;
   border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
   box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.3) !important;
 }
@@ -3587,6 +3590,32 @@ body.header-hidden .slide-overlay {
 .comercios-slider-wrapper {
   position: relative;
   width: 100%;
+}
+
+/* ==========================================================================
+   Capacitor Native Safe Areas (StatusBar & Home Indicator Protection)
+   ========================================================================== */
+
+/* Ensure the header (first child of panel-page) accommodates the top status bar */
+.panel-page > div:first-child {
+  padding-top: calc(16px + env(safe-area-inset-top, 0px)) !important;
+}
+
+/* Bottom Safe Area Protection for lists, overlays, and pages */
+.panel-page,
+.slide-overlay.panel-fullscreen,
+.gofavores-page,
+.notifications-page,
+.order-tracking-page {
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  box-sizing: border-box !important;
+}
+
+/* Adjust scrollable areas within panels so they don't clip at the bottom home indicator */
+.panel-page > div[style*="overflow-y:auto"],
+.panel-page > div[style*="overflow-y: auto"],
+.panel-page > div.scrollable-content {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important;
 }
 
 

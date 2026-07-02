@@ -2,21 +2,35 @@
   "firestore": {
     "rules": "firestore.rules"
   },
-  "hosting": {
-    "target": "app",
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
+  "storage": {
+    "rules": "storage.rules"
   },
+  "hosting": [
+    {
+      "target": "app",
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    },
+    {
+      "target": "licencias",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    }
+  ],
   "functions": {
     "source": "functions"
   }

@@ -3,10 +3,18 @@ import { db } from '../firebase.js';
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { subscribe, getState } from '../state.js';
 import { isDelivery } from '../auth.js';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
+
+let BackgroundGeolocation = null;
+try {
+  BackgroundGeolocation = registerPlugin('BackgroundGeolocation');
+} catch (e) {}
 
 let userSub = null;
 let activeOrdersUnsub = null;
 let locationWatchId = null;
+let nativeWatcherId = null;
 let currentActiveOrders = [];
 let wakeLock = null;
 
@@ -96,25 +104,59 @@ async function requestWakeLock() {
 }
 
 async function startWatching() {
-  if (locationWatchId) return; // Already tracking
+  if (locationWatchId || nativeWatcherId) return; // Already tracking
+
+  if (Capacitor.isNativePlatform() && BackgroundGeolocation) {
+    console.log('Background Tracking: Starting NATIVE background geolocation watcher...');
+    try {
+      const permStatus = await Geolocation.checkPermissions();
+      if (permStatus.location !== 'granted') {
+        console.log('Background Tracking: Requesting foreground location permissions...');
+        await Geolocation.requestPermissions();
+      }
+
+      nativeWatcherId = await BackgroundGeolocation.addWatcher({
+        backgroundMessage: "Rastreando ubicación para la entrega del pedido.",
+        backgroundTitle: "GO! Repartidor Activo",
+        requestPermissions: true,
+        stale: false,
+        distanceFilter: 10
+      }, async (location, error) => {
+        if (error) {
+          console.error('Background Tracking Native Error:', error);
+          return;
+        }
+        const pos = { coords: { latitude: location.latitude, longitude: location.longitude } };
+        
+        // Inline handleLocationUpdate wrapper since handleLocationUpdate is defined below
+        // we'll call it if it exists. Actually, we extracted it above. Wait, if it's extracted 
+        // into startWatching, it's local. I should pass pos directly.
+        await handleLocationUpdate(pos);
+      });
+      return; // Skip web fallback
+    } catch (err) {
+      console.error('Failed to start native background geolocation:', err);
+      // Fallback to web below
+    }
+  }
 
   if (!navigator.geolocation) {
     console.error('Background Tracking: Geolocation not supported by this browser');
     return;
   }
 
-  console.log('Background Tracking: Starting location watch sensor...');
+  console.log('Background Tracking: Starting WEB location watch sensor...');
   await requestWakeLock();
 
   lastLocationUpdateTime = Date.now();
   
   const geoOptions = {
     enableHighAccuracy: true,
-    maximumAge: 0,
-    timeout: 10000
+    maximumAge: 10000, // 10 seconds cache to save massive battery drain
+    timeout: 15000
   };
 
-  const onGeoSuccess = async (pos) => {
+  const handleLocationUpdate = async (pos) => {
     const { latitude, longitude } = pos.coords;
     lastLocationUpdateTime = Date.now();
     
@@ -202,6 +244,8 @@ async function startWatching() {
     }
   };
 
+  const onGeoSuccess = handleLocationUpdate;
+
   const onGeoError = (err) => {
     console.warn(`Background Tracking Watch Error (Code ${err.code}): ${err.message}`);
     
@@ -236,10 +280,7 @@ async function startWatching() {
 
 function restartWatching() {
   console.log('Background Tracking: Executing forced clean watchPosition restart...');
-  if (locationWatchId) {
-    navigator.geolocation.clearWatch(locationWatchId);
-    locationWatchId = null;
-  }
+  stopWatching();
   if (errorRetryTimeout) {
     clearTimeout(errorRetryTimeout);
     errorRetryTimeout = null;

@@ -246,14 +246,54 @@ function updateOrderFAB(order, config) {
 
   fab.innerHTML = `
     ${icon(config.iconName, 22)}
-    <div style="display:flex; flex-direction:column; align-items:flex-start; line-height:1.1;">
+    <div style="display:flex; flex-direction:column; align-items:flex-start; line-height:1.1; margin-right:8px;">
       <span style="font-size:9px; opacity:0.85; font-weight:800; text-transform:uppercase; letter-spacing:0.02em;">${config.title}</span>
       ${subtitleHtml}
+    </div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <button class="fab-action-btn fab-ver-btn" style="background:rgba(255,255,255,0.25); border:none; color:white; padding:5px 12px; border-radius:14px; font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s;">
+        ${icon('eye', 12)} VER
+      </button>
+      <button class="fab-action-btn fab-chat-btn" style="background:white; border:none; color:${config.color2}; padding:5px 12px; border-radius:14px; font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+        ${icon('chat', 12)} CHAT
+      </button>
     </div>
     <div class="fab-toggle-dot"></div>
   `;
 
-  fab.onclick = () => {
+  fab.onclick = async (e) => {
+    const verBtn = e.target.closest('.fab-ver-btn');
+    const chatBtn = e.target.closest('.fab-chat-btn');
+
+    if (verBtn) {
+      e.stopPropagation();
+      window.location.hash = `#/pedido/${order.id}`;
+      return;
+    }
+
+    if (chatBtn) {
+      e.stopPropagation();
+      const isDirectFavorOrTrip = order.isFavor || order.isTrip || !order.comercioId;
+      
+      if (isDirectFavorOrTrip && !order.driverId) {
+        import('./toast.js').then(m => m.showToast('Esperando que un repartidor tome tu pedido para poder chatear', 'info'));
+        return;
+      }
+      
+      const { openChat } = await import('./chat.js');
+      const chatType = isDirectFavorOrTrip ? 'client-delivery' : (order.status === 'delivering' ? 'client-delivery' : 'client-commerce');
+      const recipientName = chatType === 'client-delivery' ? (order.driverName || 'Repartidor') : (order.comercioName || 'Comercio');
+      
+      openChat({
+        orderId: order.id,
+        type: chatType,
+        otherName: recipientName,
+        orderNum: order.orderId
+      });
+      return;
+    }
+
+    // Default FAB body click
     window.location.hash = `#/pedido/${order.id}`;
   };
 }

@@ -88,3 +88,45 @@ export function formatDeliveryTime(distanceKm) {
   return `${minTime}-${maxTime} min`;
 }
 
+export function isScheduleActive(config) {
+  if (!config || !config.enabled) return false;
+  
+  const now = getArgentinaTime();
+  const currentTime = now.getHours() * 60 + now.getMinutes();
+
+  try {
+    const [startH, startM] = config.start.split(':').map(Number);
+    const [endH, endM] = config.end.split(':').map(Number);
+    
+    if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return false;
+
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    if (endMinutes < startMinutes) {
+      // Overnight schedule, e.g. 23:00 to 06:00
+      return currentTime >= startMinutes || currentTime <= endMinutes;
+    } else {
+      // Normal schedule, e.g. 12:00 to 15:00
+      return currentTime >= startMinutes && currentTime <= endMinutes;
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+export function calculateScheduleSurcharge(config, baseValue) {
+  if (!config || !config.enabled) return 0;
+  
+  try {
+    const isActive = isScheduleActive(config);
+    if (isActive) {
+      if (config.type === 'fixed') return config.value;
+      if (config.type === 'percentage') return baseValue * (config.value / 100);
+    }
+  } catch (e) {
+    console.warn('Error calculating schedule surcharge:', e);
+  }
+  return 0;
+}
+

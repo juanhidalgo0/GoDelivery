@@ -232,6 +232,10 @@ select {
   min-height: calc(100dvh - var(--header-height));
 }
 
+.page-content {
+  padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 16px) + 32px) !important;
+}
+
 #app-navbar {
   position: fixed;
   bottom: 0;
@@ -674,4 +678,120 @@ select {
   background: linear-gradient(270deg, var(--color-primary), #F97316, #8B5CF6, var(--color-primary));
   background-size: 400% 400%;
   animation: gradient-shimmer-liquid 4s ease infinite;
+}
+
+/* ==========================================================================
+   Capacitor Native Safe Area Adaptability
+   ========================================================================== */
+body.platform-capacitor {
+  --status-bar-height: max(env(safe-area-inset-top, 0px), 28px);
+  --bottom-safe-area: max(env(safe-area-inset-bottom, 0px), 28px);
+}
+
+/* Adjust Main Web Page Header padding when status bar overlaps */
+body.platform-capacitor #app-header {
+  padding-top: var(--status-bar-height) !important;
+}
+
+/* Adjust Custom/Sticky headers in sub-panels (e.g. Adm: Productos, Adm: Ventas) */
+body.platform-capacitor .panel-page > div:first-child[style*="position:sticky"][style*="top:0"],
+body.platform-capacitor .panel-page > div:first-child[style*="position: sticky"][style*="top: 0"] {
+  padding-top: var(--status-bar-height) !important;
+  height: calc(64px + var(--status-bar-height)) !important;
+}
+
+/* Adjust bottom navigation bar safe area */
+body.platform-capacitor #app-navbar {
+  padding-bottom: var(--bottom-safe-area) !important;
+  background-color: var(--color-surface) !important;
+}
+
+/* Adjust scroll container height to avoid bottom bar overlaps */
+body.platform-capacitor #app-content {
+  padding-bottom: calc(var(--navbar-height) + var(--space-4) + var(--bottom-safe-area)) !important;
+}
+
+/* Adjust panel screens (height 100% or 100dvh) to not go under navigation buttons */
+body.platform-capacitor .panel-page {
+  height: calc(100% - var(--bottom-safe-area)) !important;
+}
+body.platform-capacitor .panel-page[style*="height:100dvh"],
+body.platform-capacitor .panel-page[style*="height: 100dvh"] {
+  height: calc(100dvh - var(--bottom-safe-area)) !important;
+}
+body.platform-capacitor .panel-page[style*="height:100%"],
+body.platform-capacitor .panel-page[style*="height: 100%"] {
+  height: calc(100% - var(--bottom-safe-area)) !important;
+}
+
+/* Add padding-bottom to scroll containers inside panel-page to prevent last element overlap */
+body.platform-capacitor .panel-page > div[style*="overflow-y:auto"],
+body.platform-capacitor .panel-page > div[style*="overflow-y: auto"] {
+  padding-bottom: calc(24px + var(--bottom-safe-area)) !important;
+}
+
+/* Adjust commerce cover page back button position */
+body.platform-capacitor .comercio-header-back {
+  top: calc(16px + var(--status-bar-height)) !important;
+}
+
+/* Adjust product detail modal close & heart buttons position */
+body.platform-capacitor .pm-close-btn,
+body.platform-capacitor .pm-heart-btn {
+  top: calc(16px + var(--status-bar-height)) !important;
+}
+
+/* Adjust product detail modal bottom sticky button bar */
+body.platform-capacitor .pm-footer {
+  padding-bottom: calc(var(--space-4) + var(--bottom-safe-area)) !important;
+  background-color: var(--color-surface) !important;
+}
+
+/* --- Scroll Reveal Animations --- */
+.scroll-reveal {
+  opacity: 0 !important;
+  will-change: transform, opacity;
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.reveal-fade-up {
+  transform: translateY(30px) !important;
+}
+
+.reveal-fade-in {
+  transform: translateY(0) !important;
+}
+
+.reveal-scale-up {
+  transform: scale(0.85) !important;
+}
+
+.reveal-fade-right {
+  transform: translateX(-40px) !important;
+}
+
+.reveal-fade-left {
+  transform: translateX(40px) !important;
+}
+
+/* When active/revealed */
+.scroll-reveal.revealed {
+  opacity: 1 !important;
+  transform: translate(0) scale(1) !important;
+}
+
+/* Stagger delays */
+.reveal-delay-1 { transition-delay: 100ms !important; }
+.reveal-delay-2 { transition-delay: 200ms !important; }
+.reveal-delay-3 { transition-delay: 300ms !important; }
+.reveal-delay-4 { transition-delay: 400ms !important; }
+.reveal-delay-5 { transition-delay: 500ms !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
 }

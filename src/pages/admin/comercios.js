@@ -13,7 +13,7 @@ export async function renderAdminComercios() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
@@ -63,12 +63,17 @@ export async function renderAdminComercios() {
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px;">
         ${filtered.map(c => `
-          <div class="admin-comercio-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:16px; display:flex; align-items:center; gap:14px; transition:all 0.2s;">
+          <div class="admin-comercio-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:16px; display:flex; align-items:center; gap:14px; transition:all 0.2s; position:relative;">
             <div style="width:52px; height:52px; border-radius:50%; overflow:hidden; border:1px solid var(--color-border-light); background:white; flex-shrink:0; padding:2px;">
               <img src="${c.logo || '/logo.png'}" style="width:100%; height:100%; object-fit:cover;" />
             </div>
             <div style="flex:1; min-width:0;">
-              <div style="font-weight:800; font-size:16px; color:var(--color-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.name}</div>
+              <div style="font-weight:800; font-size:16px; color:var(--color-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:8px;">
+                ${c.name}
+                ${c.approvedByAdmin === false ? `
+                  <span style="font-size:10px; font-weight:800; background:#f59e0b; color:white; padding:2px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.03em;">Pendiente</span>
+                ` : ''}
+              </div>
               <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; display:flex; align-items:center; gap:4px;">
                 ${icon('tag', 12)} ${c.category || 'Sin categoría'}
               </div>
@@ -189,6 +194,23 @@ async function openComercioEditor(comercio, onSaved) {
         </div>
         <div id="edit-com-address-badge" style="display:none; font-size:12px; font-weight:700; color:#0d9488; background:rgba(13,148,136,0.06); border:1px solid rgba(13,148,136,0.18); border-radius:8px; padding:8px 12px; align-items:center; gap:6px; word-break:break-all; line-height:1.4; margin-top:8px;">
           ${icon('checkCircle', 14)} Dirección seleccionada y verificada
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px; background:var(--color-bg-secondary); padding:16px; border-radius:16px; border:1px solid var(--color-border-light);">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <div>
+            <label style="display:block; font-size:13px; font-weight:800; color:var(--color-text-primary);">Aprobado por Administrador</label>
+            <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:600;">Permite que el comercio aparezca en la app</span>
+          </div>
+          <input type="checkbox" id="edit-com-approved" ${comercio.approvedByAdmin !== false ? 'checked' : ''} style="width:22px; height:22px; accent-color:var(--color-primary); cursor:pointer;" />
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--color-border-light); padding-top:12px; margin-top:4px;">
+          <div>
+            <label style="display:block; font-size:13px; font-weight:800; color:var(--color-text-primary);">Comercio Activo (Visible)</label>
+            <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:600;">Controla la visibilidad pública en la app</span>
+          </div>
+          <input type="checkbox" id="edit-com-active" ${comercio.isActive !== false ? 'checked' : ''} style="width:22px; height:22px; accent-color:var(--color-primary); cursor:pointer;" />
         </div>
       </div>
 
@@ -344,7 +366,9 @@ async function openComercioEditor(comercio, onSaved) {
       logo: croppedLogo,
       banner: croppedBanner,
       address: document.getElementById('edit-com-address').value.trim(),
-      coords: comercioCoords
+      coords: comercioCoords,
+      approvedByAdmin: document.getElementById('edit-com-approved').checked,
+      isActive: document.getElementById('edit-com-active').checked
     };
 
     const showCenterAlert = (title, message) => {

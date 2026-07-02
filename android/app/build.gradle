@@ -7,8 +7,8 @@ android {
         applicationId "com.godelivery.magdalena"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.0.2"
+        versionCode 15
+        versionName "1.1.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +16,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        debug {
+            storeFile file("c:/Users/PC/Desktop/GoANDROID/go_new.jks")
+            storePassword "osopolar77912879"
+            keyAlias "key0"
+            keyPassword "osopolar77912879"
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
+            signingConfig signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

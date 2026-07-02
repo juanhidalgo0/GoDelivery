@@ -31,7 +31,7 @@ export function initChatNotifier() {
   }, { once: true });
 
   // 1. Listen as Client
-  const ordersQ = query(collection(db, 'orders'), where('userId', '==', user.uid));
+  const ordersQ = query(collection(db, 'orders'), where('userId', '==', user.uid), where('status', 'in', ['pending', 'accepted', 'preparing', 'ready', 'delivering']));
   const orderUnsub = onSnapshot(ordersQ, (snap) => {
     snap.docs.forEach(orderDoc => {
       const order = { id: orderDoc.id, ...orderDoc.data() };
@@ -51,7 +51,12 @@ function listenAsCommerceOrDelivery(user) {
   const comerciosQ = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
   const comercioUnsub = onSnapshot(comerciosQ, (snap) => {
     snap.docs.forEach(comercioDoc => {
-      const ordersQ = query(collection(db, 'orders'), where('comercioId', '==', comercioDoc.id));
+      // Only listen to active orders to prevent memory leak
+      const ordersQ = query(
+        collection(db, 'orders'), 
+        where('comercioId', '==', comercioDoc.id),
+        where('status', 'in', ['pending', 'accepted', 'preparing', 'ready', 'delivering'])
+      );
       const orderUnsub = onSnapshot(ordersQ, (orderSnap) => {
         orderSnap.docs.forEach(orderDoc => {
           const order = { id: orderDoc.id, ...orderDoc.data() };
@@ -64,7 +69,11 @@ function listenAsCommerceOrDelivery(user) {
   activeListeners.push(comercioUnsub);
 
   if (user.isDelivery || user.role === 'delivery') {
-    const deliveryOrdersQ = query(collection(db, 'orders'), where('driverId', '==', user.uid));
+    const deliveryOrdersQ = query(
+      collection(db, 'orders'), 
+      where('driverId', '==', user.uid),
+      where('status', 'in', ['pending', 'accepted', 'preparing', 'ready', 'delivering'])
+    );
     const deliveryUnsub = onSnapshot(deliveryOrdersQ, (snap) => {
       snap.docs.forEach(orderDoc => {
         const order = { id: orderDoc.id, ...orderDoc.data() };
@@ -100,12 +109,17 @@ function listenToChat(chatId, userId, otherName, order) {
               console.warn('AudioManager sound play failed:', soundErr);
             }
 
+            const isCommerceOrDelivery = order.userId !== userId;
+            const clickUrl = isCommerceOrDelivery 
+              ? (order.driverId === userId ? `#/delivery-panel` : `#/comercio-panel/orders?id=${order.comercioId}`)
+              : `#/pedido/${order.id}`;
+
             sendLocalNotification(`💬 ${msg.senderName || otherName}`, msg.text, {
               tag: `chat-${chatId}`,
-              url: `#/pedido/${order.id}`,
+              url: clickUrl,
               type: 'chat'
             });
-            showGlobalMessageBanner(msg.senderName || otherName, msg.text, order.id, chatId);
+            showGlobalMessageBanner(msg.senderName || otherName, msg.text, order.id, chatId, isCommerceOrDelivery, order);
           }
         }
       }
@@ -214,27 +228,36 @@ function updateGlobalFAB() {
       const orderId = parts[0];
       const { openChat } = await import('../components/chat.js');
       
-      // Load sender name from activeListeners/unreadCounts context (fallback to 'Chat')
-      let sender = 'Chat';
+      let otherPartyName = 'Chat';
+      let myDisplayName = 'Usuario';
       const { doc, getDoc } = await import('firebase/firestore');
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (snap.exists()) {
         const orderData = snap.data();
-        sender = isCommerce ? (orderData.userName || 'Cliente') : (orderData.comercioName || orderData.driverName || 'Soporte');
+        const userId = getState().user?.uid;
+        const isCommerceOrDelivery = orderData.userId !== userId;
+
+        if (isCommerceOrDelivery) {
+          otherPartyName = orderData.userName || 'Cliente';
+          myDisplayName = orderData.driverId === userId ? 'Repartidor' : 'Comercio';
+        } else {
+          otherPartyName = isCommerce ? (orderData.comercioName || 'Comercio') : (orderData.driverName || 'Repartidor');
+          myDisplayName = 'Cliente';
+        }
       }
 
       openChat({
         orderId: orderId,
         type: isCommerce ? 'client-commerce' : 'client-delivery',
-        otherName: sender,
+        otherName: otherPartyName,
         orderNum: orderId.slice(0, 6).toUpperCase(),
-        senderDisplayName: sender
+        senderDisplayName: myDisplayName
       });
     }
   };
 }
 
-function showGlobalMessageBanner(sender, text, orderId, chatId) {
+function showGlobalMessageBanner(sender, text, orderId, chatId, isCommerceOrDelivery = false, order = null) {
   if (window.location.hash.includes(orderId) && window.location.hash.includes('chat')) return;
   
   setBanner('message', {
@@ -267,12 +290,19 @@ function showGlobalMessageBanner(sender, text, orderId, chatId) {
       
       // Instant open chat using cached order data
       const { openChat } = await import('../components/chat.js');
+      let myDisplayName = 'Usuario';
+      if (isCommerceOrDelivery && order) {
+        myDisplayName = order.driverId === getState().user.uid ? 'Repartidor' : 'Comercio';
+      } else {
+        myDisplayName = 'Cliente';
+      }
+
       openChat({
         orderId: orderId,
         type: chatId.includes('commerce') ? 'client-commerce' : 'client-delivery',
         otherName: sender,
         orderNum: orderId.slice(0, 6).toUpperCase(),
-        senderDisplayName: sender
+        senderDisplayName: myDisplayName
       });
     }
   });

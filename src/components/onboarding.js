@@ -65,8 +65,9 @@ export async function showOnboarding(onComplete) {
     });
   }
 
-  // Check Notification Permission
-  if ('Notification' in window && Notification.permission !== 'granted') {
+  // Check Notification Permission (Only mandatory on native Play Store / App Store apps)
+  const isNativeApp = window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web';
+  if (isNativeApp && 'Notification' in window && Notification.permission !== 'granted') {
     screens.push({
       id: 'notifications',
       image: '/onboarding_delivery_illustration.png',

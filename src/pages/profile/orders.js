@@ -1,6 +1,6 @@
 
 import { db } from '../../firebase.js';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
@@ -26,7 +26,7 @@ export async function renderProfileOrders(content) {
     </div>
   `;
 
-  const q = query(collection(db, 'orders'), where('userId', '==', user.uid));
+  const q = query(collection(db, 'orders'), where('userId', '==', user.uid), limit(50));
   const unsub = onSnapshot(q, (snap) => {
     let orders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     
