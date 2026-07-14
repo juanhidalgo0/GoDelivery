@@ -24,6 +24,7 @@ workflows:
       - name: Install Node dependencies
         script: |
           npm install --legacy-peer-deps
+          node patch-spm.js
       - name: Build web project
         script: |
           npm run build
