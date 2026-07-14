@@ -4,6 +4,8 @@ workflows:
     name: iOS Capacitor Build
     max_build_duration: 120
     instance_type: mac_mini_m1
+    integrations:
+      app_store_connect: Codemagic API Key
     environment:
       groups:
         # Aquí puedes vincular el grupo de variables para credenciales de Apple
