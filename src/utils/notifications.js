@@ -103,9 +103,31 @@ export async function initPushNotifications() {
 
         PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
           console.log('[Push] Native push action performed:', action);
-          const data = action.notification?.data;
-          if (data && data.url) {
-            let url = data.url;
+          
+          let url = '';
+          if (action.notification) {
+            const n = action.notification;
+            if (n.data) {
+              url = n.data.url || n.data.targetUrl || n.data.click_action || '';
+              if (typeof n.data === 'string') {
+                try {
+                  const parsed = JSON.parse(n.data);
+                  url = url || parsed.url || parsed.targetUrl || parsed.click_action;
+                } catch (e) {}
+              }
+              if (!url) {
+                for (const key of Object.keys(n.data)) {
+                  if (typeof n.data[key] === 'object' && n.data[key] !== null) {
+                    url = n.data[key].url || n.data[key].targetUrl || '';
+                    if (url) break;
+                  }
+                }
+              }
+            }
+            url = url || n.url || n.click_action || '';
+          }
+
+          if (url) {
             if (url.includes('localhost') || url.includes('127.0.0.1')) {
               url = url.replace(/^https?:\/\/[^\/]+/, 'https://godelivery-magdalena.web.app');
             }
@@ -121,6 +143,11 @@ export async function initPushNotifications() {
               if (loggedIn) {
                 console.log('[Push] Navigating directly to hash:', targetHash);
                 window.location.hash = targetHash;
+                
+                // Dispatch HashChangeEvent with a short delay to ensure app webview is awake and routes trigger
+                setTimeout(() => {
+                  window.dispatchEvent(new HashChangeEvent('hashchange'));
+                }, 150);
               } else {
                 console.log('[Push] Deferring navigation, saving to pending URL:', targetHash);
                 localStorage.setItem('gd_pending_notification_url', targetHash);

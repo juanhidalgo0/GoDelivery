@@ -54,8 +54,17 @@ export function initGlobalTracking() {
 }
 
 async function handleVisibilityChange() {
-  if (wakeLock !== null && document.visibilityState === 'visible') {
-    await requestWakeLock();
+  if (document.visibilityState === 'visible') {
+    if (currentActiveOrders.length > 0) {
+      await requestWakeLock();
+    }
+  } else {
+    if (wakeLock) {
+      try {
+        await wakeLock.release();
+      } catch (e) {}
+      wakeLock = null;
+    }
   }
 }
 
@@ -90,16 +99,161 @@ function setupOrdersListener(user) {
 }
 
 async function requestWakeLock() {
-  if ('wakeLock' in navigator) {
+  if (document.visibilityState !== 'visible') {
+    console.log('Background Tracking: Skipping Wake Lock because tab is not visible.');
+    return;
+  }
+  if ('wakeLock' in navigator && !wakeLock) {
     try {
       wakeLock = await navigator.wakeLock.request('screen');
       console.log('Background Tracking: Wake Lock active');
       wakeLock.addEventListener('release', () => {
         console.log('Background Tracking: Wake Lock released');
+        wakeLock = null;
       });
     } catch (err) {
       console.warn('WakeLock failed:', err.message);
     }
+  }
+}
+
+let lastFirestoreWriteTime = 0;
+let lastFirestoreWriteCoords = null;
+
+async function handleLocationUpdate(pos) {
+  const { latitude, longitude } = pos.coords;
+  lastLocationUpdateTime = Date.now();
+  
+  // Cache position in global window context for instant access across modals/maps
+  window.lastRiderPos = { lat: latitude, lng: longitude };
+  
+  // Módulo 3.1: Geofencing
+  window.triggeredGeofences = window.triggeredGeofences || {};
+
+  let geofenceTriggeredThisTick = false;
+  let minDist = Infinity;
+
+  for (const o of currentActiveOrders) {
+    const orderGeofenceKey = o.id;
+    window.triggeredGeofences[orderGeofenceKey] = window.triggeredGeofences[orderGeofenceKey] || { commerce: false, customer: false };
+
+    // 1. Check distance to commerce (<= 200m)
+    const commerceCoords = o.comercioCoords || o.pickupCoords;
+    if (commerceCoords) {
+      const distToCommerce = getHaversineDistance(latitude, longitude, commerceCoords.lat, commerceCoords.lng);
+      if (distToCommerce < minDist) minDist = distToCommerce;
+
+      if (!window.triggeredGeofences[orderGeofenceKey].commerce) {
+        if (distToCommerce <= 200) {
+          window.triggeredGeofences[orderGeofenceKey].commerce = true;
+          geofenceTriggeredThisTick = true;
+          console.log(`[Geofencing] Driver is close to commerce for order ${o.id} (${Math.round(distToCommerce)}m). Triggering notification...`);
+          
+          try {
+            if (o.comercioId) {
+              const { getDoc, doc, collection, addDoc } = await import('firebase/firestore');
+              const comSnap = await getDoc(doc(db, 'comercios', o.comercioId));
+              if (comSnap.exists()) {
+                const ownerId = comSnap.data().ownerId;
+                if (ownerId) {
+                  await addDoc(collection(db, 'users', ownerId, 'notifications'), {
+                    title: 'Repartidor cerca',
+                    body: `El repartidor está a ${Math.round(distToCommerce)}m. Prepará el empaque final para el pedido #${o.orderId || o.id.slice(0, 6)}.`,
+                    type: 'system',
+                    status: 'unread',
+                    createdAt: serverTimestamp()
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.error('[Geofencing] Error notifying commerce:', e);
+          }
+        }
+      }
+    }
+
+    // 2. Check distance to customer (<= 100m)
+    if (o.deliveryCoords) {
+      const distToCustomer = getHaversineDistance(latitude, longitude, o.deliveryCoords.lat, o.deliveryCoords.lng);
+      if (distToCustomer < minDist) minDist = distToCustomer;
+
+      if (!window.triggeredGeofences[orderGeofenceKey].customer) {
+        if (distToCustomer <= 100) {
+          window.triggeredGeofences[orderGeofenceKey].customer = true;
+          geofenceTriggeredThisTick = true;
+          console.log(`[Geofencing] Driver is close to customer for order ${o.id} (${Math.round(distToCustomer)}m). Triggering notification...`);
+
+          try {
+            if (o.userId) {
+              const { collection, addDoc } = await import('firebase/firestore');
+              await addDoc(collection(db, 'users', o.userId, 'notifications'), {
+                title: '¡Tu repartidor está en la puerta!',
+                body: 'Prepárate para recibir tu pedido. ¡Ya llegó!',
+                type: 'system',
+                status: 'unread',
+                createdAt: serverTimestamp()
+              });
+            }
+          } catch (e) {
+            console.error('[Geofencing] Error notifying customer:', e);
+          }
+        }
+      }
+    }
+  }
+
+  // Throttling logic based on distance
+  const now = Date.now();
+  let timeThreshold = 10000; // 10s default if close
+  let distanceThreshold = 10; // 10m default if close
+
+  if (minDist > 1500) {
+    timeThreshold = 90000; // 90s if far
+    distanceThreshold = 150; // 150m if far
+  } else if (minDist > 500) {
+    timeThreshold = 45000; // 45s
+    distanceThreshold = 50; // 50m
+  }
+
+  let shouldUpdate = false;
+  const timeElapsed = now - lastFirestoreWriteTime;
+
+  if (!lastFirestoreWriteCoords || geofenceTriggeredThisTick) {
+    shouldUpdate = true;
+  } else {
+    const distMoved = getHaversineDistance(latitude, longitude, lastFirestoreWriteCoords.lat, lastFirestoreWriteCoords.lng);
+    if (timeElapsed >= timeThreshold && distMoved >= distanceThreshold) {
+      shouldUpdate = true;
+    } else if (distMoved > 250) {
+      shouldUpdate = true;
+    } else if (timeElapsed > timeThreshold * 2) {
+      shouldUpdate = true;
+    }
+  }
+
+  if (!shouldUpdate) {
+    return;
+  }
+
+  console.log(`Background Tracking: Updating order locations in Firestore: [${latitude}, ${longitude}]. Dist to target: ${minDist.toFixed(1)}m.`);
+  lastFirestoreWriteTime = now;
+  lastFirestoreWriteCoords = { lat: latitude, lng: longitude };
+
+  const updates = currentActiveOrders.map(o => {
+    return updateDoc(doc(db, 'orders', o.id), {
+      driverLocation: {
+        lat: latitude,
+        lng: longitude,
+        updatedAt: serverTimestamp()
+      }
+    });
+  });
+
+  try {
+    await Promise.all(updates);
+  } catch (err) {
+    console.error('Background Tracking: Failed to update order locations in Firestore:', err);
   }
 }
 
@@ -128,9 +282,6 @@ async function startWatching() {
         }
         const pos = { coords: { latitude: location.latitude, longitude: location.longitude } };
         
-        // Inline handleLocationUpdate wrapper since handleLocationUpdate is defined below
-        // we'll call it if it exists. Actually, we extracted it above. Wait, if it's extracted 
-        // into startWatching, it's local. I should pass pos directly.
         await handleLocationUpdate(pos);
       });
       return; // Skip web fallback
@@ -154,94 +305,6 @@ async function startWatching() {
     enableHighAccuracy: true,
     maximumAge: 10000, // 10 seconds cache to save massive battery drain
     timeout: 15000
-  };
-
-  const handleLocationUpdate = async (pos) => {
-    const { latitude, longitude } = pos.coords;
-    lastLocationUpdateTime = Date.now();
-    
-    // Cache position in global window context for instant access across modals/maps
-    window.lastRiderPos = { lat: latitude, lng: longitude };
-    console.log(`Background Tracking: Location successfully update: [${latitude}, ${longitude}]`);
-
-    // Módulo 3.1: Geofencing
-    window.triggeredGeofences = window.triggeredGeofences || {};
-
-    for (const o of currentActiveOrders) {
-      const orderGeofenceKey = o.id;
-      window.triggeredGeofences[orderGeofenceKey] = window.triggeredGeofences[orderGeofenceKey] || { commerce: false, customer: false };
-
-      // 1. Check distance to commerce (<= 200m)
-      const commerceCoords = o.comercioCoords || o.pickupCoords;
-      if (commerceCoords && !window.triggeredGeofences[orderGeofenceKey].commerce) {
-        const distToCommerce = getHaversineDistance(latitude, longitude, commerceCoords.lat, commerceCoords.lng);
-        if (distToCommerce <= 200) {
-          window.triggeredGeofences[orderGeofenceKey].commerce = true;
-          console.log(`[Geofencing] Driver is close to commerce for order ${o.id} (${Math.round(distToCommerce)}m). Triggering notification...`);
-          
-          try {
-            if (o.comercioId) {
-              const { getDoc, doc, collection, addDoc } = await import('firebase/firestore');
-              const comSnap = await getDoc(doc(db, 'comercios', o.comercioId));
-              if (comSnap.exists()) {
-                const ownerId = comSnap.data().ownerId;
-                if (ownerId) {
-                  await addDoc(collection(db, 'users', ownerId, 'notifications'), {
-                    title: 'Repartidor cerca',
-                    body: `El repartidor está a ${Math.round(distToCommerce)}m. Prepará el empaque final para el pedido #${o.orderId || o.id.slice(0, 6)}.`,
-                    type: 'system',
-                    status: 'unread',
-                    createdAt: serverTimestamp()
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            console.error('[Geofencing] Error notifying commerce:', e);
-          }
-        }
-      }
-
-      // 2. Check distance to customer (<= 100m)
-      if (o.deliveryCoords && !window.triggeredGeofences[orderGeofenceKey].customer) {
-        const distToCustomer = getHaversineDistance(latitude, longitude, o.deliveryCoords.lat, o.deliveryCoords.lng);
-        if (distToCustomer <= 100) {
-          window.triggeredGeofences[orderGeofenceKey].customer = true;
-          console.log(`[Geofencing] Driver is close to customer for order ${o.id} (${Math.round(distToCustomer)}m). Triggering notification...`);
-
-          try {
-            if (o.userId) {
-              const { collection, addDoc } = await import('firebase/firestore');
-              await addDoc(collection(db, 'users', o.userId, 'notifications'), {
-                title: '¡Tu repartidor está en la puerta!',
-                body: 'Prepárate para recibir tu pedido. ¡Ya llegó!',
-                type: 'system',
-                status: 'unread',
-                createdAt: serverTimestamp()
-              });
-            }
-          } catch (e) {
-            console.error('[Geofencing] Error notifying customer:', e);
-          }
-        }
-      }
-    }
-
-    const updates = currentActiveOrders.map(o => {
-      return updateDoc(doc(db, 'orders', o.id), {
-        driverLocation: {
-          lat: latitude,
-          lng: longitude,
-          updatedAt: serverTimestamp()
-        }
-      });
-    });
-
-    try {
-      await Promise.all(updates);
-    } catch (err) {
-      console.error('Background Tracking: Failed to update order locations in Firestore:', err);
-    }
   };
 
   const onGeoSuccess = handleLocationUpdate;

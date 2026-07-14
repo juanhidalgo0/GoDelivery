@@ -1,6 +1,6 @@
 // GoDelivery — Admin Offers Management
 import { db } from '../../firebase.js';
-import { collection, getDocs, doc, deleteDoc, updateDoc, addDoc, serverTimestamp, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, updateDoc, addDoc, serverTimestamp, query, where, onSnapshot } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
@@ -38,15 +38,19 @@ export async function renderAdminOffers() {
   `;
 
   document.getElementById('admin-create-offer-btn').onclick = () => openOfferEditor();
-  loadOffers();
+  const unsubOffers = loadOffers();
+  return {
+    cleanup: () => {
+      if (unsubOffers) unsubOffers();
+    }
+  };
 }
 
-async function loadOffers() {
+function loadOffers() {
   const container = document.getElementById('admin-offers-list');
   if (!container) return;
 
-  try {
-    const snap = await getDocs(collection(db, 'offers'));
+  return onSnapshot(collection(db, 'offers'), (snap) => {
     const offers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     if (offers.length === 0) {
@@ -87,7 +91,6 @@ async function loadOffers() {
         const id = btn.dataset.id;
         const active = btn.dataset.active === 'true';
         await updateDoc(doc(db, 'offers', id), { active: !active });
-        loadOffers();
       };
     });
 
@@ -105,15 +108,13 @@ async function loadOffers() {
       btn.onclick = async () => {
         if (confirm('¿Eliminar oferta?')) {
           await deleteDoc(doc(db, 'offers', btn.dataset.id));
-          loadOffers();
         }
       };
     });
-
-  } catch (err) {
+  }, (err) => {
     console.error(err);
     container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--color-danger);">Error al cargar</div>`;
-  }
+  });
 }
 
 async function openOfferEditor(existingOffer = null) {

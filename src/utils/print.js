@@ -1,10 +1,4 @@
 export function printComanda(order) {
-  const iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow.document;
-  
   const formatP = (num) => '$' + (num || 0).toLocaleString('es-AR');
   const d = order.createdAt ? (order.createdAt.toDate ? order.createdAt.toDate() : new Date(order.createdAt)) : new Date();
   
@@ -92,16 +86,52 @@ export function printComanda(order) {
       </body>
     </html>
   `;
-  
-  doc.open();
-  doc.write(html);
-  doc.close();
 
-  iframe.onload = () => {
-    iframe.contentWindow.focus();
-    iframe.contentWindow.print();
-    setTimeout(() => {
-      document.body.removeChild(iframe);
-    }, 5000); // Wait enough time for print dialog
-  };
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  if (isMobile) {
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+      }, 500);
+    } else {
+      // Fallback: temporarily rewrite the current document and trigger print
+      const originalBody = document.body.innerHTML;
+      const originalStyle = document.body.style.cssText;
+      
+      document.body.innerHTML = html;
+      window.focus();
+      setTimeout(() => {
+        window.print();
+        // Restore page
+        document.body.innerHTML = originalBody;
+        document.body.style.cssText = originalStyle;
+        // Re-trigger router match to bind events back
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      }, 500);
+    }
+  } else {
+    // Desktop: hidden iframe keeps screen intact
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    iframe.onload = () => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 5000);
+    };
+  }
 }

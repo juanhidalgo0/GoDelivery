@@ -293,6 +293,19 @@ export async function renderAdminUsers() {
       return;
     }
 
+    // 2.5. Edit Vehicle Click
+    const editVehicleBtn = e.target.closest('[data-edit-vehicle]');
+    if (editVehicleBtn) {
+      const uid = editVehicleBtn.dataset.editVehicle;
+      const targetUser = users.find(u => u.uid === uid);
+      if (!targetUser) return;
+      
+      showEditVehicleModal(targetUser, () => {
+        renderUsersList(users, document.getElementById('users-search')?.value || '', currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
+      });
+      return;
+    }
+
     // 3. Toggle Role Click
     const toggleBtn = e.target.closest('[data-toggle]');
     if (toggleBtn && canChangeRoles) {
@@ -568,8 +581,37 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
           </div>
         </div>
 
+        ${(u.isDelivery || u.tripStatus === 'approved') ? `
+          <!-- Vehicle details block -->
+          <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px; margin-top:8px; display:flex; flex-direction:column; gap:6.5px; font-size:12px; font-weight:700;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="color:var(--color-text-secondary); display:flex; align-items:center; gap:4px; font-size:11px;">
+                ${icon('car', 14)} Vehículo:
+              </span>
+              <span style="color:var(--color-text-primary); font-weight:800; font-size:12px;">
+                ${u.vehicleType ? (u.vehicleType.toLowerCase() === 'moto' ? '🏍️ Moto' : '🚗 Auto') : '---'}
+              </span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px dashed var(--color-border-light); padding-top: 5px;">
+              <span style="color:var(--color-text-secondary); font-size:11px;">Detalles:</span>
+              <span style="color:var(--color-text-primary); font-weight:800; font-size:12.5px;">
+                ${u.vehicleModel || '---'} ${u.vehicleColor ? `(${u.vehicleColor})` : ''}
+              </span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px dashed var(--color-border-light); padding-top: 5px;">
+              <span style="color:var(--color-text-secondary); font-size:11px;">Patente:</span>
+              <span style="color:var(--color-text-primary); font-weight:850; letter-spacing:0.5px; font-size:12.5px;">
+                ${u.patente || u.vehicleDetails || '---'}
+              </span>
+            </div>
+            <button data-edit-vehicle="${u.uid}" style="margin-top:6px; height:32px; border-radius:8px; border:1px dashed var(--color-primary); background:none; color:var(--color-primary); font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;" onmouseover="this.style.background='rgba(var(--color-primary-rgb), 0.05)'" onmouseout="this.style.background='none'">
+              ${icon('edit', 12)} Editar Vehículo
+            </button>
+          </div>
+        ` : ''}
+
         <!-- Dedicated Reviews and Award Points Action Buttons -->
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 4px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 8px;">
           <button data-view-ratings="${u.uid}" style="height:42px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text); font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='var(--color-border-light)';" onmouseout="this.style.background='var(--color-bg-secondary)';">
             ${icon('star', 14)} Reseñas (${count})
           </button>
@@ -1373,4 +1415,103 @@ async function showAwardPointsModal(targetUser, allUsers, adminUser) {
       });
     }
   });
+}
+
+function showEditVehicleModal(u, onSuccess) {
+  const modalEl = document.createElement('div');
+  modalEl.style.cssText = 'padding: 20px; font-family: inherit; color: var(--color-text-primary); display: flex; flex-direction: column; gap: 14px;';
+  
+  modalEl.innerHTML = `
+    <h3 style="margin: 0; font-family: var(--font-display); font-size: 18px; font-weight: 900; color: var(--color-text-primary);">Editar Vehículo de ${u.displayName || 'Chofer'}</h3>
+    
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <label style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Tipo de Vehículo</label>
+      <select id="edit-veh-type" style="width: 100%; height: 42px; border-radius: 10px; border: 1.5px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 13px; font-weight: 700; padding: 0 12px; outline: none; font-family: inherit;">
+        <option value="" ${!u.vehicleType ? 'selected' : ''}>Ninguno (No configurado)</option>
+        <option value="Moto" ${(u.vehicleType || '').toLowerCase() === 'moto' ? 'selected' : ''}>🏍️ Moto</option>
+        <option value="Auto" ${(u.vehicleType || '').toLowerCase() === 'auto' ? 'selected' : ''}>🚗 Auto</option>
+      </select>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <label style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Modelo / Marca</label>
+      <input type="text" id="edit-veh-model" value="${u.vehicleModel || ''}" placeholder="Ej: Fiat Cronos" style="width: 100%; box-sizing: border-box; height: 42px; border-radius: 10px; border: 1.5px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 13px; font-weight: 700; padding: 0 12px; outline: none;" />
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <label style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Color</label>
+      <input type="text" id="edit-veh-color" value="${u.vehicleColor || ''}" placeholder="Ej: Blanco" style="width: 100%; box-sizing: border-box; height: 42px; border-radius: 10px; border: 1.5px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 13px; font-weight: 700; padding: 0 12px; outline: none;" />
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <label style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Número de Patente</label>
+      <input type="text" id="edit-veh-patent" value="${u.patente || u.vehicleDetails || ''}" placeholder="Ej: AB123CD" style="width: 100%; box-sizing: border-box; height: 42px; border-radius: 10px; border: 1.5px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 13px; font-weight: 700; padding: 0 12px; outline: none;" />
+    </div>
+
+    <button id="edit-veh-save-btn" class="btn btn-primary btn-block" style="height: 48px; border-radius: 14px; font-weight: 900; font-size: 13.5px; background: #3b82f6; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2); margin-top: 8px;">
+      Guardar Cambios
+    </button>
+  `;
+
+  showModal({
+    title: '',
+    content: modalEl,
+    height: 'auto',
+    hideHeader: true
+  });
+
+  const saveBtn = modalEl.querySelector('#edit-veh-save-btn');
+  saveBtn.onclick = async () => {
+    const typeVal = modalEl.querySelector('#edit-veh-type').value;
+    const modelVal = modalEl.querySelector('#edit-veh-model').value.trim();
+    const colorVal = modalEl.querySelector('#edit-veh-color').value.trim();
+    const patentVal = modalEl.querySelector('#edit-veh-patent').value.trim();
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = 'Guardando...';
+
+    try {
+      const { doc: fDoc, updateDoc: fUpdateDoc } = await import('firebase/firestore');
+      const { db } = await import('../../firebase.js');
+      const userRef = fDoc(db, 'users', u.uid);
+      
+      const vTypeLower = typeVal.toLowerCase();
+      
+      const updateFields = {
+        tripVehicleType: vTypeLower,
+        tripVehicleModel: modelVal,
+        tripVehicleColor: colorVal,
+        tripVehiclePatent: patentVal,
+        
+        deliveryVehicleType: typeVal,
+        deliveryVehicleModel: modelVal,
+        deliveryVehicleColor: colorVal,
+        deliveryVehiclePatent: patentVal,
+
+        vehicleType: vTypeLower,
+        vehicleModel: modelVal,
+        vehicleColor: colorVal,
+        vehicleDetails: patentVal,
+        patente: patentVal
+      };
+
+      await fUpdateDoc(userRef, updateFields);
+
+      // Update local array object reactively
+      Object.assign(u, updateFields);
+
+      // Trigger list update via callback
+      if (onSuccess) onSuccess();
+      
+      import('../../components/toast.js').then(m => m.showToast('Vehículo actualizado con éxito', 'success'));
+      
+      const { closeModal } = await import('../../components/modal.js');
+      closeModal();
+    } catch (err) {
+      console.error('Error saving user vehicle details:', err);
+      import('../../components/toast.js').then(m => m.showToast('Error al guardar vehículo', 'error'));
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = 'Guardar Cambios';
+    }
+  };
 }

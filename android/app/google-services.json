@@ -15,6 +15,38 @@
       },
       "oauth_client": [
         {
+          "client_id": "848164656125-39s20b9aib1vs2h4v3skkvuoas7pdb05.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.godelivery.magdalena",
+            "certificate_hash": "1af0aee070a4e2bd7eadbd1cf0284cd8a711fdd5"
+          }
+        },
+        {
+          "client_id": "848164656125-do8ap3555g81r7jmge4kq9tgvo3kh7um.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.godelivery.magdalena",
+            "certificate_hash": "bcbb83b5b06933b058218379ef9d8cf44f02b05a"
+          }
+        },
+        {
+          "client_id": "848164656125-fhhn78leh2rq9cd9eul0o8qft78n71hg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.godelivery.magdalena",
+            "certificate_hash": "b4875a701e07c4ec9db7341eb733bf91655c71a4"
+          }
+        },
+        {
+          "client_id": "848164656125-tii759faorkt340umt4793phn12dc4o8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.godelivery.magdalena",
+            "certificate_hash": "e45da686b5a482b57eab0b139b284ddea71e95c6"
+          }
+        },
+        {
           "client_id": "848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com",
           "client_type": 3
         }

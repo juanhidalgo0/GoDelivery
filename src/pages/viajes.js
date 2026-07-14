@@ -47,8 +47,8 @@ export async function renderViajes(content) {
   content.innerHTML = `
     <div class="viajes-page page-enter" style="display:flex; flex-direction:column; height: 100dvh; background: var(--color-bg); overflow: hidden; position:relative;">
       
-      <!-- Premium Red Header with smooth gradient -->
-      <div style="background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%); padding:calc(18px + env(safe-area-inset-top, 0px)) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(225, 29, 72, 0.2); z-index:100;">
+      <!-- Premium Unified Blue Header with smooth gradient -->
+      <div style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); padding:calc(18px + env(safe-area-inset-top, 0px)) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(37, 99, 235, 0.2); z-index:100;">
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         <button onclick="history.back()" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
           ${icon('chevronLeft', 24)}
@@ -57,6 +57,10 @@ export async function renderViajes(content) {
           <h1 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; letter-spacing:-0.03em;">Solicitar Viaje</h1>
           <p style="font-size:10px; font-weight:850; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:0.1em; margin-top:2px;">Elegí tu destino y viaja seguro</p>
         </div>
+        <!-- Help Button -->
+        <button id="viajes-help-header-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+          ${icon('info', 20)}
+        </button>
       </div>
 
       <!-- Main Scrollable Body -->
@@ -284,7 +288,7 @@ export async function renderViajes(content) {
       originText.textContent = addr;
       originText.style.color = 'var(--color-text-primary)';
       updateCostDisplay();
-    }, { mode: 'pick', skipDetails: true });
+    }, { mode: 'pick', skipDetails: true, justReturnAddress: true });
   };
 
   destBtn.onclick = () => {
@@ -293,7 +297,7 @@ export async function renderViajes(content) {
       destText.textContent = addr;
       destText.style.color = 'var(--color-text-primary)';
       updateCostDisplay();
-    }, { mode: 'deliver', skipDetails: true });
+    }, { mode: 'deliver', skipDetails: true, optionalReference: true, justReturnAddress: true });
   };
 
   // Vehicle toggle
@@ -328,12 +332,16 @@ export async function renderViajes(content) {
     try {
       const driversQ = query(
         collection(db, 'users'),
-        where('tripStatus', '==', 'approved'),
-        where('isOnline', '==', true),
-        where('tripVehicleType', '==', vehicleType)
+        where('isOnline', '==', true)
       );
       const snap = await getDocs(driversQ);
-      return snap.size > 0;
+      const available = snap.docs.some(docSnap => {
+        const u = docSnap.data();
+        const isApproved = u.tripStatus === 'approved' || u.role === 'chofer';
+        const vType = (u.tripVehicleType || u.vehicleType || '').toLowerCase();
+        return isApproved && vType === vehicleType.toLowerCase();
+      });
+      return available;
     } catch (err) {
       console.warn('Error checking driver availability:', err);
       return true; // Allow trip if check fails
@@ -526,10 +534,9 @@ export async function renderViajes(content) {
     const hasDrivers = await checkDriverAvailability(selectedVehicle);
 
     if (!hasDrivers) {
-      // No drivers available — show schedule modal
       requestBtn.disabled = false;
       requestBtn.innerHTML = `${icon('zap', 18)} Pedir Viaje`;
-      showScheduleModal(cost, selectedVehicle);
+      showWarningModal('Lo sentimos, en este momento no hay choferes de ' + (selectedVehicle === 'moto' ? 'moto 🏍️' : 'auto 🚗') + ' disponibles. Por favor, intentá nuevamente más tarde.');
       return;
     }
 
@@ -596,4 +603,56 @@ export async function renderViajes(content) {
       }
     });
   };
+
+  // Handle general info modal trigger for trips
+  const showViajesInfoModal = () => {
+    showModal({
+      title: '🚗 ¿Cómo funcionan los Viajes?',
+      height: 'auto',
+      content: `
+        <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
+          <p style="margin: 0; font-weight: 700;">GO! Viajes te permite solicitar autos y conductores habilitados para trasladarte de forma segura en tu zona.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Indicá origen y destino</h4>
+                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Escribí las direcciones o seleccionalas directamente interactuando con el mapa integrado.</p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Visualizá el costo estimado</h4>
+                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">El sistema calculará automáticamente la distancia en kilómetros y te mostrará la tarifa correspondiente.</p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Viajá con seguridad</h4>
+                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Podrás visualizar en vivo la aproximación del chofer, ver la patente de su auto y chatear para coordinar.</p>
+              </div>
+            </div>
+          </div>
+          <button id="close-viajes-info-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+        </div>
+      `,
+      onOpen: () => {
+        document.getElementById('close-viajes-info-modal-btn').onclick = () => closeModal();
+      }
+    });
+  };
+
+  const helpBtn = document.getElementById('viajes-help-header-btn');
+  if (helpBtn) {
+    helpBtn.onclick = () => showViajesInfoModal();
+  }
+
+  const hasSeenInfo = localStorage.getItem('info_seen_viajes_v4');
+  if (!hasSeenInfo) {
+     showViajesInfoModal();
+     localStorage.setItem('info_seen_viajes_v4', 'true');
+  }
 }

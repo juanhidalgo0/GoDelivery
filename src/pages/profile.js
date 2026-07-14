@@ -1,6 +1,6 @@
 import { getState, setState, subscribe, getUserLevel } from '../state.js';
 import { signInWithGoogle, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from '../auth.js';
-import { db } from '../firebase.js';
+import { db, auth } from '../firebase.js';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
@@ -311,7 +311,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           </div>
 
           <!-- Delivery Application Section -->
-          ${!isDelivery() ? `
+            ${!isDelivery() && (user.deliveryStatus === 'pending' || user.deliveryStatus === 'rejected') ? `
             <div id="delivery-apply-card" style="margin: 10px 20px; background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
               ${user.deliveryStatus === 'pending' ? `
                 <div style="display: flex; gap: 12px; align-items: flex-start;">
@@ -329,7 +329,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                   <div class="spinner-mini" style="width:12px; height:12px; border-width:2px; border-top-color:#f59e0b; margin:0;"></div>
                   EN REVISIÓN
                 </div>
-              ` : user.deliveryStatus === 'rejected' ? `
+              ` : `
                 <div style="display: flex; gap: 12px; align-items: flex-start;">
                   <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                     ${icon('alertCircle', 22)}
@@ -344,24 +344,9 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 <button id="reapply-delivery-btn" class="btn btn-outline" style="height: 38px; font-size: 12px; font-weight: 800; border-radius: 8px; align-self: flex-start; padding: 0 16px;">
                   Volver a Postularse
                 </button>
-              ` : `
-                <div style="display: flex; gap: 12px; align-items: flex-start;">
-                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                    ${icon('bike', 22)}
-                  </div>
-                  <div>
-                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">¿Querés ser Repartidor?</h4>
-                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
-                      Trabajá con total libertad de horarios, sumá excelentes ingresos semanales y sé tu propio jefe.
-                    </p>
-                  </div>
-                </div>
-                <button id="apply-delivery-btn" class="btn btn-primary" style="height: 38px; font-size: 12px; font-weight: 800; border-radius: 8px; align-self: flex-start; padding: 0 16px; background: var(--color-primary); border: none; color: white;">
-                  Postularse Ahora
-                </button>
               `}
             </div>
-          ` : `
+          ` : isDelivery() ? `
             <!-- Panel Repartidor Acceso Directo si ya está aprobado -->
             <div style="margin: 10px 20px; background: rgba(34, 197, 94, 0.05); border-radius: 16px; padding: 14px 16px; border: 1.5px solid rgba(34, 197, 94, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
               <div style="display:flex; align-items:center; gap:12px;">
@@ -377,8 +362,61 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 Entrar ${icon('chevronRight', 10)}
               </a>
             </div>
-          `}
-
+          ` : ''}
+ 
+          <!-- Commerce Application Section -->
+          ${!isComercio() && (user.commerceStatus === 'pending' || user.commerceStatus === 'rejected') ? `
+            <div id="commerce-apply-card" style="margin: 10px 20px; background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
+              ${user.commerceStatus === 'pending' ? `
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center; flex-shrink: 0; animation: pulse-green 2s infinite;">
+                    ${icon('store', 22)}
+                  </div>
+                  <div>
+                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">Postulación de Comercio en Revisión</h4>
+                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                      Tu solicitud para registrar tu comercio está siendo evaluada por un administrador. Te notificaremos pronto.
+                    </p>
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; background: rgba(34, 197, 94, 0.08); padding: 6px 12px; border-radius: 8px; color: #22c55e; font-size: 11px; font-weight: 800; align-self: flex-start;">
+                  <div class="spinner-mini" style="width:12px; height:12px; border-width:2px; border-top-color:#22c55e; margin:0;"></div>
+                  EN REVISIÓN
+                </div>
+              ` : `
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    ${icon('alertCircle', 22)}
+                  </div>
+                  <div>
+                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">Postulación de Comercio Rechazada</h4>
+                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                      Tu solicitud de comercio ha sido rechazada. Contactá con soporte si tenés dudas o querés apelar.
+                    </p>
+                  </div>
+                </div>
+                <button id="reapply-commerce-btn" class="btn btn-outline" style="height: 38px; font-size: 12px; font-weight: 800; border-radius: 8px; align-self: flex-start; padding: 0 16px;">
+                  Volver a Solicitar
+                </button>
+              `}
+            </div>
+          ` : isComercio() ? `
+            <!-- Panel Comercio Acceso Directo si ya está aprobado -->
+            <div style="margin: 10px 20px; background: rgba(34, 197, 94, 0.05); border-radius: 16px; padding: 14px 16px; border: 1.5px solid rgba(34, 197, 94, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center;">
+                  ${icon('store', 20)}
+                </div>
+                <div>
+                  <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); margin-top:1px;">¡Comercio Activo!</div>
+                  <div style="font-size:11px; color:var(--color-text-secondary); margin-top:1px;">Gestioná tus productos y ventas directas.</div>
+                </div>
+              </div>
+              <a href="#/comercio-panel" class="btn btn-success" style="height: 32px; font-size: 11px; font-weight: 900; border-radius: 8px; display:flex; align-items:center; gap:4px; text-transform:uppercase; padding:0 12px; background:#22c55e; border:none; color:white; text-decoration:none;">
+                Panel ${icon('chevronRight', 10)}
+              </a>
+            </div>
+          ` : ''}
           <!-- Módulo 1.1: Sistema de Referidos & 1.2 Desafíos y Rachas Semanales -->
           <div style="margin: 10px 20px; display: flex; flex-direction: column; gap: 10px;">
             <!-- Referidos Card -->
@@ -495,7 +533,13 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               </div>
               <div style="flex:1;">
                 <span class="settings-label">Número de contacto</span>
-                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.phone ? `+54 ${user.phone}` : 'No configurado'}</p>
+                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis;">
+                  ${user.phone ? `+54 ${user.phone}` : 'No configurado'}
+                  ${user.phone ? (user.phoneVerified ? 
+                    `<span style="background:rgba(34, 197, 94, 0.15); color:#22c55e; padding:2px 6px; border-radius:10px; font-size:9px; font-weight:800;">✓ Verificado</span>` : 
+                    `<span style="background:rgba(249, 115, 22, 0.15); color:#f97316; padding:2px 6px; border-radius:10px; font-size:9px; font-weight:800;">⚠ Sin Verificar</span>`
+                  ) : ''}
+                </p>
               </div>
               ${icon('edit', 16, 'settings-chevron')}
             </div>
@@ -521,6 +565,14 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 ${icon('chevronRight', 16, 'settings-chevron')}
               </a>
             ` : ''}
+
+            <div class="settings-row" id="delete-account-row">
+              <div class="settings-icon-box" style="background:rgba(239, 68, 68, 0.1); color:var(--color-danger);">
+                ${icon('trash', 20)}
+              </div>
+              <span class="settings-label" style="color:var(--color-danger);">Eliminar cuenta</span>
+              ${icon('chevronRight', 16, 'settings-chevron')}
+            </div>
 
             <div class="settings-row" id="install-app-row" style="display:none;">
               <div class="settings-icon-box" style="background:rgba(236, 72, 153, 0.1); color:#ec4899;">
@@ -555,6 +607,10 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     });
     document.getElementById('install-app-row')?.addEventListener('click', () => showInstallUI());
     document.getElementById('help-terms-btn')?.addEventListener('click', () => showHelpAndTermsModal());
+    document.getElementById('delete-account-row')?.addEventListener('click', () => {
+      AudioManager.hapticLight();
+      window.open('https://godelivery-magdalena.web.app/delete-account.html', '_blank');
+    });
 
     document.getElementById('profile-avatar-container')?.addEventListener('click', () => {
       AudioManager.hapticLight();
@@ -843,6 +899,8 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
 
     document.getElementById('apply-delivery-btn')?.addEventListener('click', () => showDeliveryApplicationModal(user));
     document.getElementById('reapply-delivery-btn')?.addEventListener('click', () => showDeliveryApplicationModal(user));
+    document.getElementById('apply-commerce-btn')?.addEventListener('click', () => showCommerceApplicationModal(user));
+    document.getElementById('reapply-commerce-btn')?.addEventListener('click', () => showCommerceApplicationModal(user));
 
     updateInstallVisibility?.();
 
@@ -1271,14 +1329,45 @@ async function loadAndRenderModalChallenges(uid) {
   const container = document.getElementById('modal-challenges-container');
   if (!container) return;
 
+  const getWeekIdentifier = (date) => {
+    const d = date ? new Date(date) : new Date();
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+    const yearStart = new Date(d.getFullYear(), 0, 1);
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return `${d.getFullYear()}-W${weekNo}`;
+  };
+
+  const currentWeek = getWeekIdentifier(new Date());
+
   try {
-    const { collection, getDocs, setDoc, doc } = await import('firebase/firestore');
+    const { collection, getDocs, setDoc, doc, updateDoc } = await import('firebase/firestore');
     const collRef = collection(db, 'users', uid, 'challenges');
     const snap = await getDocs(collRef);
     let challenges = [];
 
     if (!snap.empty) {
       challenges = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Check if any loaded challenge is from a previous week and needs reset
+      for (const ch of challenges) {
+        if (ch.weekIdentifier !== currentWeek) {
+          ch.progress = 0;
+          ch.completed = false;
+          ch.completedAt = null;
+          ch.weekIdentifier = currentWeek;
+          try {
+            await updateDoc(doc(db, 'users', uid, 'challenges', ch.id), {
+              progress: 0,
+              completed: false,
+              completedAt: null,
+              weekIdentifier: currentWeek
+            });
+          } catch (e) {
+            console.error('Error resetting weekly challenge on client:', ch.id, e);
+          }
+        }
+      }
     } else {
       // Create defaults from getState().weeklyChallenges
       const { getState } = await import('../state.js');
@@ -1294,7 +1383,8 @@ async function loadAndRenderModalChallenges(uid) {
         target: Number(ch.target),
         progress: 0,
         pointsReward: Number(ch.pointsReward),
-        completed: false
+        completed: false,
+        weekIdentifier: currentWeek
       }));
       for (const challenge of challenges) {
         await setDoc(doc(db, 'users', uid, 'challenges', challenge.id), challenge);
@@ -1618,7 +1708,6 @@ async function showEditDisplayNameModal(user) {
 
 async function showEditPhoneModal(user) {
   const { showModal, closeModal } = await import('../components/modal.js');
-  const { doc, updateDoc } = await import('firebase/firestore');
   const { showToast } = await import('../components/toast.js');
 
   const modalContent = `
@@ -1663,23 +1752,184 @@ async function showEditPhoneModal(user) {
             return;
           }
 
+          let cleanedPhone = val.replace(/\D/g, '');
+          
+          // Argentine numbers / general E164 check (must be between 10 and 13 digits)
+          if (cleanedPhone.length < 10 || cleanedPhone.length > 13) {
+            showToast('Número celular inválido. Debe tener entre 10 y 13 dígitos (ej: 2215551234).', 'danger');
+            return;
+          }
+
           saveBtn.disabled = true;
           saveBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' Guardando...';
 
+          // Clean prefixes to get the raw 10-digit number
+          if (cleanedPhone.startsWith('54')) {
+            cleanedPhone = cleanedPhone.substring(2);
+          }
+          if (cleanedPhone.startsWith('9') && cleanedPhone.length > 10) {
+            cleanedPhone = cleanedPhone.substring(1); // Remove 9 if it was prefixed
+          }
+          if (cleanedPhone.startsWith('0')) {
+            cleanedPhone = cleanedPhone.substring(1);
+          }
+          
+          // Strip the "15" mobile indicator from different area code formats
+          if (cleanedPhone.length === 12) {
+            if (cleanedPhone.substring(4, 6) === '15') {
+              cleanedPhone = cleanedPhone.substring(0, 4) + cleanedPhone.substring(6);
+            }
+            else if (cleanedPhone.substring(3, 5) === '15') {
+              cleanedPhone = cleanedPhone.substring(0, 3) + cleanedPhone.substring(5);
+            }
+            else if (cleanedPhone.substring(2, 4) === '15') {
+              cleanedPhone = cleanedPhone.substring(0, 2) + cleanedPhone.substring(4);
+            }
+          }
+          else if (cleanedPhone.length === 11) {
+            if (cleanedPhone.substring(3, 5) === '15') {
+              cleanedPhone = cleanedPhone.substring(0, 3) + cleanedPhone.substring(5);
+            }
+            else if (cleanedPhone.substring(2, 4) === '15') {
+              cleanedPhone = cleanedPhone.substring(0, 2) + cleanedPhone.substring(4);
+            }
+          }
+          
           try {
+            const { doc, updateDoc } = await import('firebase/firestore');
             const { db } = await import('../firebase.js');
+
             await updateDoc(doc(db, 'users', user.uid), {
-              phone: val
+              phone: cleanedPhone,
+              phoneVerified: true
             });
+
             const currentUser = getState().user;
-            setState('user', { ...currentUser, phone: val });
-            showToast('Número de contacto actualizado', 'success');
+            setState('user', { ...currentUser, phone: cleanedPhone, phoneVerified: true });
+
+            showToast('Número de teléfono guardado con éxito', 'success');
             closeModal();
           } catch (error) {
-            console.error('Error updating phone:', error);
-            showToast('Error al actualizar el número', 'error');
+            console.error('Error saving phone number:', error);
+            showToast('Error al guardar el número de teléfono. Reintenta.', 'danger');
             saveBtn.disabled = false;
             saveBtn.innerHTML = 'Guardar';
+          }
+        };
+      }
+    }
+  });
+}
+
+async function showPhoneVerificationModal(user, phoneVal, confirmationResult) {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { doc, updateDoc } = await import('firebase/firestore');
+  const { showToast } = await import('../components/toast.js');
+
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; text-align: center;">
+      <div>
+        <div style="font-size: 40px; margin-bottom: 12px;">📱</div>
+        <h3 style="font-size: 16px; font-weight: 800; margin: 0 0 8px 0;">Verificación por SMS</h3>
+        <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5;">
+          Hemos enviado un mensaje de texto (SMS) con un código de verificación a tu número <strong>+54 ${phoneVal}</strong>.
+        </p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; margin-top: 8px;">
+        <label style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Ingresa el código de 6 dígitos</label>
+        <input type="text" id="verification-code-input" maxlength="6" placeholder="------" style="width: 160px; height: 48px; border-radius: 12px; border: 2px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 20px; font-weight: 800; text-align: center; letter-spacing: 4px; outline: none; transition: border-color 0.2s;" />
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: 'Verificar Teléfono',
+    height: 'auto',
+    content: modalContent,
+    footer: `
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
+        <button id="verification-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
+        <button id="verification-confirm-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Confirmar</button>
+      </div>
+    `,
+    onOpen: () => {
+      const input = document.getElementById('verification-code-input');
+      const cancelBtn = document.getElementById('verification-cancel-btn');
+      const confirmBtn = document.getElementById('verification-confirm-btn');
+
+      if (input) input.focus();
+
+      if (cancelBtn) {
+        cancelBtn.onclick = () => {
+          closeModal();
+          const recaptchaContainer = document.getElementById('recaptcha-container');
+          if (recaptchaContainer) recaptchaContainer.remove();
+        };
+      }
+
+      if (confirmBtn) {
+        confirmBtn.onclick = async () => {
+          const val = input.value.trim();
+          if (val.length !== 6) {
+            showToast('Ingresa un código de 6 dígitos válido.', 'warning');
+            return;
+          }
+
+          confirmBtn.disabled = true;
+          confirmBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' Verificando...';
+
+          try {
+            await confirmationResult.confirm(val);
+            
+            const { db } = await import('../firebase.js');
+            await updateDoc(doc(db, 'users', user.uid), {
+              phone: phoneVal,
+              phoneVerified: true
+            });
+            
+            const currentUser = getState().user;
+            setState('user', { ...currentUser, phone: phoneVal, phoneVerified: true });
+            
+            closeModal();
+            const recaptchaContainer = document.getElementById('recaptcha-container');
+            if (recaptchaContainer) recaptchaContainer.remove();
+
+            setTimeout(async () => {
+              const { showModal: showSuccessModal } = await import('../components/modal.js');
+              const successModal = showSuccessModal({
+                title: '🎉 ¡Celular Verificado!',
+                height: 'auto',
+                content: `
+                  <div style="padding: 20px 10px; text-align: center; font-family: var(--font-body); color: var(--color-text-primary);">
+                    <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                    <p style="font-size: 15px; font-weight: 700; margin-bottom: 8px; color: var(--color-success);">¡Tu número de teléfono ha sido verificado!</p>
+                    <p style="font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; margin: 0;">Ya tienes configurado tu celular de contacto de forma segura y puedes continuar realizando tus pedidos.</p>
+                  </div>
+                `,
+                footer: `
+                  <div style="padding: 0 4px 12px 4px; display: flex; justify-content: center; width: 100%;">
+                    <button id="success-confirm-btn" class="btn btn-primary" style="width: 100%; height: 48px; border-radius: 12px; font-weight: 900; font-size: 14.5px; background: var(--color-primary); border: none; color: white; cursor: pointer;">Entendido</button>
+                  </div>
+                `,
+                onOpen: () => {
+                  const btn = document.getElementById('success-confirm-btn');
+                  if (btn) {
+                    btn.onclick = () => {
+                      successModal.close();
+                      if (location.hash === '#/profile') {
+                        location.reload();
+                      }
+                    };
+                  }
+                }
+              });
+            }, 300);
+          } catch (error) {
+            console.error('Error verifying SMS code:', error);
+            showToast('El código ingresado es incorrecto o ya expiró.', 'danger');
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = 'Confirmar';
           }
         };
       }
@@ -1873,5 +2123,135 @@ async function showManageAddressesModal() {
       if (unsubSaved) unsubSaved();
       if (unsubDelivery) unsubDelivery();
     }
+  });
+}
+
+async function showDeleteAccountConfirmModal() {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const user = getState().user || {};
+  
+  showModal({
+    title: '⚠️ Eliminar Cuenta',
+    height: 'auto',
+    content: `
+      <div style="padding: 16px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 14px; text-align: center;">
+        <div style="font-size: 40px;">🗑️</div>
+        <p style="font-size: 14px; font-weight: 800; line-height: 1.4; color: var(--color-text-primary); margin: 0;">
+          ¿Estás seguro de que deseas solicitar la eliminación de tu cuenta?
+        </p>
+        <p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0; text-align: left;">
+          Se eliminarán permanentemente tu perfil, historial de pedidos, puntos de fidelidad y cualquier dato de ubicación asociado a tu usuario en <strong>GO!</strong> en un plazo máximo de 72 horas.
+        </p>
+        <div style="font-size: 11px; color: var(--color-text-tertiary); line-height: 1.4; padding: 10px; background: var(--color-bg-secondary); border-radius: 8px;">
+          Esta solicitud se enviará a <strong>goenvios2023@gmail.com</strong> desde tu correo electrónico.
+        </div>
+      </div>
+    `,
+    footer: `
+      <div style="padding: 0 4px 12px 4px; display: flex; gap: 12px; width: 100%;">
+        <button id="del-acc-cancel-btn" class="btn btn-ghost" style="flex: 1; height: 48px; border-radius: 12px; font-weight: 800; cursor: pointer; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); color: var(--color-text-primary);">Cancelar</button>
+        <a id="del-acc-confirm-link" href="mailto:goenvios2023@gmail.com?subject=Solicitud%20de%20eliminacion%20de%20cuenta%20-%20GO!&body=Hola%2C%20solicito%20la%20eliminacion%20de%20mi%20cuenta%20de%20usuario%20con%20el%20correo%3A%20${encodeURIComponent(user.email || '')}%20y%20el%20ID%3A%20${encodeURIComponent(user.uid || '')}." class="btn btn-primary" style="flex: 1.5; height: 48px; border-radius: 12px; font-weight: 900; background: var(--color-danger); border: none; color: white; display: flex; align-items: center; justify-content: center; text-decoration: none; cursor: pointer;">Solicitar Eliminación</a>
+      </div>
+    `,
+    onOpen: () => {
+      document.getElementById('del-acc-cancel-btn').onclick = () => closeModal();
+      document.getElementById('del-acc-confirm-link').onclick = () => {
+        closeModal();
+        showToast('Solicitud enviada. Procesaremos la eliminación en un plazo de 72 horas.', 'success');
+      };
+    }
+  });
+}
+
+async function showCommerceApplicationModal(user) {
+  const { showModal, closeModal } = await import('../components/modal.js');
+  const { doc, updateDoc } = await import('firebase/firestore');
+  const { db } = await import('../firebase.js');
+
+  const modalEl = document.createElement('div');
+  modalEl.style.cssText = 'padding: 16px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 14px;';
+
+  modalEl.innerHTML = `
+    <h3 style="font-family: var(--font-display); font-size: 19px; font-weight: 900; color: var(--color-text-primary); margin: 0;">Postulación de Comercio</h3>
+    <p style="font-size: 12.5px; color: var(--color-text-secondary); line-height: 1.45; margin: 0 0 6px 0;">
+      Completá los datos de tu comercio. Un administrador revisará la solicitud y te dará de alta de inmediato.
+    </p>
+
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Nombre del Comercio</label>
+        <input type="text" id="com-app-name" placeholder="Ej. Pizzería Don Juan" style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box;" />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Categoría Principal</label>
+        <select id="com-app-category" style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box; cursor:pointer;">
+          <option value="Restaurantes">Restaurantes</option>
+          <option value="Supermercado">Supermercado</option>
+          <option value="Heladerías">Heladerías</option>
+          <option value="Kioscos / Bebidas">Kioscos / Bebidas</option>
+          <option value="GoMarket">GoMarket</option>
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Teléfono de Contacto</label>
+        <input type="tel" id="com-app-phone" value="${user.phone || ''}" placeholder="Ej. +549 221 ..." style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box;" />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Dirección Física</label>
+        <input type="text" id="com-app-address" placeholder="Ej. Calle 12 Nro. 345, Magdalena" style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box;" />
+      </div>
+    </div>
+
+    <button id="com-app-submit-btn" class="btn btn-primary" style="height:48px; border-radius:12px; font-weight:900; background:#22c55e; border:none; color:white; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:8px; cursor:pointer; width:100%;">
+      Enviar Solicitud
+    </button>
+  `;
+
+  modalEl.querySelector('#com-app-submit-btn').onclick = async (e) => {
+    const nameVal = modalEl.querySelector('#com-app-name').value.trim();
+    const categoryVal = modalEl.querySelector('#com-app-category').value;
+    const phoneVal = modalEl.querySelector('#com-app-phone').value.trim();
+    const addressVal = modalEl.querySelector('#com-app-address').value.trim();
+
+    if (!nameVal || !phoneVal || !addressVal) {
+      showToast('Por favor completa todos los campos del formulario.', 'warning');
+      return;
+    }
+
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.innerHTML = `${icon('loader', 16, 'animate-spin')} Enviando...`;
+
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        commerceStatus: 'pending',
+        commerceApplication: {
+          name: nameVal,
+          category: categoryVal,
+          phone: phoneVal,
+          address: addressVal,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        }
+      });
+
+      showToast('¡Tu solicitud de comercio fue enviada con éxito!', 'success');
+      closeModal();
+      location.reload();
+    } catch (err) {
+      console.error(err);
+      showToast('Error al enviar la solicitud. Por favor intenta de nuevo.', 'error');
+      btn.disabled = false;
+      btn.innerHTML = 'Enviar Solicitud';
+    }
+  };
+
+  showModal({
+    title: 'Nueva Solicitud',
+    height: 'auto',
+    content: modalEl
   });
 }

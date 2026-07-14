@@ -10,6 +10,8 @@
   justify-content: center;
   padding: var(--space-6);
   transition: opacity 0.4s ease-out;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .onboarding-overlay.fade-out {
@@ -20,13 +22,12 @@
 .onboarding-card {
   width: 100%;
   max-width: 400px;
-  height: 100%;
-  max-height: 700px;
   display: flex;
   flex-direction: column;
   align-items: center;
   position: relative;
   text-align: center;
+  margin: auto;
 }
 
 .onboarding-skip {
@@ -249,6 +250,31 @@
   max-height: 200px; /* Suficiente para contener el texto de la FAQ */
   opacity: 1;
   padding-bottom: 16px;
+}
+
+@media (max-height: 680px) {
+  .onboarding-image img {
+    max-height: 180px !important;
+  }
+  .onboarding-image {
+    margin-top: var(--space-4) !important;
+  }
+  .onboarding-content {
+    padding: var(--space-3) 0 !important;
+  }
+  .onboarding-title {
+    font-size: 20px !important;
+  }
+  .onboarding-text {
+    font-size: 13.5px !important;
+    line-height: 1.45 !important;
+  }
+  .onboarding-dots {
+    margin-bottom: var(--space-4) !important;
+  }
+  .onboarding-next {
+    height: 48px !important;
+  }
 }
 
 

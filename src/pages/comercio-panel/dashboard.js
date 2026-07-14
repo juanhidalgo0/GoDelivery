@@ -93,6 +93,15 @@ export async function renderComercioDashboard() {
             <span style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</span>
           </a>
 
+          <a href="#/mi-comercio/${comercioId}/coupons" class="admin-menu-item">
+            <div class="admin-menu-icon" style="background:rgba(168, 85, 247, 0.1); color:#a855f7;">${icon('gift', 24)}</div>
+            <div class="admin-menu-text">
+              <div class="admin-menu-title">Mis Cupones</div>
+              <div class="admin-menu-desc">Descuentos exclusivos en mis productos</div>
+            </div>
+            <span style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</span>
+          </a>
+
           <a href="#/mi-comercio/${comercioId}/metrics" class="admin-menu-item">
             <div class="admin-menu-icon" style="background:rgba(59, 130, 246, 0.1); color:#3b82f6;">${icon('trendingUp', 24)}</div>
             <div class="admin-menu-text">

@@ -40,11 +40,24 @@ export async function renderCategoryPage(categoryName, content) {
   content.innerHTML = `
     <div class="category-page page-enter" style="display:flex; flex-direction:column; height: 100%; background: var(--color-bg); overflow: hidden;">
       
-      <!-- Search Bar (Now in Content) -->
-      <div style="padding: 16px 20px; background: var(--color-bg); z-index: 10; position: relative;">
+      <!-- Search Bar & Filters (Now in Content) -->
+      <div style="padding: 16px 20px 8px 20px; background: var(--color-bg); z-index: 10; position: relative; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--color-border-light);">
          <div style="position: relative;">
            <input type="text" id="category-search" placeholder="Buscar en ${categoryName}..." style="width: 100%; height: 48px; border-radius: 14px; border: 1px solid var(--color-border); background: var(--color-surface); padding: 0 44px; color: var(--color-text); font-size: 14px; font-weight: 600; outline: none; transition: all 0.3s; box-shadow: var(--shadow-sm);">
            <div style="position: absolute; left: 14px; top: 14px; color: var(--color-text-tertiary);">${icon('search', 18)}</div>
+         </div>
+
+         <!-- Interactive Filter Pills Row -->
+         <div class="filter-pills-row" style="display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding-bottom: 4px; -webkit-overflow-scrolling: touch;">
+           <button id="filter-btn-open" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 700; border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
+             <span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow:0 0 0 2px rgba(34,197,94,0.2);"></span> Abiertos ahora
+           </button>
+           <button id="filter-btn-shipping" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 700; border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
+             <span style="color:#0ea5e9; display:flex;">${icon('truck', 16)}</span> Envío Gratis
+           </button>
+           <button id="filter-btn-rating" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 700; border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
+             <span style="color:#f59e0b; display:flex;">${icon('star', 16)}</span> Más valorados
+           </button>
          </div>
       </div>
 
@@ -57,19 +70,27 @@ export async function renderCategoryPage(categoryName, content) {
     <style>
       #category-search::placeholder { color: var(--color-text-tertiary); }
       #category-search:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12); }
+      .filter-pills-row::-webkit-scrollbar { display: none; }
     </style>
   `;
 
   // Load Data
   try {
-    let q;
-    if (categoryName === 'Todos') {
-      q = query(collection(db, 'comercios'), where('isActive', '==', true));
+    const isSpecialProductsView = ['Destacados', 'Solo En App'].includes(categoryName);
+    const isSpecialRecommendedView = categoryName === 'Recomendados';
+
+    let comercios = [];
+    if (isSpecialProductsView || isSpecialRecommendedView || categoryName === 'Todos') {
+      const snap = await getDocsOptimized(query(collection(db, 'comercios')), 'comercios_all_category_views', 900000);
+      comercios = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
     } else {
-      q = query(collection(db, 'comercios'), where('isActive', '==', true), where('category', '==', categoryName));
+      const snap = await getDocsOptimized(query(collection(db, 'comercios'), where('category', '==', categoryName)), `category_comercios_${categoryName}_all`, 900000);
+      comercios = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
     }
-    const snap = await getDocsOptimized(q, `category_comercios_${categoryName}`, 900000);
-    const comercios = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    if (isSpecialRecommendedView) {
+      comercios = comercios.filter(c => c.promotion && c.promotion.active === true);
+    }
 
     // Apply hourly randomization
     const hourSeed = new Date().getFullYear() + '-' + new Date().getMonth() + '-' + new Date().getDate() + '-' + new Date().getHours();
@@ -97,9 +118,23 @@ export async function renderCategoryPage(categoryName, content) {
       });
       const results = await Promise.all(promises);
       allProducts = results.flat().filter(p => p.isActive !== false);
+
+      if (categoryName === 'Solo En App') {
+        allProducts = allProducts.filter(p => p.onlyInApp === true);
+      }
+
+      if (isSpecialProductsView) {
+        allProducts = allProducts.sort(() => 0.5 - Math.random());
+      }
     } catch (err) {
       console.warn('Error fetching products for category:', err);
     }
+
+    let currentFilters = {
+      openOnly: false,
+      freeShippingOnly: false,
+      topRatedOnly: false
+    };
 
     const renderList = async (filteredComs, filteredProds, queryStr = '') => {
       const grid = document.getElementById('category-comercios-grid');
@@ -110,7 +145,7 @@ export async function renderCategoryPage(categoryName, content) {
       const { getQuickDistance, calculateDynamicFee } = await import('../utils/geo.js');
 
       // Precalculate distances and fees for comercios synchronously
-      const resolvedComs = filteredComs.map((c) => {
+      let resolvedComs = filteredComs.map((c) => {
         let distanceKm = null;
         let deliveryFee = null;
         if (userCoords && c.coords) {
@@ -123,7 +158,7 @@ export async function renderCategoryPage(categoryName, content) {
       });
 
       // Precalculate delivery fees for product merchants synchronously
-      const resolvedProds = filteredProds.map((p) => {
+      let resolvedProds = filteredProds.map((p) => {
         let deliveryFee = null;
         const ownerComer = comercios.find(c => c.id === p.comercioId);
         if (userCoords && ownerComer && ownerComer.coords) {
@@ -135,14 +170,58 @@ export async function renderCategoryPage(categoryName, content) {
         return { product: p, deliveryFee };
       });
 
-      if (!queryStr) {
+      // Apply current filters to resolved lists
+      if (currentFilters.openOnly) {
+        resolvedComs = resolvedComs.filter(({ comercio: c }) => {
+          let isOpen = true;
+          try {
+            isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
+          } catch (e) {}
+          return isOpen && c.isPaused !== true && c.isActive !== false;
+        });
+
+        resolvedProds = resolvedProds.filter(({ product: p }) => {
+          const ownerComer = comercios.find(c => c.id === p.comercioId);
+          if (!ownerComer) return false;
+          let isOpen = true;
+          try {
+            isOpen = isShopOpen(ownerComer.schedules || (ownerComer.schedule ? [ownerComer.schedule] : []), ownerComer.daysOpen);
+          } catch (e) {}
+          return isOpen && ownerComer.isPaused !== true && ownerComer.isActive !== false;
+        });
+      }
+
+      if (currentFilters.freeShippingOnly) {
+        resolvedComs = resolvedComs.filter(({ deliveryFee }) => deliveryFee === null || deliveryFee === 0);
+        resolvedProds = resolvedProds.filter(({ deliveryFee }) => deliveryFee === null || deliveryFee === 0);
+      }
+
+      if (currentFilters.topRatedOnly) {
+        resolvedComs = resolvedComs.filter(({ comercio: c }) => (c.ratingAverage || 0) >= 4.5);
+        resolvedProds = resolvedProds.filter(({ product: p }) => {
+          const ownerComer = comercios.find(c => c.id === p.comercioId);
+          return ownerComer && (ownerComer.ratingAverage || 0) >= 4.5;
+        });
+      }
+
+      if (isSpecialProductsView) {
+        if (queryStr && queryStr !== 'show_products_only') {
+          resolvedProds = resolvedProds.filter(({ product: p }) => 
+            (p.name || '').toLowerCase().includes(queryStr.toLowerCase()) || 
+            (p.description || '').toLowerCase().includes(queryStr.toLowerCase())
+          );
+        }
+        resolvedComs = [];
+      }
+
+      if (!queryStr && !isSpecialProductsView) {
         // Render only Comercios
         if (resolvedComs.length === 0) {
           grid.innerHTML = `
             <div class="empty-state" style="padding-top: 40px; grid-column: 1/-1;">
               <div class="empty-state-icon" style="color: var(--color-text-tertiary);">${icon('store', 48)}</div>
               <div class="empty-state-title" style="margin-top:16px;">No hay comercios</div>
-              <div class="empty-state-text">No hay comercios disponibles en esta categoría.</div>
+              <div class="empty-state-text">No hay comercios disponibles que cumplan con los filtros.</div>
             </div>
           `;
           return;
@@ -154,16 +233,17 @@ export async function renderCategoryPage(categoryName, content) {
             isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
           } catch (e) {}
           
+          const isInactive = c.isActive === false;
           const isPaused = c.isPaused === true;
-          const statusClass = isPaused ? 'paused' : (isOpen ? 'open' : 'closed');
-          const statusText = isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
-          const href = isPaused ? 'javascript:void(0)' : `#/comercio/${c.id}`;
+          const statusClass = isInactive ? 'inactive' : (isPaused ? 'paused' : (isOpen ? 'open' : 'closed'));
+          const statusText = isInactive ? 'Próximamente' : (isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado'));
+          const href = (isPaused || isInactive) ? 'javascript:void(0)' : `#/comercio/${c.id}`;
           const bannerSrc = c.banner || '';
 
           return `
-            <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} page-enter stagger-${Math.min(i+1, 6)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom: 18px; position:relative;">
+            <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} ${isInactive ? 'is-inactive' : ''} page-enter stagger-${Math.min(i+1, 6)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom: 18px; position:relative; ${isInactive ? 'opacity: 0.75; filter: grayscale(0.85);' : ''}">
               <!-- Floating Favorite Heart Button (Moved out of banner to prevent clipping) -->
-              <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10;" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
+              <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10; ${isInactive ? 'display:none;' : ''}" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
                 ${icon('heart', 18)}
               </div>
 
@@ -175,8 +255,8 @@ export async function renderCategoryPage(categoryName, content) {
                 </div>
 
                 <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
-                <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isOpen && !isPaused ? '#00B174' : '#3F372B'}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15); text-transform:none; letter-spacing:normal;">
-                  ${statusText === 'Abierto' ? 'Abierto ahora' : statusText}
+                <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isInactive ? '#64748b' : (isOpen && !isPaused ? '#00B174' : '#3F372B')}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15); text-transform:none; letter-spacing:normal;">
+                  ${statusText === 'Abierto' ? 'Abierto ahora' : statusText.toUpperCase()}
                 </div>
                 
                 <!-- Rating Box on top-right -->
@@ -333,10 +413,14 @@ export async function renderCategoryPage(categoryName, content) {
         }
 
         if (resolvedProds.length > 0) {
+          let sectionHeader = 'Productos Encontrados';
+          if (categoryName === 'Destacados') sectionHeader = 'Productos Destacados';
+          if (categoryName === 'Solo En App') sectionHeader = 'Disponible sólo en la app';
+
           html += `
             <div style="grid-column: 1/-1; margin-top: 24px;">
               <h3 style="font-family: var(--font-display); font-weight: 900; font-size: 16px; margin: 0 0 12px 0; color: var(--color-text-primary); display: flex; align-items: center; gap: 8px;">
-                ${icon('package', 18)} Productos Encontrados (${resolvedProds.length})
+                ${icon('package', 18)} ${sectionHeader} (${resolvedProds.length})
               </h3>
             </div>
           `;
@@ -388,23 +472,82 @@ export async function renderCategoryPage(categoryName, content) {
       }
     };
 
-    renderList(comercios, [], '');
+    if (isSpecialProductsView) {
+      renderList([], allProducts, 'show_products_only');
+    } else {
+      renderList(comercios, [], '');
+    }
 
-    // Search input handler
-    document.getElementById('category-search').oninput = (e) => {
-      const s = e.target.value.toLowerCase().trim();
-      if (!s) {
-        renderList(comercios, [], '');
-        return;
+    // Bind event handlers
+    const filterOpenBtn = document.getElementById('filter-btn-open');
+    const filterShippingBtn = document.getElementById('filter-btn-shipping');
+    const filterRatingBtn = document.getElementById('filter-btn-rating');
+    const searchInput = document.getElementById('category-search');
+
+    const updateFilterStyles = () => {
+      if (filterOpenBtn) {
+        filterOpenBtn.style.background = currentFilters.openOnly ? 'var(--color-primary)' : 'var(--color-surface)';
+        filterOpenBtn.style.color = currentFilters.openOnly ? 'white' : 'var(--color-text-primary)';
+        filterOpenBtn.style.borderColor = currentFilters.openOnly ? 'var(--color-primary)' : 'var(--color-border-light)';
       }
-      const filteredComs = comercios.filter(c => 
-        c.name.toLowerCase().includes(s) || (c.description || '').toLowerCase().includes(s)
-      );
-      const filteredProds = allProducts.filter(p => 
-        p.name.toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s)
-      );
-      renderList(filteredComs, filteredProds, s);
+      if (filterShippingBtn) {
+        filterShippingBtn.style.background = currentFilters.freeShippingOnly ? 'var(--color-primary)' : 'var(--color-surface)';
+        filterShippingBtn.style.color = currentFilters.freeShippingOnly ? 'white' : 'var(--color-text-primary)';
+        filterShippingBtn.style.borderColor = currentFilters.freeShippingOnly ? 'var(--color-primary)' : 'var(--color-border-light)';
+      }
+      if (filterRatingBtn) {
+        filterRatingBtn.style.background = currentFilters.topRatedOnly ? 'var(--color-primary)' : 'var(--color-surface)';
+        filterRatingBtn.style.color = currentFilters.topRatedOnly ? 'white' : 'var(--color-text-primary)';
+        filterRatingBtn.style.borderColor = currentFilters.topRatedOnly ? 'var(--color-primary)' : 'var(--color-border-light)';
+      }
     };
+
+    const triggerFilterAndRender = () => {
+      const s = (searchInput?.value || '').toLowerCase().trim();
+      let filteredComs = comercios;
+      let filteredProds = isSpecialProductsView ? allProducts : [];
+
+      if (s) {
+        filteredComs = comercios.filter(c => 
+          c.name.toLowerCase().includes(s) || (c.description || '').toLowerCase().includes(s)
+        );
+        filteredProds = allProducts.filter(p => 
+          p.name.toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s)
+        );
+      }
+      renderList(filteredComs, filteredProds, s || (isSpecialProductsView ? 'show_products_only' : ''));
+    };
+
+    if (filterOpenBtn) {
+      filterOpenBtn.onclick = (e) => {
+        e.preventDefault();
+        currentFilters.openOnly = !currentFilters.openOnly;
+        updateFilterStyles();
+        triggerFilterAndRender();
+      };
+    }
+    if (filterShippingBtn) {
+      filterShippingBtn.onclick = (e) => {
+        e.preventDefault();
+        currentFilters.freeShippingOnly = !currentFilters.freeShippingOnly;
+        updateFilterStyles();
+        triggerFilterAndRender();
+      };
+    }
+    if (filterRatingBtn) {
+      filterRatingBtn.onclick = (e) => {
+        e.preventDefault();
+        currentFilters.topRatedOnly = !currentFilters.topRatedOnly;
+        updateFilterStyles();
+        triggerFilterAndRender();
+      };
+    }
+
+    if (searchInput) {
+      searchInput.oninput = () => {
+        triggerFilterAndRender();
+      };
+    }
 
   } catch (err) {
     console.error(err);

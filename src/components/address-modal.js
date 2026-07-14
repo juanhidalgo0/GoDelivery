@@ -21,6 +21,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
   let geocodingDisabled = false;
   let geocodingDisabledTimeout = null;
   let isManualAddress = false;
+  let isPreciseLocation = false;
 
   const updateSelectedAddress = (newAddress) => {
     if (!newAddress) return;
@@ -91,7 +92,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
       </div>
 
       <!-- Bottom Panel -->
-      <div id="address-bottom-panel" style="padding: 24px 20px 40px; background: var(--color-bg); box-shadow: 0 -10px 30px rgba(0,0,0,0.1); z-index: 20; flex-shrink:0;">
+      <div id="address-bottom-panel" style="padding: 24px 20px calc(24px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); box-shadow: 0 -10px 30px rgba(0,0,0,0.1); z-index: 20; flex-shrink:0;">
         <!-- Dirección seleccionada aparte -->
         <div id="current-selected-address-container" style="margin-bottom: 16px; display: flex; align-items: flex-start; gap: 10px; background: var(--color-bg-secondary); padding: 14px 16px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
           <div style="color: var(--color-primary); margin-top: 2px; flex-shrink: 0;">${icon('mapPin', 18)}</div>
@@ -115,7 +116,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
         <!-- Reference/Notes input -->
         <div style="margin-bottom: 16px;">
-          <textarea id="address-reference-input" placeholder="Referencia / Indicaciones de entrega (Ej: Portón negro, depto 2) - Obligatorio" style="width:100%; height:54px; padding:10px 14px; border-radius:14px; border:1.5px solid var(--color-border); background:var(--color-surface); font-size:13px; font-weight:600; outline:none; color:var(--color-text-primary); resize:none; line-height:1.4; transition:all 0.2s; box-sizing:border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'">${getState().addressNotes || ''}</textarea>
+          <textarea id="address-reference-input" placeholder="${config.optionalReference ? 'Referencia / Indicaciones (Opcional)' : 'Referencia / Indicaciones de entrega (Ej: Portón negro, depto 2) - Obligatorio'}" style="width:100%; height:54px; padding:10px 14px; border-radius:14px; border:1.5px solid var(--color-border); background:var(--color-surface); font-size:13px; font-weight:600; outline:none; color:var(--color-text-primary); resize:none; line-height:1.4; transition:all 0.2s; box-sizing:border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'">${getState().addressNotes || ''}</textarea>
         </div>
 
         <!-- Saved Addresses Horizontal List -->
@@ -222,6 +223,9 @@ export function showAddressPrompt(onSuccess, config = {}) {
     });
 
     updateRealTimeLocation();
+    setTimeout(() => {
+      centerOnMe(false);
+    }, 500);
 
     // FIXED: Ensure listeners are attached correctly
     const locBtn = document.getElementById('my-location-btn');
@@ -233,6 +237,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
     }
 
     document.getElementById('confirm-location-btn').onclick = () => {
+      const isDefaultCoords = Math.abs(selectedCoords.lat - (-35.0811)) < 0.0001 && Math.abs(selectedCoords.lng - (-57.6508)) < 0.0001;
+      if (isDefaultCoords && !isPreciseLocation) {
+        showToast('No pudimos detectar tu ubicación GPS precisa. Por favor, escribe tu dirección en el buscador o mueve el mapa.', 'warning');
+        return;
+      }
+
       if (isGeocoding) {
         pendingConfirm = true;
         const confirmBtn = document.getElementById('confirm-location-btn');
@@ -243,9 +253,9 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
       const address = lastGeocodedAddress || document.getElementById('address-search-input').value;
       if (address) {
-        // Validation of reference note (Obligatorio)
+        // Validation of reference note (Obligatorio unless optionalReference is passed)
         const reference = document.getElementById('address-reference-input')?.value.trim() || '';
-        if (!reference) {
+        if (!config.optionalReference && !reference) {
           const refInput = document.getElementById('address-reference-input');
           if (refInput) {
             refInput.style.borderColor = '#EF4444';
@@ -255,7 +265,18 @@ export function showAddressPrompt(onSuccess, config = {}) {
           return;
         }
 
-        if (isGeneric) {
+        if (isGeneric || !config.editAddress) {
+           if (config.justReturnAddress) {
+             closeModal();
+             if (onSuccess) onSuccess(address, reference, selectedCoords);
+             return;
+           }
+           // Save to saved addresses list if we are not editing
+           if (!config.editAddress) {
+             import('../state.js').then(({ saveUserAddress }) => {
+               saveUserAddress('Dirección', address, reference, selectedCoords);
+             }).catch(e => console.warn('Could not save user address to list:', e));
+           }
            setDeliveryAddress(address, reference, selectedCoords, '');
            closeModal();
            if (onSuccess) onSuccess(address, reference, selectedCoords);
@@ -330,8 +351,16 @@ export function showAddressPrompt(onSuccess, config = {}) {
   const updateRealTimeLocation = () => {
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition((pos) => {
+        const accuracy = pos.coords.accuracy || 9999;
+        if (accuracy > 150) {
+          isPreciseLocation = false;
+          if (userLocationMarker) userLocationMarker.setMap(null);
+          userLocationMarker = null;
+          return;
+        }
         const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         lastKnownUserPos = coords;
+        isPreciseLocation = true;
         if (!userLocationMarker) {
           userLocationMarker = new google.maps.OverlayView();
           userLocationMarker.onAdd = function () {
@@ -373,6 +402,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
     if (lastKnownUserPos && googleMap) {
       googleMap.setCenter(lastKnownUserPos);
       googleMap.setZoom(17);
+      isPreciseLocation = true;
       
       if (iconWrap) {
         iconWrap.classList.add('loc-pulse-anim');
@@ -390,8 +420,19 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
     const onSuccessCoords = (pos) => {
       if (overlay) overlay.style.opacity = '0';
+      
+      const accuracy = pos.coords.accuracy || 9999;
+      if (accuracy > 150) {
+        isPreciseLocation = false;
+        if (showFeedback) {
+          showToast('Ubicación poco precisa. Por favor, escribe tu dirección manualmente o mueve el mapa.', 'warning');
+        }
+        return;
+      }
+      
       const myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       lastKnownUserPos = myPos;
+      isPreciseLocation = true;
       if (googleMap) {
         if (showFeedback) {
           googleMap.setCenter(myPos);
@@ -654,7 +695,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
 export function showAddressDetails(address, coords, onSuccess, config = {}) {
   const modalContent = document.createElement('div');
-  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg);';
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden;';
 
   let aptVal = '';
   let notesVal = '';
@@ -676,22 +717,30 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
 
   modalContent.innerHTML = `
     <!-- Header -->
-    <div style="padding:20px; display:flex; align-items:center; gap:16px; border-bottom:1px solid var(--color-border-light);">
+    <div style="padding:20px; display:flex; align-items:center; gap:16px; border-bottom:1px solid var(--color-border-light); flex-shrink:0;">
       <button id="details-back" style="background:none; border:none; padding:8px; cursor:pointer; color: var(--color-text-primary);">${icon('arrowLeft', 20)}</button>
-      <h3 style="font-family:var(--font-display); font-weight:800; margin:0; font-size:1.1rem; color: var(--color-text-primary);">Detalles de entrega</h3>
+      <div style="flex:1;">
+        <h2 style="font-family:var(--font-display); font-size:17px; font-weight:900; color:var(--color-text-primary); margin:0;">${config.editAddress ? 'Editar dirección' : 'Detalles de entrega'}</h2>
+      </div>
     </div>
 
-    <div style="flex:1; overflow-y:auto; padding:24px 20px; display:flex; flex-direction:column; gap:20px;">
-      <div>
-        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; margin-bottom:8px; letter-spacing:0.02em;">Nombre de la dirección</label>
-        <input type="text" id="details-name" placeholder="Ej: Casa, Trabajo, Gimnasio..." value="${config.editAddress ? config.editAddress.name : ''}" style="width:100%; height:52px; padding:0 16px; border:1.5px solid var(--color-border); border-radius:14px; font-size:15px; font-weight:700; outline:none; background: var(--color-bg); color: var(--color-text-primary);" />
+    <!-- Scrollable Body -->
+    <div style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:20px;">
+      <div style="background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); border-radius:14px; padding:12px; display:flex; gap:10px;">
+        <div style="color:var(--color-primary); flex-shrink:0; margin-top:2px;">${icon('mapPin', 16)}</div>
+        <div style="font-weight:700; font-size:13px; color:var(--color-text-primary); line-height:1.4;">${address}</div>
       </div>
 
-      <div>
-        <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px; letter-spacing:0.02em;">Ubicación seleccionada</div>
-        <div style="display:flex; align-items:center; gap:12px; padding:16px; background:var(--color-bg-secondary); border-radius:14px; border:1px solid var(--color-border-light);">
-          <div style="color:var(--color-primary);">${icon('mapPin', 20)}</div>
-          <div style="font-size:14px; font-weight:700; color:var(--color-text-primary); line-height:1.4;">${address}</div>
+      <!-- Tag Buttons horizontal select -->
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Guardar dirección como (opcional)</label>
+        <div id="address-tags-container" style="display:flex; gap:10px;">
+          <button class="addr-tag-btn ${config.editAddress && config.editAddress.name === 'Casa' ? 'active' : ''}" data-tag="Casa" style="flex:1; height:42px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-bg); font-weight:750; font-size:12.5px; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;">${icon('home', 14)} Casa</button>
+          <button class="addr-tag-btn ${config.editAddress && config.editAddress.name === 'Trabajo' ? 'active' : ''}" data-tag="Trabajo" style="flex:1; height:42px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-bg); font-weight:750; font-size:12.5px; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;">${icon('store', 14)} Trabajo</button>
+          <button class="addr-tag-btn ${config.editAddress && !['Casa','Trabajo'].includes(config.editAddress.name) ? 'active' : ''}" id="tag-custom-trigger" style="flex:1; height:42px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-bg); font-weight:750; font-size:12.5px; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;">${icon('mapPin', 14)} Otro</button>
+        </div>
+        <div id="custom-tag-input-container" style="display:${config.editAddress && !['Casa','Trabajo'].includes(config.editAddress.name) ? 'block' : 'none'}; margin-top:8px;">
+          <input type="text" id="custom-tag-name" placeholder="Ej: Novia, Padres, Club..." value="${config.editAddress && !['Casa','Trabajo'].includes(config.editAddress.name) ? config.editAddress.name : ''}" style="width:100%; height:44px; padding:0 14px; border:1.5px solid var(--color-border); border-radius:10px; font-size:13.5px; outline:none; background:var(--color-bg); color:var(--color-text-primary);" />
         </div>
       </div>
 
@@ -706,7 +755,8 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
       </div>
     </div>
 
-    <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; flex-direction:column; gap:12px;">
+    <!-- Sticky Footer -->
+    <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10;">
        <button id="save-address-final" class="btn btn-primary" style="width:100%; height:56px; border-radius:18px; font-weight:900; font-size:16px; background:#E11D48; border:none; box-shadow: 0 8px 20px rgba(225, 29, 72, 0.2);">Guardar y continuar</button>
        ${config.editAddress ? `
          <button id="delete-address-btn" style="width:100%; height:48px; border:1.5px solid var(--color-border); border-radius:18px; font-weight:800; font-size:14px; background:transparent; color:#EF4444; border-color:#EF4444; cursor:pointer; transition:all 0.2s;">
@@ -754,6 +804,12 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     if (hasError) return;
 
     const finalNotes = [apt, notes].filter(Boolean).join(' - ');
+
+    if (config.justReturnAddress) {
+      closeMultipleModals(2);
+      if (onSuccess) onSuccess(address, finalNotes, coords);
+      return;
+    }
     
     // Save/Update user addresses list
     const finalName = name || 'Dirección';

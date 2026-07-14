@@ -58,6 +58,10 @@ export function renderNavbar() {
         <span class="nav-item-icon">${icon('home', 24)}</span>
         <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Inicio</span>
       </a>
+      <a href="#/offers" class="nav-item ${hashPath === '/offers' ? 'active' : ''}">
+        <span class="nav-item-icon">${icon('tag', 24)}</span>
+        <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Ofertas</span>
+      </a>
       ${(isComercio() || isAdmin()) ? `
         <a href="#/mi-comercio" class="nav-item ${hashPath.startsWith('/mi-comercio') ? 'active' : ''}">
           <span class="nav-item-icon">
@@ -88,10 +92,6 @@ export function renderNavbar() {
           ` : ''}
         </span>
         <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Mis Chats</span>
-      </a>
-      <a href="#/profile/orders" class="nav-item ${hashPath === '/profile/orders' ? 'active' : ''}">
-        <span class="nav-item-icon">${icon('package', 24, '', hashPath === '/profile/orders' ? 'var(--color-primary)' : 'var(--footer-item-inactive)')}</span>
-        <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Pedidos</span>
       </a>
     </div>
   `;

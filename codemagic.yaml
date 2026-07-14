@@ -57,3 +57,8 @@ workflows:
         notify:
           success: true
           failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_testers:
+          - juanhidalgobaez@gmail.com

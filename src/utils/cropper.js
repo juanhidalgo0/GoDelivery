@@ -93,9 +93,9 @@ export function openCropper(imageSource, options = {}) {
           imageSmoothingQuality: 'high',
         });
 
-        let croppedBase64 = canvas.toDataURL('image/webp', 0.75);
+        let croppedBase64 = canvas.toDataURL('image/webp', options.quality !== undefined ? options.quality : 0.75);
         if (!croppedBase64.startsWith('data:image/webp')) {
-          croppedBase64 = canvas.toDataURL('image/jpeg', 0.75);
+          croppedBase64 = canvas.toDataURL('image/jpeg', options.quality !== undefined ? options.quality : 0.75);
         }
         closeModal();
         resolve(croppedBase64);

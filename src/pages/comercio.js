@@ -132,6 +132,7 @@ export async function renderComercio(content) {
   let activeSearch = '';
   let activeBrand = 'all';
   let activeSubCategory = 'all';
+  let deepLinkOpened = false;
 
   // If cache exists, do a zero-ms instant render first!
   if (cachedData) {
@@ -144,10 +145,11 @@ export async function renderComercio(content) {
     try {
       const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
       const targetProductId = urlParams.get('product') || urlParams.get('p');
-      if (targetProductId) {
+      if (targetProductId && !deepLinkOpened) {
         const targetProd = products.find(p => p.id === targetProductId);
         if (targetProd && targetProd.isAvailable !== false && !(targetProd.stockMode === 'limited' && (targetProd.stockQuantity || 0) <= 0)) {
           const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+          deepLinkOpened = true;
           setTimeout(() => {
             openProductModal(targetProd, resolvedComercioId, comercio.name, isOpen);
           }, 300);
@@ -281,23 +283,29 @@ export async function renderComercio(content) {
       renderPage(comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory);
     }
 
-    // Deep link product modal trigger (only if it wasn't triggered by cache or cache didn't exist)
-    if (!cachedData) {
-      try {
-        const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
-        const targetProductId = urlParams.get('product') || urlParams.get('p');
-        if (targetProductId) {
-          const targetProd = products.find(p => p.id === targetProductId);
-          if (targetProd && targetProd.isAvailable !== false && !(targetProd.stockMode === 'limited' && (targetProd.stockQuantity || 0) <= 0)) {
-            const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
-            setTimeout(() => {
-              openProductModal(targetProd, resolvedComercioId, comercio.name, isOpen);
-            }, 300);
+    // Deep link product modal trigger
+    try {
+      const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      const targetProductId = urlParams.get('product') || urlParams.get('p');
+      if (targetProductId && !deepLinkOpened) {
+        let targetProd = products.find(p => p.id === targetProductId);
+        if (!targetProd) {
+          const { doc: firestoreDoc, getDoc } = await import('firebase/firestore');
+          const pSnap = await getDoc(firestoreDoc(db, 'comercios', resolvedComercioId, 'products', targetProductId));
+          if (pSnap.exists()) {
+            targetProd = { id: pSnap.id, ...pSnap.data() };
           }
         }
-      } catch (e) {
-        console.warn('Failed parsing deep-link parameters', e);
+        if (targetProd && targetProd.isAvailable !== false && !(targetProd.stockMode === 'limited' && (targetProd.stockQuantity || 0) <= 0)) {
+          const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+          deepLinkOpened = true;
+          setTimeout(() => {
+            openProductModal(targetProd, resolvedComercioId, comercio.name, isOpen);
+          }, 350);
+        }
       }
+    } catch (e) {
+      console.warn('Failed parsing deep-link parameters or loading target product', e);
     }
 
     // Helper for smooth scrolling when filtering prevents layout snapping
@@ -1011,6 +1019,25 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
     });
   }
 
+  // Filter out products that are unavailable or out of stock for customer view
+  filtered = filtered.filter(p => {
+    if (p.isAvailable === false) return false;
+    let isOutOfStock = p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0;
+    if (p.useGlobalFlavors && currentComercio) {
+      const activeFlavors = (p.allowedFlavors && p.allowedFlavors.length > 0)
+        ? (currentComercio.sabores || []).filter(s => p.allowedFlavors.includes(s.name))
+        : (currentComercio.sabores || []);
+      const hasInfinite = activeFlavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
+      if (hasInfinite) {
+        isOutOfStock = false;
+      } else {
+        const totalQty = activeFlavors.reduce((acc, s) => acc + (s.stock || 0), 0);
+        isOutOfStock = totalQty <= 0;
+      }
+    }
+    return !isOutOfStock;
+  });
+
   // Sort
   if (sortBy === 'price-asc') {
     filtered.sort((a, b) => getProductEffectivePrice(a) - getProductEffectivePrice(b));
@@ -1110,7 +1137,10 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
           <!-- Left side: Text Details -->
           <div style="flex:1; display:flex; flex-direction:column; justify-content:space-between; min-width:0; text-align:left;">
             <div>
-              <div style="font-family:var(--font-display); font-size:15px; font-weight:800; color:var(--color-text); margin-bottom:4px; line-height:1.2; overflow-wrap: break-word; word-break: break-word;">${p.name}</div>
+              <div style="font-family:var(--font-display); font-size:15px; font-weight:800; color:var(--color-text); margin-bottom:4px; line-height:1.2; overflow-wrap: break-word; word-break: break-word; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span>${p.name}</span>
+                ${p.onlyInApp ? `<span style="font-family:var(--font-sans); font-size:9px; font-weight:900; background:rgba(126, 34, 206, 0.08); color:#7e22ce; padding:2px 6px; border-radius:6px; border:1px solid rgba(126, 34, 206, 0.15); display:inline-flex; align-items:center; gap:2px; text-transform:uppercase; vertical-align:middle;">📱 Disponible sólo en la app</span>` : ''}
+              </div>
               ${p.description ? `<div style="font-size:12px; color:var(--color-text-secondary); line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin-bottom:8px;">${p.description}</div>` : ''}
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
@@ -1203,7 +1233,7 @@ function updateFAB() {
 
   if (count > 0) {
     container.innerHTML = `
-      <a href="#/cart" class="fab" title="Ver carrito" style="bottom: 16px !important; right: 16px !important;">
+      <a href="#/cart" class="fab" title="Ver carrito" style="bottom: calc(var(--navbar-height) + 20px + env(safe-area-inset-bottom, 0px)) !important; right: 16px !important;">
         ${icon('cart', 26)}
         <span class="fab-badge">${count}</span>
       </a>

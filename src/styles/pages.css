@@ -1042,7 +1042,7 @@ body.header-hidden .slide-overlay {
 
 .home-page {
   animation: fadeIn 0.3s ease;
-  padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 20px) + 32px) !important;
+  padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 0px) + 4px) !important;
 }
 
 .home-hero {

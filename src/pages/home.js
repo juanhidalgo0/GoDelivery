@@ -1,6 +1,6 @@
 // GoDelivery — Home Page
 import { db } from '../firebase.js';
-import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, collectionGroup } from 'firebase/firestore';
 import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js';
 import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
@@ -21,43 +21,66 @@ export async function renderHome(content) {
       <!-- Ambient Background Blobs (Soft Glows) -->
       <div class="home-blob home-blob-1"></div>
       <div class="home-blob home-blob-2"></div>
-      <!-- Quick Services Row (GoFavor, Pedir Viaje & Marketplace) -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px 16px 0; margin-bottom: 4px;">
-        <!-- GoFavor Quick Card -->
-        <a href="#/gofavores" class="glow-hover spring-hover scroll-reveal reveal-fade-right" style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(225, 0, 54, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-          <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('package', 16)}
+      
+      <!-- Mundial Banner -->
+      <div style="background: linear-gradient(135deg, #74ACDF 0%, #ffffff 50%, #74ACDF 100%); border-radius: 20px; padding: 14px 16px; margin: 12px 16px 0; display: flex; align-items: center; gap: 14px; box-shadow: 0 8px 24px rgba(116, 172, 223, 0.25); border: 1.5px solid rgba(255, 255, 255, 0.4); position: relative; overflow: hidden;">
+        <div style="position: absolute; right: -15px; bottom: -15px; font-size: 56px; opacity: 0.15; transform: rotate(-15deg); pointer-events: none;">⚽</div>
+        <div style="width: 44px; height: 44px; border-radius: 50%; background: #FFD700; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 4px 10px rgba(255,215,0,0.3); border: 2px solid white; flex-shrink:0;">
+          🏆
+        </div>
+        <div style="flex: 1; min-width: 0;">
+          <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: #1E3A8A; margin: 0; letter-spacing: -0.02em; display: flex; align-items: center; gap: 6px;">
+            ¡VAMOS ARGENTINA! 🇦🇷
+          </h4>
+          <p style="font-size: 11.5px; color: #1E3A8A; font-weight: 800; margin: 2px 0 0; opacity: 0.95; line-height: 1.3;">
+            ¿Listos para el partido? Pedí la picada, birra o fernet y no te pierdas ni un segundo. ⚽
+          </p>
+        </div>
+      </div>
+
+      <!-- Quick Services Column Structure (Mandados on Top, Viajes and Market below) -->
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 0; margin-bottom: 4px;">
+        <!-- Mandados Hero Card (100% width) -->
+        <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover scroll-reveal reveal-fade-down" style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); border-radius: 20px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; height: 76px; box-shadow: 0 10px 24px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
+          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
+          <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+            ${icon('package', 20)}
           </div>
           <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-            <h4 style="font-family: var(--font-display); font-size: 13px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.12);">GoFavor</h4>
-            <span style="font-size: 9px; color: rgba(255, 255, 255, 0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Mandados</span>
+            <h4 style="font-family: var(--font-display); font-size: 16px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Mandados</h4>
+            <span style="font-size: 11.5px; color: #ffffff; font-weight: 850; letter-spacing: -0.01em; margin-top: 2px; display: block; line-height: 1.2;">¿Qué te traemos? Pedí lo que quieras del pueblo</span>
           </div>
+          
+          <!-- Modern Floating Badge -->
+          <span class="badge-pulse-modern" style="position: absolute; top: 10px; right: 14px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #000; font-size: 8.5px; font-weight: 900; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.6px; box-shadow: 0 4px 10px rgba(255, 215, 0, 0.35); font-family: var(--font-display); line-height: 1; z-index: 3;">¡Más Pedido!</span>
         </a>
 
-        <!-- Pedir Viaje Quick Card -->
-        <a href="#/viajes" class="glow-hover spring-hover scroll-reveal reveal-fade-up" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-          <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('car', 16)}
-          </div>
-          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-            <h4 style="font-family: var(--font-display); font-size: 13px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.12);">Viajes</h4>
-            <span style="font-size: 9px; color: rgba(255, 255, 255, 0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
-          </div>
-        </a>
+        <!-- Viajes & Market split row -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%;">
+          <!-- Pedir Viaje Quick Card -->
+          <a href="#/viajes" class="glow-hover spring-hover scroll-reveal reveal-fade-right" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+              ${icon('car', 16)}
+            </div>
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+              <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Viajes</h4>
+              <span style="font-size: 10.5px; color: #ffffff; font-weight: 850; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
+            </div>
+          </a>
 
-        <!-- Marketplace Quick Card -->
-        <a href="#/marketplace" class="glow-hover spring-hover scroll-reveal reveal-fade-left" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-          <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('shop', 16) || icon('tag', 16) || '🏷️'}
-          </div>
-          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-            <h4 style="font-family: var(--font-display); font-size: 13px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.12);">Market</h4>
-            <span style="font-size: 9px; color: rgba(255, 255, 255, 0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
-          </div>
-        </a>
+          <!-- Marketplace Quick Card -->
+          <a href="#/marketplace" class="glow-hover spring-hover scroll-reveal reveal-fade-left" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+              ${icon('shop', 16) || icon('tag', 16) || '🏷️'}
+            </div>
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+              <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Market</h4>
+              <span style="font-size: 10.5px; color: #ffffff; font-weight: 850; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
+            </div>
+          </a>
+        </div>
       </div>
  
        <!-- Premium Category Grid (Comida & GoMarket) -->
@@ -105,33 +128,20 @@ export async function renderHome(content) {
        <!-- Promoted Section -->
       <div id="promoted-section" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
 
-      <!-- Offers Section -->
-      <div id="offers-section" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
+      <!-- App Only Section -->
+      <div id="app-only-section" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
 
 
 
       <!-- Main Content -->
       <div style="position: absolute; top: -50px; left: -20%; width: 140%; height: 300px; background: radial-gradient(circle at 50% 0%, rgba(225,29,72,0.15), rgba(16,185,129,0.05), transparent 70%); filter: blur(40px); z-index: -1; pointer-events: none;"></div>
       <div class="home-section scroll-reveal reveal-fade-up" style="margin-top: 18px; padding-top: 8px; position: relative;">
-        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; padding: 0 16px;">
+        <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 18px; padding: 0 16px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
           <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-            <h2 class="home-section-title" style="display:flex; align-items:center; gap:12px; font-size:20px; font-weight:800; letter-spacing:-0.03em; color:var(--color-text-primary); margin:0;">
-              <span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; background:linear-gradient(135deg, rgba(225,29,72,0.12), rgba(225,29,72,0.02)); border:1px solid rgba(225,29,72,0.1); color:var(--color-primary); box-shadow:0 4px 12px rgba(225,29,72,0.06);">${icon('store', 18)}</span> Todos los comercios
+            <h2 class="home-section-title" style="font-size:19px; font-weight:900; letter-spacing:-0.03em; color:var(--color-text-primary); margin:0;">
+              Todos los comercios
             </h2>
             <a href="#/category/Todos" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
-          </div>
-          
-          <!-- Interactive Filter Pills Row -->
-          <div class="filter-pills-row" style="display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding-bottom: 4px; -webkit-overflow-scrolling: touch;">
-            <button id="filter-btn-open" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 700; border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
-              <span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow:0 0 0 2px rgba(34,197,94,0.2);"></span> Abiertos ahora
-            </button>
-            <button id="filter-btn-shipping" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 700; border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
-              <span style="color:#0ea5e9; display:flex;">${icon('truck', 16)}</span> Envío Gratis
-            </button>
-            <button id="filter-btn-rating" class="filter-pill-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 700; border: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; transition: all 0.2s; white-space: nowrap; outline: none;">
-              <span style="color:#f59e0b; display:flex;">${icon('star', 16)}</span> Más valorados
-            </button>
           </div>
         </div>
         
@@ -205,11 +215,51 @@ export async function renderHome(content) {
   let activeCategory = 'Todos';
   let unsubComercios = null;
 
-  try {
-    // Load platform categories (TTL = 1 hour / 3600000 ms)
-    const catSnap = await getDocsOptimized(query(collection(db, 'platformCategories'), orderBy('order')), 'platformCategories', 3600000);
-    categories = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
+  let onlyInAppProducts = [];
 
+  // Instant render categories, offers, onlyInAppProducts, and commerce lists from LocalStorage cache
+  try {
+    const rawOffers = localStorage.getItem('gd_cached_offers');
+    if (rawOffers) offers = JSON.parse(rawOffers);
+
+    const rawAppOnly = localStorage.getItem('gd_cached_only_in_app');
+    if (rawAppOnly) onlyInAppProducts = JSON.parse(rawAppOnly);
+
+    const raw = localStorage.getItem('gd_platform_categories');
+    if (raw) {
+      categories = JSON.parse(raw);
+      if (!categories.some(c => c.name === 'GoMarket')) {
+        categories.push({ id: 'gomarket', name: 'GoMarket', icon: 'shoppingBag', order: 0 });
+      }
+      setTimeout(() => {
+        renderCategories(categories, activeCategory);
+      }, 50);
+    }
+
+    const rawComercios = localStorage.getItem('gd_cached_comercios');
+    if (rawComercios) {
+      comercios = JSON.parse(rawComercios);
+      setTimeout(() => {
+        renderBrandsSlider(comercios);
+        renderRandomProductsSlider(comercios, offers);
+        renderPromotedSection(comercios);
+        renderAppOnlySection(onlyInAppProducts, comercios, offers);
+        const searchVal = document.getElementById('header-search')?.value || '';
+        renderComercios(comercios, activeCategory, searchVal, currentFilters);
+      }, 75);
+    }
+  } catch (e) {}
+
+  try {
+    const qAppOnly = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
+    const [catSnap, offersSnap, appOnlySnap] = await Promise.all([
+      getDocsOptimized(query(collection(db, 'platformCategories'), orderBy('order')), 'platformCategories', 3600000),
+      getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 300000),
+      getDocsOptimized(qAppOnly, 'onlyInAppProducts', 300000)
+    ]);
+
+    categories = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
+    
     // Ensure "Comida" is always available even if not in DB
     if (!categories.some(c => c.name === 'Comida')) {
       const existingComidas = categories.find(c => c.name === 'Comidas');
@@ -219,37 +269,77 @@ export async function renderHome(content) {
         categories.unshift({ id: 'comida', name: 'Comida', icon: '🍕', order: -1 });
       }
     }
+    
+    // Save to LocalStorage cache
+    try {
+      localStorage.setItem('gd_platform_categories', JSON.stringify(categories));
+    } catch (e) {}
 
-    // Load active offers (TTL = 5 minutes / 300000 ms)
-    const offersSnap = await getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 300000);
     offers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    onlyInAppProducts = appOnlySnap.docs
+      .map(docSnap => {
+        const pathParts = docSnap.ref.path.split('/');
+        const comercioId = pathParts[1];
+        return { id: docSnap.id, comercioId, ...docSnap.data() };
+      })
+      .filter(p => p.isAvailable !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0));
 
-    // Fetch product details for offers in parallel
-    offers = await Promise.all(offers.map(async (o) => {
-      if (o.productIds && o.productIds.length > 0) {
+    // Fetch product details for all products in parallel and expand multi-product offers
+    const expandedOffers = [];
+    await Promise.all(offers.map(async (o) => {
+      if (o.productIds && o.productIds.length > 0 && o.comercioId) {
         try {
-          const pSnap = await getDoc(doc(db, 'comercios', o.comercioId, 'products', o.productIds[0]));
-          if (pSnap.exists()) {
-            o.product = { id: pSnap.id, ...pSnap.data() };
-          }
+          const productsData = await Promise.all(o.productIds.map(async (pId) => {
+            try {
+              const pSnap = await getDoc(doc(db, 'comercios', o.comercioId, 'products', pId));
+              if (pSnap.exists()) {
+                return { id: pSnap.id, ...pSnap.data() };
+              }
+            } catch (e) {
+              console.warn(`Error loading product details for offer ${o.id}, product ${pId}:`, e);
+            }
+            return null;
+          }));
+          
+          const validProducts = productsData.filter(Boolean);
+          
+          validProducts.forEach((p) => {
+            expandedOffers.push({
+              ...o,
+              id: `${o.id}-${p.id}`,
+              product: p,
+              targetProductId: p.id
+            });
+          });
         } catch (e) {
-          console.warn('Error loading product details for offer:', o.id, e);
+          console.warn('Error expanding products for offer:', o.id, e);
+          expandedOffers.push(o);
         }
+      } else {
+        expandedOffers.push(o);
       }
-      return o;
     }));
+    offers = expandedOffers;
+
+    try {
+      localStorage.setItem('gd_cached_offers', JSON.stringify(offers));
+      localStorage.setItem('gd_cached_only_in_app', JSON.stringify(onlyInAppProducts));
+    } catch (e) {}
 
     // Add GoMarket to categories if it exists as a concept
     if (!categories.some(c => c.name === 'GoMarket')) {
       categories.push({ id: 'gomarket', name: 'GoMarket', icon: 'shoppingBag', order: 0 });
     }
 
-    // Set up real-time listener for active comercios
-    unsubComercios = onSnapshot(query(collection(db, 'comercios'), where('isActive', '==', true)), async (comSnap) => {
+    // Set up real-time listener for active and inactive comercios
+    unsubComercios = onSnapshot(collection(db, 'comercios'), async (comSnap) => {
       comercios = comSnap.docs.map(doc => {
         const data = doc.data();
         return { id: doc.id, ...data };
       });
+      try {
+        localStorage.setItem('gd_cached_comercios', JSON.stringify(comercios));
+      } catch (e) {}
 
       // Render brands slider
       renderBrandsSlider(comercios);
@@ -260,7 +350,7 @@ export async function renderHome(content) {
       // Render promoted section (Ads)
       renderPromotedSection(comercios);
 
-      renderOffersSection(offers, comercios);
+      renderAppOnlySection(onlyInAppProducts, comercios, offers);
 
       // Render categories
       renderCategories(categories, activeCategory);
@@ -324,58 +414,12 @@ export async function renderHome(content) {
     });
   }
 
-  // Interactive Filter Pills Handler
-  const filterOpenBtn = document.getElementById('filter-btn-open');
-  const filterShippingBtn = document.getElementById('filter-btn-shipping');
-  const filterRatingBtn = document.getElementById('filter-btn-rating');
 
-  const updateFilterStyles = () => {
-    if (filterOpenBtn) {
-      filterOpenBtn.style.background = currentFilters.openOnly ? 'var(--color-primary)' : 'var(--color-surface)';
-      filterOpenBtn.style.color = currentFilters.openOnly ? 'white' : 'var(--color-text-primary)';
-      filterOpenBtn.style.borderColor = currentFilters.openOnly ? 'var(--color-primary)' : 'var(--color-border-light)';
-    }
-    if (filterShippingBtn) {
-      filterShippingBtn.style.background = currentFilters.freeShippingOnly ? 'var(--color-primary)' : 'var(--color-surface)';
-      filterShippingBtn.style.color = currentFilters.freeShippingOnly ? 'white' : 'var(--color-text-primary)';
-      filterShippingBtn.style.borderColor = currentFilters.freeShippingOnly ? 'var(--color-primary)' : 'var(--color-border-light)';
-    }
-    if (filterRatingBtn) {
-      filterRatingBtn.style.background = currentFilters.topRatedOnly ? 'var(--color-primary)' : 'var(--color-surface)';
-      filterRatingBtn.style.color = currentFilters.topRatedOnly ? 'white' : 'var(--color-text-primary)';
-      filterRatingBtn.style.borderColor = currentFilters.topRatedOnly ? 'var(--color-primary)' : 'var(--color-border-light)';
-    }
-  };
-
-  if (filterOpenBtn) {
-    filterOpenBtn.onclick = (e) => {
-      e.preventDefault();
-      currentFilters.openOnly = !currentFilters.openOnly;
-      updateFilterStyles();
-      renderComercios(comercios, activeCategory, searchInput?.value || '', currentFilters);
-    };
-  }
-  if (filterShippingBtn) {
-    filterShippingBtn.onclick = (e) => {
-      e.preventDefault();
-      currentFilters.freeShippingOnly = !currentFilters.freeShippingOnly;
-      updateFilterStyles();
-      renderComercios(comercios, activeCategory, searchInput?.value || '', currentFilters);
-    };
-  }
-  if (filterRatingBtn) {
-    filterRatingBtn.onclick = (e) => {
-      e.preventDefault();
-      currentFilters.topRatedOnly = !currentFilters.topRatedOnly;
-      updateFilterStyles();
-      renderComercios(comercios, activeCategory, searchInput?.value || '', currentFilters);
-    };
-  }
 
   // Bug Report button handler
   const reportBugBtn = document.getElementById('report-bug-btn');
   if (reportBugBtn) {
-    reportBugBtn.addEventListener('click', async () => {
+    reportBugBtn.onclick = async () => {
       const user = getState().user;
       if (!user) {
         const { showToast } = await import('../components/toast.js');
@@ -383,7 +427,7 @@ export async function renderHome(content) {
         return;
       }
       showBugReportModal();
-    });
+    };
   }
 
   // Join Commerce button handler
@@ -414,11 +458,123 @@ export async function renderHome(content) {
     });
   }
 
+  // Show welcome beta modal if not shown before
+  checkAndShowWelcomeModal();
+
+  // Show app-only product promotion modal if not shown in this session
+  checkAndShowAppOnlyPromo();
+
+  // Mandados Home button handler
+  const mandadosBtn = document.getElementById('home-mandados-btn');
+  if (mandadosBtn) {
+    mandadosBtn.onclick = async () => {
+      const user = getState().user;
+      if (!user) {
+        const { showToast } = await import('../components/toast.js');
+        showToast('Iniciá sesión para usar el servicio de Mandados.', 'warning');
+        return;
+      }
+      showMandadosOverlayModal();
+    };
+  }
+
+  // Hide FABs at bottom of page to avoid overlapping the bug report card
+  content.addEventListener('scroll', () => {
+    const fabBtn = document.getElementById('support-bot-fab-btn');
+    const guideFab = document.getElementById('app-guide-fab');
+    const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 160;
+    
+    if (isAtBottom) {
+      if (fabBtn) fabBtn.classList.add('fab-hidden');
+      if (guideFab) guideFab.classList.add('fab-hidden');
+    } else {
+      if (fabBtn) fabBtn.classList.remove('fab-hidden');
+      if (guideFab) guideFab.classList.remove('fab-hidden');
+    }
+  });
+
   return {
     cleanup: () => {
       if (unsubComercios) unsubComercios();
     }
   };
+}
+
+function checkAndShowWelcomeModal() {
+  if (document.getElementById('welcome-beta-modal-overlay')) return;
+  const user = getState().user;
+  if (!user) return;
+  const welcomed = localStorage.getItem('welcome_beta_v1');
+  if (welcomed === 'true') return;
+
+  const modalEl = document.createElement('div');
+  modalEl.id = 'welcome-beta-modal-overlay';
+  modalEl.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    padding: 24px;
+    box-sizing: border-box;
+    animation: fadeInWelcome 0.3s ease-out forwards;
+  `;
+
+  modalEl.innerHTML = `
+    <div style="background: var(--color-surface, #ffffff); max-width: 440px; width: 100%; border-radius: 28px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; text-align: center; padding: 28px; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
+      <div style="font-size: 48px; margin-bottom: 12px; display: inline-block; animation: waveEmoji 2s infinite ease-in-out;">👋</div>
+      <h2 style="font-family: var(--font-display, inherit); font-size: 20px; font-weight: 950; color: var(--color-text-primary, #0f172a); margin: 0 0 10px 0;">¡Hola, Vecino! Te damos la bienvenida a GO!</h2>
+      <p style="font-size: 13.5px; line-height: 1.6; color: var(--color-text-secondary, #475569); margin: 0 0 18px 0; font-weight: 600; text-align: left;">
+        Estamos muy felices de traerte una aplicación creada por y para nuestro pueblo, pensada para hacernos el día a día más fácil a todos.<br><br>
+        Queremos contarte que actualmente nos encontramos en <strong>Fase Beta (en desarrollo y prueba)</strong>. Esto significa que, aunque le ponemos todo el corazón, de vez en cuando podría surgir algún pequeño error en el sistema.<br><br>
+        Si te encontrás con alguno, te agradeceríamos enormemente tu paciencia y que nos lo comentes directamente desde el botón de soporte. Tu feedback es nuestro motor para corregir los detalles, seguir mejorando y <strong>seguir creciendo juntos</strong>.<br><br>
+        ¡Gracias por ser parte de la comunidad de GO!
+      </p>
+      <button id="welcome-beta-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none; margin-top: 4px;">
+        ¡Entendido, vamos a GO!
+      </button>
+    </div>
+    
+    <style>
+      @keyframes fadeInWelcome {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      @keyframes scaleUpWelcome {
+        from { transform: scale(0.9); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+      }
+      @keyframes waveEmoji {
+        0%, 100% { transform: rotate(0deg); }
+        25% { transform: rotate(-10deg); }
+        75% { transform: rotate(10deg); }
+      }
+      #welcome-beta-accept-btn:active {
+        transform: scale(0.96);
+        opacity: 0.95;
+      }
+    </style>
+  `;
+
+  document.body.appendChild(modalEl);
+
+  const acceptBtn = modalEl.querySelector('#welcome-beta-accept-btn');
+  if (acceptBtn) {
+    acceptBtn.onclick = () => {
+      localStorage.setItem('welcome_beta_v1', 'true');
+      modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
+      setTimeout(() => {
+        modalEl.remove();
+      }, 200);
+    };
+  }
 }
 
 function renderBrandsSlider(comercios) {
@@ -447,18 +603,22 @@ function renderBrandsSlider(comercios) {
 
   container.innerHTML = `
     <div style="padding: 0 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px;">
-      <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Marcas destacadas</h3>
+      <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comercios</h3>
       <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Los locales más elegidos por la comunidad</span>
     </div>
     <div style="overflow-x: auto; display: flex; gap: 14px; padding: 6px 16px 12px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
-      ${shuffledBrands.map(brand => `
-        <a href="#/comercio/${brand.id}" style="flex: 0 0 64px; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 6px;">
-          <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;">
-            <img src="${brand.logo}" alt="${brand.name}" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
-          </div>
-          <span style="font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 68px; text-align: center;">${brand.name}</span>
-        </a>
-      `).join('')}
+      ${shuffledBrands.map(brand => {
+        const isInactive = brand.isActive === false;
+        const href = isInactive ? 'javascript:void(0)' : `#/comercio/${brand.id}`;
+        return `
+          <a href="${href}" style="flex: 0 0 64px; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 6px; ${isInactive ? 'opacity: 0.5; filter: grayscale(1); pointer-events: none;' : ''}">
+            <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;">
+              <img src="${brand.logo}" alt="${brand.name}" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+            </div>
+            <span style="font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 68px; text-align: center;">${brand.name}</span>
+          </a>
+        `;
+      }).join('')}
     </div>
     <style>
       #brands-slider-container div::-webkit-scrollbar { display: none; }
@@ -484,6 +644,7 @@ async function renderPromotedSection(comercios) {
 
   // 2. Filter shop promotions
   let shopPromotions = comercios.filter(c => {
+    if (c.isActive === false) return false;
     if (!c.promotion || !c.promotion.active) return false;
     if (c.promotion.isPaid === false) return false;
 
@@ -585,11 +746,14 @@ async function renderPromotedSection(comercios) {
   const finalPromoted = [...shuffledPriority, ...shuffledNormal];
 
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px;">
-      <h2 style="font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; display: flex; align-items: center; gap: 12px;">
-        <span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.02)); border:1px solid rgba(245,158,11,0.1); color:#f59e0b; box-shadow:0 4px 12px rgba(245,158,11,0.06);">${icon('star', 18)}</span> Recomendados para vos
-      </h2>
-      <span style="font-size: 13px; color: var(--color-text-tertiary); font-weight: 500; margin-left: 46px; letter-spacing: -0.01em;">Selección exclusiva de locales destacados</span>
+    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
+          Recomendados para vos
+        </h2>
+        <a href="#/category/Recomendados" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s; flex-shrink:0;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
+      </div>
+      <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Selección exclusiva de locales destacados</span>
     </div>
     <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${finalPromoted.map(p => {
@@ -666,79 +830,82 @@ async function renderPromotedSection(comercios) {
   }
 }
 
-function renderOffersSection(offers, comercios) {
-  const container = document.getElementById('offers-section');
+function renderAppOnlySection(products, comercios, offers = []) {
+  const container = document.getElementById('app-only-section');
   if (!container) return;
 
-  if (offers.length === 0) {
+  const user = getState().user;
+  if (!user) {
     container.style.display = 'none';
     return;
   }
 
-  // Seeded hourly shuffle for absolute fairness
-  const shuffledOffers = seededShuffle(offers, getHourSeed());
+  const activeComerciosIds = new Set(comercios.filter(c => c.isActive !== false).map(c => c.id));
+  const activeProducts = products.filter(p => activeComerciosIds.has(p.comercioId));
+
+  if (activeProducts.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = '';
+
+  // Seeded hourly shuffle for rotating products every 1 hour
+  const shuffledProducts = seededShuffle(activeProducts, getHourSeed());
 
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px;">
-      <h2 style="font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; display: flex; align-items: center; gap: 12px;">
-        <span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(16,185,129,0.02)); border:1px solid rgba(16,185,129,0.1); color:#10b981; box-shadow:0 4px 12px rgba(16,185,129,0.06);">${icon('tag', 18)}</span> Ofertas y promociones
-      </h2>
-      <span style="font-size: 13px; color: var(--color-text-tertiary); font-weight: 500; margin-left: 46px; letter-spacing: -0.01em;">Ahorrá hoy con los mejores descuentos de la zona</span>
+    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
+          Disponible sólo en la app
+        </h2>
+        <a href="#/category/Solo En App" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s; flex-shrink:0;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
+      </div>
+      <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Aprovechá productos exclusivos de nuestra plataforma móvil</span>
     </div>
     <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
-      ${shuffledOffers.map(o => {
-        const c = comercios.find(com => com.id === o.comercioId);
-        if (!c) return '';
-        
-        let targetHref = `#/comercio/${o.comercioId}`;
-        if (o.productIds && o.productIds.length > 0) {
-          targetHref = `#/comercio/${o.comercioId}?product=${o.productIds[0]}`;
-        }
-        let pricingHtml = '';
-        
-        if (o.product) {
-          const origPrice = o.product.price;
-          if (o.type === 'percentage') {
-            const promoPrice = origPrice * (1 - o.value / 100);
-            pricingHtml = `
-              <div style="display:flex; align-items:center; gap:6px; margin-top:5px;">
-                <span style="font-weight: 900; font-size: 15px; color: var(--color-primary);">${formatPrice(promoPrice)}</span>
-                <span style="text-decoration: line-through; color: var(--color-text-tertiary); font-size: 11px; font-weight: 700;">${formatPrice(origPrice)}</span>
-              </div>
-            `;
-          } else if (o.type === '2x1') {
-            pricingHtml = `
-              <div style="display:flex; align-items:center; gap:6px; margin-top:5px;">
-                <span style="font-weight: 900; font-size: 13px; color: #e31b23; background: rgba(227,27,35,0.08); padding: 2px 6px; border-radius: 6px;">2x1</span>
-                <span style="color: var(--color-text-tertiary); font-size: 11px; font-weight: 700;">Llevás 2 Pagás 1</span>
-              </div>
-            `;
-          }
-        }
+      ${shuffledProducts.map(p => {
+        const c = comercios.find(com => com.id === p.comercioId);
+        const cName = c ? c.name : 'Comercio';
+        const cLogo = c ? c.logo : '/logo.png';
+        const pImage = p.image || '/logo.png';
+        const targetHref = `#/comercio/${p.comercioId}?product=${p.id}`;
 
-        const badgeBg = o.type === '2x1' ? 'linear-gradient(135deg, #e31b23, #ff4d4d)' : 'linear-gradient(135deg, #ffeb00, #ffc700)';
-        const badgeColor = o.type === '2x1' ? '#ffffff' : '#111111';
-        const badgeText = o.type === '2x1' ? '2x1' : `${o.value}% OFF`;
+        const offer = offers.find(o => o.active !== false && (o.targetProductId === p.id || (o.productIds && o.productIds.includes(p.id))));
+        const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
+        const discountedPrice = discountPercent > 0 ? p.price * (1 - discountPercent / 100) : p.price;
 
         return `
-          <a href="${targetHref}" class="offer-nav-card" style="flex: 0 0 240px; text-decoration: none; display: flex; flex-direction: column; gap: 10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:12px; transition: all 0.2s; box-shadow: var(--shadow-xs);">
+          <a href="${targetHref}" class="app-only-nav-card" style="flex: 0 0 240px; text-decoration: none; display: flex; flex-direction: column; gap: 10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:12px; transition: all 0.2s; box-shadow: var(--shadow-xs);">
             <div style="position: relative; width: 100%; aspect-ratio: 16/10; border-radius: 16px; overflow: hidden; background: var(--color-bg-secondary);">
-              <img src="${o.banner || c.banner || c.logo}" alt="Banner" style="width: 100%; height: 100%; object-fit: cover;" />
+              <img src="${pImage}" alt="Banner" style="width: 100%; height: 100%; object-fit: cover;" />
               
-              <!-- Dynamic Promo Badge Overlay -->
-              <div style="position: absolute; top: 10px; left: 10px; background: ${badgeBg}; color: ${badgeColor}; padding: 5px 11px; border-radius: 10px; font-size: 11px; font-weight: 900; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 4px; letter-spacing: -0.01em;">
-                ${badgeText}
+              <!-- App only Badge Overlay -->
+              <div style="position: absolute; top: 10px; left: 10px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; padding: 5px 11px; border-radius: 10px; font-size: 10px; font-weight: 900; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 4px; letter-spacing: -0.01em; text-transform: uppercase; line-height: 1;">
+                Disponible sólo en la app
               </div>
+              ${discountPercent > 0 ? `
+                <div style="position: absolute; top: 10px; right: 10px; background: var(--color-primary); color: white; padding: 3px 8px; border-radius: 8px; font-size: 9px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2; text-transform: uppercase;">
+                  ${discountPercent}% OFF
+                </div>
+              ` : ''}
             </div>
 
             <div style="display:flex; align-items:center; gap:10px; padding: 0 4px;">
               <div style="width: 38px; height: 38px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: white; border: 1px solid var(--color-border-light); display:flex; align-items:center; justify-content:center;">
-                <img src="${c.logo}" alt="" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+                <img src="${cLogo}" alt="" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
               </div>
               <div style="flex:1; min-width:0;">
-                <div style="font-weight: 850; font-size: 14px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em;">${c.name}</div>
-                <div style="font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;">${o.title}</div>
-                ${pricingHtml}
+                <div style="font-weight: 850; font-size: 14px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em;">${p.name}</div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;">${cName}</div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                  ${discountPercent > 0 ? `
+                    <span style="font-weight: 900; font-size: 15px; color: var(--color-primary);">${formatPrice(discountedPrice)}</span>
+                    <span style="font-size: 11px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(p.price)}</span>
+                  ` : `
+                    <span style="font-weight: 900; font-size: 15px; color: var(--color-primary);">${formatPrice(p.price)}</span>
+                  `}
+                </div>
               </div>
             </div>
           </a>
@@ -746,15 +913,15 @@ function renderOffersSection(offers, comercios) {
       }).join('')}
     </div>
     <style>
-      #offers-section div::-webkit-scrollbar { display: none; }
-      .offer-nav-card:active { transform: scale(0.97); }
+      #app-only-section div::-webkit-scrollbar { display: none; }
+      .app-only-nav-card:active { transform: scale(0.97); }
     </style>
   `;
 
   const slider = container.querySelector('div:nth-child(2)');
   if (slider) {
     if (slider._autoplayCleanup) slider._autoplayCleanup();
-    slider._autoplayCleanup = initAutoplay(slider, 4500, 260);
+    slider._autoplayCleanup = initAutoplay(slider, 5000, 260);
   }
 }
 
@@ -782,6 +949,7 @@ const CATEGORY_IMAGE_MAP = {
   'Fiambrería': '/images/categories/fiambreria.png',
   'Fiambreria': '/images/categories/fiambreria.png',
   'Comida': '/images/categories/restaurants.png',
+  'Bazar': '/images/categories/bazar.png',
 };
 
 function renderCategories(categories, active) {
@@ -794,19 +962,22 @@ function renderCategories(categories, active) {
     c.name !== 'Comida' &&
     c.name !== 'Restaurante' &&
     c.name !== 'Restaurantes' &&
-    c.name !== 'GoMarket'
+    c.name !== 'GoMarket' &&
+    c.name !== 'Pizzería' &&
+    c.name !== 'Pizzeria'
   );
 
   container.innerHTML = smallCats.map(cat => {
-    const img = CATEGORY_IMAGE_MAP[cat.name];
+    const cleanName = cat.name.replace('🎁', '').trim();
+    const img = CATEGORY_IMAGE_MAP[cleanName];
     
     return `
       <a href="#/category/${cat.name}" class="category-card-small" style="flex: 0 0 110px; height: 140px; text-decoration: none;">
         ${img ? 
-          `<img src="${img}" alt="${cat.name}" />` : 
+          `<img src="${img}" alt="${cleanName}" />` : 
           `<div class="card-icon"><i class="ph-duotone ph-${CATEGORY_PHOSPHOR_MAP[cat.name] || 'package'}"></i></div>`
         }
-        <span class="card-title">${cat.name}</span>
+        <span class="card-title">${cleanName}</span>
       </a>
     `;
   }).join('');
@@ -982,18 +1153,19 @@ async function renderComercios(comercios, category, search, filters) {
         console.warn('Error checking isShopOpen for', c.name, e);
       }
       
+      const isInactive = c.isActive === false;
       const isPaused = c.isPaused === true;
-      const statusClass = isPaused ? 'paused' : (isOpen ? 'open' : 'closed');
-      const statusText = isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
-      const href = isPaused ? 'javascript:void(0)' : `#/comercio/${c.id}`;
+      const statusClass = isInactive ? 'inactive' : (isPaused ? 'paused' : (isOpen ? 'open' : 'closed'));
+      const statusText = isInactive ? 'Próximamente' : (isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado'));
+      const href = (isPaused || isInactive) ? 'javascript:void(0)' : `#/comercio/${c.id}`;
 
       // Use c.banner properly
       const bannerSrc = c.banner || '';
 
       return `
-        <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} scroll-reveal reveal-fade-up reveal-delay-${Math.min(i + 1, 5)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom:18px; position:relative;">
+        <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} ${isInactive ? 'is-inactive' : ''} scroll-reveal reveal-fade-up reveal-delay-${Math.min(i + 1, 5)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom:18px; position:relative; ${isInactive ? 'opacity: 0.75; filter: grayscale(0.85);' : ''}">
           <!-- Floating Favorite Heart Button (Moved out of banner to prevent clipping) -->
-          <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10;" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
+          <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10; ${isInactive ? 'display:none;' : ''}" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
             ${icon('heart', 18)}
           </div>
 
@@ -1005,8 +1177,8 @@ async function renderComercios(comercios, category, search, filters) {
             </div>
 
             <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
-            <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isOpen && !isPaused ? '#00B174' : '#3F372B'}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-              ${statusText === 'Abierto' ? 'Abierto ahora' : statusText}
+            <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isInactive ? '#64748b' : (isOpen && !isPaused ? '#00B174' : '#3F372B')}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+              ${statusText === 'Abierto' ? 'Abierto ahora' : statusText.toUpperCase()}
             </div>
             
             <!-- Rating Box on top-right -->
@@ -1575,10 +1747,10 @@ async function renderRandomProductsSlider(comercios, offers = []) {
     selectedShops.push(shuffledShops[i]);
   }
 
-  // 2. Fetch products in parallel for selected shops
+  // 2. Fetch products in parallel for active shops
   let allProducts = [];
   try {
-    const promises = selectedShops.map(async (shop) => {
+    const promises = activeShops.map(async (shop) => {
       try {
         const q = query(collection(db, 'comercios', shop.id, 'products'));
         // 5-minute TTL cache
@@ -1611,15 +1783,18 @@ async function renderRandomProductsSlider(comercios, offers = []) {
     return;
   }
 
-  // Shuffle products and take up to 10
-  const shuffledProds = allProducts.sort(() => 0.5 - Math.random()).slice(0, 10);
+  // Get top 20 most sold products, then shuffle them
+  const top20Prods = allProducts
+    .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
+    .slice(0, 20);
+  const shuffledProds = top20Prods.sort(() => 0.5 - Math.random());
 
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px;">
-      <h2 style="font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; display: flex; align-items: center; gap: 12px;">
-        <span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; background:linear-gradient(135deg, rgba(225,29,72,0.12), rgba(225,29,72,0.02)); border:1px solid rgba(225,29,72,0.1); color:var(--color-primary); box-shadow:0 4px 12px rgba(225,29,72,0.06);">${icon('gift', 18)}</span> Ofertas Imperdibles
+    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
+      <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
+        Productos Destacados
       </h2>
-      <span style="font-size: 13px; color: var(--color-text-tertiary); font-weight: 500; margin-left: 46px; letter-spacing: -0.01em;">Los mejores descuentos que encontramos para vos</span>
+      <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los artículos más vendidos de tus comercios favoritos</span>
     </div>
     <div class="random-products-slider-wrapper">
       <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
@@ -2259,4 +2434,388 @@ async function showJoinTeamModal() {
     content: modalContent,
     height: 'auto'
   });
+}
+
+async function showMandadosOverlayModal() {
+  const { showModal, closeModal, showConfirm } = await import('../components/modal.js');
+
+  const contentEl = document.createElement('div');
+  contentEl.style.cssText = `
+    padding: 12px 16px calc(20px + env(safe-area-inset-bottom, 24px));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: linear-gradient(to bottom, var(--color-bg), var(--color-bg-secondary));
+    box-sizing: border-box;
+    width: 100%;
+  `;
+
+  contentEl.innerHTML = `
+    <!-- Options List -->
+    <div style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
+      <!-- Option 1: Encomienda -->
+      <div id="modal-favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
+        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
+        <div style="text-align: left; z-index: 2; width: 100%;">
+          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Encomienda</h3>
+          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+              Costo normal de envío
+            </span>
+            <span id="modal-info-mandado-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Option 2: Mandado -->
+      <div id="modal-favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
+        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
+        <div style="text-align: left; z-index: 2; width: 100%;">
+          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Mandado</h3>
+          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+              Tarifa de gestión
+            </span>
+            <span id="modal-info-compra-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Option 3: Go Cash -->
+      <div id="modal-favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
+        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+        <div style="text-align: left; z-index: 2; width: 100%;">
+          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Go Cash</h3>
+          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+              Efectivo ↔ Transferencia
+            </span>
+            <span id="modal-info-gocash-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <style>
+      .card-encomienda { background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important; border-color: rgba(16,185,129,0.3) !important; box-shadow: 0 8px 20px rgba(16,185,129,0.15) !important; }
+      .card-mandado { background: linear-gradient(135deg, #E11D48 0%, #F43F5E 100%) !important; border-color: rgba(244,63,94,0.3) !important; box-shadow: 0 8px 20px rgba(244,63,94,0.15) !important; }
+      .card-gocash { background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important; border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 8px 20px rgba(99,102,241,0.15) !important; }
+      [data-theme="dark"] .card-encomienda { background: linear-gradient(135deg, #064e3b 0%, #047857 100%) !important; }
+      [data-theme="dark"] .card-mandado { background: linear-gradient(135deg, #7f1d1d 0%, #E11D48 100%) !important; }
+      [data-theme="dark"] .card-gocash { background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important; }
+      .gofavores-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12) !important; }
+      .gofavores-card:active { transform: translateY(0) scale(0.98); }
+    </style>
+  `;
+
+  showModal({
+    title: '<div style="margin-top: 14px; font-weight: 950; font-size: 16.5px; letter-spacing: -0.02em;">Mandados (Servicios Especiales)</div>',
+    height: 'auto',
+    content: contentEl,
+    onOpen: async () => {
+      let goFav;
+      try {
+        goFav = await import('./gofavores.js');
+      } catch (err) {
+        console.error('Failed to load gofavores module, reloading to get latest build...', err);
+        const { showToast } = await import('../components/toast.js');
+        showToast('Actualizando aplicación...', 'info');
+        setTimeout(() => { window.location.reload(); }, 600);
+        return;
+      }
+      const { showMandadoForm, showCompraForm, showGoCashForm, showServiceInfoModal } = goFav;
+      const { getState } = await import('../state.js');
+
+      const checkPhoneAndOpen = (openFn) => {
+        const u = getState().user || {};
+        if (!u.phone || u.phone.trim() === '') {
+          showConfirm({
+            title: '📱 Teléfono Requerido',
+            message: 'Para realizar un favor o mandado es obligatorio configurar un celular de contacto para que el chofer y el soporte se comuniquen.',
+            confirmText: 'Configurar ahora',
+            cancelText: 'Volver',
+            onConfirm: () => {
+              sessionStorage.setItem('open-phone-edit', 'true');
+              location.hash = '#/profile';
+            }
+          });
+        } else {
+          closeModal();
+          setTimeout(() => {
+            openFn();
+          }, 250);
+        }
+      };
+
+      document.getElementById('modal-favor-mandado-btn').onclick = (e) => {
+        if (e.target.id === 'modal-info-mandado-btn') return;
+        checkPhoneAndOpen(showMandadoForm);
+      };
+      document.getElementById('modal-favor-compra-btn').onclick = (e) => {
+        if (e.target.id === 'modal-info-compra-btn') return;
+        checkPhoneAndOpen(showCompraForm);
+      };
+      document.getElementById('modal-favor-gocash-btn').onclick = (e) => {
+        if (e.target.id === 'modal-info-gocash-btn') return;
+        checkPhoneAndOpen(showGoCashForm);
+      };
+
+      document.getElementById('modal-info-mandado-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('encomienda'); };
+      document.getElementById('modal-info-compra-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('mandado'); };
+      document.getElementById('modal-info-gocash-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('gocash'); };
+    }
+  });
+}
+
+async function checkAndShowAppOnlyPromo() {
+  const user = getState().user;
+  if (!user) return;
+
+  const promoShown = sessionStorage.getItem('gd_app_only_promo_shown');
+  if (promoShown === 'true') return;
+
+  // Defer if welcome beta, onboarding, or tutorial guides are active or not completed
+  const welcomeBetaDone = localStorage.getItem('welcome_beta_v1') === 'true';
+  const onboardingDone = localStorage.getItem('gd-onboarding-done') === 'true';
+  const appGuideDone = localStorage.getItem('gd-app-guide-seen-v2') === 'true';
+  const welcomeActive = document.getElementById('welcome-beta-modal-overlay') 
+    || document.getElementById('onboarding-container') 
+    || document.getElementById('app-guide-overlay')
+    || document.querySelector('.delivery-map-modal-v4');
+
+  if (!welcomeBetaDone || !onboardingDone || !appGuideDone || welcomeActive) {
+    setTimeout(checkAndShowAppOnlyPromo, 1000);
+    return;
+  }
+
+  const renderModal = async (product, offers, comercioId, isFromCache = false) => {
+    // If already shown during this session, bypass unless it is the cached trigger
+    if (sessionStorage.getItem('gd_app_only_promo_shown') === 'true' && !isFromCache) return;
+    sessionStorage.setItem('gd_app_only_promo_shown', 'true');
+
+    const offer = offers.find(o => o.active !== false && (o.targetProductId === product.id || (o.productIds && o.productIds.includes(product.id))));
+    const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
+    const discountedPrice = discountPercent > 0 ? product.price * (1 - discountPercent / 100) : product.price;
+
+    const { doc, getDoc } = await import('firebase/firestore');
+    let comercioName = 'Comercio';
+    try {
+      const comSnap = await getDoc(doc(db, 'comercios', comercioId));
+      if (comSnap.exists()) {
+        comercioName = comSnap.data().name || 'Comercio';
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    const overlayId = `app-only-promo-overlay-${Math.random().toString(36).substr(2, 9)}`;
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: fadeIn 0.25s ease-out forwards;
+    `;
+
+    overlay.innerHTML = `
+      <div id="${overlayId}-card" style="
+        background: var(--color-bg);
+        border-radius: 28px;
+        width: 100%;
+        max-width: 380px;
+        max-height: calc(100dvh - 32px);
+        overflow-y: auto;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        animation: zoomIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.15) forwards;
+      ">
+        <button id="${overlayId}-close-btn" style="
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          border: none;
+          background: rgba(0, 0, 0, 0.05);
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          color: var(--color-text-secondary);
+          z-index: 10;
+          transition: all 0.2s;
+        ">
+          ${icon('close', 18)}
+        </button>
+
+        <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: 24px 20px 20px; gap: 16px; width: 100%; box-sizing: border-box;">
+          <div style="font-size: 50px; animation: bouncePromo 2s infinite; line-height: 1;">📱</div>
+          
+          <div>
+            <span style="font-size: 11px; font-weight: 900; color: #7e22ce; background: rgba(126, 34, 206, 0.08); padding: 4px 10px; border-radius: 20px; border: 1.5px solid rgba(126, 34, 206, 0.15); text-transform: uppercase; font-family: var(--font-display);">¡Exclusivo en la App!</span>
+            <h2 style="font-family: var(--font-display); font-weight: 850; font-size: 19px; color: var(--color-text-primary); margin: 12px 0 6px;">${product.name}</h2>
+            <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">Disponible de forma exclusiva en nuestra plataforma. ¡Pedilo ahora en <b>${comercioName}</b>!</p>
+          </div>
+
+          ${product.image ? `
+            <div style="width: 100%; height: 160px; border-radius: 18px; overflow: hidden; border: 1px solid var(--color-border-light); background: #f8fafc; position: relative;">
+              <img src="${product.image}" alt="${product.name}" style="width: 100%; height: 100%; object-fit: cover;" />
+              ${discountPercent > 0 ? `
+                <div style="position: absolute; top: 10px; right: 10px; background: var(--color-primary); color: white; padding: 4px 10px; border-radius: 8px; font-size: 10px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2; text-transform: uppercase;">
+                  ${discountPercent}% OFF
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
+            ${discountPercent > 0 ? `
+              <span style="font-size: 24px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">${formatPrice(discountedPrice)}</span>
+              <span style="font-size: 14px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(product.price)}</span>
+            ` : `
+              <span style="font-size: 24px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">${formatPrice(product.price)}</span>
+            `}
+          </div>
+
+          <button id="${overlayId}-action-btn" class="btn btn-primary" style="width: 100%; height: 50px; border-radius: 14px; font-weight: 900; font-size: 13.5px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(126, 34, 206, 0.25); margin: 0;">
+            VER PRODUCTO E IR A LA TIENDA
+          </button>
+        </div>
+      </div>
+
+      <style>
+        @keyframes bouncePromo {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-8px); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes zoomIn {
+          from { transform: scale(0.9) translateY(10px); opacity: 0; }
+          to { transform: scale(1) translateY(0); opacity: 1; }
+        }
+      </style>
+    `;
+
+    document.body.appendChild(overlay);
+
+    window.history.pushState({ isAppOnlyOverlay: overlayId }, '');
+
+    const closeOverlay = () => {
+      const el = document.getElementById(overlayId);
+      if (el) {
+        const card = document.getElementById(`${overlayId}-card`);
+        if (card) {
+          card.style.transition = 'transform 0.25s ease-in, opacity 0.2s ease-in';
+          card.style.transform = 'scale(0.9) translateY(10px)';
+          card.style.opacity = '0';
+        }
+        el.style.transition = 'opacity 0.25s ease-in';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 250);
+      }
+      window.removeEventListener('popstate', handlePopState);
+    };
+
+    const handlePopState = (e) => {
+      if (e.state && e.state.isAppOnlyOverlay === overlayId) return;
+      closeOverlay();
+    };
+    window.addEventListener('popstate', handlePopState);
+
+    document.getElementById(`${overlayId}-close-btn`).onclick = () => {
+      window.history.back();
+    };
+    overlay.onclick = (e) => {
+      if (e.target === overlay) {
+        window.history.back();
+      }
+    };
+
+    document.getElementById(`${overlayId}-action-btn`).onclick = () => {
+      closeOverlay();
+      location.hash = `#/comercio/${comercioId}?product=${product.id}`;
+    };
+  };
+
+  // 1. Render instantly using local cache if available
+  let shownFromCache = false;
+  try {
+    const cachedProductsRaw = localStorage.getItem('gd_cached_only_in_app');
+    const cachedOffersRaw = localStorage.getItem('gd_cached_offers');
+    if (cachedProductsRaw) {
+      const cachedProducts = JSON.parse(cachedProductsRaw);
+      const cachedOffers = cachedOffersRaw ? JSON.parse(cachedOffersRaw) : [];
+      if (cachedProducts && cachedProducts.length > 0) {
+        const randomProduct = cachedProducts[Math.floor(Math.random() * cachedProducts.length)];
+        if (randomProduct && randomProduct.comercioId) {
+          shownFromCache = true;
+          renderModal(randomProduct, cachedOffers, randomProduct.comercioId, true);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Error loading app-only promo from local cache:', e);
+  }
+
+  // 2. Query fresh database data in the background and update cache silently
+  try {
+    const { collectionGroup, getDocs, query, where, collection } = await import('firebase/firestore');
+    const qAppOnly = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
+    
+    const [snap, offersSnap] = await Promise.all([
+      getDocs(qAppOnly),
+      getDocs(query(collection(db, 'offers'), where('active', '==', true)))
+    ]);
+
+    const validDocs = snap.docs.filter(d => {
+      const data = d.data();
+      const isOutOfStock = data.stockMode === 'limited' && (data.stockQuantity || 0) <= 0;
+      return data.onlyInApp === true && data.isAvailable !== false && !isOutOfStock;
+    });
+
+    if (validDocs.length === 0) return;
+
+    const freshProducts = validDocs.map(docSnap => {
+      const pathParts = docSnap.ref.path.split('/');
+      const comercioId = pathParts[1];
+      return { id: docSnap.id, comercioId, ...docSnap.data() };
+    });
+
+    const freshOffers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Overwrite cache silently
+    try {
+      localStorage.setItem('gd_cached_only_in_app', JSON.stringify(freshProducts));
+      localStorage.setItem('gd_cached_offers', JSON.stringify(freshOffers));
+    } catch (e) {}
+
+    // If first launch (no cache), render the modal now
+    if (!shownFromCache) {
+      const randomProduct = freshProducts[Math.floor(Math.random() * freshProducts.length)];
+      if (randomProduct && randomProduct.comercioId) {
+        renderModal(randomProduct, freshOffers, randomProduct.comercioId, false);
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching fresh app-only products:', err);
+  }
 }

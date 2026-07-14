@@ -133,10 +133,11 @@ async function openComercioEditor(comercio, onSaved) {
   let croppedLogo = comercio.logo || '';
   let croppedBanner = comercio.banner || '';
   const modalContent = document.createElement('div');
-  modalContent.style.cssText = 'padding: 24px 20px 40px; overflow-y: auto; height: 100%;';
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative;';
 
   modalContent.innerHTML = `
-    <div style="text-align:center; margin-bottom:24px;">
+    <div style="flex:1; overflow-y:auto; padding:24px 20px 10px;">
+      <div style="text-align:center; margin-bottom:24px;">
       <div style="width:70px; height:70px; border-radius:50%; overflow:hidden; border:2px solid var(--color-primary); margin:0 auto 12px; background:white; box-shadow:0 8px 20px rgba(0,0,0,0.1); padding:2px;">
         <img src="${comercio.logo || '/logo.png'}" id="edit-com-logo-top-preview" style="width:100%; height:100%; object-fit:cover;" />
       </div>
@@ -214,18 +215,22 @@ async function openComercioEditor(comercio, onSaved) {
         </div>
       </div>
 
-      <div style="display:flex; flex-direction:column; gap:12px; margin-top:10px;">
-        <button id="save-com-btn" style="width:100%; height:60px; border-radius:20px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.25);">
-          Guardar Cambios
-        </button>
-        <button id="delete-com-btn" style="width:100%; height:54px; border-radius:20px; background:transparent; color:var(--color-danger); border:1.5px solid var(--color-danger); font-weight:800; font-size:14px; cursor:pointer;">
-          Eliminar Comercio Definitivamente
-        </button>
-        <a href="#/mi-comercio/${comercio.id}/orders" style="width:100%; height:54px; border-radius:20px; background:var(--color-bg-secondary); color:var(--color-text); border:1.5px solid var(--color-border); display:flex; align-items:center; justify-content:center; text-decoration:none; font-weight:800; font-size:14px; gap:8px;">
-          ${icon('package', 20)} Administrar Productos y Pedidos
-        </a>
-      </div>
     </div>
+  </div>
+
+  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box;">
+    <button id="save-com-btn" style="width:100%; height:56px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.25);">
+      Guardar Cambios
+    </button>
+    <div style="display:flex; gap:10px;">
+      <button id="delete-com-btn" style="flex:1; height:46px; border-radius:14px; background:transparent; color:var(--color-danger); border:1.5px solid var(--color-danger); font-weight:800; font-size:13px; cursor:pointer;">
+        Eliminar
+      </button>
+      <a href="#/mi-comercio/${comercio.id}/orders" style="flex:2; height:46px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text); border:1.5px solid var(--color-border); display:flex; align-items:center; justify-content:center; text-decoration:none; font-weight:800; font-size:13px; gap:6px;">
+        ${icon('package', 16)} Administrar Productos
+      </a>
+    </div>
+  </div>
   `;
 
   showModal({ title: '', hideHeader: true, height: '90dvh', content: modalContent });
@@ -471,6 +476,19 @@ async function openComercioEditor(comercio, onSaved) {
 
     try {
       await updateDoc(doc(db, 'comercios', comercio.id), updateData);
+      
+      if (updateData.approvedByAdmin && comercio.ownerId) {
+        try {
+          await updateDoc(doc(db, 'users', comercio.ownerId), {
+            role: 'comercio',
+            isComercio: true,
+            commerceStatus: 'approved'
+          });
+        } catch (userErr) {
+          console.error('Error updating user role on commerce approval:', userErr);
+        }
+      }
+      
       showToast('Perfil actualizado correctamente', 'success');
       closeModal();
       onSaved();

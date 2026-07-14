@@ -46,11 +46,24 @@ function startListening(userId) {
   activeUnsub = onSnapshot(q, (snap) => {
     const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    // Check for completed orders that haven't been dismissed yet
-    const undismissedCompleted = orders.filter(o => 
-      (o.status === 'completed' || o.status === 'entregado') && 
-      localStorage.getItem(`gd_dismissed_points_modal_${o.id}`) !== 'true'
-    );
+    // Check for completed orders that haven't been dismissed yet and are recent (less than 12 hours old)
+    const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+    const undismissedCompleted = orders.filter(o => {
+      const isCompleted = o.status === 'completed' || o.status === 'entregado';
+      if (!isCompleted) return false;
+
+      const isDismissed = localStorage.getItem(`gd_dismissed_points_modal_${o.id}`) === 'true';
+      if (isDismissed) return false;
+
+      let completedTime = 0;
+      if (o.completedAt) {
+        completedTime = o.completedAt.toMillis ? o.completedAt.toMillis() : new Date(o.completedAt).getTime();
+      } else if (o.createdAt) {
+        completedTime = o.createdAt.toMillis ? o.createdAt.toMillis() : new Date(o.createdAt).getTime();
+      }
+
+      return completedTime > twelveHoursAgo;
+    });
 
     undismissedCompleted.forEach(async (completedOrder) => {
       // Show unified rating and points modal globally!

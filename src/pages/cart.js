@@ -15,7 +15,7 @@ import { ConfettiCelebrator } from '../utils/confetti.js';
 
 let currentCartStep = 1;
 let isSubmitting = false;
-let selectedPaymentMethod = 'efectivo';
+let selectedPaymentMethod = null;
 let selectedIsScheduled = false;
 let selectedSchedDate = '';
 let selectedSchedTime = '';
@@ -30,7 +30,7 @@ export async function renderCart(content) {
   if (!content) return;
 
   currentCartStep = 1; // Reset to step 1 when page loads
-  selectedPaymentMethod = 'efectivo'; // Reset to cash on page load
+  selectedPaymentMethod = null; // Reset to null on page load
 
   // Start calculating dynamic fees in background
   calculateAllFees();
@@ -73,8 +73,11 @@ export async function renderCart(content) {
     renderCartContent(content);
   });
 
+  content.addEventListener('click', handleCartClick);
+
   return {
     cleanup: () => {
+      content.removeEventListener('click', handleCartClick);
       unsubCart();
       unsubUser();
       unsubDollarPerPoint();
@@ -449,6 +452,25 @@ function renderCartContent(content) {
                     }
                     return sum + basePrice * item.qty;
                   }, 0);
+              } else if (appliedCoupon.comercioIds && Array.isArray(appliedCoupon.comercioIds) && appliedCoupon.comercioIds.length > 0) {
+                const cart = getState().cart || [];
+                targetProductsTotal = cart
+                  .filter(item => appliedCoupon.comercioIds.includes(item.comercioId))
+                  .reduce((sum, item) => {
+                    const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                    const activeOffers = getState().activeOffers || [];
+                    const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+                    if (offer) {
+                      if (offer.type === '2x1') {
+                        const paidQty = Math.ceil(item.qty / 2);
+                        return sum + basePrice * paidQty;
+                      } else if (offer.type === 'percentage') {
+                        const disc = (100 - (offer.value || 0)) / 100;
+                        return sum + basePrice * item.qty * disc;
+                      }
+                    }
+                    return sum + basePrice * item.qty;
+                  }, 0);
               }
 
               if (discountType === 'percentage') {
@@ -540,7 +562,7 @@ function renderCartContent(content) {
                 <button class="btn btn-primary checkout-btn" 
                         id="global-checkout-btn"
                         ${!allFeesReady ? 'disabled' : ''}
-                        style="height:54px; width:180px; border-radius:16px; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:0.02em; display:flex; align-items:center; justify-content:center; gap:var(--space-2); background:${!allFeesReady ? 'var(--color-text-tertiary)' : 'var(--color-primary)'}; box-shadow: ${!allFeesReady ? 'none' : '0 12px 24px rgba(var(--color-primary-rgb), 0.3)'}; border:none; opacity: ${!allFeesReady ? 0.6 : 1};">
+                        style="height:54px; width:180px; border-radius:16px; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:0.02em; display:flex; align-items:center; justify-content:center; gap:var(--space-2); background:${!allFeesReady ? 'var(--color-text-tertiary)' : 'var(--color-primary)'}; box-shadow: ${!allFeesReady ? 'none' : '0 12px 24px rgba(var(--color-primary-rgb), 0.3)'}; border:none; opacity: ${!allFeesReady ? 0.6 : 1}; pointer-events: ${!allFeesReady ? 'none' : 'auto'};">
                   ${currentCartStep === 1 ? `${icon('arrowRight', 18)} SIGUIENTE` : `${icon('check', 18)} ${isMulti ? 'PEDIDO MÚLTIPLE' : 'CONFIRMAR'}`}
                 </button>
               </div>
@@ -704,9 +726,6 @@ function renderCartContent(content) {
   content.querySelector('#cart-open-coupon-btn')?.addEventListener('click', () => {
     openCouponModal();
   });
-
-  // General click handler (qty, remove, clear, checkout)
-  content.addEventListener('click', handleCartClick);
 
   document.getElementById('show-fee-details')?.addEventListener('click', () => {
     showFeeDetails();
@@ -1291,6 +1310,93 @@ function openCouponModal() {
         if (!hasMerchantItems) {
           throw new Error(`Este cupón es exclusivo para productos del comercio ${cData.comercioName || 'propietario'}.`);
         }
+      } else if (cData.comercioIds && Array.isArray(cData.comercioIds) && cData.comercioIds.length > 0) {
+        const cart = getState().cart || [];
+        const hasMerchantItems = cart.some(item => cData.comercioIds.includes(item.comercioId));
+        if (!hasMerchantItems) {
+          throw new Error('Este cupón no es válido para los productos en tu carrito.');
+        }
+      }
+
+      // Validate order/subtotal limit for fixed discounts
+      const isFixed = cData.discountType === 'fixed' || (cData.type !== 'percentage' && cData.type !== 'free_delivery');
+      if (isFixed) {
+        const couponVal = Number(cData.value || 0);
+        let applicableTotal = 0;
+        const scope = cData.scope || 'products';
+
+        if (scope === 'shipping') {
+          const state = getState();
+          const cart = state.cart || [];
+          const grouped = {};
+          cart.forEach(item => {
+            if (!grouped[item.comercioId]) grouped[item.comercioId] = [];
+            grouped[item.comercioId].push(item);
+          });
+          const commerceIds = Object.keys(grouped);
+          const dynamicFees = state.dynamicDeliveryFees || {};
+          const allFeesReady = commerceIds.every(cid => dynamicFees[cid] !== undefined);
+          
+          let baseDeliveryFeeCalc = 0;
+          let nightSurcharge = 0;
+          if (allFeesReady) {
+            const individualFees = commerceIds.map(cid => dynamicFees[cid]);
+            const maxIndividualFee = Math.max(...individualFees, 0);
+            const extraStopsFee = (individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+            const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
+            baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+            nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
+          }
+          applicableTotal = baseDeliveryFeeCalc + nightSurcharge;
+        } else {
+          const totalProducts = getCartTotal();
+          let targetProductsTotal = totalProducts;
+          if (cData.ownerId && cData.ownerId !== 'admin') {
+            const merchantId = cData.ownerId;
+            const cart = getState().cart || [];
+            targetProductsTotal = cart
+              .filter(item => item.comercioId === merchantId)
+              .reduce((sum, item) => {
+                const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                const activeOffers = getState().activeOffers || [];
+                const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+                if (offer) {
+                  if (offer.type === '2x1') {
+                    const paidQty = Math.ceil(item.qty / 2);
+                    return sum + basePrice * paidQty;
+                  } else if (offer.type === 'percentage') {
+                    const disc = (100 - (offer.value || 0)) / 100;
+                    return sum + basePrice * item.qty * disc;
+                  }
+                }
+                return sum + basePrice * item.qty;
+              }, 0);
+          } else if (cData.comercioIds && Array.isArray(cData.comercioIds) && cData.comercioIds.length > 0) {
+            const cart = getState().cart || [];
+            targetProductsTotal = cart
+              .filter(item => cData.comercioIds.includes(item.comercioId))
+              .reduce((sum, item) => {
+                const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                const activeOffers = getState().activeOffers || [];
+                const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+                if (offer) {
+                  if (offer.type === '2x1') {
+                    const paidQty = Math.ceil(item.qty / 2);
+                    return sum + basePrice * paidQty;
+                  } else if (offer.type === 'percentage') {
+                    const disc = (100 - (offer.value || 0)) / 100;
+                    return sum + basePrice * item.qty * disc;
+                  }
+                }
+                return sum + basePrice * item.qty;
+              }, 0);
+          }
+          applicableTotal = targetProductsTotal;
+        }
+
+        if (applicableTotal < couponVal) {
+          throw new Error(`El total de tu pedido es menor al valor del cupón (${formatPrice(couponVal)}).`);
+        }
       }
 
       // 3. Client-side check for double redemption to provide fast UX
@@ -1306,6 +1412,7 @@ function openCouponModal() {
         type: cData.type,
         value: cData.value,
         ownerId: cData.ownerId || 'admin',
+        comercioIds: cData.comercioIds || [],
         scope: cData.scope || 'products',
         discountType: cData.discountType || (cData.type === 'free_delivery' ? 'percentage' : 'percentage'),
         absorbedBy: cData.absorbedBy || 'platform',
@@ -1372,8 +1479,42 @@ async function checkOnlineDrivers() {
 }
 
 async function openCheckoutConfirmationModal() {
+  if (!selectedPaymentMethod) {
+    const { showToast } = await import('../components/toast.js');
+    showToast('Por favor, selecciona un método de pago', 'warning');
+    isSubmitting = false;
+    return;
+  }
+
   // Query online drivers in real-time before presenting the modal
   const hasDelivery = await checkOnlineDrivers();
+  if (!hasDelivery) {
+    isSubmitting = false;
+    const { showModal } = await import('../components/modal.js');
+    const { close: closeAlert } = showModal({
+      title: '',
+      hideHeader: true,
+      height: 'auto',
+      content: `
+        <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
+          <div style="font-size: 44px; margin-bottom: 4px;">🛵</div>
+          <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3; color: var(--color-danger);">Sin repartidores disponibles</h4>
+          <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
+            No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
+          </p>
+          <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+            ENTENDIDO
+          </button>
+        </div>
+      `
+    });
+    
+    setTimeout(() => {
+      const btn = document.getElementById('no-drivers-close-btn');
+      if (btn) btn.onclick = () => closeAlert();
+    }, 50);
+    return;
+  }
 
   const state = getState();
   const address = state.deliveryAddress;
@@ -1479,7 +1620,7 @@ async function openCheckoutConfirmationModal() {
     flex-direction: column;
     gap: var(--confirm-gap);
     max-height: 82dvh;
-    overflow-y: auto;
+    overflow: hidden;
     box-sizing: border-box;
   `;
 
@@ -1587,8 +1728,9 @@ async function openCheckoutConfirmationModal() {
       </p>
     </div>
 
-    <!-- DIRECCIÓN DE ENTREGA (Interactive Address Card) -->
-    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); transition: all 0.2s; flex-shrink: 0;">
+    <div class="confirm-modal-scrollable-body" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--confirm-gap); padding-right: 4px; margin-bottom: 4px;">
+      <!-- DIRECCIÓN DE ENTREGA (Interactive Address Card) -->
+      <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); transition: all 0.2s; flex-shrink: 0;">
       <div style="display: flex; align-items: center; justify-content: space-between;">
         <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
           ${icon('mapPin', 12)} Dirección de entrega
@@ -1749,26 +1891,13 @@ async function openCheckoutConfirmationModal() {
       </div>
     </div>
 
-    <!-- BOTONES DE ACCIÓN Y ALERTAS -->
-    ${!hasDelivery ? `
-      <div style="background: rgba(239, 68, 68, 0.08); border: 1.5px solid rgba(239, 68, 68, 0.2); border-radius: 16px; padding: 12px 14px; display: flex; align-items: flex-start; gap: 10px; margin-top: 4px; margin-bottom: 4px; flex-shrink: 0; animation: fadeIn 0.3s ease-out;">
-        <span style="font-size: 20px; line-height: 1; filter: drop-shadow(0 2px 4px rgba(239,68,68,0.25));">⚠️</span>
-        <div style="display: flex; flex-direction: column; gap: 2px;">
-          <span style="font-size: 11px; font-weight: 900; color: #EF4444; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
-            Sin repartidores disponibles
-          </span>
-          <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.4;">
-            No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
-          </span>
-        </div>
-      </div>
-    ` : ''}
+    </div>
 
-    <div style="display: flex; gap: 8px; margin-top: 4px; width: 100%; flex-shrink: 0;">
+    <div style="display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--color-border-light); width: 100%; flex-shrink: 0; background: var(--color-bg); z-index: 10;">
       <button id="confirm-cancel-btn" class="btn btn-ghost" style="flex: 1; height: var(--confirm-btn-height); border-radius: 12px; font-weight: 800; font-size: var(--confirm-btn-font); color: var(--color-text-secondary); background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); margin: 0; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">
         Cancelar
       </button>
-      <button id="confirm-submit-btn" class="btn btn-primary" ${!hasDelivery ? 'disabled' : ''} style="flex: 1.8; height: var(--confirm-btn-height); border-radius: 12px; font-weight: 900; font-size: var(--confirm-btn-font); background: ${hasDelivery ? 'var(--color-primary)' : '#9CA3AF'}; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: ${hasDelivery ? '0 6px 16px rgba(var(--color-primary-rgb), 0.2)' : 'none'}; margin: 0; transition: all 0.2s; cursor: ${hasDelivery ? 'pointer' : 'not-allowed'}; opacity: ${hasDelivery ? '1' : '0.65'};">
+      <button id="confirm-submit-btn" class="btn btn-primary" style="flex: 1.8; height: var(--confirm-btn-height); border-radius: 12px; font-weight: 900; font-size: var(--confirm-btn-font); background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 6px 16px rgba(var(--color-primary-rgb), 0.2); margin: 0; transition: all 0.2s; cursor: pointer; opacity: 1;">
         ${icon('check', 16)} CONFIRMAR Y PEDIR
       </button>
     </div>
@@ -2187,6 +2316,8 @@ async function handleCartClick(e) {
   // Quantity buttons
   const qtyBtn = e.target.closest('.cart-qty-btn');
   if (qtyBtn) {
+    e.stopPropagation();
+    e.preventDefault();
     const id = qtyBtn.dataset.id;
     const cid = qtyBtn.dataset.cid;
     const action = qtyBtn.dataset.action;
@@ -2201,6 +2332,8 @@ async function handleCartClick(e) {
   // Remove button
   const removeBtn = e.target.closest('.cart-item-remove');
   if (removeBtn) {
+    e.stopPropagation();
+    e.preventDefault();
     const id = removeBtn.dataset.id;
     const cid = removeBtn.dataset.cid;
     removeFromCart(id, cid);
@@ -2210,6 +2343,8 @@ async function handleCartClick(e) {
 
   // Back step button
   if (e.target.closest('#cart-back-step-btn')) {
+    e.stopPropagation();
+    e.preventDefault();
     currentCartStep = 1;
     renderCartContent(document.getElementById('page-cart') || document.getElementById('app-content'));
     return;
@@ -2218,6 +2353,14 @@ async function handleCartClick(e) {
   // Checkout button
   const checkoutBtn = e.target.closest('.checkout-btn');
   if (checkoutBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    // Ignore click events on disabled buttons to prevent double processing or weird bubbling on custom pointer configurations
+    if (checkoutBtn.disabled || checkoutBtn.getAttribute('disabled') !== null) {
+      return;
+    }
+
     if (isSubmitting) return;
 
     const address = getState().deliveryAddress;
@@ -2244,12 +2387,15 @@ async function handleCartClick(e) {
       return;
     }
 
-    if (!user.phone || user.phone.trim() === '') {
+    if (!user.phone || user.phone.trim() === '' || !user.phoneVerified) {
       const { showConfirm } = await import('../components/modal.js');
+      const isUnverified = user.phone && user.phone.trim() !== '' && !user.phoneVerified;
       showConfirm({
-        title: '📱 Teléfono Requerido',
-        message: 'Para realizar un pedido en la plataforma es obligatorio configurar un celular de contacto para que el comercio y el repartidor se comuniquen.',
-        confirmText: 'Configurar ahora',
+        title: isUnverified ? '📱 Verificar Teléfono' : '📱 Teléfono Requerido',
+        message: isUnverified ? 
+          'Para realizar tu pedido debes verificar tu número telefónico primero.' : 
+          'Para realizar un pedido en la plataforma es obligatorio configurar y verificar un celular de contacto para que el comercio y el repartidor se comuniquen.',
+        confirmText: isUnverified ? 'Verificar ahora' : 'Configurar ahora',
         cancelText: 'Volver',
         onConfirm: () => {
           sessionStorage.setItem('open-phone-edit', 'true');
@@ -2288,6 +2434,8 @@ async function handleCartClick(e) {
 
   // Clear cart
   if (e.target.closest('#clear-cart-btn')) {
+    e.stopPropagation();
+    e.preventDefault();
     showConfirm({
       title: 'Vaciar carrito',
       message: '¿Estás seguro de que querés vaciar todo el carrito?',

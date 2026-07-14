@@ -102,6 +102,7 @@ export async function initSettings() {
         state.driverIncentiveConfig = data.driverIncentiveConfig || { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 };
         state.rainMode = data.rainMode || 'auto';
         state.useDarkBrandTheme = data.useDarkBrandTheme || false;
+        state.favorPurchaseFee = data.favorPurchaseFee !== undefined ? data.favorPurchaseFee : 800;
 
         // Dynamically apply brand theme
         const primaryColor = state.useDarkBrandTheme ? '#0F172A' : '#E11D48';

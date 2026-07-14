@@ -795,3 +795,27 @@ body.platform-capacitor .pm-footer {
     transition: none !important;
   }
 }
+
+.fab-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: scale(0.8) translateY(20px) !important;
+}
+
+body.modal-open #support-bot-fab-btn,
+body.modal-open #app-guide-fab,
+body.modal-open #global-order-fab,
+body.modal-open #global-commerce-pending-fab,
+body.modal-open #global-active-delivery-fab,
+body.modal-open #global-delivery-available-fab {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.multiple-modals .v5-back-btn,
+body.multiple-modals #close-delivery-map-btn,
+body:has(#modal-container > div + div) .v5-back-btn,
+body:has(#modal-container > div + div) #close-delivery-map-btn {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

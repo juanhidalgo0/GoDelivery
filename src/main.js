@@ -11,8 +11,21 @@ import { initScrollAnimations } from './utils/scroll-animations.js';
 // Initialize audio system
 AudioManager.init();
 
-// Initialize app
 async function init() {
+  // Restore last route hash on startup to handle Android activity destruction recovery
+  try {
+    const lastHash = localStorage.getItem('gd_last_hash');
+    if (lastHash && lastHash !== '#/' && lastHash !== '#') {
+      window.location.hash = lastHash;
+    }
+    window.addEventListener('hashchange', () => {
+      const h = window.location.hash;
+      if (h && !h.includes('reset') && !h.includes('login')) {
+        localStorage.setItem('gd_last_hash', h);
+      }
+    });
+  } catch (e) {}
+
   if (window.Capacitor) {
     document.body.classList.add('platform-capacitor');
     
@@ -56,19 +69,14 @@ async function init() {
   }
   // Seed Database: Pizzería category and Dany's Pizza categories
   try {
-    const runOnceKey = 'gd_seed_pizzeria_danys_pizza_2026_06_11';
+    const runOnceKey = 'gd_seed_remove_pizzeria_2026_07_11';
     if (!localStorage.getItem(runOnceKey)) {
-      const { doc, setDoc, getDoc, updateDoc, collection, getDocs, query } = await import('firebase/firestore');
+      const { doc, deleteDoc, collection, getDocs, query, updateDoc } = await import('firebase/firestore');
       
-      // 1. Ensure Pizzería category exists in platformCategories
-      await setDoc(doc(db, 'platformCategories', 'pizzeria'), {
-        name: 'Pizzería',
-        icon: '🍕',
-        order: 10,
-        isActive: true
-      }, { merge: true });
+      // 1. Delete Pizzería category from platformCategories
+      await deleteDoc(doc(db, 'platformCategories', 'pizzeria'));
       
-      // 2. Find Dany's Pizza and update it
+      // 2. Find Dany's Pizza and clean up its categories
       const comQuery = query(collection(db, 'comercios'));
       const comSnap = await getDocs(comQuery);
       for (const d of comSnap.docs) {
@@ -76,17 +84,17 @@ async function init() {
         if (cData.name && cData.name.toLowerCase().includes("dany's pizza")) {
           await updateDoc(doc(db, 'comercios', d.id), {
             category: 'Comida',
-            categories: ['Comida', 'Pizzería']
+            categories: ['Comida']
           });
-          console.log("Updated Dany's Pizza to Comida + Pizzería!");
+          console.log("Updated Dany's Pizza to Comida!");
         }
       }
       
       localStorage.setItem(runOnceKey, 'true');
-      console.log("Database seeded successfully for Pizzería / Dany's Pizza!");
+      console.log("Pizzería category deleted and Dany's Pizza cleaned up!");
     }
   } catch (err) {
-    console.error('Error seeding database for Pizzería / Dany\'s Pizza:', err);
+    console.error('Error removing Pizzería category:', err);
   }
 
   // Force-update check against version.json
@@ -470,6 +478,8 @@ async function init() {
     '/admin/users': (c) => import('./pages/admin/users.js').then(m => m.renderAdminUsers(c)),
     '/admin/categories': (c) => import('./pages/admin/categories.js').then(m => m.renderAdminCategories(c)),
     '/admin/comercios': (c) => import('./pages/admin/comercios.js').then(m => m.renderAdminComercios(c)),
+    '/admin/solicitudes-comercios': (c) => import('./pages/admin/solicitudes-comercios.js').then(m => m.renderAdminCommerceRequests(c)),
+    '/admin/solicitudes-empleo': (c) => import('./pages/admin/solicitudes-empleo.js').then(m => m.renderAdminJobApplications(c)),
     '/admin/reviews': (c) => import('./pages/admin/reviews.js').then(m => m.renderAdminReviews(c)),
     '/admin/support-chats': (c) => import('./pages/admin/support-chats.js').then(m => m.renderAdminSupportChats(c)),
     '/admin/orders': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
@@ -556,7 +566,12 @@ async function init() {
       const id = window.location.hash.split('/')[2]?.split('?')[0];
       return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/metrics.js').then(m => m.renderComercioMetrics(c)));
     },
+    '/mi-comercio/:id/coupons': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/coupons.js').then(m => m.renderComercioCoupons(c)));
+    },
     '/notifications': (c) => import('./pages/notifications.js').then(m => m.renderNotifications(c)),
+    '/offers': (c) => import('./pages/offers-page.js').then(m => m.renderOffersPage(c)),
     '/mp-connect': (c) => import('./pages/mp-connect.js').then(m => m.renderMPConnect(c)),
     '/gofavores': (c) => import('./pages/gofavores.js').then(m => m.renderGoFavores(c)),
     '/viajes': (c) => import('./pages/viajes.js').then(m => m.renderViajes(c)),

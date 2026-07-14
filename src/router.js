@@ -143,12 +143,16 @@ async function handleRoute() {
         panel.innerHTML = ''; // Clear to ensure animation re-triggers
         try {
           const result = await handler(panel);
-          
           if (result && result.cleanup) {
             currentCleanup = result.cleanup;
           }
         } catch (err) {
           console.error('Route error (main):', err);
+          if (err.name === 'TypeError' || err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript')) {
+            console.warn('Failed to load main route module. Reloading page...');
+            window.location.reload();
+            return;
+          }
           panel.innerHTML = `
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:20px; text-align:center;">
               <div style="width:64px; height:64px; background:rgba(227,27,35,0.1); color:#E31B23; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
@@ -194,6 +198,11 @@ async function handleRoute() {
         }
       } catch (err) {
         console.error('Route error (overlay):', err);
+        if (err.name === 'TypeError' || err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript')) {
+          console.warn('Failed to load overlay route module. Reloading page...');
+          window.location.reload();
+          return;
+        }
         target.innerHTML = `
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:24px; text-align:center; background:var(--color-bg);">
             <div style="width:64px; height:64px; background:rgba(227,27,35,0.08); color:#E31B23; border-radius:24px; display:flex; align-items:center; justify-content:center; margin-bottom:20px; box-shadow:0 8px 20px rgba(227,27,35,0.15);">

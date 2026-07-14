@@ -250,8 +250,25 @@ export async function renderAdminCoupons() {
   });
 
   // Open modal trigger
-  document.getElementById('admin-create-coupon-btn')?.addEventListener('click', () => {
-    showGenerateCouponModal(loadCoupons);
+  document.getElementById('admin-create-coupon-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('admin-create-coupon-btn');
+    if (!btn) return;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `${icon('loader', 14, 'animate-spin')} Cargando...`;
+    try {
+      const { collection, getDocs } = await import('firebase/firestore');
+      const snap = await getDocs(collection(db, 'comercios'));
+      const comerciosList = snap.docs.map(docSnap => ({ id: docSnap.id, name: docSnap.data().name }));
+      comerciosList.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      showGenerateCouponModal(loadCoupons, comerciosList);
+    } catch (err) {
+      console.error(err);
+      showToast('Error al cargar comercios', 'danger');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
   });
 
   // Initial Load
@@ -269,7 +286,7 @@ function generateRandomAlphanumeric(length = 4) {
 }
 
 // Show Premium Modal for Creating Coupons
-function showGenerateCouponModal(onSuccessCallback) {
+function showGenerateCouponModal(onSuccessCallback, comerciosList = []) {
   showModal({
     title: 'Generar Nuevo Cupón',
     content: `
@@ -314,6 +331,25 @@ function showGenerateCouponModal(onSuccessCallback) {
         <div style="display:flex; flex-direction:column; gap:6px;">
           <label style="font-size:12px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Cantidad de Cupones (Stock)</label>
           <input type="number" id="modal-coupon-limit" value="50" min="1" placeholder="Cantidad de usos totales" style="width:100%; height:48px; border-radius:14px; border:1px solid var(--color-border); background:var(--color-surface); padding:0 16px; font-weight:700; font-size:14px; outline:none; box-sizing:border-box; color:var(--color-text);" />
+        </div>
+
+        <!-- Restricted Commerce Selector (Optional) -->
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="font-size:12px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Restringir a Comercio (Opcional)</label>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <select id="modal-coupon-comercio-mode" style="width:100%; height:48px; border-radius:14px; border:1px solid var(--color-border); background:var(--color-surface); padding:0 12px; font-weight:700; font-size:14px; color:var(--color-text); outline:none; cursor:pointer;">
+              <option value="none">🌐 Cupón Global (Válido para todo)</option>
+              <option value="single">🏪 Restringir a Comercios específicos...</option>
+            </select>
+            <div id="modal-coupon-comercios-checkboxes" style="display:none; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; border:1px solid var(--color-border); border-radius:14px; padding:12px; background:var(--color-bg-secondary);">
+              ${comerciosList.map(c => `
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; cursor:pointer; color:var(--color-text);">
+                  <input type="checkbox" class="modal-coupon-comercio-chk" value="${c.id}" style="width:18px; height:18px; cursor:pointer;" />
+                  <span>${c.name}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
         </div>
 
         <!-- Code Generation Selector -->
@@ -477,6 +513,14 @@ function showGenerateCouponModal(onSuccessCallback) {
     e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
   });
 
+  // Toggle checkboxes visibility
+  document.getElementById('modal-coupon-comercio-mode')?.addEventListener('change', (e) => {
+    const box = document.getElementById('modal-coupon-comercios-checkboxes');
+    if (box) {
+      box.style.display = e.target.value === 'single' ? 'flex' : 'none';
+    }
+  });
+
   // Cancel trigger
   document.getElementById('modal-coupon-cancel')?.addEventListener('click', closeModal);
 
@@ -484,6 +528,18 @@ function showGenerateCouponModal(onSuccessCallback) {
   document.getElementById('modal-coupon-create')?.addEventListener('click', async () => {
     const limitVal = parseInt(document.getElementById('modal-coupon-limit')?.value || '50', 10);
     const valueVal = parseFloat(document.getElementById('modal-coupon-value')?.value || '0');
+    const comercioMode = document.getElementById('modal-coupon-comercio-mode')?.value || 'none';
+
+    let selectedComercioIds = [];
+    if (comercioMode === 'single') {
+      document.querySelectorAll('.modal-coupon-comercio-chk:checked').forEach(chk => {
+        selectedComercioIds.push(chk.value);
+      });
+      if (selectedComercioIds.length === 0) {
+        showToast('Debés seleccionar al menos un comercio si activás la restricción.', 'warning');
+        return;
+      }
+    }
 
     let finalCode = '';
     if (codeMode === 'random') {
@@ -540,6 +596,7 @@ function showGenerateCouponModal(onSuccessCallback) {
       await setDoc(docRef, {
         active: true,
         ownerId: 'admin',
+        comercioIds: selectedComercioIds,
         scope: selectedScope,
         discountType: selectedDiscountType,
         absorbedBy: 'platform',

@@ -53,9 +53,13 @@ export async function renderPublishProduct(content) {
         </div>
 
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <label style="font-size:12px; font-weight:800; text-transform:uppercase; color:var(--color-text-secondary);">URL de Imagen (Simulada)</label>
-          <input type="url" id="prod-image" placeholder="Pegá el link de una imagen (ej: https://picsum.photos/400)" style="height:48px; border-radius:12px; border:1px solid var(--color-border); padding:0 16px; font-size:14px; background:var(--color-surface); color:var(--color-text); box-sizing:border-box;" />
-          <span style="font-size:11px; color:var(--color-text-secondary);">Por ahora podés usar cualquier link de imagen público para pruebas.</span>
+          <label style="font-size:12px; font-weight:800; text-transform:uppercase; color:var(--color-text-secondary);">Foto del Producto *</label>
+          <div class="image-upload" id="prod-image-upload" style="border: 2px dashed var(--color-border); border-radius: 16px; background: var(--color-bg-secondary); overflow: hidden; position: relative; height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+            <img id="prod-image-preview" src="" style="width: 100%; height: 100%; object-fit: cover; position: absolute; left: 0; top: 0; opacity: 0; pointer-events: none;" />
+            <span class="image-upload-icon" style="position: absolute; font-size: 32px; color: var(--color-text-tertiary);">${icon('upload', 32)}</span>
+            <span class="image-upload-text" style="position: absolute; bottom: 16px; font-size: 11px; font-weight: 800; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; text-align: center; padding: 0 10px;">Click para cargar foto del celular</span>
+          </div>
+          <input type="file" id="prod-image-input" accept="image/*" style="display:none;" />
         </div>
 
         <button type="submit" id="btn-submit-publish" style="height:50px; background:var(--color-primary); color:white; border:none; border-radius:14px; font-weight:800; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; box-shadow:0 8px 24px rgba(var(--color-primary-rgb),0.2);">
@@ -65,11 +69,47 @@ export async function renderPublishProduct(content) {
     </div>
   `;
 
+  let croppedImage = null;
+
+  const uploadBox = content.querySelector('#prod-image-upload');
+  const fileInput = content.querySelector('#prod-image-input');
+  const preview = content.querySelector('#prod-image-preview');
+  const uploadIcon = content.querySelector('.image-upload-icon');
+  const uploadText = content.querySelector('.image-upload-text');
+
+  if (uploadBox && fileInput) {
+    uploadBox.onclick = () => fileInput.click();
+    
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        try {
+          const { openCropper } = await import('../utils/cropper.js');
+          const cropped = await openCropper(file, { aspectRatio: 4 / 3 });
+          croppedImage = cropped;
+          if (preview) {
+            preview.src = cropped;
+            preview.style.opacity = '1';
+          }
+          if (uploadIcon) uploadIcon.style.display = 'none';
+          if (uploadText) uploadText.style.display = 'none';
+        } catch (err) {
+          console.warn('Cropping failed or cancelled', err);
+        }
+      }
+    };
+  }
+
   const form = content.querySelector('#publish-form');
   const submitBtn = content.querySelector('#btn-submit-publish');
 
   form.onsubmit = async (e) => {
     e.preventDefault();
+
+    if (!croppedImage) {
+      alert('Por favor, selecciona y carga una foto para tu producto.');
+      return;
+    }
 
     if (submitBtn.disabled) return;
     submitBtn.disabled = true;
@@ -79,7 +119,6 @@ export async function renderPublishProduct(content) {
     const price = parseFloat(content.querySelector('#prod-price').value);
     const condition = content.querySelector('#prod-condition').value;
     const description = content.querySelector('#prod-desc').value.trim();
-    const imageUrl = content.querySelector('#prod-image').value.trim() || 'https://picsum.photos/400';
 
     // Simple anti-bypass sanitization (No phones or emails in description)
     const phoneOrEmailRegex = /(\b[0-9]{3,4}[- ]?[0-9]{3,4}[- ]?[0-9]{3,4}\b)|(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b)/g;
@@ -96,7 +135,7 @@ export async function renderPublishProduct(content) {
         price,
         condition,
         description,
-        images: [imageUrl],
+        images: [croppedImage],
         sellerId: user.uid,
         sellerName: user.displayName || 'Usuario de GoDelivery',
         status: 'pending', // Requerirá aprobación de administrador

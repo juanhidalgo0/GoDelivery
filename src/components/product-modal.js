@@ -12,23 +12,34 @@ import { renderNavbar } from './navbar.js';
 export function openProductModal(product, comercioId, comercioName, isCommerceOpen = true) {
   const modalContent = document.createElement('div');
   modalContent.className = 'product-detail-modal-v2';
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative;';
   
   // Local state for the modal
   let qty = (!isCommerceOpen || (product.stockMode === 'limited' && typeof product.stockQuantity === 'number' && product.stockQuantity <= 0)) ? 0 : 1;
   const selectedOptions = []; // Array of { groupName, name, price, qty }
   let flavorSearchQuery = '';
   let commerceLogo = '';
+  let localCommerceProducts = [];
 
-  import('firebase/firestore').then(async ({ doc, getDoc }) => {
+  import('firebase/firestore').then(async ({ doc, getDoc, collection, getDocs }) => {
     try {
       const { db } = await import('../firebase.js');
-      const snap = await getDoc(doc(db, 'comercios', comercioId));
-      if (snap.exists()) {
-        commerceLogo = snap.data().logo || '';
-        render();
-      }
+      
+      const logoPromise = getDoc(doc(db, 'comercios', comercioId)).then(snap => {
+        if (snap.exists()) {
+          commerceLogo = snap.data().logo || '';
+        }
+      });
+
+      const productsPromise = getDocs(collection(db, 'comercios', comercioId, 'products')).then(snap => {
+        localCommerceProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      });
+
+      await Promise.all([logoPromise, productsPromise]);
+      render();
     } catch (e) {
-      console.error('Error fetching commerce logo:', e);
+      console.error('Error prefetching product modal assets:', e);
+      render();
     }
   });
 
@@ -122,7 +133,10 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
     const baseDiscountedPrice = discountPercent > 0 ? product.price * (1 - discountPercent / 100) : product.price;
 
-    const allProducts = getState().currentProducts || [];
+    let allProducts = getState().currentProducts || [];
+    if (allProducts.length === 0 || allProducts[0].comercioId !== comercioId) {
+      allProducts = localCommerceProducts;
+    }
     const combos = product.frequentCombos || {};
 
     const suggested = allProducts
@@ -167,36 +181,6 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     const isOutOfStock = isLimited && stockQty < requiredStockPerUnit;
 
     let stockBadgeHTML = '';
-    if (isLimited) {
-      if (stockQty <= 0) {
-        stockBadgeHTML = `
-          <div>
-            <div class="pm-stock-badge agotado" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; background: rgba(225, 29, 72, 0.08); color: var(--color-primary); font-size: 11px; font-weight: 850; border: 1.5px solid rgba(225, 29, 72, 0.18); margin-top: 8px; font-family: var(--font-display);">
-              <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); display: inline-block;"></span>
-              Agotado
-            </div>
-          </div>
-        `;
-      } else if (stockQty <= stockThresh) {
-        stockBadgeHTML = `
-          <div>
-            <div class="pm-stock-badge bajo" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; background: rgba(249, 115, 22, 0.08); color: #f97316; font-size: 11px; font-weight: 850; border: 1.5px solid rgba(249, 115, 22, 0.18); margin-top: 8px; font-family: var(--font-display);">
-              <span style="width: 6px; height: 6px; border-radius: 50%; background: #f97316; display: inline-block; animation: pulse 1.5s infinite;"></span>
-              Stock Bajo: ${stockQty}
-            </div>
-          </div>
-        `;
-      } else {
-        stockBadgeHTML = `
-          <div>
-            <div class="pm-stock-badge ok" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; background: rgba(16, 185, 129, 0.08); color: #10b981; font-size: 11px; font-weight: 850; border: 1.5px solid rgba(16, 185, 129, 0.18); margin-top: 8px; font-family: var(--font-display);">
-              <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
-              Stock: ${stockQty}
-            </div>
-          </div>
-        `;
-      }
-    }
 
     let missingRequired = false;
     let missingRequiredFlavors = false;
@@ -235,7 +219,8 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     modalContent.innerHTML = `
       <button class="pm-close-btn" id="pm-modal-close">${icon('close', 20)}</button>
 
-      ${product.image ? `
+      <div class="pm-scrollable-body" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; -webkit-overflow-scrolling:touch;">
+        ${product.image ? `
         <div class="pm-banner">
           <img src="${product.image}" alt="${product.name}" />
           <div class="pm-banner-overlay"></div>
@@ -281,7 +266,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         ${stockBadgeHTML ? `<div style="margin-top: 2px;">${stockBadgeHTML.replace('margin-top: 8px;', 'margin-top: 2px;').replace('padding: 4px 12px;', 'padding: 3px 10px;')}</div>` : ''}
       </div>
 
-      <div class="pm-content" style="padding-bottom: 24px;">
+      <div class="pm-content" style="padding-bottom: 24px; overflow-y: visible; flex: none;">
         ${flavorsLoading ? `
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 20px; gap:12px;">
             <div style="border: 3px solid var(--color-border-light); border-top: 3px solid var(--color-primary); border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite;"></div>
@@ -467,8 +452,9 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           </div>
         ` : ''}
       </div>
+    </div>
 
-      <div class="pm-footer">
+    <div class="pm-footer">
         <div class="pm-qty-main" style="${(!isCommerceOpen || isOutOfStock) ? 'opacity: 0.5; pointer-events: none;' : ''}">
           <button class="pm-main-qty-btn" id="pm-qty-minus">${icon('minus', 18)}</button>
           <span class="pm-main-qty-val">${qty}</span>

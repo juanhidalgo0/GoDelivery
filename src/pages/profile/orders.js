@@ -13,10 +13,30 @@ export async function renderProfileOrders(content) {
     return;
   }
 
-  document.body.style.overflow = 'hidden';
+  // Calculate padding dynamically for iOS/Android native
+  const isNative = !!window.Capacitor;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const topPadding = isNative 
+    ? 'var(--status-bar-height, 24px)' 
+    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
 
   content.innerHTML = `
     <div class="panel-page page-enter" style="background:var(--color-bg); height:100%; display:flex; flex-direction:column; overflow:hidden;">
+      <!-- Premium Fixed Header -->
+      <div style="width:100%; padding-top: ${topPadding}; background: var(--color-primary); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
+        <div style="display:flex; align-items:center; gap:12px; padding: 12px 16px 20px 16px; color:white; position:relative; overflow:hidden;">
+          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
+          
+          <a href="#/profile" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.15); color:white; text-decoration:none; position:relative; z-index:2;">
+            ${icon('chevronLeft', 24)}
+          </a>
+          <div>
+            <h1 style="font-family:var(--font-display); font-weight:800; font-size:18px; margin:0; line-height:1.2; letter-spacing:-0.01em;">Mis Pedidos</h1>
+            <p style="font-size:10px; color:rgba(255,255,255,0.85); font-weight:700; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.5px;">Historial y estado de tus compras</p>
+          </div>
+        </div>
+      </div>
       
       <div style="flex:1; overflow-y:auto; padding:20px 20px 40px; -webkit-overflow-scrolling:touch;">
         <div id="profile-orders-list">

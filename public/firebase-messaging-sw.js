@@ -73,7 +73,7 @@ self.addEventListener('push', (event) => {
         const options = {
           body: body,
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
-          badge: 'https://godelivery-magdalena.web.app/badge-icon.svg',
+          badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
           vibrate: [300, 100, 300, 100, 300], // Indispensable for Heads-up on Android
           requireInteraction: true, // High importance
           renotify: true, // Forces wakeup/vibration even on same tag
@@ -104,7 +104,7 @@ self.addEventListener('push', (event) => {
         await self.registration.showNotification("Go Delivery", {
           body: "Tenés novedades en tu pedido. Entrá a la app para ver los detalles.",
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
-          badge: 'https://godelivery-magdalena.web.app/badge-icon.svg',
+          badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
           vibrate: [300, 100, 300],
           requireInteraction: true,
           data: { url: 'https://godelivery-magdalena.web.app/#/' }

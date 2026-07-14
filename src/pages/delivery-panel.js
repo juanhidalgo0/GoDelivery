@@ -297,11 +297,12 @@ export async function renderDeliveryPanel() {
         if (mode === 'delivery' && o.isTrip) return;
         
         if (o.isTrip) {
-          if (user.tripStatus !== 'approved') return;
-          const requestedTripType = (o.tripType || 'auto').toLowerCase();
-          const driverVehicleType = (user.tripVehicleType || 'auto').toLowerCase();
-          if (requestedTripType !== driverVehicleType) return;
-          batches.add(o.id);
+          const isApproved = user.tripStatus === 'approved' || user.role === 'chofer';
+          if (!isApproved) return;
+           const requestedTripType = (o.tripType || 'auto').toLowerCase();
+           const driverVehicleType = (user.tripVehicleType || user.vehicleType || '').toLowerCase();
+           if (requestedTripType !== driverVehicleType) return;
+           batches.add(o.id);
         }
         else if (o.isFavor) batches.add(o.id);
         else if (o.bundleId) batches.add(o.bundleId);
@@ -396,9 +397,10 @@ function loadTabContent(tab, container, user) {
           if (mode === 'delivery' && o.isTrip) return;
           
           if (o.isTrip) {
-            if (user.tripStatus !== 'approved') return;
+            const isApproved = user.tripStatus === 'approved' || user.role === 'chofer';
+            if (!isApproved) return;
             const requestedTripType = (o.tripType || 'auto').toLowerCase();
-            const driverVehicleType = (user.tripVehicleType || 'auto').toLowerCase();
+            const driverVehicleType = (user.tripVehicleType || user.vehicleType || '').toLowerCase();
             if (requestedTripType !== driverVehicleType) return;
             trips.push(o);
           } else if (o.isFavor) {
@@ -719,7 +721,7 @@ function loadTabContent(tab, container, user) {
                     <!-- Ganancia Tuya -->
                     <div style="flex:1; background: #10b981; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(16, 185, 129, 0.15); border: none;">
                       <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">Ganancia Tuya</div>
-                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice((isFavor || isTrip) ? (b.total - (b.subtotal || 0) - (b.appUsageFee || 0)) : b.deliveryCost)}</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice((isFavor || isTrip) ? ((b.deliveryCost || 0) + (b.purchaseFee || 0) + (b.extraStopsFee || 0) + (b.tip || b.tipAmount || 0) - (b.appUsageFee || 0)) : b.deliveryCost)}</div>
                     </div>
                   </div>
  
@@ -883,7 +885,7 @@ function loadTabContent(tab, container, user) {
               .filter(o => {
                 if (o.driverId && o.driverId !== user.uid) return false;
                 const reqType = (o.tripType || 'auto').toLowerCase();
-                const driverType = (user.tripVehicleType || 'auto').toLowerCase();
+                const driverType = (user.tripVehicleType || user.vehicleType || 'auto').toLowerCase();
                 return reqType === driverType;
               });
 
@@ -1198,7 +1200,7 @@ function loadTabContent(tab, container, user) {
             let key = o.comercioId || (o.isFavor ? `favor_${o.id}` : `order_${o.id}`);
             if (!pickupsByCommerce.has(key)) {
               pickupsByCommerce.set(key, {
-                comercioName: o.comercioName || (o.favorType === 'mandado' ? 'Punto de Retiro' : 'Comercio a Comprar'),
+                comercioName: o.comercioName || (o.isTrip ? 'Punto de Encuentro' : (o.favorType === 'mandado' ? 'Punto de Retiro' : 'Comercio a Comprar')),
                 address: o.pickupAddress || o.comercioAddress || '',
                 isFavor: !!o.isFavor,
                 orders: []
@@ -1336,13 +1338,74 @@ function loadTabContent(tab, container, user) {
                         <div>
                           <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
                             <span style="font-size:10px; font-weight:900; text-transform:uppercase; color:${isActive ? 'var(--color-primary)' : 'var(--color-text-tertiary)'}; letter-spacing:0.1em;">
-                              ${stop.type === 'PICKUP' ? 'Punto de Retiro' : 'Punto de Entrega'}
+                              ${(() => {
+                                const hasTrip = (stop.orders || []).some(o => o.isTrip);
+                                if (hasTrip) {
+                                  return stop.type === 'PICKUP' ? 'Punto de Encuentro' : 'Destino del Viaje';
+                                }
+                                return stop.type === 'PICKUP' ? 'Punto de Retiro' : 'Punto de Entrega';
+                              })()}
                             </span>
                             ${isActive ? `<div style="background:var(--color-primary); width:6px; height:6px; border-radius:50%; animation: blink 1s infinite;"></div>` : ''}
                           </div>
                           <h4 style="margin:0; font-size:18px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.02em;">
                             ${stop.type === 'PICKUP' ? stop.comercioName : stop.userName}
                           </h4>
+                          ${(() => {
+                            const orderTypes = Array.from(new Set((stop.orders || []).map(o => {
+                              if (o.isTrip) return 'viaje';
+                              if (o.isFavor) {
+                                if (o.favorType === 'gocash') return 'go cash';
+                                if (o.favorType === 'mandado') return 'mandado';
+                                if (o.favorType === 'encomienda') return 'encomienda';
+                                return 'mandado';
+                              }
+                              return 'comercio';
+                            })));
+                            return `
+                              <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; margin-bottom:2px;">
+                                ${orderTypes.map(t => {
+                                  let bg = '', border = '', color = '', iconName = '', label = '';
+                                  if (t === 'mandado') {
+                                    bg = 'rgba(245, 158, 11, 0.12)';
+                                    border = '1px solid rgba(245, 158, 11, 0.25)';
+                                    color = '#d97706';
+                                    iconName = 'shoppingBag';
+                                    label = 'Mandado';
+                                  } else if (t === 'encomienda') {
+                                    bg = 'rgba(16, 185, 129, 0.12)';
+                                    border = '1px solid rgba(16, 185, 129, 0.25)';
+                                    color = '#059669';
+                                    iconName = 'package';
+                                    label = 'Encomienda';
+                                  } else if (t === 'go cash') {
+                                    bg = 'rgba(59, 130, 246, 0.12)';
+                                    border = '1px solid rgba(59, 130, 246, 0.25)';
+                                    color = '#2563eb';
+                                    iconName = 'dollarSign';
+                                    label = 'Go Cash';
+                                  } else if (t === 'viaje') {
+                                    bg = 'rgba(236, 72, 153, 0.12)';
+                                    border = '1px solid rgba(236, 72, 153, 0.25)';
+                                    color = '#db2777';
+                                    iconName = 'navigation';
+                                    label = 'Viaje';
+                                  } else {
+                                    bg = 'rgba(139, 92, 246, 0.12)';
+                                    border = '1px solid rgba(139, 92, 246, 0.25)';
+                                    color = '#7c3aed';
+                                    iconName = 'shoppingCart';
+                                    label = 'Comercio';
+                                  }
+                                  return `
+                                    <span style="background:${bg}; border:${border}; color:${color}; padding:4px 10px; border-radius:10px; font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.04em; display:inline-flex; align-items:center; gap:4px; flex-shrink:0;">
+                                      ${icon(iconName, 11)} ${label}
+                                    </span>
+                                  `;
+                                }).join('')}
+                              </div>
+                            `;
+                          })()}
                         </div>
                         ${stop.pickedUp ? `
                           <div style="background:rgba(34, 197, 94, 0.12); color:var(--color-success); padding:5px 12px; border-radius:10px; font-size:10px; font-weight:900; display:flex; align-items:center; gap:6px; letter-spacing:0.02em;">
@@ -1469,11 +1532,20 @@ function loadTabContent(tab, container, user) {
                           `).join('')}
                           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600; padding-top:8px; border-top:1px dashed var(--color-border-light);">
                             <span style="color:var(--color-text-secondary); opacity:0.8;">Costo de Envío</span>
-                            <span style="color:var(--color-success);">${formatPrice(stop.orders.reduce((s, o) => s + (o.deliveryCost || 0), 0))}${(() => {
-                              const totalTips = stop.orders.reduce((s, o) => s + (o.tip || 0), 0);
-                              return totalTips > 0 ? ` <span style="font-size:11px; font-weight:normal; color:var(--color-text-secondary);">(${formatPrice(totalTips)} propina)</span>` : '';
-                            })()}</span>
+                            <span style="color:var(--color-text-primary);">${formatPrice(stop.orders.reduce((s, o) => s + (o.deliveryCost || 0), 0))}</span>
                           </div>
+                          ${(() => {
+                            const totalTips = stop.orders.reduce((s, o) => s + (o.tip || 0), 0);
+                            if (totalTips > 0) {
+                              return `
+                                <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600; color: #10b981;">
+                                  <span>Propina al Repartidor</span>
+                                  <span>+ ${formatPrice(totalTips)}</span>
+                                </div>
+                              `;
+                            }
+                            return '';
+                          })()}
                           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
                             <span style="color:var(--color-text-secondary); opacity:0.8;">Tarifa de Uso App</span>
                             <span style="color:var(--color-text-primary);">${formatPrice(stop.orders.reduce((s, o) => s + (o.appUsageFee || 0), 0))}</span>
@@ -1516,9 +1588,12 @@ function loadTabContent(tab, container, user) {
                             const couponCodes = stop.orders.filter(o => o.couponCode).map(o => o.couponCode);
                             if (totalCouponDiscount > 0 || couponCodes.length > 0) {
                               return `
-                                <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#a855f7; background: rgba(168, 85, 247, 0.06); padding: 6px 8px; border-radius: 8px; border: 1px dashed rgba(168, 85, 247, 0.25); margin-top: 4px; align-items: center;">
-                                  <span style="display:flex; align-items:center; gap:4px;">${icon('tag', 12)} Cupón Aplicado (${couponCodes.join(', ') || 'Promo'})</span>
-                                  <span>- ${formatPrice(totalCouponDiscount)}</span>
+                                <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#a855f7; background: rgba(168, 85, 247, 0.06); padding: 8px 12px; border-radius: 12px; border: 1px dashed rgba(168, 85, 247, 0.25); margin-top: 4px; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;">
+                                  <span style="display:flex; align-items:center; gap:4px; min-width: 0; flex: 1; text-align: left;">
+                                    ${icon('tag', 12)}
+                                    <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">Cupón: ${couponCodes.join(', ') || 'Promo'}</span>
+                                  </span>
+                                  <span style="flex-shrink: 0; white-space: nowrap;">- ${formatPrice(totalCouponDiscount)}</span>
                                 </div>
                                 <div style="font-size:10px; color:#a855f7; font-weight:700; margin-top:4px; margin-bottom:8px; line-height:1.3; display:flex; align-items:center; justify-content:space-between; gap:6px;">
                                   <span style="display:flex; align-items:center; gap:4px;">
@@ -1547,14 +1622,14 @@ function loadTabContent(tab, container, user) {
                       `}
 
                       <!-- Actions -->
-                      <div style="display:flex; gap:12px; align-items:center; height:54px;">
+                      <div style="display:flex; gap:8px; align-items:center; height:48px; width:100%;">
                         ${stop.type === 'PICKUP' ? `
                           <button class="btn mark-picked-up-btn" 
                                   data-id="${stop.docId}" 
                                   data-istrip="${stop.isFavor ? 'false' : stop.orders.some(o => o.isTrip)}"
                                   ${stop.pickedUp ? 'disabled' : ''}
-                                  style="height:100%; font-size:14px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:10px; white-space:nowrap; letter-spacing:0.02em;">
-                            ${stop.pickedUp ? icon('check', 18) : (stop.orders.some(o => o.isTrip) ? icon('user', 18) : icon('package', 18))} 
+                                  style="height:100%; font-size:13.5px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; letter-spacing:0.02em;">
+                            ${stop.pickedUp ? icon('check', 16) : (stop.orders.some(o => o.isTrip) ? icon('user', 16) : icon('package', 16))} 
                             ${stop.pickedUp ? (stop.orders.some(o => o.isTrip) ? 'EN VIAJE' : 'RETIRADO') : (stop.orders.some(o => o.isTrip) ? 'PASAJERO A BORDO' : 'RETIRAR')}
                           </button>
                         ` : ''}
@@ -1570,8 +1645,8 @@ function loadTabContent(tab, container, user) {
                                 <button class="btn notify-at-door-btn" 
                                         data-ids="${stop.orders.map(o => o.id).join(',')}" 
                                         ${!allPickedUp ? 'disabled' : ''}
-                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:#f59e0b; box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(245, 158, 11, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
-                                  ${icon('bell', 15)} AVISAR QUE ESTOY AFUERA
+                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:#f59e0b; box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(245, 158, 11, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
+                                  ${icon('bell', 14)} AVISAR AFUERA
                                 </button>
                               `;
                             } else {
@@ -1581,8 +1656,8 @@ function loadTabContent(tab, container, user) {
                                         data-codes="${stop.orders.map(o => o.verificationCode).join(',')}"
                                         data-istrip="${isTrip}"
                                         ${!allPickedUp ? 'disabled' : ''}
-                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:18px; border:none; color:white; background:var(--color-success); box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
-                                  ${icon('checkCircle', 15)} ${isTrip ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
+                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:var(--color-success); box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
+                                  ${icon('checkCircle', 14)} ${isTrip ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
                                 </button>
                               `;
                             }
@@ -1592,14 +1667,16 @@ function loadTabContent(tab, container, user) {
                         <button class="btn view-active-map-btn" 
                                 data-id="${stop.type === 'PICKUP' ? stop.docId : stop.orders[0].id}" 
                                 ${stop.type === 'PICKUP' && stop.pickedUp ? 'disabled' : ''}
-                                style="width:54px; height:54px; min-width:54px; display:flex; align-items:center; justify-content:center; border-radius:18px; border:none; background:rgba(var(--color-primary-rgb), 0.15); color:var(--color-primary); transition:all 0.3s; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.1); ${stop.type === 'PICKUP' && stop.pickedUp ? 'opacity:0.2; cursor:not-allowed; box-shadow:none;' : ''}">
-                          ${icon('navigationArrow', 26)} 
+                                style="width:48px; height:48px; min-width:48px; display:flex; align-items:center; justify-content:center; border-radius:16px; border:none; background:rgba(var(--color-primary-rgb), 0.15); color:var(--color-primary); transition:all 0.3s; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.1); ${stop.type === 'PICKUP' && stop.pickedUp ? 'opacity:0.2; cursor:not-allowed; box-shadow:none;' : ''}">
+                          ${icon('navigationArrow', 20)} 
                         </button>
 
                         ${stop.type === 'DROP_OFF' ? `
-                           <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.userName}" style="width:54px; height:54px; min-width:54px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 24)}</button>
+                           <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.userName}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
+                           <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.userName}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
                          ` : `
-                           <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.orders[0].userName || 'Cliente'}" style="width:54px; height:54px; min-width:54px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 24)}</button>
+                           <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.orders[0].userName || 'Cliente'}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
+                           <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.orders[0].userName || 'Cliente'}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
                          `}
                       </div>
                     </div>
@@ -1711,10 +1788,16 @@ function loadTabContent(tab, container, user) {
               title: isTrip ? '¿Confirmar Inicio de Viaje?' : '¿Confirmar Retiro?',
               message: isTrip ? 'Confirmá que el pasajero ya está a bordo para iniciar el trayecto.' : 'Asegurate de haber recibido todos los productos del local.',
               confirmText: isTrip ? 'Iniciar Viaje' : 'Sí, retirar',
-              onConfirm: () => {
+              onConfirm: async () => {
                 btn.disabled = true;
                 btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Actualizando...';
-                markAsPickedUp(btn.dataset.id);
+                await markAsPickedUp(btn.dataset.id);
+                
+                const firstId = btn.dataset.id.split(',')[0];
+                const order = orders.find(o => o.id === firstId);
+                if (order && order.isFavor && order.favorType === 'compra') {
+                  showEditFavorPriceModal(order, true);
+                }
               }
             });
           });
@@ -1723,6 +1806,17 @@ function loadTabContent(tab, container, user) {
         container.querySelectorAll('.notify-at-door-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
             const ids = btn.dataset.ids.split(',');
+            
+            // Check if any order is GoFavor Compra and hasn't loaded product prices
+            for (const orderId of ids) {
+              const order = orders.find(o => o.id === orderId);
+              if (order && order.isFavor && order.favorType === 'compra' && !order.subtotal) {
+                showToast('⚠️ Debes ingresar el valor de los productos antes de avisar que estás afuera', 'warning');
+                showEditFavorPriceModal(order, true);
+                return;
+              }
+            }
+
             btn.disabled = true;
             btn.innerHTML = icon('loader', 14, 'animate-spin') + ' NOTIFICANDO...';
             
@@ -1767,86 +1861,18 @@ function loadTabContent(tab, container, user) {
             const order = orders.find(o => o.id === orderId);
             if (order && order.isFavor && order.favorType === 'compra' && !order.subtotal) {
               showToast('⚠️ Debes ingresar el valor de los productos antes de entregar el pedido', 'warning');
-              showEditFavorPriceModal(order);
+              showEditFavorPriceModal(order, true);
               return;
             }
 
-            if (isTrip) {
-              showConfirm({
-                title: '🚕 ¿Finalizar Viaje?',
-                message: 'Confirmá que llegaste al destino y que el pasajero descendió del vehículo.',
-                confirmText: 'SÍ, FINALIZAR VIAJE',
-                onConfirm: async () => {
-                  showToast('Finalizando viaje...', 'info');
-                  await markAsDelivered(ids);
-                  showToast('Viaje completado con éxito', 'success');
-                }
-              });
-              return;
-            }
-            
-            // Go straight to verification modal, no double confirmation
-            const masterCode = codes[0]; 
-            
-            let html = `
-              <div style="padding:4px;">
-                <p style="font-size:14px; color:var(--color-text-secondary); margin-bottom:24px; line-height:1.5;">Pedile al cliente su <strong>código de 4 dígitos</strong> para validar la entrega.</p>
-                <div style="margin-bottom:24px;">
-                  <input type="text" id="single-verification-input" 
-                         placeholder="0000" maxlength="4" inputmode="numeric"
-                         style="width:100%; height:70px; border-radius:24px; background:var(--color-bg-secondary); border:3px solid var(--color-border); text-align:center; font-size:36px; font-weight:950; letter-spacing:10px; color:var(--color-text); box-shadow:var(--shadow-sm); transition:all 0.3s ease;">
-                </div>
-                <button id="confirm-codes-btn" class="btn btn-primary btn-block" style="height:64px; border-radius:22px; font-weight:950; font-size:16px; letter-spacing:0.03em; box-shadow:0 12px 30px rgba(var(--color-primary-rgb), 0.35);">ENTREGAR</button>
-                <p style="font-size:11px; text-align:center; color:var(--color-text-tertiary); margin-top:16px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Seguridad GoDelivery</p>
-              </div>
-            `;
-            
-            showModal({
-              title: 'Verificación de Entrega',
-              content: html
-            });
-            
-            const input = document.getElementById('single-verification-input');
-            if (input) {
-              setTimeout(() => input.focus(), 300);
-              input.addEventListener('input', () => {
-                input.style.borderColor = 'var(--color-primary)';
-                
-                if (input.value.length === 4) {
-                  const isCorrect = codes.includes(input.value);
-                  if (isCorrect) {
-                    input.style.borderColor = 'var(--color-success)';
-                    input.disabled = true; // Prevent further input
-                    setTimeout(() => {
-                      closeModal();
-                      markAsDelivered(ids);
-                    }, 400); // Small delay for visual feedback
-                  } else {
-                    input.style.borderColor = 'var(--color-danger)';
-                    input.style.animation = 'shake 0.4s ease';
-                    setTimeout(() => {
-                      input.style.animation = '';
-                      input.value = ''; // Clear for retry
-                      input.focus();
-                    }, 400);
-                    showToast('Código incorrecto', 'danger');
-                  }
-                }
-              });
-            }
-
-            document.getElementById('confirm-codes-btn').addEventListener('click', () => {
-              const val = input.value;
-              const isCorrect = codes.includes(val);
-              
-              if (isCorrect) {
-                closeModal();
-                markAsDelivered(ids);
-              } else {
-                input.style.borderColor = 'var(--color-danger)';
-                input.style.animation = 'shake 0.4s ease';
-                setTimeout(() => input.style.animation = '', 400);
-                showToast('Código incorrecto', 'danger');
+            openSlideToConfirmModal({
+              isTrip,
+              codes,
+              ids,
+              orders,
+              onConfirm: async () => {
+                showToast(isTrip ? 'Finalizando viaje...' : 'Procesando entrega...', 'info');
+                await markAsDelivered(ids);
               }
             });
           });
@@ -1900,6 +1926,31 @@ function loadTabContent(tab, container, user) {
               otherName: btn.dataset.clientName,
               orderNum: btn.dataset.orderNum 
             });
+          });
+        });
+
+        container.querySelectorAll('.whatsapp-client-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const rawPhone = btn.dataset.phone || '';
+            const clientName = btn.dataset.clientName || 'Cliente';
+            const orderNum = btn.dataset.orderNum || '';
+            if (!rawPhone) {
+              showToast('El cliente no posee un número de teléfono configurado.', 'warning');
+              return;
+            }
+            let cleanedPhone = rawPhone.replace(/\D/g, '');
+            if (cleanedPhone.startsWith('54')) {
+              if (!cleanedPhone.startsWith('549')) {
+                cleanedPhone = '549' + cleanedPhone.substring(2);
+              }
+            } else if (cleanedPhone.startsWith('15')) {
+              cleanedPhone = '549' + cleanedPhone.substring(2);
+            } else if (!cleanedPhone.startsWith('549') && cleanedPhone.length <= 10) {
+              cleanedPhone = '549' + cleanedPhone;
+            }
+            const msg = encodeURIComponent(`Hola ${clientName}, soy el repartidor de GoDelivery en camino con tu pedido #${orderNum}.`);
+            const waUrl = `https://wa.me/${cleanedPhone}?text=${msg}`;
+            window.open(waUrl, '_blank');
           });
         });
       }
@@ -2123,6 +2174,12 @@ function loadTabContent(tab, container, user) {
               `).join('')}
             </div>
 
+            <!-- Charts Container -->
+            <div id="finances-charts-container" style="display:flex; flex-direction:column; gap:12px;">
+              <div class="skeleton" style="height:140px; border-radius:24px;"></div>
+              <div class="skeleton" style="height:140px; border-radius:24px;"></div>
+            </div>
+
             <!-- Operations Stack -->
             <div style="display:flex; flex-direction:column; gap:10px;">
               <!-- Gestor de Balance -->
@@ -2294,8 +2351,25 @@ function loadTabContent(tab, container, user) {
           </div>
       `;
 
-      if (!isTripApproved) {
-        // Render simple Trip Application Block for normal riders (without vehicle details)
+      if (isTripApproved) {
+        configHtml += `
+          <!-- Card 2: Tipo de Trabajo -->
+          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
+            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
+              ${icon('settings', 20)} Tipo de Trabajo
+            </h3>
+
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Qué querés recibir? *</label>
+              <select id="config-deliverymode-select" style="width:100%; height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; font-family:inherit;">
+                <option value="delivery" ${user.deliveryMode === 'delivery' ? 'selected' : ''}>Solo Envíos (Pedidos y Favores)</option>
+                <option value="trip" ${user.deliveryMode === 'trip' ? 'selected' : ''}>Solo Viajes (Traslado de Pasajeros)</option>
+                <option value="both" ${(!user.deliveryMode || user.deliveryMode === 'both') ? 'selected' : ''}>Ambos (Envíos y Viajes)</option>
+              </select>
+            </div>
+          </div>
+        `;
+      } else {
         configHtml += `
           <!-- Card 2: Postulación para Viajes -->
           <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
@@ -2333,96 +2407,44 @@ function loadTabContent(tab, container, user) {
             </div>
           </div>
         `;
-      } else {
-        // Render Full Chofer Configuration (Modes, Trips Vehicle, Deliveries Vehicle)
-        configHtml += `
-          <!-- Card 2: Tipo de Trabajo -->
-          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
-            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
-              ${icon('settings', 20)} Tipo de Trabajo
-            </h3>
+      }
 
-            <div style="display:flex; flex-direction:column; gap:6px;">
-              <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Qué querés recibir? *</label>
-              <select id="config-deliverymode-select" style="width:100%; height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; font-family:inherit;">
-                <option value="delivery" ${user.deliveryMode === 'delivery' ? 'selected' : ''}>Solo Envíos (Pedidos y Favores)</option>
-                <option value="trip" ${user.deliveryMode === 'trip' ? 'selected' : ''}>Solo Viajes (Traslado de Pasajeros)</option>
-                <option value="both" ${(!user.deliveryMode || user.deliveryMode === 'both') ? 'selected' : ''}>Ambos (Envíos y Viajes)</option>
+      // Render single mandatory vehicle configuration card for everyone!
+      configHtml += `
+        <!-- Card 3: Configuración de tu Vehículo -->
+        <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:20px; box-shadow:var(--shadow-sm);">
+          <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
+            ${icon('car', 20)} Configuración de tu Vehículo
+          </h3>
+
+          <div style="padding:14px; border:1.5px solid rgba(59,130,246,0.15); background:rgba(59,130,246,0.02); border-radius:20px; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <label style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Tipo de Vehículo (Obligatorio) *</label>
+              <select id="config-vehicle-type-select" style="width:100%; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none; font-family:inherit;">
+                <option value="" disabled ${!defaultTripVehicleType ? 'selected' : ''}>-- Seleccioná tipo --</option>
+                <option value="Moto" ${defaultTripVehicleType.toLowerCase() === 'moto' ? 'selected' : ''}>🏍️ Moto</option>
+                <option value="Auto" ${defaultTripVehicleType.toLowerCase() === 'auto' ? 'selected' : ''}>🚗 Auto</option>
               </select>
             </div>
-          </div>
-
-          <!-- Card 3: Configuración de tus Vehículos -->
-          <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:28px; padding:24px; display:flex; flex-direction:column; gap:20px; box-shadow:var(--shadow-sm);">
-            <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:8px;">
-              ${icon('car', 20)} Configuración de tus Vehículos
-            </h3>
-
-            <!-- VIAJES VEHICLE -->
-            <div style="padding:14px; border:1px solid rgba(59,130,246,0.15); background:rgba(59,130,246,0.02); border-radius:20px; display:flex; flex-direction:column; gap:12px;">
-              <h4 style="margin:0; font-size:12.5px; font-weight:900; color:#3b82f6; display:flex; align-items:center; gap:6px;">
-                ${icon('user', 14)} Vehículo para Viajes (Pasajeros)
-              </h4>
-
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
               <div style="display:flex; flex-direction:column; gap:4px;">
-                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Tipo de Vehículo</label>
-                <select id="config-trip-vehicletype-select" style="width:100%; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none; font-family:inherit;">
-                  <option value="Auto" ${defaultTripVehicleType.toLowerCase() === 'auto' ? 'selected' : ''}>Auto</option>
-                  <option value="Moto" ${defaultTripVehicleType.toLowerCase() === 'moto' ? 'selected' : ''}>Moto</option>
-                </select>
+                <label style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Modelo / Marca *</label>
+                <input type="text" id="config-vehicle-model-input" value="${defaultTripModel}" placeholder="Ej: Fiat Cronos / Honda Wave" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
               </div>
-              
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Modelo / Marca</label>
-                  <input type="text" id="config-trip-vehiclemodel-input" value="${defaultTripModel}" placeholder="Ej: Fiat Cronos" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
-                </div>
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Color</label>
-                  <input type="text" id="config-trip-vehiclecolor-input" value="${defaultTripColor}" placeholder="Ej: Blanco" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
-                </div>
-              </div>
-
               <div style="display:flex; flex-direction:column; gap:4px;">
-                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Número de Patente</label>
-                <input type="text" id="config-trip-vehiclepatent-input" value="${defaultTripPatent}" placeholder="Ej: AB123CD" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
+                <label style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Color *</label>
+                <input type="text" id="config-vehicle-color-input" value="${defaultTripColor}" placeholder="Ej: Blanco" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
               </div>
             </div>
 
-            <!-- DELIVERIES VEHICLE -->
-            <div style="padding:14px; border:1px solid rgba(16,185,129,0.15); background:rgba(16,185,129,0.02); border-radius:20px; display:flex; flex-direction:column; gap:12px;">
-              <h4 style="margin:0; font-size:12.5px; font-weight:900; color:#10b981; display:flex; align-items:center; gap:6px;">
-                ${icon('bike', 14)} Vehículo para Envíos (Pedidos)
-              </h4>
-
-              <div style="display:flex; flex-direction:column; gap:4px;">
-                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Tipo de Vehículo</label>
-                <select id="config-delivery-vehicletype-select" style="width:100%; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none; font-family:inherit;">
-                  <option value="Moto" ${defaultDelivType === 'Moto' ? 'selected' : ''}>Moto</option>
-                  <option value="Bici" ${defaultDelivType === 'Bici' ? 'selected' : ''}>Bicicleta</option>
-                  <option value="Auto" ${defaultDelivType === 'Auto' ? 'selected' : ''}>Auto</option>
-                </select>
-              </div>
-              
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Modelo / Marca</label>
-                  <input type="text" id="config-delivery-vehiclemodel-input" value="${defaultDelivModel}" placeholder="Ej: Honda Wave" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
-                </div>
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Color</label>
-                  <input type="text" id="config-delivery-vehiclecolor-input" value="${defaultDelivColor}" placeholder="Ej: Rojo" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
-                </div>
-              </div>
-
-              <div style="display:flex; flex-direction:column; gap:4px;">
-                <label style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Número de Patente (Opcional)</label>
-                <input type="text" id="config-delivery-vehiclepatent-input" value="${defaultDelivPatent}" placeholder="Ej: AA123BC" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
-              </div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <label style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Número de Patente *</label>
+              <input type="text" id="config-vehicle-patent-input" value="${defaultTripPatent}" placeholder="Ej: AB123CD" style="width:100%; box-sizing:border-box; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none;" />
             </div>
           </div>
-        `;
-      }
+        </div>
+      `;
 
       configHtml += `
           <!-- Save button -->
@@ -2441,12 +2463,22 @@ function loadTabContent(tab, container, user) {
       if (applyBtn) applyBtn.onclick = handleApplyClick;
       if (reapplyBtn) reapplyBtn.onclick = handleApplyClick;
 
-      // Save Config Click
       document.getElementById('config-save-btn').onclick = async () => {
         const aliasVal = document.getElementById('config-alias-input').value.trim();
 
         if (!aliasVal) {
           showToast('El alias es obligatorio', 'warning');
+          return;
+        }
+
+        const vehicleTypeSelect = document.getElementById('config-vehicle-type-select');
+        const vehicleType = vehicleTypeSelect ? vehicleTypeSelect.value : '';
+        const vehicleModel = document.getElementById('config-vehicle-model-input').value.trim();
+        const vehicleColor = document.getElementById('config-vehicle-color-input').value.trim();
+        const vehiclePatent = document.getElementById('config-vehicle-patent-input').value.trim();
+
+        if (!vehicleType || !vehicleModel || !vehicleColor || !vehiclePatent) {
+          showToast('Debés completar todos los datos del vehículo (tipo, modelo, color y patente) para poder recibir viajes y pedidos.', 'warning');
           return;
         }
 
@@ -2464,36 +2496,27 @@ function loadTabContent(tab, container, user) {
 
           if (isTripApproved) {
             const modeVal = document.getElementById('config-deliverymode-select').value;
-            
-            const tripType = document.getElementById('config-trip-vehicletype-select').value;
-            const tripModel = document.getElementById('config-trip-vehiclemodel-input').value.trim();
-            const tripColor = document.getElementById('config-trip-vehiclecolor-input').value.trim();
-            const tripPatent = document.getElementById('config-trip-vehiclepatent-input').value.trim();
-
-            const delivType = document.getElementById('config-delivery-vehicletype-select').value;
-            const delivModel = document.getElementById('config-delivery-vehiclemodel-input').value.trim();
-            const delivColor = document.getElementById('config-delivery-vehiclecolor-input').value.trim();
-            const delivPatent = document.getElementById('config-delivery-vehiclepatent-input').value.trim();
-
             updateFields.deliveryMode = modeVal;
-            
-            updateFields.tripVehicleType = tripType.toLowerCase();
-            updateFields.tripVehicleModel = tripModel;
-            updateFields.tripVehicleColor = tripColor;
-            updateFields.tripVehiclePatent = tripPatent;
-            
-            updateFields.deliveryVehicleType = delivType;
-            updateFields.deliveryVehicleModel = delivModel;
-            updateFields.deliveryVehicleColor = delivColor;
-            updateFields.deliveryVehiclePatent = delivPatent;
-
-            // Retain compatibility (copy trip vehicle details to standard vehicle properties)
-            updateFields.vehicleType = tripType.toLowerCase();
-            updateFields.vehicleModel = tripModel;
-            updateFields.vehicleColor = tripColor;
-            updateFields.vehicleDetails = tripPatent;
-            updateFields.patente = tripPatent;
           }
+
+          // Unify vehicle information across all fields for absolute compatibility
+          const vTypeLower = vehicleType.toLowerCase();
+          
+          updateFields.tripVehicleType = vTypeLower;
+          updateFields.tripVehicleModel = vehicleModel;
+          updateFields.tripVehicleColor = vehicleColor;
+          updateFields.tripVehiclePatent = vehiclePatent;
+          
+          updateFields.deliveryVehicleType = vehicleType;
+          updateFields.deliveryVehicleModel = vehicleModel;
+          updateFields.deliveryVehicleColor = vehicleColor;
+          updateFields.deliveryVehiclePatent = vehiclePatent;
+
+          updateFields.vehicleType = vTypeLower;
+          updateFields.vehicleModel = vehicleModel;
+          updateFields.vehicleColor = vehicleColor;
+          updateFields.vehicleDetails = vehiclePatent;
+          updateFields.patente = vehiclePatent;
 
           await fUpdateDoc(userRef, updateFields);
 
@@ -2797,7 +2820,7 @@ async function showModifyOrderModal(order) {
   };
 }
 
-async function showEditFavorPriceModal(order) {
+async function showEditFavorPriceModal(order, isPersistent = false) {
   const { showModal, closeModal } = await import('../components/modal.js');
   const { icon } = await import('../utils/icons.js');
   const { formatPrice } = await import('../utils/format.js');
@@ -2806,7 +2829,9 @@ async function showEditFavorPriceModal(order) {
   const appFee = order.appUsageFee || 0;
   const pFee = order.purchaseFee || 0;
   const extraStops = order.extraStopsFee || 0;
-  const serviceTotal = deliveryFee + appFee + pFee + extraStops;
+  const couponDiscount = order.couponDiscount || 0;
+  const tip = order.tip || order.tipAmount || 0;
+  const serviceTotal = deliveryFee + appFee + pFee + extraStops - couponDiscount + tip;
 
   const stores = parseFavorDetails(order.details || order.description);
   const currentPrices = order.storePrices || {};
@@ -2847,8 +2872,20 @@ async function showEditFavorPriceModal(order) {
         <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
           <div style="display:flex; justify-content:space-between;">
             <span>Servicio (Envío/Gestión/App):</span>
-            <span>+ ${formatPrice(serviceTotal)}</span>
+            <span>+ ${formatPrice(deliveryFee + appFee + pFee + extraStops)}</span>
           </div>
+          ${couponDiscount > 0 ? `
+          <div style="display:flex; justify-content:space-between; color:#a855f7;">
+            <span>Descuento de Cupón:</span>
+            <span>- ${formatPrice(couponDiscount)}</span>
+          </div>
+          ` : ''}
+          ${tip > 0 ? `
+          <div style="display:flex; justify-content:space-between; color:#10b981;">
+            <span>Propina al Repartidor:</span>
+            <span>+ ${formatPrice(tip)}</span>
+          </div>
+          ` : ''}
           <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:900; color:var(--color-primary); margin-top:4px;">
             <span>Cobrar al cliente:</span>
             <span id="client-total-preview">${formatPrice((parseFloat(order.subtotal) || 0) + serviceTotal)}</span>
@@ -2856,14 +2893,14 @@ async function showEditFavorPriceModal(order) {
         </div>
       </div>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <button id="cancel-edit-price" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:none; font-weight:900; cursor:pointer;">CANCELAR</button>
+      <div style="display:grid; grid-template-columns:${isPersistent ? '1fr' : '1fr 1fr'}; gap:12px;">
+        ${isPersistent ? '' : '<button id="cancel-edit-price" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:none; font-weight:900; cursor:pointer;">CANCELAR</button>'}
         <button id="confirm-edit-price" style="height:54px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:950; cursor:pointer; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);">GUARDAR</button>
       </div>
     </div>
   `;
 
-  showModal({ content: modalEl, height: 'auto', hideHeader: true });
+  showModal({ content: modalEl, height: 'auto', hideHeader: true, persistent: isPersistent });
 
   const inputs = modalEl.querySelectorAll('.favor-store-price-input');
   const sumDisplay = modalEl.querySelector('#favor-products-sum');
@@ -2886,20 +2923,31 @@ async function showEditFavorPriceModal(order) {
     inputs[0].focus();
   }
 
-  modalEl.querySelector('#cancel-edit-price').onclick = () => closeModal();
+  const cancelBtn = modalEl.querySelector('#cancel-edit-price');
+  if (cancelBtn) {
+    cancelBtn.onclick = () => closeModal();
+  }
+
   modalEl.querySelector('#confirm-edit-price').onclick = () => {
     const storePrices = {};
     let hasInvalid = false;
+    let sum = 0;
 
     inputs.forEach(input => {
       const name = input.dataset.storeName;
       const val = parseFloat(input.value) || 0;
       if (val < 0) hasInvalid = true;
+      sum += val;
       storePrices[name] = val;
     });
 
     if (hasInvalid) {
       showToast('Por favor, ingresá montos válidos.', 'warning');
+      return;
+    }
+
+    if (isPersistent && sum <= 0) {
+      showToast('⚠️ Debes ingresar el valor de los productos comprados.', 'warning');
       return;
     }
 
@@ -2935,7 +2983,9 @@ async function saveFavorStorePrices(orderId, storePrices) {
   
   // Sum prices
   const val = Object.values(storePrices).reduce((sum, price) => sum + price, 0);
-  const newTotal = val + deliveryFee + appFee + pFee + extraStops;
+  const couponDiscount = freshOrder.couponDiscount || 0;
+  const tip = freshOrder.tip || freshOrder.tipAmount || 0;
+  const newTotal = Math.max(0, val + deliveryFee + appFee + pFee + extraStops - couponDiscount + tip);
   
   await updateDoc(fDoc(db, 'orders', orderId), {
     storePrices: storePrices,
@@ -2965,6 +3015,87 @@ async function startSession(user) {
     showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en la sección de Configuración antes de conectarte.', 'warning');
     document.querySelector('.tab-pill[data-tab="config"]')?.click();
     return;
+  }
+
+  // FORCE GEOLOCATION PERMISSIONS
+  let locationGranted = false;
+  if (window.Capacitor && window.Capacitor.isNative) {
+    try {
+      const { Geolocation } = await import('@capacitor/geolocation');
+      const permStatus = await Geolocation.checkPermissions();
+      if (permStatus.location !== 'granted') {
+        const req = await Geolocation.requestPermissions();
+        if (req.location === 'granted') {
+          locationGranted = true;
+        }
+      } else {
+        locationGranted = true;
+      }
+    } catch (err) {
+      console.warn('Capacitor native geolocation check failed:', err);
+    }
+  } else {
+    locationGranted = true;
+  }
+
+  if (navigator.geolocation) {
+    try {
+      await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          (err) => {
+            console.warn('High accuracy location failed, trying low accuracy...', err);
+            navigator.geolocation.getCurrentPosition(
+              resolve,
+              (err2) => {
+                reject(err2);
+              },
+              { timeout: 10000, enableHighAccuracy: false }
+            );
+          },
+          { timeout: 8000, enableHighAccuracy: true }
+        );
+      });
+    } catch (err) {
+      console.warn('Geolocation check failed:', err);
+      if (!window.Capacitor || !window.Capacitor.isNative) {
+        showToast('⚠️ Conectado con precisión limitada. Activá tu GPS para recibir pedidos cercanos.', 'warning');
+      } else {
+        showToast('⚠️ Debes otorgar permisos de ubicación para poder conectarte y recibir pedidos.', 'danger');
+        return; // Block native apps
+      }
+    }
+  }
+
+  // FORCE BACKGROUND LOCATION SETTINGS INSTRUCTION FOR NATIVE APPS
+  if (window.Capacitor && window.Capacitor.isNative) {
+    try {
+      const { registerPlugin } = await import('@capacitor/core');
+      const BgGeo = registerPlugin('BackgroundGeolocation');
+      
+      if (BgGeo) {
+        showToast('Redirigiendo a permisos de ubicación...', 'info');
+        
+        // This triggers the native Android 11+ permission system prompt, 
+        // which redirects the user directly to the app's location settings screen.
+        const tempWatcherId = await BgGeo.addWatcher({
+          backgroundMessage: "Activá el permiso de ubicación 'Permitir todo el tiempo' para poder recibir pedidos en segundo plano.",
+          backgroundTitle: "GO! Permiso Requerido",
+          requestPermissions: true,
+          stale: true,
+          distanceFilter: 1000
+        }, () => {});
+        
+        // Cleanup the temporary watcher after a short delay
+        setTimeout(() => {
+          try {
+            BgGeo.removeWatcher({ id: tempWatcherId });
+          } catch(e) {}
+        }, 5000);
+      }
+    } catch (err) {
+      console.warn('Failed to trigger background permission check:', err);
+    }
   }
 
   const { addDoc, collection, doc, updateDoc } = await import('firebase/firestore');
@@ -3143,11 +3274,11 @@ function startInactivityCheck(user) {
     const oneHour = 1 * 60 * 60 * 1000;
     const threeHours = 3 * 60 * 60 * 1000;
     
-    if (new Date() - lastTripDate > oneHour) {
-      console.log('Trip inactivity (1 hour) detected. Disconnecting...');
+    if (new Date() - lastTripDate > threeHours) {
+      console.log('Trip inactivity (3 hours) detected. Disconnecting...');
       await endSession(currentUser);
       renderDeliveryPanel();
-      showToast('Sesión cerrada por inactividad (1 hora sin tomar viajes)', 'warning');
+      showToast('Sesión cerrada por inactividad (3 horas sin tomar viajes)', 'warning');
     } else if (new Date() - lastActivityDate > threeHours) {
       console.log('Inactivity detected. Disconnecting...');
       await endSession(currentUser);
@@ -3155,6 +3286,161 @@ function startInactivityCheck(user) {
       showToast('Sesión cerrada por inactividad (3hs)', 'warning');
     }
   }, 60000); // Check every minute
+}
+
+function renderFinancesCharts(orders) {
+  const container = document.getElementById('finances-charts-container');
+  if (!container) return;
+
+  const now = new Date();
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now);
+    d.setDate(now.getDate() - (6 - i));
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+
+  const dailyData = last7Days.map(date => {
+    const dayOrders = orders.filter(o => {
+      const oDate = new Date(o.deliveredAt);
+      return oDate.getFullYear() === date.getFullYear() &&
+             oDate.getMonth() === date.getMonth() &&
+             oDate.getDate() === date.getDate();
+    });
+    const sum = dayOrders.reduce((s, o) => s + (o.deliveryCost || 0), 0);
+    return {
+      dayName: date.toLocaleDateString('es-ES', { weekday: 'short' }).substring(0, 2).toUpperCase(),
+      amount: sum
+    };
+  });
+
+  // Find max daily amount to scale bars
+  const maxDaily = Math.max(...dailyData.map(d => d.amount), 1);
+
+  // Calculate breakdown for Donut chart
+  let totalBase = 0;
+  let totalTips = 0;
+  let totalExtras = 0;
+
+  orders.forEach(o => {
+    // Note: o.deliveryCost here has already been calculated as the net earnings in loadProfessionalStats!
+    // Let's compute proportion based on original tip and extra values if they exist, or estimate.
+    const tip = o.tip || o.tipAmount || 0;
+    const extra = o.isFavor || o.isTrip ? ((o.purchaseFee || 0) + (o.extraStopsFee || 0)) : 0;
+    const base = Math.max(0, o.deliveryCost - tip - extra);
+    
+    totalBase += base;
+    totalTips += tip;
+    totalExtras += extra;
+  });
+
+  const total = totalBase + totalTips + totalExtras;
+  const basePct = total > 0 ? Math.round((totalBase / total) * 100) : 0;
+  const tipsPct = total > 0 ? Math.round((totalTips / total) * 100) : 0;
+  const extrasPct = total > 0 ? Math.max(0, 100 - basePct - tipsPct) : 0;
+
+  const donutCircumference = 100;
+  const strokeDash1 = `${basePct} ${donutCircumference - basePct}`;
+  const strokeDash2 = `${tipsPct} ${donutCircumference - tipsPct}`;
+  const strokeDash3 = `${extrasPct} ${donutCircumference - extrasPct}`;
+
+  const offset1 = 100;
+  const offset2 = 100 - basePct;
+  const offset3 = 100 - basePct - tipsPct;
+
+  container.innerHTML = `
+    <!-- Weekly Bar Chart -->
+    <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:24px; padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:16px;">
+      <h4 style="margin:0; font-size:12.5px; font-weight:900; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+        ${icon('chart', 16)} Actividad Semanal
+      </h4>
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; height:120px; padding:10px 0 5px; box-sizing:border-box;">
+        ${dailyData.map(d => {
+          const heightPct = Math.round((d.amount / maxDaily) * 100);
+          return `
+            <div style="display:flex; flex-direction:column; align-items:center; flex:1; gap:6px; cursor:pointer;" class="bar-chart-col">
+              <div style="font-size:8px; font-weight:900; color:var(--color-text-tertiary); transform:scale(0.8); transition:all 0.2s;" class="bar-amount">${d.amount > 0 ? formatPrice(d.amount) : ''}</div>
+              <div style="position:relative; width:12px; height:70px; background:var(--color-bg-secondary); border-radius:6px; overflow:hidden;">
+                <div style="position:absolute; bottom:0; left:0; width:100%; height:${heightPct}%; background:linear-gradient(to top, var(--color-primary), #60a5fa); border-radius:6px; transition:height 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);"></div>
+              </div>
+              <div style="font-size:9.5px; font-weight:900; color:var(--color-text-tertiary);">${d.dayName}</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Doughnut Distribution Chart -->
+    <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:24px; padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:16px;">
+      <h4 style="margin:0; font-size:12.5px; font-weight:900; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+        ${icon('star', 15)} Distribución de Ganancias
+      </h4>
+      ${total > 0 ? `
+        <div style="display:flex; align-items:center; gap:20px; justify-content:space-around;">
+          <!-- SVG Donut -->
+          <div style="position:relative; width:100px; height:100px;">
+            <svg viewBox="0 0 42 42" width="100" height="100" style="transform:rotate(-90deg);">
+              <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--color-border-light)" stroke-width="4.5"></circle>
+              <!-- Base -->
+              ${basePct > 0 ? `<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#3b82f6" stroke-width="4.5" stroke-dasharray="${strokeDash1}" stroke-dashoffset="${offset1}" style="transition:stroke-dashoffset 0.8s ease-in-out;"></circle>` : ''}
+              <!-- Tips -->
+              ${tipsPct > 0 ? `<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#10b981" stroke-width="4.5" stroke-dasharray="${strokeDash2}" stroke-dashoffset="${offset2}" style="transition:stroke-dashoffset 0.8s ease-in-out;"></circle>` : ''}
+              <!-- Extras -->
+              ${extrasPct > 0 ? `<circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#f59e0b" stroke-width="4.5" stroke-dasharray="${strokeDash3}" stroke-dashoffset="${offset3}" style="transition:stroke-dashoffset 0.8s ease-in-out;"></circle>` : ''}
+            </svg>
+            <div style="position:absolute; top:0; left:0; width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none;">
+              <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; line-height:1;">Total</span>
+              <span style="font-size:12.5px; font-weight:950; color:var(--color-text-primary); letter-spacing:-0.5px;">${formatPrice(total)}</span>
+            </div>
+          </div>
+
+          <!-- Legends and values -->
+          <div style="display:flex; flex-direction:column; gap:8px; flex:1;">
+            <div style="display:flex; align-items:center; justify-content:space-between; font-size:11px;" class="legend-row">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <div style="width:8px; height:8px; border-radius:50%; background:#3b82f6;"></div>
+                <span style="color:var(--color-text-secondary); font-weight:800;">Tarifa Envío</span>
+              </div>
+              <span style="font-weight:900; color:var(--color-text-primary);">${basePct}%</span>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; font-size:11px;" class="legend-row">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <div style="width:8px; height:8px; border-radius:50%; background:#10b981;"></div>
+                <span style="color:var(--color-text-secondary); font-weight:800;">Propinas</span>
+              </div>
+              <span style="font-weight:900; color:var(--color-text-primary);">${tipsPct}%</span>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; font-size:11px;" class="legend-row">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <div style="width:8px; height:8px; border-radius:50%; background:#f59e0b;"></div>
+                <span style="color:var(--color-text-secondary); font-weight:800;">Extras/Viajes</span>
+              </div>
+              <span style="font-weight:900; color:var(--color-text-primary);">${extrasPct}%</span>
+            </div>
+          </div>
+        </div>
+      ` : `
+        <div style="text-align:center; padding:20px; font-size:11.5px; color:var(--color-text-tertiary); font-weight:700;">
+          Aún no tienes entregas completadas en este período para graficar.
+        </div>
+      `}
+    </div>
+
+    <style>
+      .bar-chart-col:hover .bar-amount {
+        color: var(--color-primary) !important;
+        transform: scale(1.05) translateY(-2px);
+      }
+      .legend-row {
+        padding: 4px 6px;
+        border-radius: 8px;
+        transition: background 0.2s;
+      }
+      .legend-row:hover {
+        background: var(--color-bg-secondary);
+      }
+    </style>
+  `;
 }
 
 async function loadProfessionalStats(driverId, callback = null) {
@@ -3195,6 +3481,9 @@ async function loadProfessionalStats(driverId, callback = null) {
     if (document.getElementById('stats-day')) document.getElementById('stats-day').textContent = formatPrice(earningsDay);
     if (document.getElementById('stats-week')) document.getElementById('stats-week').textContent = formatPrice(earningsWeek);
     if (document.getElementById('stats-month')) document.getElementById('stats-month').textContent = formatPrice(earningsMonth);
+
+    // Render the CSS/SVG charts dynamically
+    renderFinancesCharts(orders);
 
     if (callback) callback({ today: earningsDay, week: earningsWeek, month: earningsMonth });
   } catch (e) { console.error(e); }
@@ -4210,6 +4499,391 @@ export async function markAsPickedUp(orderIdOrIds) {
   }
 }
 
+export function openSlideToConfirmModal({ isTrip, codes, ids, orders, onConfirm }) {
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'padding: 8px 16px 16px;';
+
+  modalContent.innerHTML = `
+    <div>
+      ${!isTrip ? `
+        <p style="font-size:14px; color:var(--color-text-secondary); margin-bottom:16px; line-height:1.5; text-align:center;">
+          Pedile al cliente su <strong>código de 4 dígitos</strong> para validar la entrega.
+        </p>
+        <div style="margin-bottom:24px;">
+          <input type="text" id="modal-verification-input" 
+                 placeholder="0000" maxlength="4" inputmode="numeric"
+                 style="width:100%; height:64px; border-radius:20px; background:var(--color-bg-secondary); border:3px solid var(--color-border); text-align:center; font-size:32px; font-weight:950; letter-spacing:10px; color:var(--color-text-primary); box-shadow:var(--shadow-sm); transition:all 0.3s ease;">
+        </div>
+      ` : `
+        <p style="font-size:14px; color:var(--color-text-secondary); margin-bottom:24px; line-height:1.5; text-align:center;">
+          Confirmá que llegaste al destino y que el pasajero descendió del vehículo.
+        </p>
+      `}
+
+      <!-- Slider Container -->
+      <div id="slide-confirm-container" class="slider-container" style="
+        position: relative; 
+        width: 100%; 
+        height: 60px; 
+        background: var(--color-bg-secondary); 
+        border-radius: 30px; 
+        border: 2px solid var(--color-border); 
+        overflow: hidden; 
+        user-select: none;
+        touch-action: none;
+        ${!isTrip ? 'opacity: 0.5; pointer-events: none;' : ''}
+        transition: opacity 0.3s ease;
+      ">
+        <div class="slider-bg" style="position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: linear-gradient(90deg, var(--color-primary), #10b981); border-radius: 30px; touch-action: none;"></div>
+        <div class="slider-text" style="position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 900; color: var(--color-text-secondary); pointer-events: none; text-transform: uppercase; letter-spacing: 0.05em; touch-action: none;">
+          ${!isTrip ? 'INGRESE EL CÓDIGO' : 'DESLIZÁ PARA CONFIRMAR'}
+        </div>
+        <div class="slider-handle" style="position: absolute; top: 4px; left: 4px; width: 48px; height: 48px; background: white; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; cursor: grab; transition: left 0.1s ease; touch-action: none;">
+          <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--color-primary); display: flex; align-items: center; justify-content: center; color: white; touch-action: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" style="touch-action: none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:11px; text-align:center; color:var(--color-text-tertiary); margin-top:20px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Seguridad GoDelivery</p>
+    </div>
+  `;
+
+  showModal({
+    title: isTrip ? '🚕 ¿Finalizar Viaje?' : 'Verificación de Entrega',
+    content: modalContent,
+    height: 'auto'
+  });
+
+  const containerEl = modalContent.querySelector('#slide-confirm-container');
+  const handle = modalContent.querySelector('.slider-handle');
+  const bg = modalContent.querySelector('.slider-bg');
+  const text = modalContent.querySelector('.slider-text');
+  const input = modalContent.querySelector('#modal-verification-input');
+
+  let isDragging = false;
+  let startX = 0;
+  let maxSlide = 0;
+
+  const unlockSlider = () => {
+    containerEl.style.opacity = '1';
+    containerEl.style.pointerEvents = 'auto';
+    text.textContent = 'DESLIZÁ PARA CONFIRMAR';
+    text.style.color = 'var(--color-text-primary)';
+  };
+
+  if (input) {
+    setTimeout(() => input.focus(), 300);
+    input.addEventListener('input', () => {
+      input.style.borderColor = 'var(--color-primary)';
+      if (input.value.length === 4) {
+        const isCorrect = codes.includes(input.value);
+        if (isCorrect) {
+          input.style.borderColor = 'var(--color-success)';
+          input.disabled = true;
+          unlockSlider();
+        } else {
+          input.style.borderColor = 'var(--color-danger)';
+          input.style.animation = 'shake 0.4s ease';
+          setTimeout(() => {
+            input.style.animation = '';
+            input.value = '';
+            input.focus();
+          }, 400);
+          showToast('Código incorrecto', 'danger');
+        }
+      }
+    });
+  }
+
+  const onStart = (e) => {
+    isDragging = true;
+    startX = (e.type === 'touchstart') ? e.touches[0].clientX : e.clientX;
+    maxSlide = containerEl.clientWidth - handle.clientWidth - 8;
+    handle.style.transition = 'none';
+    bg.style.transition = 'none';
+    handle.style.cursor = 'grabbing';
+  };
+
+  const onMove = (e) => {
+    if (!isDragging) return;
+    const clientX = (e.type === 'touchmove') ? e.touches[0].clientX : e.clientX;
+    let deltaX = clientX - startX;
+    if (deltaX < 0) deltaX = 0;
+    if (deltaX > maxSlide) deltaX = maxSlide;
+
+    handle.style.left = `${deltaX + 4}px`;
+    bg.style.width = `${((deltaX + 24) / containerEl.clientWidth) * 100}%`;
+    text.style.opacity = Math.max(0, 1 - (deltaX / (maxSlide * 0.6)));
+  };
+
+  const onEnd = () => {
+    if (!isDragging) return;
+    isDragging = false;
+    handle.style.cursor = 'grab';
+    const currentLeft = parseInt(handle.style.left) - 4;
+
+    if (currentLeft >= maxSlide * 0.9) {
+      handle.style.transition = 'all 0.2s ease';
+      bg.style.transition = 'all 0.2s ease';
+      handle.style.left = `${maxSlide + 4}px`;
+      bg.style.width = '100%';
+      text.style.opacity = '0';
+
+      if (navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+
+      setTimeout(() => {
+        closeModal();
+        onConfirm();
+      }, 200);
+    } else {
+      handle.style.transition = 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+      bg.style.transition = 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+      handle.style.left = '4px';
+      bg.style.width = '0%';
+      text.style.opacity = '1';
+    }
+  };
+
+  handle.addEventListener('mousedown', onStart);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onEnd);
+
+  handle.addEventListener('touchstart', onStart, { passive: true });
+  window.addEventListener('touchmove', onMove, { passive: true });
+  window.addEventListener('touchend', onEnd);
+}
+
+export async function showSuccessCelebration(orders, onFinish) {
+  const user = getState().user;
+  const currentSessionId = user?.currentSessionId;
+  let previousSessionEarned = 0;
+
+  const totalEarned = orders.reduce((sum, o) => {
+    const orderEarnings = o.isTrip || o.isFavor 
+      ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+      : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+    return sum + orderEarnings;
+  }, 0);
+
+  if (currentSessionId) {
+    try {
+      const q = query(
+        collection(db, 'orders'),
+        where('driverId', '==', user.uid),
+        where('deliverySessionId', '==', currentSessionId),
+        where('status', '==', 'completed')
+      );
+      const snap = await getDocs(q);
+      let totalCompletedInSession = 0;
+      snap.docs.forEach(d => {
+        const o = d.data();
+        const netEarnings = o.isTrip || o.isFavor
+          ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+          : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+        totalCompletedInSession += netEarnings;
+      });
+
+      const currentOrderIds = orders.map(o => o.id);
+      let currentOrdersSessionEarnings = 0;
+      snap.docs.forEach(d => {
+        if (currentOrderIds.includes(d.id)) {
+          const o = d.data();
+          const netEarnings = o.isTrip || o.isFavor
+            ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
+            : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+          currentOrdersSessionEarnings += netEarnings;
+        }
+      });
+      previousSessionEarned = Math.max(0, totalCompletedInSession - currentOrdersSessionEarnings);
+    } catch (e) {
+      console.error('Error calculating session earnings for celebration:', e);
+    }
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'delivery-success-celebration';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(8px);
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-family: var(--font-display, 'Outfit', sans-serif);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  `;
+
+  overlay.innerHTML = `
+    <canvas id="confetti-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+    <div style="text-align:center; z-index: 10; padding:24px; max-width:400px; display:flex; flex-direction:column; align-items:center; gap:20px; width:100%; box-sizing:border-box;">
+      <div class="success-ring" style="
+        width: 90px; 
+        height: 90px; 
+        background: linear-gradient(135deg, #10b981, #059669); 
+        border-radius: 50%; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center;
+        box-shadow: 0 0 30px rgba(16, 185, 129, 0.4);
+        transform: scale(0);
+        animation: popScale 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      ">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>
+
+      <h1 style="font-size: 26px; font-weight: 900; margin: 10px 0 0; letter-spacing: -0.5px; color: white;">¡Entrega Completada!</h1>
+      <p style="font-size: 13.5px; color: #94a3b8; margin: 0; line-height: 1.45;">¡Excelente trabajo! Has sumado ganancias a tu cuenta.</p>
+      
+      <div style="background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.08); padding: 20px; border-radius: 24px; margin: 8px 0; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px;">
+        <div style="text-align: center;">
+          <span style="font-size: 10px; font-weight: 900; text-transform: uppercase; color: #10b981; letter-spacing: 0.08em; display: block; margin-bottom: 4px;">Ganado en este viaje</span>
+          <div id="celebration-amount" style="font-size: 38px; font-weight: 950; color: white; letter-spacing: -1px; line-height: 1;">$ 0.00</div>
+        </div>
+        
+        <div style="height: 1px; background: rgba(255,255,255,0.08); width: 100%;"></div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 800; color: #94a3b8;">
+          <span style="display: flex; align-items: center; gap: 6px;">💼 Total Sesión Actual</span>
+          <span id="celebration-session-amount" style="font-size: 18px; font-weight: 950; color: white;">$ 0.00</span>
+        </div>
+      </div>
+
+      <button id="celebration-continue-btn" class="btn btn-primary" style="
+        background: white; 
+        color: #0f172a; 
+        border: none; 
+        padding: 16px 40px; 
+        font-weight: 900; 
+        font-size: 14.5px; 
+        border-radius: 18px; 
+        cursor: pointer; 
+        box-shadow: 0 10px 25px rgba(255,255,255,0.1);
+        transition: all 0.2s;
+        width: 100%;
+        height: auto;
+      ">
+        CONTINUAR
+      </button>
+    </div>
+
+    <style>
+      @keyframes popScale {
+        to { transform: scale(1); }
+      }
+      #celebration-continue-btn:active {
+        transform: scale(0.97);
+      }
+    </style>
+  `;
+
+  document.body.appendChild(overlay);
+  
+  requestAnimationFrame(() => {
+    overlay.style.opacity = '1';
+  });
+
+  const canvas = overlay.querySelector('#confetti-canvas');
+  const ctx = canvas.getContext('2d');
+  let animationFrameId;
+
+  const resizeCanvas = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  };
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  const confettiCount = 150;
+  const confettiList = [];
+  const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+  for (let i = 0; i < confettiCount; i++) {
+    confettiList.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height - canvas.height,
+      r: Math.random() * 6 + 4,
+      d: Math.random() * confettiCount,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      tilt: Math.random() * 10 - 5,
+      tiltAngleIncremental: Math.random() * 0.07 + 0.02,
+      tiltAngle: 0
+    });
+  }
+
+  function drawConfetti() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    confettiList.forEach((c) => {
+      c.tiltAngle += c.tiltAngleIncremental;
+      c.y += (Math.cos(c.d) + 3 + c.r / 2) / 2;
+      c.x += Math.sin(c.tiltAngle);
+      c.tilt = Math.sin(c.tiltAngle - c.d / 3) * 15;
+
+      ctx.beginPath();
+      ctx.lineWidth = c.r;
+      ctx.strokeStyle = c.color;
+      ctx.moveTo(c.x + c.tilt + c.r / 2, c.y);
+      ctx.lineTo(c.x + c.tilt, c.y + c.tilt + c.r / 2);
+      ctx.stroke();
+
+      if (c.y > canvas.height) {
+        c.x = Math.random() * canvas.width;
+        c.y = -20;
+        c.tilt = Math.random() * 10 - 5;
+      }
+    });
+
+    animationFrameId = requestAnimationFrame(drawConfetti);
+  }
+  drawConfetti();
+
+  const amountEl = overlay.querySelector('#celebration-amount');
+  const sessionAmountEl = overlay.querySelector('#celebration-session-amount');
+  
+  sessionAmountEl.textContent = formatPrice(previousSessionEarned);
+
+  let currentVal = 0;
+  const duration = 1200;
+  const stepTime = 20;
+  const totalSteps = duration / stepTime;
+  const stepAmount = totalEarned / totalSteps;
+
+  const counterInterval = setInterval(() => {
+    currentVal += stepAmount;
+    if (currentVal >= totalEarned) {
+      currentVal = totalEarned;
+      clearInterval(counterInterval);
+    }
+    amountEl.textContent = formatPrice(currentVal);
+    sessionAmountEl.textContent = formatPrice(previousSessionEarned + currentVal);
+  }, stepTime);
+
+  const cleanup = () => {
+    cancelAnimationFrame(animationFrameId);
+    window.removeEventListener('resize', resizeCanvas);
+    clearInterval(counterInterval);
+    overlay.style.opacity = '0';
+    setTimeout(() => {
+      overlay.remove();
+      if (onFinish) onFinish();
+    }, 400);
+  };
+
+  overlay.querySelector('#celebration-continue-btn').addEventListener('click', cleanup);
+}
+
 export async function markAsDelivered(orderIdOrIds) {
   const ids = Array.isArray(orderIdOrIds) ? orderIdOrIds : orderIdOrIds.split(',');
   const user = getState().user;
@@ -4234,12 +4908,11 @@ export async function markAsDelivered(orderIdOrIds) {
 
     try {
       await batch.commit();
-      showToast('¡Entrega finalizada con éxito!', 'success');
       
-      // Trigger driver-to-customer rating modal recursively
-      setTimeout(() => {
+      // Trigger Success Celebration Modal
+      showSuccessCelebration(orders, () => {
         showCustomerRatingModal(orders);
-      }, 800);
+      });
     } catch (err) {
       console.error('Error committing delivery batch:', err);
       showToast('Error al confirmar la entrega en el servidor. Por favor, reintentá.', 'error');

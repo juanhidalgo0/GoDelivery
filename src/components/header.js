@@ -36,7 +36,7 @@ export function renderHeader() {
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
-  const isSubPage = (hash.startsWith('#/profile') && !hash.startsWith('#/profile/publications')) || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats');
+  const isSubPage = (hash.startsWith('#/profile') && !hash.startsWith('#/profile/publications') && !hash.startsWith('#/profile/orders')) || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats');
   const slider = document.getElementById('app-slider');
 
   if (!isHome && !isSubPage) {
@@ -276,7 +276,9 @@ export function renderHeader() {
     // Re-bind location selector
     const locationBtn = document.getElementById('header-location-selector');
     if (locationBtn) {
-      locationBtn.addEventListener('click', showAddressPrompt);
+      locationBtn.addEventListener('click', () => {
+        showAddressPrompt(null, { mode: 'pick' });
+      });
     }
     
     // Dynamic Scroll Compression Effect
@@ -372,7 +374,7 @@ export function renderHeader() {
     let title = 'Notificaciones';
     if (hash.startsWith('#/profile/orders')) title = 'Mis Pedidos';
     else if (hash.startsWith('#/profile')) title = 'Mi Perfil';
-    else if (hash.startsWith('#/gofavores')) title = 'GoFavores';
+    else if (hash.startsWith('#/gofavores')) title = 'Mandados';
     else if (hash.startsWith('#/category')) {
        title = decodeURIComponent(hash.split('/').pop());
     } else if (hash.startsWith('#/cart')) title = 'Mi Carrito';
@@ -387,7 +389,15 @@ export function renderHeader() {
           
           <div style="background: none; border: none; color: white; display: flex; align-items: center; gap: 12px; padding: 0; position: relative; z-index: 2;">
             ${(hash === '#/profile' || hash.startsWith('#/profile/orders') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats')) ? '' : `
-              <button onclick="history.back()" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex;">
+              <button onclick="(() => {
+                const oldHash = window.location.hash;
+                window.history.back();
+                setTimeout(() => {
+                  if (window.location.hash === oldHash) {
+                    window.location.hash = '#/';
+                  }
+                }, 100);
+              })()" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex;">
                 ${icon('chevronLeft', 28)}
               </button>
             `}

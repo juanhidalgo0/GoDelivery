@@ -196,20 +196,75 @@ export async function renderAdminDashboard() {
     }
 
     const pendingRequests = usersSnap.docs.filter(d => d.data().deliveryStatus === 'pending');
+    
+    // Fetch pending comercios
+    const comSnap = await getDocs(collection(db, 'comercios'));
+    const pendingComercios = comSnap.docs.filter(d => d.data().approvedByAdmin === false);
+    const pendingComCount = pendingComercios.length;
+    
+    const pendingComBadge = document.getElementById('admin-pending-comercios-badge');
+    if (pendingComBadge && pendingComCount > 0) {
+      pendingComBadge.textContent = `${pendingComCount}`;
+      pendingComBadge.style.display = 'inline-block';
+    }
+
+    // Fetch pending job applications
+    const jobSnap = await getDocs(collection(db, 'job_applications'));
+    const pendingJobs = jobSnap.docs.filter(d => d.data().status === 'pending');
+    const pendingJobCount = pendingJobs.length;
+
+    const pendingJobBadge = document.getElementById('admin-pending-jobs-badge');
+    if (pendingJobBadge && pendingJobCount > 0) {
+      pendingJobBadge.textContent = `${pendingJobCount}`;
+      pendingJobBadge.style.display = 'inline-block';
+    }
+
     const alertArea = document.getElementById('pending-requests-alert');
-    if (pendingRequests.length > 0 && alertArea) {
-      alertArea.innerHTML = `
-        <a href="#/admin/users" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg,var(--color-warning), #d97706); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(245,158,11,0.25); margin-bottom:4px;">
-          <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-            ${icon('bike', 24)}
-          </div>
-          <div style="flex:1;">
-            <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Solicitudes de Repartidor</div>
-            <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingRequests.length} usuarios esperando aprobación</div>
-          </div>
-          ${icon('chevronRight', 20)}
-        </a>
-      `;
+    if (alertArea) {
+      let alertsHtml = '';
+      if (pendingRequests.length > 0) {
+        alertsHtml += `
+          <a href="#/admin/users" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg,var(--color-warning), #d97706); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(245,158,11,0.25); margin-bottom:8px;">
+            <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('bike', 24)}
+            </div>
+            <div style="flex:1;">
+              <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Solicitudes de Repartidor (Perfil)</div>
+              <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingRequests.length} usuarios esperando aprobación</div>
+            </div>
+            ${icon('chevronRight', 20)}
+          </a>
+        `;
+      }
+      if (pendingJobCount > 0) {
+        alertsHtml += `
+          <a href="#/admin/solicitudes-empleo" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg, #0284c7, #0369a1); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(2,132,199,0.25); margin-bottom:8px;">
+            <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('bike', 24)}
+            </div>
+            <div style="flex:1;">
+              <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Postulaciones de Empleo</div>
+              <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingJobCount} postulaciones de chofer/repartidor esperando aprobación</div>
+            </div>
+            ${icon('chevronRight', 20)}
+          </a>
+        `;
+      }
+      if (pendingComCount > 0) {
+        alertsHtml += `
+          <a href="#/admin/solicitudes-comercios" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg, #10b981, #059669); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(16,185,129,0.25); margin-bottom:8px;">
+            <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('store', 24)}
+            </div>
+            <div style="flex:1;">
+              <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Solicitudes de Comercio</div>
+              <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingComCount} comercios esperando aprobación</div>
+            </div>
+            ${icon('chevronRight', 20)}
+          </a>
+        `;
+      }
+      alertArea.innerHTML = alertsHtml;
     }
   } catch (err) {
     console.error('Error loading admin stats:', err);

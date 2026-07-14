@@ -20,6 +20,7 @@ export function showDeliveryRating(order) {
   // Prevent double rendering
   if (window[`hasShownRatingModal_${order.id}`]) return;
   window[`hasShownRatingModal_${order.id}`] = true;
+  localStorage.setItem(`gd_dismissed_points_modal_${order.id}`, 'true');
 
   // Local calculation of Go Points (100% instant)
   const completedOrders = user?.completedOrdersCount || 0;
@@ -50,15 +51,14 @@ export function showDeliveryRating(order) {
     : Math.floor((order.subtotal || order.total || 0) * baseRate * multiplier);
 
   const valueDiscount = points * dollarPerPoint;
-
   let selectedRating = 0;
 
   const modalContent = document.createElement('div');
-  modalContent.style.cssText = 'padding: 24px 20px; text-align: center;';
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative;';
 
   modalContent.innerHTML = `
-    <!-- Top Spacer and Coin Logo -->
-    <div style="margin-top: 14px; margin-bottom: 16px;">
+    <div style="flex:1; overflow-y:auto; padding:24px 20px 10px; display:flex; flex-direction:column; text-align:center;">
+      <div style="margin-top: 14px; margin-bottom: 16px;">
       <div class="points-earned-pulse" style="width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3); animation: points-bounce 1s infinite alternate; position: relative; margin: 0 auto 16px;">
         ${icon('goPointsLogo', 38)}
       </div>
@@ -115,16 +115,19 @@ export function showDeliveryRating(order) {
       </div>
     ` : ''}
 
-    <div style="display: flex; gap: 10px; margin-top: 8px;">
-      <button class="btn btn-ghost" id="rating-skip-btn" style="flex: 1; height: 52px; border-radius: 16px; font-weight: 800; font-size: 13.5px; color: var(--color-text-tertiary); text-transform: uppercase;">
-        ${order.driverId ? 'Omitir' : 'Cerrar'}
-      </button>
-      ${order.driverId ? `
-        <button class="btn btn-primary" id="rating-submit-btn" style="flex: 2; height: 52px; border-radius: 16px; font-weight: 900; font-size: 13.5px; opacity: 0.4; pointer-events: none; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s ease;" disabled>
-          ${icon('star', 16)} Enviar Puntuación
-        </button>
-      ` : ''}
     </div>
+  </div>
+
+  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; gap:10px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; width:100%; box-sizing:border-box;">
+    <button class="btn btn-ghost" id="rating-skip-btn" style="flex: 1; height: 52px; border-radius: 16px; font-weight: 800; font-size: 13.5px; color: var(--color-text-tertiary); text-transform: uppercase;">
+      ${order.driverId ? 'Omitir' : 'Cerrar'}
+    </button>
+    ${order.driverId ? `
+      <button class="btn btn-primary" id="rating-submit-btn" style="flex: 2; height: 52px; border-radius: 16px; font-weight: 900; font-size: 13.5px; opacity: 0.4; pointer-events: none; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s ease;" disabled>
+        ${icon('star', 16)} Enviar Puntuación
+      </button>
+    ` : ''}
+  </div>
 
     <style>
       @keyframes points-bounce {

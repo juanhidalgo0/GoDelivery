@@ -290,93 +290,152 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   let recordStartTime;
   let recordTimer;
   let isRecording = false;
+  let isLockMode = false;      // Tap once to lock recording
+  let isHoldMode = false;      // Holding down button
+  let pointerDownTimeout;
+  let startX = 0;
+  let startY = 0;
+  let didCancel = false;
 
-  micBtn.addEventListener('pointerdown', async (e) => {
-    e.preventDefault();
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
-        
-        mediaRecorder.ondataavailable = ev => {
-          if (ev.data.size > 0) audioChunks.push(ev.data);
-        };
-
-        mediaRecorder.onstart = () => {
-          isRecording = true;
-          recordStartTime = Date.now();
-          audioIndicator.style.display = 'flex';
-          micBtn.style.color = 'red';
-          micBtn.style.transform = 'scale(1.2)';
-          recordTimer = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
-            const m = Math.floor(elapsed / 60);
-            const s = (elapsed % 60).toString().padStart(2, '0');
-            audioTimer.textContent = `${m}:${s}`;
-          }, 1000);
-        };
-
-        mediaRecorder.onstop = async () => {
-          isRecording = false;
-          clearInterval(recordTimer);
-          audioIndicator.style.display = 'none';
-          micBtn.style.color = '';
-          micBtn.style.transform = '';
-          
-          stream.getTracks().forEach(track => track.stop());
-
-          if (audioChunks.length > 0) {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-            import('./toast.js').then(m => m.showToast('Enviando audio...', 'info'));
-            try {
-               const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-               const storage = getStorage();
-               const fileName = `chats/${chatId}/audio_${Date.now()}.webm`;
-               const storageRef = ref(storage, fileName);
-               
-               await uploadBytes(storageRef, audioBlob);
-               const downloadURL = await getDownloadURL(storageRef);
-               
-               await addDoc(messagesRef, {
-                  senderId: user.uid,
-                  senderName: senderDisplayName || user.displayName || 'Usuario',
-                  text: 'Mensaje de voz',
-                  type: 'audio',
-                  audioUrl: downloadURL,
-                  timestamp: serverTimestamp(),
-                  read: false
-               });
-               
-               await updateChatMetadata(chatRef, user.uid, '🎙 Mensaje de voz');
-               import('./toast.js').then(m => m.showToast('Audio enviado', 'success'));
-            } catch (error) {
-               console.error("Error sending audio:", error);
-               import('./toast.js').then(m => m.showToast('Error al enviar audio', 'error'));
-            }
-          }
-        };
-
-        mediaRecorder.start();
-      } catch (err) {
-        console.error("Mic access error:", err);
-        import('./toast.js').then(m => m.showToast('Permiso de micrófono denegado', 'error'));
-      }
-    } else {
+  const startRecording = async () => {
+    if (isRecording) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       import('./toast.js').then(m => m.showToast('Micrófono no soportado en este dispositivo', 'error'));
+      return;
     }
-  });
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      didCancel = false;
+
+      mediaRecorder.ondataavailable = ev => {
+        if (ev.data.size > 0) audioChunks.push(ev.data);
+      };
+
+      mediaRecorder.onstart = () => {
+        isRecording = true;
+        recordStartTime = Date.now();
+        audioIndicator.style.display = 'flex';
+        micBtn.style.color = 'red';
+        micBtn.style.transform = 'scale(1.22)';
+        audioTimer.textContent = '0:00';
+        recordTimer = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
+          const m = Math.floor(elapsed / 60);
+          const s = (elapsed % 60).toString().padStart(2, '0');
+          audioTimer.textContent = `${m}:${s}`;
+        }, 1000);
+      };
+
+      mediaRecorder.onstop = async () => {
+        isRecording = false;
+        clearInterval(recordTimer);
+        audioIndicator.style.display = 'none';
+        micBtn.style.color = '';
+        micBtn.style.transform = '';
+        
+        stream.getTracks().forEach(track => track.stop());
+
+        if (didCancel) {
+          audioChunks = [];
+          import('./toast.js').then(m => m.showToast('Grabación cancelada', 'warning'));
+          return;
+        }
+
+        if (audioChunks.length > 0) {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          const elapsedMs = Date.now() - recordStartTime;
+          if (elapsedMs < 900) {
+            import('./toast.js').then(m => m.showToast('Audio muy corto', 'warning'));
+            return;
+          }
+          import('./toast.js').then(m => m.showToast('Enviando audio...', 'info'));
+          try {
+             const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+             const storage = getStorage();
+             const fileName = `chats/${chatId}/audio_${Date.now()}.webm`;
+             const storageRef = ref(storage, fileName);
+             
+             await uploadBytes(storageRef, audioBlob);
+             const downloadURL = await getDownloadURL(storageRef);
+             
+             await addDoc(messagesRef, {
+                senderId: user.uid,
+                senderName: displayName,
+                text: 'Mensaje de voz',
+                type: 'audio',
+                audioUrl: downloadURL,
+                timestamp: serverTimestamp(),
+                read: false
+             });
+             
+             await updateChatMetadata(chatRef, user.uid, '🎙 Mensaje de voz');
+             import('./toast.js').then(m => m.showToast('Audio enviado', 'success'));
+          } catch (error) {
+             console.error("Error sending audio:", error);
+             import('./toast.js').then(m => m.showToast('Error al enviar audio', 'error'));
+          }
+        }
+      };
+
+      mediaRecorder.start();
+    } catch (err) {
+      console.error("Mic access error:", err);
+      import('./toast.js').then(m => m.showToast('Permiso de micrófono denegado', 'error'));
+    }
+  };
 
   const stopRecording = (cancel = false) => {
+    isLockMode = false;
+    isHoldMode = false;
+    if (cancel) didCancel = true;
     if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
-      if (cancel) audioChunks = []; // clear to abort sending
       mediaRecorder.stop();
     }
   };
 
-  micBtn.addEventListener('pointerup', () => stopRecording(false));
-  micBtn.addEventListener('pointercancel', () => stopRecording(true));
-  micBtn.addEventListener('pointerleave', () => stopRecording(true));
+  micBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    micBtn.releasePointerCapture(e.pointerId);
+    startX = e.clientX;
+    startY = e.clientY;
+    isHoldMode = false;
+    didCancel = false;
+    
+    pointerDownTimeout = setTimeout(() => {
+      isHoldMode = true;
+      startRecording();
+    }, 280);
+  });
+
+  micBtn.addEventListener('pointermove', (e) => {
+    if (!isRecording) return;
+    if (startX - e.clientX > 60) {
+      stopRecording(true);
+    }
+  });
+
+  micBtn.addEventListener('pointerup', (e) => {
+    e.preventDefault();
+    clearTimeout(pointerDownTimeout);
+    
+    if (isHoldMode) {
+      stopRecording(false);
+    } else {
+      if (isRecording) {
+        stopRecording(false);
+      } else {
+        isLockMode = true;
+        startRecording();
+      }
+    }
+  });
+
+  micBtn.addEventListener('pointercancel', () => {
+    clearTimeout(pointerDownTimeout);
+    if (isHoldMode) stopRecording(true);
+  });
 
   // Emoji Handlers
   emojiBtn?.addEventListener('click', () => {
@@ -520,9 +579,29 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
         const btnGallery = document.getElementById(`btn-use-gallery-${chatId}`);
         
         if (btnCamera) {
-          btnCamera.onclick = () => {
+          btnCamera.onclick = async () => {
             closeModal();
-            fileInputCamera?.click();
+            try {
+              const { Capacitor } = await import('@capacitor/core');
+              if (Capacitor.isNativePlatform()) {
+                const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+                const photo = await Camera.getPhoto({
+                  quality: 85,
+                  allowEditing: false,
+                  resultType: CameraResultType.Uri,
+                  source: CameraSource.Camera
+                });
+                const response = await fetch(photo.webPath);
+                const blob = await response.blob();
+                const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                handleFileSelect(file);
+              } else {
+                fileInputCamera?.click();
+              }
+            } catch (err) {
+              console.warn("Capacitor camera error, falling back to input file click", err);
+              fileInputCamera?.click();
+            }
           };
         }
         if (btnGallery) {

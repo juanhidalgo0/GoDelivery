@@ -3,7 +3,7 @@ import { icon } from '../utils/icons.js';
 
 let modalStack = [];
 
-export function showModal({ title, content, footer, onOpen, onClose, hideHeader = false, fullSwipe = false, height = '88dvh', fullscreen = false, persistent = false }) {
+export function showModal({ title, content, footer, onOpen, onClose, hideHeader = false, fullSwipe = false, height = '88dvh', fullscreen = false, persistent = false, headerBackground = '', headerTextColor = '' }) {
   const container = document.getElementById('modal-container');
   if (!container) return;
 
@@ -20,7 +20,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
 
   modalWrapper.innerHTML = `
     <div class="modal-overlay" id="${modalId}-overlay" style="
-      position:fixed; inset:0; background:rgba(0,0,0,${isFullscreen ? '1' : '0.35'}); backdrop-filter:${isFullscreen ? 'none' : 'blur(10px)'}; -webkit-backdrop-filter:${isFullscreen ? 'none' : 'blur(10px)'};
+      position:fixed; inset:0; background:rgba(0,0,0,${isFullscreen ? '1' : '0.35'}); backdrop-filter:${isFullscreen ? 'none' : 'blur(4px)'}; -webkit-backdrop-filter:${isFullscreen ? 'none' : 'blur(4px)'};
       animation: fadeIn 0.25s ease-out;
       will-change: background;
     ">
@@ -34,9 +34,9 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       ">
         ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(120,120,120,0.4); border-radius:var(--radius-full); position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab;"></div>` : ''}
         ${!hideHeader && !isFullscreen ? `
-          <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:18px 24px; border-bottom:1px solid var(--color-border-light); z-index:90;">
-            <h3 style="font-family:var(--font-display); font-size:1.2rem; font-weight:900; margin:0; letter-spacing:-0.01em;">${title}</h3>
-            <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s;">${icon('close', 22)}</button>
+          <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1.5px solid rgba(0,0,0,0.06); z-index:90; ${headerBackground ? `background:${headerBackground};` : 'background:var(--color-bg-secondary);'}">
+            <h3 style="font-family:var(--font-display); font-size:1.2rem; font-weight:900; margin:0; letter-spacing:-0.01em; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-primary);'}">${title}</h3>
+            <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
         ` : ''}
         <div class="modal-body" id="${modalId}-body" style="flex:1; overflow:hidden; position:relative; display:flex; flex-direction:column; ${hideHeader || isFullscreen ? 'padding:0;' : ''}">
@@ -79,10 +79,14 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     setTimeout(() => {
       modalWrapper.remove();
       
+      if (modalStack.length <= 1) {
+        document.body.classList.remove('multiple-modals');
+      }
       // Restore pull-to-refresh when all modals are closed
       if (modalStack.length === 0) {
         document.body.style.overscrollBehaviorY = 'auto';
         document.documentElement.style.overscrollBehaviorY = 'auto';
+        document.body.classList.remove('modal-open');
       }
       
       if (onClose) onClose();
@@ -96,6 +100,9 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   if (modalStack.length === 1) {
     document.body.style.overscrollBehaviorY = 'contain';
     document.documentElement.style.overscrollBehaviorY = 'contain';
+    document.body.classList.add('modal-open');
+  } else if (modalStack.length > 1) {
+    document.body.classList.add('multiple-modals');
   }
 
   if (onOpen) requestAnimationFrame(() => onOpen());
@@ -108,6 +115,14 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
 
   const onTouchStart = (e) => {
     if (['INPUT', 'BUTTON', 'A', 'TEXTAREA'].includes(e.target.tagName)) return;
+    
+    // Disable card dragging when touching inside scrollable containers (like the flavors list)
+    const scrollableArea = e.target.closest('.pm-content, .scrollable, [style*="overflow-y: auto"], [style*="overflow-y:auto"]');
+    if (scrollableArea) {
+      if (!e.target.closest('.modal-handle, #modal-handle, [id*="-handle"], [id*="-header-drag"]')) {
+        return;
+      }
+    }
     
     startY = e.touches[0].clientY;
     startTime = Date.now();
@@ -221,9 +236,13 @@ export function closeMultipleModals(count = 1, isPopState = false) {
     }, 450);
   });
 
+  if (modalStack.length <= 1) {
+    document.body.classList.remove('multiple-modals');
+  }
   if (modalStack.length === 0) {
     document.body.style.overscrollBehaviorY = 'auto';
     document.documentElement.style.overscrollBehaviorY = 'auto';
+    document.body.classList.remove('modal-open');
   }
 
   if (!isPopState) {

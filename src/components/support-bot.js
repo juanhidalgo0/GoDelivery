@@ -178,6 +178,14 @@ export function initSupportBot() {
     }
   };
 
+  const toggleInputAreaVisibility = (show) => {
+    if (show) {
+      footerArea.style.display = 'block';
+    } else {
+      footerArea.style.display = 'none';
+    }
+  };
+
   const startRealtimeChat = async (userId) => {
     if (activeUnsub) activeUnsub();
 
@@ -186,21 +194,119 @@ export function initSupportBot() {
 
     const { doc, onSnapshot } = await import('firebase/firestore');
     activeUnsub = onSnapshot(doc(db, 'support_chats', userId), (snap) => {
-      if (!snap.exists()) {
+      const renderFAQsAndForm = () => {
         headerTitle.textContent = 'Soporte GoDelivery';
-        headerSubtitle.textContent = 'Chat directo con Administradores';
-        
+        headerSubtitle.textContent = 'Preguntas Frecuentes y Soporte';
+
         messagesBox.innerHTML = `
-          <div style="text-align:center; padding:32px 16px 16px 16px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6;">
-            👋 ¡Hola! Escribí tu consulta o problema a continuación. Un administrador de GoDelivery se conectará de inmediato para ayudarte en tiempo real.
+          <div id="faq-view-container">
+            ${renderPresetQuestionsChipArea()}
           </div>
-          ${renderPresetQuestionsChipArea()}
+
+          <div style="margin-top: 16px; padding: 16px; background: var(--color-surface); border: 1.5px solid var(--color-border-light); border-radius: 20px; box-shadow: var(--shadow-xs);">
+            <h4 style="margin: 0 0 8px 0; font-family: var(--font-display); font-size: 13.5px; font-weight: 850; color: var(--color-text-primary);">Crear Ticket de Soporte</h4>
+            <p style="margin: 0 0 12px 0; font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.45;">¿No encontrás respuesta en las preguntas frecuentes? Detallá tu consulta aquí abajo para que un administrador te responda.</p>
+            
+            <textarea id="support-ticket-text" placeholder="Escribí tu consulta detalladamente aquí..." style="width: 100%; height: 80px; border-radius: 12px; border: 1.5px solid var(--color-border); padding: 10px; font-size: 12.5px; font-weight: 700; outline: none; box-sizing: border-box; background: var(--color-bg); color: var(--color-text); resize: none; font-family: var(--font-sans);"></textarea>
+            
+            <button id="send-support-ticket-btn" class="btn btn-primary btn-block" style="height: 44px; border-radius: 12px; font-size: 13px; font-weight: 900; margin-top: 10px; background: linear-gradient(135deg, var(--color-primary), #E31B23); color:white; border:none; cursor:pointer;">
+              ENVIAR TICKET AL SOPORTE
+            </button>
+          </div>
         `;
+
+        toggleInputAreaVisibility(false);
         attachPresetQuestionListeners();
+
+        const submitBtn = document.getElementById('send-support-ticket-btn');
+        const textarea = document.getElementById('support-ticket-text');
+        if (submitBtn && textarea) {
+          submitBtn.onclick = async () => {
+            const textVal = textarea.value.trim();
+            if (!textVal) {
+              import('../components/toast.js').then(m => m.showToast('Escribí tu consulta antes de enviar', 'warning'));
+              return;
+            }
+
+            submitBtn.disabled = true;
+            textarea.disabled = true;
+
+            try {
+              const { doc: docRef, setDoc, serverTimestamp } = await import('firebase/firestore');
+              const chatRef = docRef(db, 'support_chats', userId);
+              const ticketNum = Math.floor(100000 + Math.random() * 900000);
+              const ticketIdStr = `#TK-${ticketNum}`;
+
+              await setDoc(chatRef, {
+                userId: userId,
+                userName: user.displayName || 'Usuario',
+                email: user.email || '',
+                goId: user.goId || '',
+                ticketId: ticketIdStr,
+                status: 'pending',
+                lastMessageText: textVal,
+                lastMessageTime: serverTimestamp(),
+                unreadByAdmin: true,
+                unreadByUser: false,
+                messages: [{
+                  sender: 'user',
+                  text: textVal,
+                  timestamp: Date.now()
+                }]
+              });
+
+              import('../components/toast.js').then(m => m.showToast('¡Ticket de soporte enviado con éxito!', 'success'));
+              textarea.value = '';
+              submitBtn.disabled = false;
+              textarea.disabled = false;
+            } catch (err) {
+              console.error('Error submitting support ticket:', err);
+              import('../components/toast.js').then(m => m.showToast('Error al enviar el ticket', 'error'));
+              submitBtn.disabled = false;
+              textarea.disabled = false;
+            }
+          };
+        }
+      };
+
+      const attachPresetQuestionListeners = () => {
+        messagesBox.querySelectorAll('.support-preset-chip').forEach(chip => {
+          chip.onclick = () => {
+            const text = chip.dataset.msg;
+            const qTitle = chip.querySelector('span:first-child').textContent;
+            if (!text) return;
+            
+            const matched = simulatedAIAnswers.find(item => item.match(text));
+            const answer = matched ? matched.answer : text;
+
+            const faqContainer = document.getElementById('faq-view-container');
+            if (faqContainer) {
+              faqContainer.innerHTML = `
+                <div style="background:var(--color-bg-secondary); border-radius:18px; padding:14px; border:1px solid var(--color-border-light); animation: msgPop 0.25s ease-in-out forwards; text-align:left;">
+                  <h4 style="margin:0 0 8px 0; font-family:var(--font-display); font-size:13.5px; font-weight:850; color:var(--color-text-primary);">${qTitle}</h4>
+                  <p style="margin:0; font-size:12px; color:var(--color-text-secondary); line-height:1.5; font-weight:600;">${answer}</p>
+                  
+                  <button id="btn-back-to-faqs" style="margin-top:12px; height:32px; padding:0 12px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-primary); font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; font-family:var(--font-display);">
+                    ${icon('chevronLeft', 12)} Volver a preguntas
+                  </button>
+                </div>
+              `;
+
+              const backBtn = document.getElementById('btn-back-to-faqs');
+              if (backBtn) {
+                backBtn.onclick = () => {
+                  faqContainer.innerHTML = renderPresetQuestionsChipArea();
+                  attachPresetQuestionListeners();
+                };
+              }
+            }
+          };
+        });
+      };
+
+      if (!snap.exists() || snap.data().status === 'pending') {
+        renderFAQsAndForm();
         unreadBadge.style.display = 'none';
-        
-        // Ensure input is active
-        renderInputArea(true);
         return;
       }
 
@@ -216,15 +322,13 @@ export function initSupportBot() {
 
       const isClosed = data.status === 'closed';
       if (isClosed) {
-        import('firebase/firestore').then(({ doc, deleteDoc }) => {
-          deleteDoc(doc(db, 'support_chats', userId)).catch(() => {});
+        import('firebase/firestore').then(({ doc: docRef, deleteDoc }) => {
+          deleteDoc(docRef(db, 'support_chats', userId)).catch(() => {});
         });
         return;
       }
       
-      const isPendingApproval = data.status === 'pending_approval';
-      headerSubtitle.textContent = isPendingApproval ? 'Esperando aprobación del agente ⏳' : 
-                                   'Chat activo en tiempo real ⚡';
+      headerSubtitle.textContent = 'Chat activo en tiempo real ⚡';
 
       // Update badge if unread and window is closed
       if (data.unreadByUser && !isOpen) {
@@ -247,17 +351,11 @@ export function initSupportBot() {
       }
 
       if (messages.length === 0) {
-        messagesBox.innerHTML = `
-          <div style="text-align:center; padding:32px 16px 16px 16px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6;">
-            👋 ¡Hola! Escribí tu consulta o problema a continuación. Un administrador de GoDelivery se conectará de inmediato para ayudarte en tiempo real.
-          </div>
-          ${renderPresetQuestionsChipArea()}
-        `;
-        attachPresetQuestionListeners();
+        renderFAQsAndForm();
       } else {
         // Prepend a nice floating/inline questions button so they can browse questions even with an active or closed ticket
         const backToPresetButtonHTML = `
-          <button id="ai-top-questions-btn" style="align-self:center; margin: 4px 0 10px 0; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); border-radius:12px; color:var(--color-primary); font-weight:800; font-size:11px; padding:8px 16px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s; box-shadow:var(--shadow-sm); z-index:10;">
+          <button id="ai-top-questions-btn" style="align-self:center; margin: 4px 0 10px 0; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); border-radius:12px; color:var(--color-primary); font-weight:800; font-size:11px; padding:8px 16px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s; box-shadow:var(--shadow-sm); z-index:10; font-family:var(--font-display);">
             ${icon('chatBubble', 14)} Consultar Preguntas Frecuentes
           </button>
         `;
@@ -280,66 +378,21 @@ export function initSupportBot() {
         const topBtn = messagesBox.querySelector('#ai-top-questions-btn');
         if (topBtn) {
           topBtn.onclick = () => {
-            messagesBox.innerHTML = `
-              <div style="text-align:center; padding:32px 16px 16px 16px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6;">
-                👋 ¡Hola! Escribí tu consulta o problema a continuación. Un administrador de GoDelivery se conectará de inmediato para ayudarte en tiempo real.
-              </div>
-              ${renderPresetQuestionsChipArea()}
-            `;
-            attachPresetQuestionListeners();
+            renderFAQsAndForm();
             messagesBox.scrollTop = 0;
           };
-        }
-
-        // If pending approval, append a friendly waiting banner inside the chat messages area
-        if (isPendingApproval) {
-          const waitBannerHTML = `
-            <div style="margin-top:12px; background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:16px; padding:12px 16px; display:flex; flex-direction:column; gap:6px; align-items:center; text-align:center;">
-              <span style="color:#d97706; display:flex; align-items:center; animation: pulse-wait 1.5s infinite;">${icon('clock', 16)}</span>
-              <div style="display:flex; flex-direction:column; gap:2px;">
-                <span style="font-size:11px; font-weight:900; color:#d97706; text-transform:uppercase; letter-spacing:0.03em;">Solicitud de Soporte Enviada</span>
-                <span style="font-size:11px; color:var(--color-text-secondary); font-weight:600; line-height:1.4;">
-                  Por favor espera a que un agente de soporte de Go Delivery apruebe tu solicitud y conteste tu consulta.
-                </span>
-              </div>
-            </div>
-            
-            <!-- Volver a Preguntas Frecuentes is kept visible so they can browse while waiting -->
-            <button id="ai-back-to-questions-btn" style="align-self:center; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); border-radius:12px; color:var(--color-primary); font-weight:800; font-size:11px; padding:8px 16px; margin-top:10px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s;">
-              ${icon('chevronLeft', 14)} Consultar Preguntas Frecuentes mientras espero
-            </button>
-            <style>
-              @keyframes pulse-wait { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
-            </style>
-          `;
-          messagesBox.insertAdjacentHTML('beforeend', waitBannerHTML);
-
-          // Bind dynamic back button
-          const backBtn = messagesBox.querySelector('#ai-back-to-questions-btn');
-          if (backBtn) {
-            backBtn.onclick = () => {
-              messagesBox.innerHTML = `
-                <div style="text-align:center; padding:32px 16px 16px 16px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6;">
-                  👋 ¡Hola! Escribí tu consulta o problema a continuación. Un administrador de GoDelivery se conectará de inmediato para ayudarte en tiempo real.
-                </div>
-                ${renderPresetQuestionsChipArea()}
-              `;
-              attachPresetQuestionListeners();
-              messagesBox.scrollTop = 0;
-            };
-          }
         }
 
         messagesBox.scrollTop = messagesBox.scrollHeight;
       }
 
-      // Handle chat state UI transition (Input box vs Finalized block)
       renderInputArea(!isClosed, data.ticketId);
+      toggleInputAreaVisibility(!isClosed);
 
       // If user has the window open, automatically clear unreadByUser flag
       if (isOpen && data.unreadByUser) {
-        import('firebase/firestore').then(({ doc, updateDoc }) => {
-          updateDoc(doc(db, 'support_chats', userId), { unreadByUser: false }).catch(() => {});
+        import('firebase/firestore').then(({ doc: docRef, updateDoc }) => {
+          updateDoc(docRef(db, 'support_chats', userId), { unreadByUser: false }).catch(() => {});
         });
       }
     }, (err) => console.error('Error in realtime chat support listener:', err));

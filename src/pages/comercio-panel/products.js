@@ -634,7 +634,10 @@ function renderProductsList(products, search, categoryId) {
         <div class="panel-product-card ${p.isAvailable === false ? 'unavailable' : ''}">
           <img src="${p.image || '/logo.png'}" alt="${p.name}" class="panel-product-card-img" style="opacity:${p.isAvailable === false ? '0.5' : '1'};" />
           <div class="panel-product-card-info" style="opacity:${p.isAvailable === false ? '0.7' : '1'};">
-            <div class="panel-product-card-name">${p.name}</div>
+            <div class="panel-product-card-name" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span>${p.name}</span>
+              ${p.onlyInApp ? `<span style="font-family:var(--font-sans); font-size:8.5px; font-weight:900; background:rgba(126, 34, 206, 0.08); color:#7e22ce; padding:2px 6px; border-radius:6px; border:1px solid rgba(126, 34, 206, 0.15); display:inline-flex; align-items:center; gap:2px; text-transform:uppercase; vertical-align:middle; line-height:1;">📱 Disponible sólo en la app</span>` : ''}
+            </div>
             <div class="panel-product-card-desc">${p.description || 'Sin descripción'}</div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
               <div class="panel-product-card-price" style="margin:0;">${formatPrice(p.price)}</div>
@@ -877,6 +880,17 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
                 ${icon('plus', 18)}
               </button>
             </div>
+          </div>
+
+          <div class="switch-container" style="margin-top:16px;">
+            <div style="text-align:left;">
+              <div style="font-size:13px; font-weight:750; color:var(--color-text-primary);">Disponible sólo en la app</div>
+              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">El producto mostrará un badge exclusivo de la App y se promocionará en la pantalla de inicio.</div>
+            </div>
+            <label class="prod-switch" style="width:50px; height:28px; cursor:pointer; position:relative; display:inline-block; margin:0; flex-shrink:0;">
+              <input type="checkbox" id="prod-only-in-app" ${product?.onlyInApp ? 'checked' : ''} style="opacity:0; width:0; height:0;" />
+              <span class="prod-slider" style="position:absolute; inset:0; border-radius:34px; transition:0.2s; cursor:pointer;"></span>
+            </label>
           </div>
         </div>
         <!-- Image Upload Card -->
@@ -1349,6 +1363,8 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       allowedFlavors = Array.from(document.querySelectorAll('.prod-flavor-checkbox:checked')).map(cb => cb.value);
     }
 
+    const onlyInApp = document.getElementById('prod-only-in-app')?.checked || false;
+
     if (stockMode === 'limited' && !useGlobalFlavors) {
       const qtyInput = document.getElementById('prod-stock-quantity')?.value;
       if (qtyInput === undefined || qtyInput === null || qtyInput.trim() === '') {
@@ -1394,6 +1410,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         useGlobalFlavors,
         maxSelections,
         allowedFlavors,
+        onlyInApp,
         order: product?.order || 0,
         createdAt: product?.createdAt || new Date()
       };

@@ -176,7 +176,7 @@ async function loadShopAds() {
 function openAdEditor(ad) {
   const promo = ad.promotion;
   const modalContent = document.createElement('div');
-  modalContent.style.padding = '24px 20px 40px';
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative;';
 
   // Helper for date formatting
   const formatDateForInput = (d) => {
@@ -186,7 +186,8 @@ function openAdEditor(ad) {
   };
 
   modalContent.innerHTML = `
-    <h2 style="font-family:var(--font-display); font-size:22px; font-weight:900; margin-bottom:24px; text-align:center;">Configurar Anuncio</h2>
+    <div style="flex:1; overflow-y:auto; padding:24px 20px 10px;">
+      <h2 style="font-family:var(--font-display); font-size:22px; font-weight:900; margin-bottom:24px; text-align:center;">Configurar Anuncio</h2>
     
     <div style="display:flex; flex-direction:column; gap:20px;">
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
@@ -234,10 +235,14 @@ function openAdEditor(ad) {
         </div>
       </div>
 
-      <button id="save-ad-settings" style="width:100%; height:60px; border-radius:20px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3); margin-top:10px;">
-        Guardar Configuración
-      </button>
     </div>
+  </div>
+
+  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box;">
+    <button id="save-ad-settings" style="width:100%; height:56px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3);">
+      Guardar Configuración
+    </button>
+  </div>
   `;
 
   showModal({ title: '', hideHeader: true, height: 'auto', content: modalContent });
@@ -434,7 +439,7 @@ async function deleteCustomAd(id) {
 function openCustomAdEditor(ad = null) {
   const isEdit = ad !== null;
   const modalContent = document.createElement('div');
-  modalContent.style.padding = '24px 20px 40px';
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative;';
 
   const formatDateForInput = (d) => {
     if (!d) return '';
@@ -443,9 +448,10 @@ function openCustomAdEditor(ad = null) {
   };
 
   modalContent.innerHTML = `
-    <h2 style="font-family:var(--font-display); font-size:22px; font-weight:900; margin-bottom:24px; text-align:center;">
-      ${isEdit ? 'Editar Anuncio' : 'Nuevo Anuncio Personalizado'}
-    </h2>
+    <div style="flex:1; overflow-y:auto; padding:24px 20px 10px;">
+      <h2 style="font-family:var(--font-display); font-size:22px; font-weight:900; margin-bottom:24px; text-align:center;">
+        ${isEdit ? 'Editar Anuncio' : 'Nuevo Anuncio Personalizado'}
+      </h2>
     
     <div style="display:flex; flex-direction:column; gap:20px;">
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
@@ -503,10 +509,14 @@ function openCustomAdEditor(ad = null) {
         </div>
       </div>
 
-      <button id="save-custom-ad" style="width:100%; height:60px; border-radius:20px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3); margin-top:10px;">
-        ${isEdit ? 'Guardar Cambios' : 'Crear Anuncio'}
-      </button>
     </div>
+  </div>
+
+  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box;">
+    <button id="save-custom-ad" style="width:100%; height:56px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3);">
+      ${isEdit ? 'Guardar Cambios' : 'Crear Anuncio'}
+    </button>
+  </div>
   `;
 
   showModal({ title: '', hideHeader: true, height: 'auto', content: modalContent });

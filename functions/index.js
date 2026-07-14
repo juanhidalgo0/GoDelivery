@@ -1,5 +1,5 @@
 const { onRequest } = require("firebase-functions/v2/https");
-const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
@@ -189,9 +189,11 @@ async function getUserTokens(userId) {
 async function sendPush(tokens, notification, data = {}) {
   if (!tokens || tokens.length === 0) return;
 
-  // User requested title to be strictly "Go Delivery"
-  const finalTitle = "Go Delivery";
-  const finalBody = notification.title ? `${notification.title}\n${notification.body}` : notification.body;
+  // Split tokens into chunks of 500 (FCM sendEachForMulticast limit)
+  const tokenChunks = [];
+  for (let i = 0; i < tokens.length; i += 500) {
+    tokenChunks.push(tokens.slice(i, i + 500));
+  }
 
   // Ensure absolute HTTPS URL for the deep links to bypass relative SW resolution bugs
   let targetUrl = data.url || "/#/";
@@ -201,119 +203,130 @@ async function sendPush(tokens, notification, data = {}) {
     targetUrl = "https://godelivery-magdalena.web.app" + targetUrl;
   }
 
-  const message = {
-    notification: {
-      title: "Go Delivery",
-      body: finalBody
-    },
-    data: {
-      ...data,
-      title: "Go Delivery",
-      body: finalBody,
-      icon: "/logo-pwa.png",
-      badge: "/badge-icon.png",
-      url: targetUrl
-    },
-    android: {
-      priority: "high",
-      ttl: 3600000,
-      notification: {
-        priority: "max",
-        sound: "default",
-        defaultSound: true,
-        defaultVibrateTimings: true,
-        visibility: "public"
-      }
-    },
-    apns: {
-      payload: {
-        aps: {
-          sound: "default",
-          badge: 1,
-          contentAvailable: true,
-          mutableContent: true,
-          priority: 10
-        }
-      }
-    },
-    webpush: {
-      headers: {
-        Urgency: "high"
-      },
+  const finalTitle = "Go Delivery";
+  const finalBody = notification.title ? `${notification.title}\n${notification.body}` : notification.body;
+
+  let totalSuccess = 0;
+  let totalFailure = 0;
+
+  for (const chunk of tokenChunks) {
+    const message = {
       notification: {
         title: "Go Delivery",
+        body: finalBody
+      },
+      data: {
+        ...data,
+        title: "Go Delivery",
         body: finalBody,
-        icon: "https://godelivery-magdalena.web.app/logo-pwa.png",
-        badge: "https://godelivery-magdalena.web.app/badge-icon.png",
-        vibrate: [200, 100, 200, 100, 200],
-        requireInteraction: true,
-        tag: data.tag || undefined,
-        data: {
-          ...data,
-          url: targetUrl
+        icon: "/logo-pwa.png",
+        badge: "/badge-icon.png",
+        url: targetUrl
+      },
+      android: {
+        priority: "high",
+        ttl: 3600000,
+        notification: {
+          priority: "max",
+          sound: "default",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+          visibility: "public"
         }
       },
-      fcmOptions: {
-        link: targetUrl
-      }
-    },
-    tokens
-  };
-
-  if (data.imageUrl && (data.imageUrl.startsWith("http://") || data.imageUrl.startsWith("https://"))) {
-    // Set platform-specific image fields to prevent FCM delivery validation failures on Web/PWA
-    message.android.notification.image = data.imageUrl;
-    message.webpush.notification.image = data.imageUrl;
-    message.apns.fcmOptions = {
-      imageUrl: data.imageUrl
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+            contentAvailable: true,
+            mutableContent: true,
+            priority: 10
+          }
+        }
+      },
+      webpush: {
+        headers: {
+          Urgency: "high"
+        },
+        notification: {
+          title: "Go Delivery",
+          body: finalBody,
+          icon: "https://godelivery-magdalena.web.app/logo-pwa.png",
+          badge: "https://godelivery-magdalena.web.app/badge-icon.png",
+          vibrate: [200, 100, 200, 100, 200],
+          requireInteraction: true,
+          tag: data.tag || undefined,
+          data: {
+            ...data,
+            url: targetUrl
+          }
+        },
+        fcmOptions: {
+          link: targetUrl
+        }
+      },
+      tokens: chunk
     };
-  }
 
-  try {
-    const response = await admin.messaging().sendEachForMulticast(message);
-    
-    // Clean up invalid tokens
-    if (response.failureCount > 0) {
-      const tokensToDelete = [];
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success) {
-          logger.error(`[FCM Error] Failed to send to token index ${idx} (${tokens[idx].substring(0, 10)}...):`, resp.error);
-          const errorCode = resp.error?.code;
-          if (errorCode === "messaging/invalid-registration-token" || 
-              errorCode === "messaging/registration-token-not-registered") {
-            tokensToDelete.push(tokens[idx]);
-          }
-        }
-      });
-
-      if (tokensToDelete.length > 0) {
-        logger.info(`Cleaning up ${tokensToDelete.length} invalid tokens`);
-        
-        // Chunk tokensToDelete into groups of 30 for parallel search and destroy
-        const chunks = [];
-        for (let i = 0; i < tokensToDelete.length; i += 30) {
-          chunks.push(tokensToDelete.slice(i, i + 30));
-        }
-
-        await Promise.all(chunks.map(async (chunk) => {
-          try {
-            const snap = await db.collectionGroup("fcmTokens").where("token", "in", chunk).get();
-            if (!snap.empty) {
-              const batch = db.batch();
-              snap.docs.forEach(d => batch.delete(d.ref));
-              await batch.commit();
-            }
-          } catch (err) {
-            logger.error("Error deleting fcmToken chunk:", err);
-          }
-        }));
-      }
+    if (data.imageUrl && (data.imageUrl.startsWith("http://") || data.imageUrl.startsWith("https://"))) {
+      // Set platform-specific image fields to prevent FCM delivery validation failures on Web/PWA
+      message.notification.image = data.imageUrl;
+      message.android.notification.image = data.imageUrl;
+      message.webpush.notification.image = data.imageUrl;
+      message.apns.fcmOptions = {
+        imageUrl: data.imageUrl
+      };
     }
-    
-    logger.info(`Push sent: ${response.successCount} success, ${response.failureCount} failed`);
-  } catch (err) {
-    logger.error("Error sending push:", err);
+
+    try {
+      const response = await admin.messaging().sendEachForMulticast(message);
+      totalSuccess += response.successCount;
+      totalFailure += response.failureCount;
+      
+      // Clean up invalid tokens
+      if (response.failureCount > 0) {
+        const tokensToDelete = [];
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            logger.error(`[FCM Error] Failed to send to token index ${idx} (${chunk[idx].substring(0, 10)}...):`, resp.error);
+            const errorCode = resp.error?.code;
+            if (errorCode === "messaging/invalid-registration-token" || 
+                errorCode === "messaging/registration-token-not-registered") {
+              tokensToDelete.push(chunk[idx]);
+            }
+          }
+        });
+
+        if (tokensToDelete.length > 0) {
+          logger.info(`Cleaning up ${tokensToDelete.length} invalid tokens`);
+          
+          // Chunk tokensToDelete into groups of 30 for parallel search and destroy
+          const chunks = [];
+          for (let i = 0; i < tokensToDelete.length; i += 30) {
+            chunks.push(tokensToDelete.slice(i, i + 30));
+          }
+
+          await Promise.all(chunks.map(async (c) => {
+            try {
+              const snap = await db.collectionGroup("fcmTokens").where("token", "in", c).get();
+              if (!snap.empty) {
+                const batch = db.batch();
+                snap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+              }
+            } catch (err) {
+              logger.error("Error deleting fcmToken chunk:", err);
+            }
+          }));
+        }
+      }
+    } catch (err) {
+      logger.error("Error sending chunk of push notifications:", err);
+    }
   }
+
+  logger.info(`Push sent total: ${totalSuccess} success, ${totalFailure} failed`);
 }
 
 /**
@@ -728,18 +741,219 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             body: "El repartidor ya entregó tu pedido. ¡Que lo disfrutes!"
           }, { tag: `order-${orderId}-delivered`, url: `#/pedido/${orderId}`, persistent: "true" });
 
-          // 2. Increment driver's debt by appUsageFee if applicable
+          // 2. Update driver's debt: increment by appUsageFee and decrement by couponDiscount
           if (after.driverId) {
             const appFee = after.appUsageFee || 0;
-            if (appFee > 0) {
+            const couponDiscount = after.couponDiscount || 0;
+            const netDebtChange = appFee - couponDiscount;
+            if (netDebtChange !== 0) {
               try {
                 await db.collection("users").doc(after.driverId).update({
-                  deliveryDebt: admin.firestore.FieldValue.increment(appFee)
+                  deliveryDebt: admin.firestore.FieldValue.increment(netDebtChange)
                 });
-                logger.info(`Added app usage fee ${appFee} to driver ${after.driverId} debt.`);
+                logger.info(`Updated driver ${after.driverId} debt by ${netDebtChange} (AppFee: ${appFee}, Coupon: -${couponDiscount}).`);
               } catch (err) {
                 logger.error(`Error updating driver ${after.driverId} debt:`, err);
               }
+            }
+          }
+
+          // 3. Process Customer loyalty points, completedOrdersCount, referral system and challenges
+          if (after.userId) {
+            try {
+              const customerRef = db.collection("users").doc(after.userId);
+              const customerSnap = await customerRef.get();
+              
+              if (customerSnap.exists) {
+                const customerData = customerSnap.data();
+                const currentCount = customerData.completedOrdersCount || 0;
+                const nextOrderCount = currentCount + 1;
+                
+                // Fetch settings/global to get pointsPerDollar and referralPoints settings
+                const globalSnap = await db.collection("settings").doc("global").get();
+                const globalData = globalSnap.exists ? globalSnap.data() : {};
+                
+                const pointsPerDollar = globalData.pointsPerDollar !== undefined ? Number(globalData.pointsPerDollar) : 0.01;
+                const referralPoints = globalData.referralPoints !== undefined ? Number(globalData.referralPoints) : 500;
+                
+                // Determine multiplier
+                let multiplier = 1.0;
+                if (currentCount >= 16) {
+                  multiplier = 1.5;
+                } else if (currentCount >= 6) {
+                  multiplier = 1.25;
+                }
+                
+                // Calculate standard points earned from order subtotal (or total)
+                const baseAmount = after.subtotal || after.total || 0;
+                const pointsEarned = Math.floor(baseAmount * pointsPerDollar * multiplier);
+                
+                logger.info(`[Points] Customer ${after.userId} earned ${pointsEarned} points (Multiplier: ${multiplier}x, Base: ${baseAmount}, Rate: ${pointsPerDollar})`);
+                
+                // Create a batch for transactional consistency
+                const batch = db.batch();
+                
+                // Update customer points and completedOrdersCount
+                batch.update(customerRef, {
+                  points: admin.firestore.FieldValue.increment(pointsEarned),
+                  completedOrdersCount: admin.firestore.FieldValue.increment(1)
+                });
+                
+                // Update order with pointsEarned and appliedMultiplier
+                batch.update(db.collection("orders").doc(orderId), {
+                  pointsEarned: pointsEarned,
+                  appliedMultiplier: multiplier
+                });
+                
+                // Log standard points transaction
+                if (pointsEarned > 0) {
+                  const ptsTransRef = db.collection("points_transactions").doc();
+                  batch.set(ptsTransRef, {
+                    userId: after.userId,
+                    type: "purchase_points",
+                    points: pointsEarned,
+                    description: `Puntos ganados por tu compra en ${after.comercioName || "Comercio"}.`,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp()
+                  });
+                }
+                
+                // Process Referral welcome bonus
+                if (nextOrderCount === 1 && customerData.referredBy && !customerData.referredRewardGranted) {
+                  const refCode = customerData.referredBy;
+                  const referrerSnap = await db.collection("users").where("referralCode", "==", refCode).limit(1).get();
+                  
+                  if (!referrerSnap.empty) {
+                    const referrerDoc = referrerSnap.docs[0];
+                    const referrerUid = referrerDoc.id;
+                    
+                    logger.info(`[Referral] Rewarding first-order bonus of ${referralPoints} pts to referrer ${referrerUid} and customer ${after.userId}`);
+                    
+                    // Reward referrer
+                    batch.update(db.collection("users").doc(referrerUid), {
+                      points: admin.firestore.FieldValue.increment(referralPoints)
+                    });
+                    
+                    // Reward customer
+                    batch.update(customerRef, {
+                      points: admin.firestore.FieldValue.increment(referralPoints),
+                      referredRewardGranted: true
+                    });
+                    
+                    // Note on order
+                    batch.update(db.collection("orders").doc(orderId), {
+                      referredRewardGranted: true,
+                      referralBonusAmount: referralPoints
+                    });
+                    
+                    // Log transactions
+                    const refTransRef = db.collection("points_transactions").doc();
+                    batch.set(refTransRef, {
+                      userId: referrerUid,
+                      type: "referral_bonus",
+                      points: referralPoints,
+                      description: "¡Tu amigo completó su primer pedido! Bono de referido concedido.",
+                      createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    const custTransRef = db.collection("points_transactions").doc();
+                    batch.set(custTransRef, {
+                      userId: after.userId,
+                      type: "referred_welcome",
+                      points: referralPoints,
+                      description: "¡Bono de bienvenida por usar el código de referido de un amigo!",
+                      createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                  }
+                }
+                
+                // Process Weekly challenges
+                const getWeekIdentifier = (date) => {
+                  const d = date ? new Date(date) : new Date();
+                  d.setHours(0,0,0,0);
+                  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+                  const yearStart = new Date(d.getFullYear(), 0, 1);
+                  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+                  return `${d.getFullYear()}-W${weekNo}`;
+                };
+
+                const currentWeek = getWeekIdentifier(new Date());
+                let challengesDocs = [];
+                const challengesSnap = await customerRef.collection("challenges").get();
+                
+                if (challengesSnap.empty) {
+                  const configuredChallenges = globalData.weeklyChallenges || [
+                    { id: 'weekly_3', title: 'Desafío Bronce', description: 'Completá 3 pedidos esta semana', target: 3, pointsReward: 150 },
+                    { id: 'weekly_5', title: 'Desafío Plata', description: 'Completá 5 pedidos esta semana', target: 5, pointsReward: 300 },
+                    { id: 'weekly_10', title: 'Desafío Oro', description: 'Completá 10 pedidos esta semana', target: 10, pointsReward: 600 }
+                  ];
+                  for (const ch of configuredChallenges) {
+                    const defaultChallenge = {
+                      id: ch.id,
+                      title: ch.title,
+                      description: ch.description || `Completá ${ch.target} pedidos esta semana`,
+                      target: Number(ch.target),
+                      progress: 0,
+                      pointsReward: Number(ch.pointsReward),
+                      completed: false,
+                      weekIdentifier: currentWeek
+                    };
+                    batch.set(customerRef.collection("challenges").doc(ch.id), defaultChallenge);
+                    challengesDocs.push({ id: ch.id, data: () => defaultChallenge });
+                  }
+                } else {
+                  challengesDocs = challengesSnap.docs;
+                }
+
+                challengesDocs.forEach(cDoc => {
+                  const challenge = cDoc.data ? cDoc.data() : cDoc;
+                  
+                  let progress = challenge.progress || 0;
+                  let completed = challenge.completed || false;
+                  
+                  if (challenge.weekIdentifier !== currentWeek) {
+                    progress = 0;
+                    completed = false;
+                  }
+
+                  if (!completed) {
+                    const currentProgress = progress + 1;
+                    const isCompleted = currentProgress >= challenge.target;
+                    
+                    const updateData = {
+                      progress: currentProgress,
+                      weekIdentifier: currentWeek,
+                      completed: isCompleted
+                    };
+
+                    if (isCompleted) {
+                      updateData.completedAt = admin.firestore.FieldValue.serverTimestamp();
+                      
+                      logger.info(`[Challenges] Challenge ${challenge.id} completed by ${after.userId}. Awarding ${challenge.pointsReward} pts.`);
+
+                      // Award challenge points
+                      batch.update(customerRef, {
+                        points: admin.firestore.FieldValue.increment(challenge.pointsReward)
+                      });
+
+                      // Log challenge transaction
+                      const challengeTransRef = db.collection("points_transactions").doc();
+                      batch.set(challengeTransRef, {
+                        userId: after.userId,
+                        type: "challenge_completion",
+                        points: challenge.pointsReward,
+                        description: `Completaste el desafío semanal: ${challenge.title}`,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                      });
+                    }
+
+                    batch.update(customerRef.collection("challenges").doc(challenge.id), updateData);
+                  }
+                });
+                
+                await batch.commit();
+              }
+            } catch (err) {
+              logger.error(`Error processing loyalty points and count for customer ${after.userId}:`, err);
             }
           }
           break;
@@ -863,6 +1077,14 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists) throw new Error("Usuario no encontrado");
       const userData = userSnap.data();
+
+      // Enforce phone requirements
+      if (!userData.phone || userData.phone.trim() === "") {
+        throw new Error("El celular de contacto es obligatorio");
+      }
+      if (userData.phoneVerified !== true) {
+        throw new Error("El número de teléfono no ha sido verificado");
+      }
 
       // Fetch global settings for deliveryCost, deliveryRainSurcharge, etc.
       const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
@@ -1284,7 +1506,7 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
   }
 
   const uid = decodedToken.uid;
-  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total } = req.body;
+  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total, tip, couponCode, couponDiscount, paymentMethod } = req.body;
 
   if (!pickupAddress || !deliveryAddress || !details) {
     return res.status(400).json({ error: "Faltan campos obligatorios (direcciones o detalles)" });
@@ -1307,6 +1529,38 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
       // Fetch global settings to securely recalculate fees
       const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
       const globalSettings = globalSettingsSnap.exists ? globalSettingsSnap.data() : {};
+
+      // Validate Coupon securely inside transaction
+      let couponData = null;
+      let couponRef = null;
+      if (couponCode) {
+        const cleanCouponCode = couponCode.toUpperCase().trim();
+        couponRef = db.collection("coupons").doc(cleanCouponCode);
+        const couponSnap = await transaction.get(couponRef);
+        if (!couponSnap.exists) {
+          throw new Error("El cupón ingresado no existe.");
+        }
+        couponData = couponSnap.data();
+        if (couponData.active !== true) {
+          throw new Error("El cupón ingresado no está activo.");
+        }
+        if (typeof couponData.remaining === 'number' && couponData.remaining <= 0) {
+          throw new Error("Este cupón ya no tiene usos disponibles.");
+        }
+        if (couponData.expirationDate) {
+          const expDate = new Date(couponData.expirationDate + "T23:59:59-03:00");
+          if (Date.now() > expDate.getTime()) {
+            throw new Error("Este cupón ha expirado.");
+          }
+        }
+
+        // Single-use per user check!
+        const redemptionRef = couponRef.collection("redemptions").doc(uid);
+        const redemptionSnap = await transaction.get(redemptionRef);
+        if (redemptionSnap.exists) {
+          throw new Error("Ya has utilizado este cupón anteriormente.");
+        }
+      }
 
       const orderRef = db.collection("orders").doc();
       const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
@@ -1362,7 +1616,25 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
         finalAppUsageFee = secureAppUsageFee;
       }
 
-      const secureTotal = finalDeliveryCost + finalPurchaseFee + finalAppUsageFee + Number(extraStopsFee || 0);
+      let secureCouponDiscount = 0;
+      if (couponData) {
+        const scope = couponData.scope || 'shipping';
+        const discountType = couponData.discountType || 'fixed';
+        const couponVal = Number(couponData.value || 0);
+
+        if (scope === 'shipping' || couponData.type === 'free_delivery') {
+          if (couponData.type === 'free_delivery') {
+            secureCouponDiscount = finalDeliveryCost;
+          } else if (discountType === 'percentage') {
+            secureCouponDiscount = finalDeliveryCost * (couponVal / 100);
+          } else {
+            secureCouponDiscount = couponVal;
+          }
+        }
+      }
+      const finalCouponDiscount = Number(couponDiscount) || secureCouponDiscount;
+
+      const secureTotal = Math.max(finalDeliveryCost + finalPurchaseFee + finalAppUsageFee + Number(extraStopsFee || 0) - Number(finalCouponDiscount || 0) + Number(tip || 0), 0);
       let finalTotal = Number(total);
       if (finalTotal < 0.9 * secureTotal) {
          logger.warn(`GoFavor Total fee tampering detected! Client: ${finalTotal}, calculated: ${secureTotal}. Overwriting.`);
@@ -1398,13 +1670,31 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
         stopsCount: Number(stopsCount || 1),
         total: finalTotal,
         status: 'pending',
-        paymentMethod: 'efectivo',
+        paymentMethod: paymentMethod || 'efectivo',
         paymentStatus: 'pending',
         verificationCode,
+        tip: Number(tip || 0),
+        couponCode: couponCode || null,
+        couponDiscount: finalCouponDiscount,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       };
 
       transaction.set(orderRef, orderData);
+      
+      // Decrement coupon remaining count and record redemption (Single-Use)
+      if (couponData && couponRef) {
+        transaction.update(couponRef, {
+          remaining: admin.firestore.FieldValue.increment(-1),
+          usedCount: admin.firestore.FieldValue.increment(1)
+        });
+
+        const redemptionRef = couponRef.collection("redemptions").doc(uid);
+        transaction.set(redemptionRef, {
+          userId: uid,
+          usedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+
       transaction.set(settingsRef, { lastOrderId: lastId }, { merge: true });
       return { docId: orderRef.id, orderId: lastId };
     });
@@ -1454,12 +1744,40 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
       return res.status(403).json({ error: "No tenés permisos para realizar esta acción" });
     }
 
-    const { title, body, url, audience, imageUrl } = req.body;
+    const { title, body, url, audience, imageUrl, scheduledAt } = req.body;
     if (!body) {
       return res.status(400).json({ error: "El cuerpo de la notificación es obligatorio" });
     }
 
     const targetAudience = audience || "all";
+
+    // Check if scheduled
+    let isScheduled = false;
+    let scheduledDate = null;
+    if (scheduledAt) {
+      scheduledDate = new Date(scheduledAt);
+      if (scheduledDate > new Date()) {
+        isScheduled = true;
+      }
+    }
+
+    if (isScheduled) {
+      // 1. Create a scheduled broadcast campaign record in Firestore
+      const broadcastRef = await db.collection("broadcasts").add({
+        title: title || "Go Delivery",
+        body: body,
+        imageUrl: imageUrl || "",
+        url: url || "/#/",
+        targetAudience: targetAudience,
+        status: "scheduled",
+        scheduledAt: admin.firestore.Timestamp.fromDate(scheduledDate),
+        sentCount: 0,
+        clicks: 0,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      return res.status(200).json({ success: true, scheduled: true, broadcastId: broadcastRef.id });
+    }
 
     // 2. Fetch target devices' tokens in matching segments (Instant direct delivery, bypassing topic delay)
     let targetTokens = [];
@@ -1507,6 +1825,7 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
       imageUrl: imageUrl || "",
       url: url || "/#/",
       targetAudience: targetAudience,
+      status: "sent",
       sentCount: sentCount || 0,
       clicks: 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -1789,7 +2108,7 @@ async function getAllDeliveryDrivers() {
 
 exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
   try {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
     const snap = await db.collection("users")
       .where("isOnline", "==", true)
       .get();
@@ -1802,7 +2121,7 @@ exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
       // FIX: Check lastActivityAt (updated by heartbeat/actions) instead of lastActiveTime
       const lastActiveTime = data.lastActivityAt ? data.lastActivityAt.toDate() : new Date(0);
       
-      if (lastActiveTime < oneHourAgo) {
+      if (lastActiveTime < threeHoursAgo) {
         const activeOrdersSnap = await db.collection("orders")
           .where("driverId", "==", doc.id)
           .where("status", "in", ["confirmed", "ready", "delivering"])
@@ -1813,7 +2132,7 @@ exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
           const settingsSnap = await db.collection("settings").doc("global").get();
           const msgs = settingsSnap.exists ? settingsSnap.data().pushMessages : {};
           const title = msgs?.disconnect?.title || "Zzz... Sesión pausada";
-          const body = msgs?.disconnect?.body || "Te desconectamos porque pasó 1 hora sin que tomaras pedidos.";
+          const body = msgs?.disconnect?.body || "Te desconectamos porque pasaron 3 horas de inactividad.";
           
           const tokens = await getUserTokens(doc.id);
           if (tokens.length > 0) {
@@ -1825,6 +2144,38 @@ exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
     }
   } catch (e) {
     logger.error("Error in autoDisconnectDrivers:", e);
+  }
+});
+
+exports.cancelUnassignedOrders = onSchedule("*/5 * * * *", async (event) => {
+  try {
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const pendingOrdersSnap = await db.collection("orders")
+      .where("status", "==", "pending")
+      .where("createdAt", "<=", thirtyMinutesAgo)
+      .get();
+
+    for (const doc of pendingOrdersSnap.docs) {
+      const order = doc.data();
+      
+      await doc.ref.update({
+        status: "cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancelReason: "No se encontró un repartidor disponible."
+      });
+
+      logger.info(`Automatically cancelled unassigned order ${doc.id} (30 minutes expired).`);
+
+      const clientTokens = await getUserTokens(order.userId);
+      if (clientTokens.length > 0) {
+        await sendPush(clientTokens, {
+          title: "❌ Pedido Cancelado",
+          body: "Lo sentimos, no encontramos un repartidor disponible para realizar tu pedido en este momento."
+        }, { tag: `order-${doc.id}-cancelled`, url: `#/pedido/${doc.id}` });
+      }
+    }
+  } catch (e) {
+    logger.error("Error in cancelUnassignedOrders:", e);
   }
 });
 
@@ -1879,12 +2230,22 @@ exports.onOfferCreated = onDocumentCreated("offers/{offerId}", async (event) => 
   if (!offer) return;
   const title = offer.title || "¡Nueva Oferta!";
   const body = offer.description || "Aprovechá esta oferta especial.";
+  
+  let targetUrl = "#/";
+  if (offer.comercioId) {
+    if (offer.productIds && offer.productIds.length > 0) {
+      targetUrl = `#/comercio/${offer.comercioId}?product=${offer.productIds[0]}`;
+    } else {
+      targetUrl = `#/comercio/${offer.comercioId}`;
+    }
+  }
+
   try {
     const tokensSnap = await db.collectionGroup("fcmTokens").get();
     const tokens = [...new Set(tokensSnap.docs.map(d => d.data().token).filter(Boolean))];
     
     if (tokens.length > 0) {
-      await sendPush(tokens, { title, body }, { tag: `offer-${event.params.offerId}`, url: "#/" });
+      await sendPush(tokens, { title, body }, { tag: `offer-${event.params.offerId}`, url: targetUrl });
     }
   } catch (e) {
     logger.error("Error sending offer push:", e);
@@ -2090,6 +2451,140 @@ exports.onMarketplaceProductCreated = onDocumentCreated("marketplace_products/{p
       logger.info(`Admin notification push sent for pending product ${event.params.productId}`);
     } catch (err) {
       logger.error("Error sending marketplace moderation push notification:", err);
+    }
+  }
+});
+
+/**
+ * Scheduled task: Check for scheduled push broadcasts and deliver them (runs every 1 minute)
+ */
+exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => {
+  const now = admin.firestore.Timestamp.now();
+  try {
+    const snap = await db.collection("broadcasts")
+      .where("status", "==", "scheduled")
+      .where("scheduledAt", "<=", now)
+      .get();
+
+    if (snap.empty) return;
+
+    logger.info(`Found ${snap.size} scheduled push campaigns to process.`);
+
+    for (const doc of snap.docs) {
+      const campaign = doc.data();
+      const campaignId = doc.id;
+
+      // 1. Instantly mark as sending to prevent double-runs
+      await db.collection("broadcasts").doc(campaignId).update({
+        status: "sending"
+      });
+
+      const { title, body, url, targetAudience, imageUrl } = campaign;
+
+      // 2. Fetch target tokens
+      let targetTokens = [];
+      try {
+        if (targetAudience === "all") {
+          const tokensSnap = await db.collectionGroup("fcmTokens").get();
+          targetTokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+        } else {
+          let usersSnap;
+          if (targetAudience === "clients") {
+            usersSnap = await db.collection("users").where("role", "in", ["client", "admin"]).get();
+          } else if (targetAudience === "drivers") {
+            usersSnap = await db.collection("users").where("role", "in", ["driver", "delivery"]).get();
+          } else {
+            usersSnap = await db.collection("users").where("role", "in", ["commerce", "comercio"]).get();
+          }
+
+          const userIds = usersSnap.docs.map(d => d.id);
+          if (userIds.length > 0) {
+            for (const uId of userIds) {
+              const tSnap = await db.collection("users").doc(uId).collection("fcmTokens").get();
+              tSnap.docs.forEach(d => {
+                if (d.data().token) {
+                  targetTokens.push(d.data().token);
+                }
+              });
+            }
+          }
+        }
+      } catch (tokenErr) {
+        logger.error(`Error querying tokens for scheduled campaign ${campaignId}:`, tokenErr);
+      }
+
+      targetTokens = [...new Set(targetTokens)];
+      const sentCount = targetTokens.length;
+
+      // 3. Send the campaign
+      if (targetTokens.length > 0) {
+        try {
+          await sendPush(targetTokens, {
+            title: title || "Go Delivery",
+            body: body
+          }, {
+            url: url || "/#/",
+            type: "custom_global_push",
+            broadcastId: campaignId,
+            imageUrl: imageUrl || ""
+          });
+          logger.info(`Scheduled campaign ${campaignId} sent successfully to ${sentCount} devices.`);
+        } catch (sendErr) {
+          logger.error(`Error sending push for scheduled campaign ${campaignId}:`, sendErr);
+        }
+      }
+
+      // 4. Mark as completed
+      await db.collection("broadcasts").doc(campaignId).update({
+        status: "sent",
+        sentCount: sentCount || 0,
+        sentAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  } catch (err) {
+    logger.error("Error in processScheduledBroadcasts:", err);
+  }
+});
+
+/**
+ * Trigger: Support chat written → Notify Admins of new tickets and bug reports
+ */
+exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async (event) => {
+  const data = event.data.after.data();
+  const previousData = event.data.before ? event.data.before.data() : null;
+
+  if (!data) return;
+
+  const ticketId = data.ticketId;
+  const userName = data.userName || "Usuario";
+  const lastMessageText = data.lastMessageText || "";
+  const unreadByAdmin = data.unreadByAdmin === true;
+
+  // We only notify if unreadByAdmin is true, AND it was either just created or changed from false to true
+  const isNewlyUnread = unreadByAdmin && (!previousData || previousData.unreadByAdmin !== true);
+
+  if (isNewlyUnread && ticketId) {
+    try {
+      const adminTokens = await getAdminTokens();
+      if (adminTokens.length > 0) {
+        logger.info(`Sending new support ticket push notification for ${ticketId} to ${adminTokens.length} admins.`);
+        
+        let title = `Soporte: Nuevo Ticket ${ticketId}`;
+        if (lastMessageText.includes("Reporte de Bug") || lastMessageText.includes("🐞") || lastMessageText.includes("[REPORTE DE BUG/ERROR]")) {
+          title = `🐞 Bug Report: ${ticketId}`;
+        }
+
+        await sendPush(adminTokens, {
+          title: title,
+          body: `${userName}: ${lastMessageText}`
+        }, {
+          url: "/#/admin/support", // Redirect admin to their support chats page
+          type: "new_support_ticket",
+          ticketId: ticketId
+        });
+      }
+    } catch (err) {
+      logger.error(`Error sending push for support chat of user ${event.params.userId}:`, err);
     }
   }
 });

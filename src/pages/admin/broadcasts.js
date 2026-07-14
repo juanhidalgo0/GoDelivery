@@ -103,6 +103,17 @@ export async function renderAdminBroadcasts() {
                   </select>
                 </div>
               </div>
+
+              <div>
+                <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Programar Envío</label>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                  <select class="input" id="push-schedule-mode" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:14px;background:var(--color-bg-secondary);border:1px solid var(--color-border);color:var(--color-text);cursor:pointer;outline:none;">
+                    <option value="now">⚡ Enviar Ahora</option>
+                    <option value="scheduled">📅 Programar para Fecha/Hora</option>
+                  </select>
+                  <input type="datetime-local" class="input" id="push-scheduled-time" style="display:none;width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:600;font-size:14px;" />
+                </div>
+              </div>
             </div>
 
             <button class="btn btn-block" id="btn-send-global-push" style="width:100%;height:52px;border-radius:16px;background:linear-gradient(135deg,#c084fc,#a855f7);color:white;border:none;font-weight:900;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 20px rgba(168,85,247,0.3);">
@@ -117,6 +128,19 @@ export async function renderAdminBroadcasts() {
 
   // Local state for the uploaded push banner
   let uploadedImageBase64 = null;
+
+  document.getElementById('push-schedule-mode')?.addEventListener('change', (e) => {
+    const timeInput = document.getElementById('push-scheduled-time');
+    if (timeInput) {
+      timeInput.style.display = e.target.value === 'scheduled' ? 'block' : 'none';
+      if (e.target.value === 'scheduled') {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        timeInput.min = now.toISOString().slice(0, 16);
+        timeInput.value = now.toISOString().slice(0, 16);
+      }
+    }
+  });
 
   // Preset URL select helper with interactive commerce picker
   document.getElementById('push-url-preset')?.addEventListener('change', async (e) => {
@@ -229,8 +253,9 @@ export async function renderAdminBroadcasts() {
       const { openCropper } = await import('../../utils/cropper.js');
       const croppedBase64 = await openCropper(file, {
         aspectRatio: 2,
-        maxWidth: 800,
-        maxHeight: 400
+        maxWidth: 500,
+        maxHeight: 250,
+        quality: 0.50
       });
 
       uploadedImageBase64 = croppedBase64;
@@ -336,10 +361,25 @@ export async function renderAdminBroadcasts() {
     const body = document.getElementById('push-body').value.trim();
     const url = document.getElementById('push-url').value.trim();
     const imageUrl = document.getElementById('push-image').value.trim();
+    const scheduleMode = document.getElementById('push-schedule-mode').value;
+    const scheduledTimeVal = document.getElementById('push-scheduled-time').value;
 
     if (!body) {
       showToast('El cuerpo del mensaje es obligatorio', 'error');
       return;
+    }
+
+    let scheduledAt = null;
+    if (scheduleMode === 'scheduled') {
+      if (!scheduledTimeVal) {
+        showToast('Debés ingresar la fecha y hora de programación', 'error');
+        return;
+      }
+      scheduledAt = new Date(scheduledTimeVal).toISOString();
+      if (new Date(scheduledAt) <= new Date()) {
+        showToast('La fecha de programación debe ser en el futuro', 'error');
+        return;
+      }
     }
 
     const audienceLabels = {
@@ -349,14 +389,18 @@ export async function renderAdminBroadcasts() {
       stores: 'Solo los comercios adheridos'
     };
 
+    const timeLabel = scheduleMode === 'scheduled' 
+      ? `<br><strong>Programado para:</strong> ${new Date(scheduledTimeVal).toLocaleString('es-AR')}`
+      : '<br><strong>Envío:</strong> Inmediato';
+
     showConfirm({
-      title: '🔔 ENVIAR CAMPAÑA PUSH',
-      message: `Estás por lanzar una notificación segmentada.<br><br><strong>Audiencia:</strong> ${audienceLabels[audience]}<br><strong>Título:</strong> ${title || 'Go Delivery'}<br><strong>Mensaje:</strong> ${body}${uploadedImageBase64 || imageUrl ? `<br><strong>Banner:</strong> Sí` : ''}`,
-      confirmText: 'SÍ, LANZAR CAMPAÑA',
+      title: scheduleMode === 'scheduled' ? '📅 PROGRAMAR CAMPAÑA PUSH' : '🔔 ENVIAR CAMPAÑA PUSH',
+      message: `Estás por ${scheduleMode === 'scheduled' ? 'programar' : 'lanzar'} una notificación segmentada.<br><br><strong>Audiencia:</strong> ${audienceLabels[audience]}<br><strong>Título:</strong> ${title || 'Go Delivery'}<br><strong>Mensaje:</strong> ${body}${uploadedImageBase64 || imageUrl ? `<br><strong>Banner:</strong> Sí` : ''}${timeLabel}`,
+      confirmText: scheduleMode === 'scheduled' ? 'SÍ, PROGRAMAR' : 'SÍ, LANZAR CAMPAÑA',
       onConfirm: async () => {
         const btn = document.getElementById('btn-send-global-push');
         btn.disabled = true;
-        btn.innerHTML = `${icon('loader', 16, 'animate-spin')} Enviando campaña...`;
+        btn.innerHTML = `${icon('loader', 16, 'animate-spin')} Procesando...`;
 
         try {
           const { auth } = await import('../../firebase.js');
@@ -367,36 +411,68 @@ export async function renderAdminBroadcasts() {
           let finalImageUrl = imageUrl;
 
           if (uploadedImageBase64) {
-            // Direct base64 transfer to cloud function to handle upload securely on the backend
-            finalImageUrl = uploadedImageBase64;
+            btn.innerHTML = `${icon('loader', 16, 'animate-spin')} Subiendo imagen...`;
+            try {
+              const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+              const { storage } = await import('../../firebase.js');
+              const storageRef = ref(storage, `broadcasts/${Date.now()}.jpg`);
+              
+              // Helper to convert base64 to Blob
+              const base64ToBlob = (b64, mimeType = 'image/jpeg') => {
+                const byteCharacters = atob(b64.split(',')[1]);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: mimeType });
+              };
+              
+              const blob = base64ToBlob(uploadedImageBase64);
+              await uploadBytes(storageRef, blob);
+              finalImageUrl = await getDownloadURL(storageRef);
+            } catch (storageErr) {
+              console.error('Error uploading image to storage:', storageErr);
+              throw new Error('Error al subir la imagen al servidor');
+            }
           } else if (imageUrl === 'Imagen cargada desde dispositivo 📤') {
             finalImageUrl = '';
           } else if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://') && !imageUrl.startsWith('data:')) {
             finalImageUrl = '';
           }
 
-          btn.innerHTML = `${icon('loader', 16, 'animate-spin')} Enviando campaña...`;
+          btn.innerHTML = `${icon('loader', 16, 'animate-spin')} ${scheduleMode === 'scheduled' ? 'Programando...' : 'Enviando...'}`;
           const res = await fetch(`https://sendglobalpush-mkje4ndb5a-uc.a.run.app`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${token}`
             },
-            body: JSON.stringify({ title, body, url, audience, imageUrl: finalImageUrl })
+            body: JSON.stringify({ title, body, url, audience, imageUrl: finalImageUrl, scheduledAt })
           });
 
           if (!res.ok) {
             const errData = await res.json();
-            throw new Error(errData.error || 'Error al enviar');
+            throw new Error(errData.error || 'Error al procesar');
           }
 
           const data = await res.json();
-          showToast(`¡Campaña enviada con éxito a ${data.sentCount} dispositivos!`, 'success');
+          if (data.scheduled) {
+            showToast('¡Campaña programada con éxito!', 'success');
+          } else {
+            showToast(`¡Campaña enviada con éxito a ${data.sentCount} dispositivos!`, 'success');
+          }
           
           // Clear inputs
           document.getElementById('push-title').value = '';
           document.getElementById('push-body').value = '';
           document.getElementById('push-url').value = '';
+          document.getElementById('push-schedule-mode').value = 'now';
+          const timeInput = document.getElementById('push-scheduled-time');
+          if (timeInput) {
+            timeInput.style.display = 'none';
+            timeInput.value = '';
+          }
           if (imgInput) imgInput.value = '';
           uploadedImageBase64 = null;
           updatePushImagePreview(null);
@@ -405,7 +481,7 @@ export async function renderAdminBroadcasts() {
           setTimeout(() => {
             showConfirm({
               title: '📊 ANALÍTICAS DE CAMPAÑA',
-              message: 'La campaña fue lanzada. ¿Querés ir a la página de Historial para ver las métricas de recepción y CTR?',
+              message: 'La campaña fue procesada. ¿Querés ir a la página de Historial para ver las métricas de recepción y CTR?',
               confirmText: 'SÍ, IR AL HISTORIAL',
               cancelText: 'QUEDARME ACÁ',
               onConfirm: () => {
@@ -416,7 +492,7 @@ export async function renderAdminBroadcasts() {
 
         } catch (err) {
           console.error('[Global Push] Error:', err);
-          showToast(err.message || 'Error al enviar campaña', 'error');
+          showToast(err.message || 'Error al procesar campaña', 'error');
         } finally {
           btn.disabled = false;
           btn.innerHTML = `${icon('send', 18)} ENVIAR CAMPAÑA PUSH`;

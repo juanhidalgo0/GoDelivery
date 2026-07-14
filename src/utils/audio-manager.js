@@ -19,35 +19,9 @@ const synthLoops = new Map();
 
 export const AudioManager = {
   init() {
-    const unlock = () => {
-      if (isUnlocked) return;
-      
-      // Create and play a silent buffer to unlock standard Audio
-      const silentAudio = new Audio();
-      silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
-      silentAudio.play().then(() => {
-        isUnlocked = true;
-        console.log('🔊 Audio System Unlocked');
-        
-        // Also unlock Web Audio API AudioContext
-        try {
-          const ctx = getAudioContext();
-          if (ctx) {
-            console.log('🎵 Web Audio API Context Active:', ctx.state);
-          }
-        } catch (e) {
-          console.warn('Web Audio API activation deferred:', e);
-        }
-
-        window.removeEventListener('click', unlock);
-        window.removeEventListener('touchstart', unlock);
-      }).catch(err => {
-        console.warn('Audio unlock failed:', err);
-      });
-    };
-
-    window.addEventListener('click', unlock, { once: false });
-    window.addEventListener('touchstart', unlock, { once: false });
+    // Avoid pre-emptively playing silent audio on user interaction to prevent stealing audio focus from background players like Spotify.
+    // Web Audio API context will be created and resumed dynamically on demand when a sound is actually played.
+    isUnlocked = true;
   },
 
   /**

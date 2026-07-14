@@ -709,10 +709,10 @@ function updateUI(order) {
           ` : ''}
         </div>
       ` : ''}
-      ${normalizedStatus === 'pending' ? `
+      ${(normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus))) ? `
         <div style="margin: 8px 0; display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%;">
           <button id="v5-cancel-order-btn" class="v5-cancel-btn">
-            ${icon('trash', 15)} Cancelar Viaje
+            ${icon('trash', 15)} ${order.isTrip ? 'Cancelar Viaje' : 'Cancelar Pedido'}
           </button>
           ${order.pointsRedeemed > 0 ? `
             <div style="display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; text-transform: none; letter-spacing: 0.1px;">
@@ -826,7 +826,9 @@ function updateUI(order) {
       ? `Los <b>${redeemedPoints} Go Points</b> canjeados serán reintegrados de forma automática e inmediata a tu cuenta.`
       : 'Los <b>Go Points</b> canjeados en esta compra (si los hubiere) serán reintegrados de forma automática e inmediata a tu cuenta.';
 
-    const confirmMessage = `
+    const confirmMessage = order.isTrip
+      ? '¿Estás seguro de que deseas cancelar este viaje? Se cancelará la solicitud de inmediato.'
+      : `
       ¿Estás seguro de que deseas cancelar este pedido? Se notificará al comercio de inmediato.
       <br><br>
       <span style="font-size: 13px; color: var(--color-text-secondary); display: block; border-top: 1px solid var(--color-border-light); padding-top: 12px; margin-top: 4px; text-align: left; line-height: 1.5;">
@@ -835,7 +837,7 @@ function updateUI(order) {
     `;
 
     showConfirm({
-      title: 'Cancelar Pedido',
+      title: order.isTrip ? 'Cancelar Viaje' : 'Cancelar Pedido',
       message: confirmMessage,
       confirmText: 'Sí, cancelar',
       cancelText: 'Volver',
@@ -849,8 +851,14 @@ function updateUI(order) {
 
             const orderData = orderSnap.data();
             const rawStatus = (orderData.status || '').toString().toLowerCase();
-            if (rawStatus !== 'pendiente' && rawStatus !== 'pending') {
-              throw 'El comercio ya está preparando tu pedido o este ya fue cancelado.';
+            const allowedCancelStatuses = orderData.isTrip
+              ? ['ready', 'preparing', 'confirmed', 'pending']
+              : ['pendiente', 'pending'];
+
+            if (!allowedCancelStatuses.includes(rawStatus)) {
+              throw orderData.isTrip
+                ? 'Un chofer ya inició el viaje o este ya fue cancelado.'
+                : 'El comercio ya está preparando tu pedido o este ya fue cancelado.';
             }
 
             transaction.update(orderRef, {
@@ -1216,7 +1224,63 @@ function getTripStepperLinePercent(order) {
   return currentVal;
 }
 
+let lastRouteFetchTime = 0;
+let lastRouteStartCoords = null;
+let lastRouteEndCoords = null;
+
+function getHaversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // metres
+  const phi1 = lat1 * Math.PI/180;
+  const phi2 = lat2 * Math.PI/180;
+  const deltaPhi = (lat2-lat1) * Math.PI/180;
+  const deltaLambda = (lon2-lon1) * Math.PI/180;
+
+  const a = Math.sin(deltaPhi/2) * Math.sin(deltaPhi/2) +
+            Math.cos(phi1) * Math.cos(phi2) *
+            Math.sin(deltaLambda/2) * Math.sin(deltaLambda/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // in metres
+}
+
 async function updateRoute(start, end) {
+  const now = Date.now();
+  const timeElapsed = now - lastRouteFetchTime;
+  
+  let shouldFetch = false;
+  if (!lastRouteStartCoords || !lastRouteEndCoords) {
+    shouldFetch = true;
+  } else {
+    const startMoved = getHaversineDistance(start.lat, start.lng, lastRouteStartCoords.lat, lastRouteStartCoords.lng);
+    const endMoved = getHaversineDistance(end.lat, end.lng, lastRouteEndCoords.lat, lastRouteEndCoords.lng);
+    
+    // Fetch a new route only if 25 seconds elapsed AND start/end moved significantly
+    if (timeElapsed >= 25000 && (startMoved >= 30 || endMoved >= 10)) {
+      shouldFetch = true;
+    }
+  }
+
+  if (!shouldFetch) {
+    if (routeLine && routeLineGlow) {
+      try {
+        const path = routeLine.getPath().getArray().map(p => ({ lat: p.lat(), lng: p.lng() }));
+        if (path.length >= 2) {
+          // Adjust start position of current route optimistically
+          path[0] = start;
+          routeLine.setPath(path);
+          routeLineGlow.setPath(path);
+        }
+      } catch (e) {
+        console.warn('Optimistic route path update failed:', e);
+      }
+    }
+    return;
+  }
+
+  lastRouteFetchTime = now;
+  lastRouteStartCoords = { lat: start.lat, lng: start.lng };
+  lastRouteEndCoords = { lat: end.lat, lng: end.lng };
+
   try {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`);
     const data = await res.json();

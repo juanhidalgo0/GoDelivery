@@ -26,6 +26,11 @@ export async function renderGoFavores(content) {
       <div class="home-blob home-blob-1" style="position: absolute; top: -10%; left: -20%; width: 300px; height: 300px; background: rgba(225, 29, 72, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
       <div class="home-blob home-blob-2" style="position: absolute; bottom: 10%; right: -20%; width: 250px; height: 250px; background: rgba(99, 102, 241, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
 
+      <!-- Floating Info Helper Button -->
+      <button id="gofavores-help-header-btn" style="position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px); right: 16px; width: 36px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.25); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); transition: all 0.2s;" onactive="transform: scale(0.95);">
+        ${icon('info', 18)}
+      </button>
+
       <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
         
         <!-- Cards Grouped Together -->
@@ -331,9 +336,20 @@ export async function renderGoFavores(content) {
     e.stopPropagation();
     showServiceInfoModal('gocash');
   };
+
+  const helpBtn = document.getElementById('gofavores-help-header-btn');
+  if (helpBtn) {
+    helpBtn.onclick = () => showGoFavoresGeneralModal();
+  }
+
+  const hasSeenInfo = localStorage.getItem('info_seen_gofavores_v4');
+  if (!hasSeenInfo) {
+    showGoFavoresGeneralModal();
+    localStorage.setItem('info_seen_gofavores_v4', 'true');
+  }
 }
 
-function showServiceInfoModal(service) {
+export function showServiceInfoModal(service) {
   let title = '';
   let contentHtml = '';
   
@@ -363,7 +379,6 @@ function showServiceInfoModal(service) {
 
         <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Límites y Restricciones:</p>
         <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
-          <li><strong>Límite de financiación:</strong> El repartidor puede abonar compras de hasta $30.000 de su propio bolsillo. Para compras mayores, debés coordinar una transferencia bancaria previa con él.</li>
           <li><strong>Paradas extra:</strong> Se cobrará una tarifa adicional fija por cada parada comercial adicional agregada al recorrido original.</li>
           <li><strong>No transportable:</strong> No se realizan compras de objetos grandes o que no puedan llevarse en moto de forma segura. Si el repartidor lo considera, puede decidir cancelar el mandado.</li>
         </ul>
@@ -417,78 +432,102 @@ function showWarningModal(message) {
   alertEl.querySelector('#alert-ok-btn').onclick = () => alertModal.close();
 }
 
-async function showMandadoForm() {
+export async function showMandadoForm() {
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
   const currentAddress = getState().deliveryAddress || '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 24px; background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 20px;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
   modalEl.innerHTML = `
     <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px;">
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:14px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
-        <button id="pickup-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s;">
-           <div style="width:36px; height:36px; border-radius:12px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 20)}</div>
-           <span id="pickup-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Elegir dirección en el mapa...</span>
-           ${icon('chevronRight', 16)}
-        </button>
-        <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
-      </div>
-
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
-        <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-           <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-           <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-           ${icon('chevronRight', 16)}
-        </button>
-        <input type="text" id="delivery-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
-      </div>
-
-      <div>
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; margin-bottom:12px; display:block;">Detalles de la Encomienda</label>
-        <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 110px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 600; resize: none; outline:none; font-family:inherit;"></textarea>
-      </div>
-
-      <!-- Método de pago -->
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
-        <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
-          <button type="button" id="mandado-pay-efectivo" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:var(--color-surface); color:var(--color-text-primary); box-shadow:var(--shadow-sm); display:flex; align-items:center; justify-content:center; gap:6px;">
-            ${icon('dollarSign', 14)} Efectivo
+      <!-- Paso 1 Container -->
+      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
+          <button id="pickup-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s;">
+             <div style="width:36px; height:36px; border-radius:12px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 20)}</div>
+             <span id="pickup-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Elegir dirección en el mapa...</span>
+             ${icon('chevronRight', 16)}
           </button>
-          <button type="button" id="mandado-pay-transfer" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-            ${icon('creditCard', 14)} Transferencia
+          <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
+          <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
+             <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+             <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+             ${icon('chevronRight', 16)}
           </button>
+          <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
         </div>
+
+        <div>
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; margin-bottom:12px; display:block;">Detalles de la Encomienda</label>
+          <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 110px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 600; resize: none; outline:none; font-family:inherit;"></textarea>
+        </div>
+
+        <button type="button" id="step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          Siguiente ${icon('chevronRight', 16)}
+        </button>
       </div>
-      
-      <div id="cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío (distancia)</span>
-          <span id="dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+
+      <!-- Paso 2 Container -->
+      <div id="step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <button type="button" id="step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+          ${icon('chevronLeft', 16)} Volver a Paso 1
+        </button>
+
+        <!-- Método de pago -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
+          <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
+            <button type="button" id="mandado-pay-efectivo" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('dollarSign', 14)} Efectivo
+            </button>
+            <button type="button" id="mandado-pay-transfer" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('creditCard', 14)} Transferencia
+            </button>
+          </div>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa servicio</span>
-          <span id="service-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+
+        <!-- Benefits Container -->
+        <div id="benefits-container"></div>
+        
+        <div id="cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío (distancia)</span>
+            <span id="dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa servicio</span>
+            <span id="service-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
+            <span style="font-weight: 900; color: #059669; font-size: 15px;">Total Servicio</span>
+            <span id="estimated-cost" style="font-size: 20px; font-weight: 950; color: #059669;">$ 0</span>
+          </div>
+          <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center;">
+            * Este es el costo por el servicio de envío.
+          </p>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-          <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Servicio</span>
-          <span id="estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
-        </div>
-        <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center;">
-          * Este es el costo por el servicio de envío.
-        </p>
+
+        <button id="confirm-favor-btn" style="width: 100%; height: 60px; border-radius: 20px; background: #059669; color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(5,150,105, 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          ${icon('check', 20)} Solicitar Encomienda
+        </button>
       </div>
     </div>
-
-    <button id="confirm-favor-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
-      ${icon('check', 20)} Solicitar Encomienda
-    </button>
   `;
 
-  showModal({ title: 'Detalles de la Encomienda', content: modalEl, height: '80dvh', hideHeader: true });
+  showModal({
+    title: 'Detalles de la Encomienda',
+    content: modalEl,
+    height: '80dvh',
+    hideHeader: false,
+    headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
+    headerTextColor: '#ffffff'
+  });
 
   const pickupBtn = modalEl.querySelector('#pickup-addr-btn');
   const deliveryBtn = modalEl.querySelector('#delivery-addr-btn');
@@ -504,16 +543,70 @@ async function showMandadoForm() {
   let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
   let calculatedFee = 0;
   let appFee = 0;
-  let selectedPaymentMethod = 'efectivo';
+  let selectedPaymentMethod = null;
+  let selectedTip = 0;
+  let appliedCoupon = null;
 
   const payEfectivoBtn = modalEl.querySelector('#mandado-pay-efectivo');
   const payTransferBtn = modalEl.querySelector('#mandado-pay-transfer');
 
+  const benefitsContainer = modalEl.querySelector('#benefits-container');
+  renderBenefitsSection(benefitsContainer, (tip, coupon) => {
+    selectedTip = tip;
+    appliedCoupon = coupon;
+    updateCost();
+  }, () => calculatedFee);
+
+  const updateDetailsFieldsState = () => {
+    const pickupDetailsInput = modalEl.querySelector('#pickup-details');
+    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+    const favorDetailsInput = modalEl.querySelector('#favor-details');
+
+    if (pickupData) {
+      pickupDetailsInput.disabled = false;
+      pickupDetailsInput.style.opacity = '1';
+      pickupDetailsInput.style.cursor = 'text';
+      pickupDetailsInput.placeholder = 'Detalle: Nro, depto, timbre, local o ref (Obligatorio)';
+    } else {
+      pickupDetailsInput.disabled = true;
+      pickupDetailsInput.style.opacity = '0.6';
+      pickupDetailsInput.style.cursor = 'not-allowed';
+      pickupDetailsInput.placeholder = 'Primero selecciona el origen...';
+    }
+
+    if (deliveryData) {
+      deliveryDetailsInput.disabled = false;
+      deliveryDetailsInput.style.opacity = '1';
+      deliveryDetailsInput.style.cursor = 'text';
+      deliveryDetailsInput.placeholder = 'Detalle: Nro, depto, timbre, local o ref (Obligatorio)';
+    } else {
+      deliveryDetailsInput.disabled = true;
+      deliveryDetailsInput.style.opacity = '0.6';
+      deliveryDetailsInput.style.cursor = 'not-allowed';
+      deliveryDetailsInput.placeholder = 'Primero selecciona la dirección de destino...';
+    }
+
+    if (pickupData && deliveryData) {
+      favorDetailsInput.disabled = false;
+      favorDetailsInput.style.opacity = '1';
+      favorDetailsInput.style.cursor = 'text';
+      favorDetailsInput.placeholder = 'Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456...';
+    } else {
+      favorDetailsInput.disabled = true;
+      favorDetailsInput.style.opacity = '0.6';
+      favorDetailsInput.style.cursor = 'not-allowed';
+      favorDetailsInput.placeholder = 'Primero selecciona origen y destino...';
+    }
+  };
+
+  // Call initially to disable fields
+  updateDetailsFieldsState();
+
   payEfectivoBtn.onclick = () => {
     selectedPaymentMethod = 'efectivo';
-    payEfectivoBtn.style.background = 'var(--color-surface)';
-    payEfectivoBtn.style.color = 'var(--color-text-primary)';
-    payEfectivoBtn.style.boxShadow = 'var(--shadow-sm)';
+    payEfectivoBtn.style.background = '#059669';
+    payEfectivoBtn.style.color = '#ffffff';
+    payEfectivoBtn.style.boxShadow = '0 4px 12px rgba(5, 150, 105, 0.2)';
     payTransferBtn.style.background = 'transparent';
     payTransferBtn.style.color = 'var(--color-text-secondary)';
     payTransferBtn.style.boxShadow = 'none';
@@ -521,9 +614,9 @@ async function showMandadoForm() {
 
   payTransferBtn.onclick = () => {
     selectedPaymentMethod = 'mercadopago';
-    payTransferBtn.style.background = 'var(--color-surface)';
-    payTransferBtn.style.color = 'var(--color-text-primary)';
-    payTransferBtn.style.boxShadow = 'var(--shadow-sm)';
+    payTransferBtn.style.background = '#2563EB';
+    payTransferBtn.style.color = '#ffffff';
+    payTransferBtn.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
     payEfectivoBtn.style.background = 'transparent';
     payEfectivoBtn.style.color = 'var(--color-text-secondary)';
     payEfectivoBtn.style.boxShadow = 'none';
@@ -537,34 +630,59 @@ async function showMandadoForm() {
         
         const appUsageFeeRate = getState().appUsageFeeRate || 0.05;
         appFee = Math.ceil((calculatedFee * appUsageFeeRate) / 10) * 10;
-        const total = calculatedFee + appFee;
+
+        let couponDiscount = 0;
+        if (appliedCoupon) {
+          if (appliedCoupon.type === 'free_delivery') {
+            couponDiscount = calculatedFee;
+          } else if (appliedCoupon.discountType === 'percentage') {
+            couponDiscount = Math.floor(calculatedFee * (Number(appliedCoupon.value || 0) / 100));
+          } else {
+            couponDiscount = Number(appliedCoupon.value || 0);
+          }
+        }
+
+        const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
 
         distCostEl.textContent = formatPrice(calculatedFee);
         serviceCostEl.textContent = formatPrice(appFee);
+
+        let couponRow = previewBox.querySelector('.coupon-preview-row');
+        const estimatedFeeRow = totalCostEl.parentElement;
+        if (couponDiscount > 0) {
+          if (!couponRow) {
+            couponRow = document.createElement('div');
+            couponRow.className = 'coupon-preview-row';
+            couponRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#a855f7; font-weight:700;';
+            previewBox.insertBefore(couponRow, estimatedFeeRow);
+          }
+          couponRow.innerHTML = `<span>Descuento cupón (${appliedCoupon.code})</span><span>-${formatPrice(couponDiscount)}</span>`;
+          couponRow.style.display = 'flex';
+        } else if (couponRow) {
+          couponRow.style.display = 'none';
+        }
+
+        let tipRow = previewBox.querySelector('.tip-preview-row');
+        if (selectedTip > 0) {
+          if (!tipRow) {
+            tipRow = document.createElement('div');
+            tipRow.className = 'tip-preview-row';
+            tipRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#10b981; font-weight:700;';
+            previewBox.insertBefore(tipRow, estimatedFeeRow);
+          }
+          tipRow.innerHTML = `<span>Propina</span><span>+ ${formatPrice(selectedTip)}</span>`;
+          tipRow.style.display = 'flex';
+        } else if (tipRow) {
+          tipRow.style.display = 'none';
+        }
+
         totalCostEl.textContent = formatPrice(total);
         previewBox.style.display = 'flex';
       } catch (e) {}
     }
   };
 
-  pickupBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      pickupData = { address: addr, coords };
-      pickupText.textContent = addr;
-      pickupText.style.color = 'var(--color-text-primary)';
-      updateCost();
-    }, { mode: 'pick' });
-  };
-
-  deliveryBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      deliveryData = { address: addr, coords };
-      deliveryText.textContent = addr;
-      updateCost();
-    });
-  };
-
-  modalEl.querySelector('#confirm-favor-btn').onclick = async () => {
+  modalEl.querySelector('#step-1-next-btn').onclick = () => {
     const pickupDetailsInput = modalEl.querySelector('#pickup-details');
     const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
     const pickupDetails = pickupDetailsInput ? pickupDetailsInput.value.trim() : '';
@@ -591,11 +709,93 @@ async function showMandadoForm() {
       return;
     }
 
+    modalEl.querySelector('#step-1-container').style.display = 'none';
+    modalEl.querySelector('#step-2-container').style.display = 'flex';
+  };
+
+  modalEl.querySelector('#step-2-back-btn').onclick = () => {
+    modalEl.querySelector('#step-1-container').style.display = 'flex';
+    modalEl.querySelector('#step-2-container').style.display = 'none';
+  };
+
+  pickupBtn.onclick = () => {
+    showAddressPrompt((addr, notes, coords) => {
+      pickupData = { address: addr, coords };
+      pickupText.textContent = addr;
+      pickupText.style.color = 'var(--color-text-primary)';
+      updateDetailsFieldsState();
+      
+      const pickupDetailsInput = modalEl.querySelector('#pickup-details');
+      if (pickupDetailsInput && notes) {
+        pickupDetailsInput.value = notes;
+      }
+      
+      updateCost();
+    }, { mode: 'pick' });
+  };
+
+  deliveryBtn.onclick = () => {
+    showAddressPrompt((addr, notes, coords) => {
+      deliveryData = { address: addr, coords };
+      deliveryText.textContent = addr;
+      updateDetailsFieldsState();
+      
+      const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+      if (deliveryDetailsInput && notes) {
+        deliveryDetailsInput.value = notes;
+      }
+      
+      updateCost();
+    }, { mode: 'pick' });
+  };
+
+  modalEl.querySelector('#confirm-favor-btn').onclick = async () => {
+    const pickupDetailsInput = modalEl.querySelector('#pickup-details');
+    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+    const pickupDetails = pickupDetailsInput ? pickupDetailsInput.value.trim() : '';
+    const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
+
+    if (!selectedPaymentMethod) {
+      showWarningModal('Por favor, selecciona un método de pago del envío (Efectivo o Transferencia)');
+      return;
+    }
+    if (!pickupData) {
+      showWarningModal('Por favor, selecciona la dirección de origen (¿Dónde recogemos?)');
+      return;
+    }
+    if (!pickupDetails) {
+      showWarningModal('Por favor, ingresa el detalle de la dirección de origen (Nro, depto, ref...)');
+      return;
+    }
+    if (!deliveryData) {
+      showWarningModal('Por favor, selecciona la dirección de destino (¿Dónde entregamos?)');
+      return;
+    }
+    if (!deliveryDetails) {
+      showWarningModal('Por favor, ingresa el detalle de la dirección de destino (Nro, depto, ref...)');
+      return;
+    }
+    if (!detailsInput.value.trim()) {
+      showWarningModal('Por favor, ingresa los detalles del paquete o encomienda a enviar');
+      return;
+    }
+
     if (calculatedFee === 0) {
       await updateCost();
     }
 
-    const total = calculatedFee + appFee;
+    let couponDiscount = 0;
+    if (appliedCoupon) {
+      if (appliedCoupon.type === 'free_delivery') {
+        couponDiscount = calculatedFee;
+      } else if (appliedCoupon.discountType === 'percentage') {
+        couponDiscount = Math.floor(calculatedFee * (Number(appliedCoupon.value || 0) / 100));
+      } else {
+        couponDiscount = Number(appliedCoupon.value || 0);
+      }
+    }
+
+    const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
 
     showConfirm({
       title: '¿Confirmar encomienda?',
@@ -611,6 +811,9 @@ async function showMandadoForm() {
             details: detailsInput.value.trim(),
             deliveryCost: calculatedFee,
             appUsageFee: appFee,
+            tip: selectedTip,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            couponDiscount: couponDiscount,
             total: total,
             paymentMethod: selectedPaymentMethod
           });
@@ -649,7 +852,10 @@ async function createFavorOrder(data) {
     stopsCount: data.stopsCount || 1,
     appUsageFee: data.appUsageFee || 0,
     total: data.total,
-    paymentMethod: data.paymentMethod
+    paymentMethod: data.paymentMethod,
+    tip: data.tip || 0,
+    couponCode: data.couponCode || null,
+    couponDiscount: data.couponDiscount || 0
   };
 
   if (data.isGoCash) {
@@ -678,98 +884,126 @@ async function createFavorOrder(data) {
   return resData.orderId;
 }
 
-async function showCompraForm() {
+export async function showCompraForm() {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
   const currentAddress = getState().deliveryAddress || '';
-  const purchaseFee = getState().deliveryPurchaseFee || 500;
+  const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 24px; background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 20px;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
   modalEl.innerHTML = `
     <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px;">
       
-      <div style="display:flex; flex-direction:column; gap:12px; margin-top: 16px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
-        <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
-          ${[1, 2, 3, 4, 5].map(n => `
-            <button type="button" class="stop-count-btn" data-stops="${n}" style="height:44px; border-radius:12px; border:2px solid ${n === 1 ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${n === 1 ? 'rgba(var(--color-primary-rgb),0.08)' : 'var(--color-bg-card)'}; color:${n === 1 ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight:900; font-size:14px; cursor:pointer;">
-              ${n}
-            </button>
-          `).join('')}
+      <!-- Paso 1 Container -->
+      <div id="compra-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display:flex; flex-direction:column; gap:12px; margin-top: 4px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
+          <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
+            ${[1, 2, 3, 4, 5].map(n => `
+              <button type="button" class="stop-count-btn" data-stops="${n}" style="height:44px; border-radius:12px; border:2px solid ${n === 1 ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${n === 1 ? 'rgba(var(--color-primary-rgb),0.08)' : 'var(--color-bg-card)'}; color:${n === 1 ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight:900; font-size:14px; cursor:pointer;">
+                ${n}
+              </button>
+            `).join('')}
+          </div>
+          <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:6px 0 0; font-weight:600; display:none; line-height:1.4;">
+            📍 Se cobra una parada extra por cada comercio adicional al primero.
+          </p>
         </div>
-        <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:6px 0 0; font-weight:600; display:none; line-height:1.4;">
-          📍 Se cobra una parada extra por cada comercio adicional al primero.
-        </p>
-      </div>
 
-      <!-- Dynamically generated list of stores -->
-      <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:16px;">
-        <!-- Filled dynamically -->
-      </div>
+        <!-- Dynamically generated list of stores -->
+        <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:16px;">
+          <!-- Filled dynamically -->
+        </div>
 
-      <!-- Delivery destination -->
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
-        <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-           <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-           <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-           ${icon('chevronRight', 16)}
+        <!-- Delivery destination -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
+          <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
+             <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+             <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+             ${icon('chevronRight', 16)}
+          </button>
+          <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
+        </div>
+
+        <button type="button" id="compra-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          Siguiente ${icon('chevronRight', 16)}
         </button>
-        <input type="text" id="delivery-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
       </div>
 
-      <!-- Método de pago -->
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
-        <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
-          <button type="button" id="compra-pay-efectivo" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:var(--color-surface); color:var(--color-text-primary); box-shadow:var(--shadow-sm); display:flex; align-items:center; justify-content:center; gap:6px;">
-            ${icon('dollarSign', 14)} Efectivo
-          </button>
-          <button type="button" id="compra-pay-transfer" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-            ${icon('creditCard', 14)} Transferencia
-          </button>
-        </div>
-      </div>
+      <!-- Paso 2 Container -->
+      <div id="compra-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <button type="button" id="compra-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+          ${icon('chevronLeft', 16)} Volver a Paso 1
+        </button>
 
-      <!-- Cost preview -->
-      <div id="compra-cost-preview" style="background: var(--color-bg-secondary); border-radius: 20px; padding: 16px; border: 1px solid var(--color-border-light); display:none; flex-direction:column; gap:8px; margin-top:auto;">
-        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-          <span>Envío estimado</span><span id="dist-fee">$ ---</span>
+        <!-- Método de pago -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
+          <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
+            <button type="button" id="compra-pay-efectivo" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('dollarSign', 14)} Efectivo
+            </button>
+            <button type="button" id="compra-pay-transfer" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('creditCard', 14)} Transferencia
+            </button>
+          </div>
         </div>
-        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-          <span>Gestión especial</span><span>+ ${formatPrice(purchaseFee)}</span>
+        
+        <!-- Benefits Container -->
+        <div id="compra-benefits-container"></div>
+        
+        <!-- Cost Preview -->
+        <div id="compra-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+            <span>Envío (distancia)</span><span id="dist-fee">$ ---</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+            <span>Gestión Especial</span><span id="purchase-fee">$ ---</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+            <span>Compra de mercadería</span><span>Cobro en mano</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+            <span id="extra-stops-label">Paradas extra</span><span id="extra-stops-fee">$ ---</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+            <span>Servicio App</span><span id="app-service-fee">$ ---</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:1px dashed var(--color-border-light); padding-top:8px; margin-top:2px;">
+            <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
+          </div>
+          <p style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; line-height:1.3; font-weight:600; text-align:center;">
+            * El valor de los productos se abona al repartidor al recibirlos.
+          </p>
         </div>
-        <div id="extra-stops-row" style="display:none; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-          <span id="extra-stops-label">Paradas extra</span><span id="extra-stops-fee">$ ---</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-          <span>Servicio App</span><span id="app-service-fee">$ ---</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:var(--color-primary); border-top:1px dashed var(--color-border-light); padding-top:8px; margin-top:2px;">
-          <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
-        </div>
-        <p style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; line-height:1.3; font-weight:600; text-align:center;">
-          * El valor de los productos se abona al repartidor al recibirlos.
-        </p>
+
+        <button id="confirm-buy-btn" style="width:100%; height:60px; border-radius:20px; background:#E11D48; color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 25px rgba(225,29,72,0.3); text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:10px; flex-shrink:0;">
+          ${icon('check', 20)} Solicitar Compra
+        </button>
       </div>
     </div>
-
-    <button id="confirm-buy-btn" style="width:100%; height:60px; border-radius:20px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 25px rgba(var(--color-primary-rgb),0.3); text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:10px; flex-shrink:0;">
-      ${icon('check', 20)} Solicitar Compra
-    </button>
   `;
 
-  showModal({ title: 'GoFavor: Comprar algo', content: modalEl, height: '85dvh', hideHeader: true });
+  showModal({
+    title: 'Mandado: Comprar algo',
+    content: modalEl,
+    height: '85dvh',
+    hideHeader: false,
+    headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
+    headerTextColor: '#ffffff'
+  });
 
   const deliveryBtn   = modalEl.querySelector('#delivery-addr-btn');
   const deliveryText  = modalEl.querySelector('#delivery-text');
   const distFeeEl     = modalEl.querySelector('#dist-fee');
+  const purchaseFeeEl = modalEl.querySelector('#purchase-fee');
   const appFeeEl      = modalEl.querySelector('#app-service-fee');
   const totalFeeEl    = modalEl.querySelector('#final-service-fee');
-  const extraStopsRow = modalEl.querySelector('#extra-stops-row');
-  const extraStopsLbl = modalEl.querySelector('#extra-stops-label');
   const extraStopsFeeEl = modalEl.querySelector('#extra-stops-fee');
+  const extraStopsLbl   = modalEl.querySelector('#extra-stops-label');
+  const extraStopsRow   = extraStopsFeeEl.parentElement;
   const extraStopNote = modalEl.querySelector('#extra-stop-note');
   const previewBox    = modalEl.querySelector('#compra-cost-preview');
   const subformsContainer = modalEl.querySelector('#stores-subforms-container');
@@ -780,16 +1014,25 @@ async function showCompraForm() {
   let appFee = 0;
   let stopsCount = 1;
   const extraStopFee = getState().deliveryExtraStopFee || 500;
-  let selectedPaymentMethod = 'efectivo';
+  let selectedPaymentMethod = null;
+  let selectedTip = 0;
+  let appliedCoupon = null;
 
   const payEfectivoBtn = modalEl.querySelector('#compra-pay-efectivo');
   const payTransferBtn = modalEl.querySelector('#compra-pay-transfer');
 
+  const benefitsContainer = modalEl.querySelector('#compra-benefits-container');
+  renderBenefitsSection(benefitsContainer, (tip, coupon) => {
+    selectedTip = tip;
+    appliedCoupon = coupon;
+    updateCost();
+  }, () => calculatedDistFee);
+
   payEfectivoBtn.onclick = () => {
     selectedPaymentMethod = 'efectivo';
-    payEfectivoBtn.style.background = 'var(--color-surface)';
-    payEfectivoBtn.style.color = 'var(--color-text-primary)';
-    payEfectivoBtn.style.boxShadow = 'var(--shadow-sm)';
+    payEfectivoBtn.style.background = '#059669';
+    payEfectivoBtn.style.color = '#ffffff';
+    payEfectivoBtn.style.boxShadow = '0 4px 12px rgba(5, 150, 105, 0.2)';
     payTransferBtn.style.background = 'transparent';
     payTransferBtn.style.color = 'var(--color-text-secondary)';
     payTransferBtn.style.boxShadow = 'none';
@@ -797,42 +1040,34 @@ async function showCompraForm() {
 
   payTransferBtn.onclick = () => {
     selectedPaymentMethod = 'mercadopago';
-    payTransferBtn.style.background = 'var(--color-surface)';
-    payTransferBtn.style.color = 'var(--color-text-primary)';
-    payTransferBtn.style.boxShadow = 'var(--shadow-sm)';
+    payTransferBtn.style.background = '#2563EB';
+    payTransferBtn.style.color = '#ffffff';
+    payTransferBtn.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
     payEfectivoBtn.style.background = 'transparent';
     payEfectivoBtn.style.color = 'var(--color-text-secondary)';
     payEfectivoBtn.style.boxShadow = 'none';
   };
 
   const placeholders = [
-    { name: "Ej: Paulos", detail: "Ej: 1 pack de brahma" },
-    { name: "Ej: Heladería Grido", detail: "Ej: 1kg de helado de chocolate" },
-    { name: "Ej: Chino Rivadavia", detail: "Ej: 1 cartón de leche entera" },
-    { name: "Ej: Panadería La Espiga", detail: "Ej: Medio kilo de pan miñón" },
-    { name: "Ej: Kiosco Magdalena", detail: "Ej: 2 alfajores y chicles" }
+    { name: 'Ej: Verdulería "El Trébol"', details: 'Ej: 1kg papas, 1/2kg tomates, 1 verdeo...' },
+    { name: 'Ej: Kiosco "Al Paso"', details: 'Ej: 2 alfajores de chocolate, 1 gaseosa 1.5L...' },
+    { name: 'Ej: Panadería "La Unión"', details: 'Ej: 1/2 docena de facturas surtidas, 1 pan de campo...' },
+    { name: 'Ej: Carnicería "Magdalena"', details: 'Ej: 1kg de asado, 1/2kg de picada común...' },
+    { name: 'Ej: Farmacia "Pasteur"', details: 'Ej: 1 jabón neutro, 1 pasta dental triple acción...' }
   ];
 
   const renderSubforms = () => {
     subformsContainer.innerHTML = '';
     for (let i = 0; i < stopsCount; i++) {
-      const card = document.createElement('div');
-      card.className = 'store-card';
-      card.style.cssText = 'background:var(--color-bg-secondary); border-radius:20px; padding:16px; border:1.5px solid var(--color-border-light); display:flex; flex-direction:column; gap:12px;';
-      
       const pl = placeholders[i] || placeholders[0];
-      card.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:12px; font-weight:900; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.5px;">🏪 Comercio #${i + 1}</span>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:46px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); font-size:14px; font-weight:700; outline:none;" required />
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <textarea class="store-detail-textarea" placeholder="${pl.detail}" style="height:76px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-surface); font-size:13.5px; font-weight:600; outline:none; resize:none; font-family:inherit; line-height:1.4;" required></textarea>
-        </div>
+      const stopDiv = document.createElement('div');
+      stopDiv.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light);';
+      stopDiv.innerHTML = `
+        <span style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
+        <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:700; outline:none;" required />
+        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:76px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:10px 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; resize:none; outline:none; font-family:inherit;" required></textarea>
       `;
-      subformsContainer.appendChild(card);
+      subformsContainer.appendChild(stopDiv);
     }
   };
 
@@ -865,10 +1100,53 @@ async function showCompraForm() {
       const subtotal = calculatedDistFee + purchaseFee + extraStopsTotal;
       const appUsageFeeRate = getState().appUsageFeeRate || 0.05;
       appFee = Math.ceil((subtotal * appUsageFeeRate) / 10) * 10;
-      const total = subtotal + appFee;
+
+      let couponDiscount = 0;
+      if (appliedCoupon) {
+        if (appliedCoupon.type === 'free_delivery') {
+          couponDiscount = calculatedDistFee;
+        } else if (appliedCoupon.discountType === 'percentage') {
+          couponDiscount = Math.floor(calculatedDistFee * (Number(appliedCoupon.value || 0) / 100));
+        } else {
+          couponDiscount = Number(appliedCoupon.value || 0);
+        }
+      }
+
+      const total = Math.max(subtotal + appFee - couponDiscount + selectedTip, 0);
 
       distFeeEl.textContent = formatPrice(calculatedDistFee);
+      purchaseFeeEl.textContent = formatPrice(purchaseFee);
       appFeeEl.textContent  = formatPrice(appFee);
+
+      let couponRow = previewBox.querySelector('.coupon-preview-row');
+      const finalFeeRow = totalFeeEl.parentElement;
+      if (couponDiscount > 0) {
+        if (!couponRow) {
+          couponRow = document.createElement('div');
+          couponRow.className = 'coupon-preview-row';
+          couponRow.style.cssText = 'display:flex; justify-content:space-between; font-size:12px; color:#a855f7; font-weight:700;';
+          previewBox.insertBefore(couponRow, finalFeeRow);
+        }
+        couponRow.innerHTML = `<span>Descuento cupón (${appliedCoupon.code})</span><span>-${formatPrice(couponDiscount)}</span>`;
+        couponRow.style.display = 'flex';
+      } else if (couponRow) {
+        couponRow.style.display = 'none';
+      }
+
+      let tipRow = previewBox.querySelector('.tip-preview-row');
+      if (selectedTip > 0) {
+        if (!tipRow) {
+          tipRow = document.createElement('div');
+          tipRow.className = 'tip-preview-row';
+          tipRow.style.cssText = 'display:flex; justify-content:space-between; font-size:12px; color:#10b981; font-weight:700;';
+          previewBox.insertBefore(tipRow, finalFeeRow);
+        }
+        tipRow.innerHTML = `<span>Propina</span><span>+ ${formatPrice(selectedTip)}</span>`;
+        tipRow.style.display = 'flex';
+      } else if (tipRow) {
+        tipRow.style.display = 'none';
+      }
+
       totalFeeEl.textContent = formatPrice(total);
 
       if (stopsCount > 1) {
@@ -882,25 +1160,13 @@ async function showCompraForm() {
     } catch (e) { console.error(e); }
   };
 
-  deliveryBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      deliveryData = { address: addr, coords };
-      deliveryText.textContent = addr;
-      updateCost();
-    });
-  };
-
-  if (deliveryData?.coords) updateCost();
-
-  modalEl.querySelector('#confirm-buy-btn').onclick = async () => {
+  modalEl.querySelector('#compra-step-1-next-btn').onclick = () => {
     const nameInputs = Array.from(subformsContainer.querySelectorAll('.store-name-input'));
     const detailTextareas = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea'));
     const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
     const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
 
     let validated = true;
-    const stopsList = [];
-
     for (let i = 0; i < stopsCount; i++) {
       const name = nameInputs[i].value.trim();
       const details = detailTextareas[i].value.trim();
@@ -911,7 +1177,6 @@ async function showCompraForm() {
       } else {
         nameInputs[i].style.borderColor = 'var(--color-border-light)';
         detailTextareas[i].style.borderColor = 'var(--color-border-light)';
-        stopsList.push({ store: name, items: details });
       }
     }
 
@@ -928,11 +1193,66 @@ async function showCompraForm() {
       return;
     }
 
+    modalEl.querySelector('#compra-step-1-container').style.display = 'none';
+    modalEl.querySelector('#compra-step-2-container').style.display = 'flex';
+  };
+
+  modalEl.querySelector('#compra-step-2-back-btn').onclick = () => {
+    modalEl.querySelector('#compra-step-1-container').style.display = 'flex';
+    modalEl.querySelector('#compra-step-2-container').style.display = 'none';
+  };
+
+  deliveryBtn.onclick = () => {
+    showAddressPrompt((addr, notes, coords) => {
+      deliveryData = { address: addr, coords };
+      deliveryText.textContent = addr;
+      
+      const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+      if (deliveryDetailsInput && notes) {
+        deliveryDetailsInput.value = notes;
+      }
+      
+      updateCost();
+    }, { mode: 'pick' });
+  };
+
+  if (deliveryData?.coords) updateCost();
+
+  modalEl.querySelector('#confirm-buy-btn').onclick = async () => {
+    const nameInputs = Array.from(subformsContainer.querySelectorAll('.store-name-input'));
+    const detailTextareas = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea'));
+    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+    const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
+
+    const stopsList = [];
+    for (let i = 0; i < stopsCount; i++) {
+      const name = nameInputs[i] ? nameInputs[i].value.trim() : '';
+      const details = detailTextareas[i] ? detailTextareas[i].value.trim() : '';
+      stopsList.push({ store: name, items: details });
+    }
+
+    if (!selectedPaymentMethod) {
+      showWarningModal('Por favor, selecciona un método de pago del envío (Efectivo o Transferencia)');
+      return;
+    }
+
     if (calculatedDistFee === 0) await updateCost();
 
     const extraStopsTotal = (stopsCount - 1) * extraStopFee;
     const subtotal = calculatedDistFee + purchaseFee + extraStopsTotal;
-    const total = subtotal + appFee;
+    
+    let couponDiscount = 0;
+    if (appliedCoupon) {
+      if (appliedCoupon.type === 'free_delivery') {
+        couponDiscount = calculatedDistFee;
+      } else if (appliedCoupon.discountType === 'percentage') {
+        couponDiscount = Math.floor(calculatedDistFee * (Number(appliedCoupon.value || 0) / 100));
+      } else {
+        couponDiscount = Number(appliedCoupon.value || 0);
+      }
+    }
+
+    const total = Math.max(subtotal + appFee - couponDiscount + selectedTip, 0);
     const stopsLabel = stopsCount === 1 ? '1 comercio' : `${stopsCount} comercios`;
 
     const packagedDetails = stopsList.map((stop, idx) => `🏪 **${idx + 1}. Comercio:** ${stop.store}\n📦 **Pedido:** ${stop.items}`).join('\n\n');
@@ -954,6 +1274,9 @@ async function showCompraForm() {
             extraStopsFee: extraStopsTotal,
             stopsCount: stopsCount,
             appUsageFee: appFee,
+            tip: selectedTip,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            couponDiscount: couponDiscount,
             total: total,
             paymentMethod: selectedPaymentMethod
           });
@@ -968,70 +1291,94 @@ async function showCompraForm() {
   };
 }
 
-async function showGoCashForm() {
+export async function showGoCashForm() {
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
   const currentAddress = getState().deliveryAddress || '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 24px; background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 20px;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
   modalEl.innerHTML = `
     <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px;">
       
-      <!-- Type Selector Segmented Control -->
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:14px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Operación</label>
-        <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
-          <button id="gocash-type-c2t" class="gocash-type-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); display:flex; align-items:center; justify-content:center; text-align:center;">
-            Doy Efectivo<br/>Recibo Transf.
-          </button>
-          <button id="gocash-type-t2c" class="gocash-type-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; text-align:center;">
-            Doy Transf.<br/>Recibo Efectivo
-          </button>
+      <!-- Paso 1 Container -->
+      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Type Selector Segmented Control -->
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Operación</label>
+          <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
+            <button id="gocash-type-c2t" class="gocash-type-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); display:flex; align-items:center; justify-content:center; text-align:center;">
+              Doy Efectivo<br/>Recibo Transf.
+            </button>
+            <button id="gocash-type-t2c" class="gocash-type-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; text-align:center;">
+              Doy Transf.<br/>Recibo Efectivo
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Amount Input -->
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Monto a Cambiar (Máx $70.000)</label>
-        <div style="position:relative;">
-          <span style="position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; font-weight:900; color:var(--color-text-tertiary);">$</span>
-          <input type="number" id="gocash-amount" placeholder="0" min="1" max="70000" style="width: 100%; height: 54px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px 0 35px; background: var(--color-bg-card); font-size: 18px; font-weight: 800; outline: none; transition: border-color 0.2s;" />
+        <!-- Amount Input -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Monto a Cambiar (Máx $70.000)</label>
+          <div style="position:relative;">
+            <span style="position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; font-weight:900; color:var(--color-text-tertiary);">$</span>
+            <input type="number" id="gocash-amount" placeholder="0" min="1" max="70000" style="width: 100%; height: 54px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px 0 35px; background: var(--color-bg-card); font-size: 18px; font-weight: 800; outline: none; transition: border-color 0.2s;" />
+          </div>
         </div>
-      </div>
 
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde nos encontramos?</label>
-        <button id="gocash-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-           <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-           <span id="gocash-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-           ${icon('chevronRight', 16)}
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde nos encontramos?</label>
+          <button id="gocash-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
+             <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+             <span id="gocash-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+             ${icon('chevronRight', 16)}
+          </button>
+          <input type="text" id="gocash-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
+        </div>
+
+        <button type="button" id="gocash-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          Siguiente ${icon('chevronRight', 16)}
         </button>
-        <input type="text" id="gocash-delivery-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
       </div>
 
-      <!-- Cost Preview -->
-      <div id="gocash-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío estimado (desde centro)</span>
-          <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+      <!-- Paso 2 Container -->
+      <div id="gocash-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <button type="button" id="gocash-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+          ${icon('chevronLeft', 16)} Volver a Paso 1
+        </button>
+
+        <!-- Benefits Container -->
+        <div id="gocash-benefits-container"></div>
+
+        <!-- Cost Preview -->
+        <div id="gocash-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío estimado (desde centro)</span>
+            <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
+            <span style="font-weight: 900; color: #4F46E5; font-size: 15px;">Total Envío Estimado</span>
+            <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: #4F46E5;">$ 0</span>
+          </div>
+          <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
+            * Se cobra únicamente el envío. El costo final se recalculará en base a la ubicación real del repartidor al aceptar.
+          </p>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-          <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Envío Estimado</span>
-          <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
-        </div>
-        <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
-          * Se cobra únicamente el envío. El costo final se recalculará en base a la ubicación real del repartidor al aceptar.
-        </p>
+
+        <button id="confirm-gocash-btn" style="width: 100%; height: 60px; border-radius: 20px; background: #4F46E5; color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(79,70,229, 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          ${icon('check', 20)} Solicitar Go Cash
+        </button>
       </div>
     </div>
-
-    <button id="confirm-gocash-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
-      ${icon('check', 20)} Solicitar Go Cash
-    </button>
   `;
 
-  showModal({ title: 'Solicitar Go Cash', content: modalEl, height: '80dvh', hideHeader: true });
+  showModal({
+    title: 'Solicitar Go Cash',
+    content: modalEl,
+    height: '80dvh',
+    hideHeader: false,
+    headerBackground: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
+    headerTextColor: '#ffffff'
+  });
 
   const btnC2t = modalEl.querySelector('#gocash-type-c2t');
   const btnT2c = modalEl.querySelector('#gocash-type-t2c');
@@ -1045,6 +1392,15 @@ async function showGoCashForm() {
   let selectedType = 'cash_to_transfer'; // or 'transfer_to_cash'
   let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
   let calculatedFee = 0;
+  let selectedTip = 0;
+  let appliedCoupon = null;
+
+  const benefitsContainer = modalEl.querySelector('#gocash-benefits-container');
+  renderBenefitsSection(benefitsContainer, (tip, coupon) => {
+    selectedTip = tip;
+    appliedCoupon = coupon;
+    updateCost();
+  }, () => calculatedFee);
 
   btnC2t.onclick = () => {
     selectedType = 'cash_to_transfer';
@@ -1077,8 +1433,51 @@ async function showGoCashForm() {
         const dist = await getDistance(centerCoords.lat, centerCoords.lng, deliveryData.coords.lat, deliveryData.coords.lng);
         calculatedFee = calculateDynamicFee(dist);
 
+        let couponDiscount = 0;
+        if (appliedCoupon) {
+          if (appliedCoupon.type === 'free_delivery') {
+            couponDiscount = calculatedFee;
+          } else if (appliedCoupon.discountType === 'percentage') {
+            couponDiscount = Math.floor(calculatedFee * (Number(appliedCoupon.value || 0) / 100));
+          } else {
+            couponDiscount = Number(appliedCoupon.value || 0);
+          }
+        }
+
+        const total = Math.max(calculatedFee - couponDiscount + selectedTip, 0);
+
         distCostEl.textContent = formatPrice(calculatedFee);
-        totalCostEl.textContent = formatPrice(calculatedFee);
+
+        let couponRow = previewBox.querySelector('.coupon-preview-row');
+        const finalFeeRow = totalCostEl.parentElement;
+        if (couponDiscount > 0) {
+          if (!couponRow) {
+            couponRow = document.createElement('div');
+            couponRow.className = 'coupon-preview-row';
+            couponRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#a855f7; font-weight:700;';
+            previewBox.insertBefore(couponRow, finalFeeRow);
+          }
+          couponRow.innerHTML = `<span>Descuento cupón (${appliedCoupon.code})</span><span>-${formatPrice(couponDiscount)}</span>`;
+          couponRow.style.display = 'flex';
+        } else if (couponRow) {
+          couponRow.style.display = 'none';
+        }
+
+        let tipRow = previewBox.querySelector('.tip-preview-row');
+        if (selectedTip > 0) {
+          if (!tipRow) {
+            tipRow = document.createElement('div');
+            tipRow.className = 'tip-preview-row';
+            tipRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#10b981; font-weight:700;';
+            previewBox.insertBefore(tipRow, finalFeeRow);
+          }
+          tipRow.innerHTML = `<span>Propina</span><span>+ ${formatPrice(selectedTip)}</span>`;
+          tipRow.style.display = 'flex';
+        } else if (tipRow) {
+          tipRow.style.display = 'none';
+        }
+
+        totalCostEl.textContent = formatPrice(total);
         previewBox.style.display = 'flex';
       } catch (e) {}
     }
@@ -1092,11 +1491,17 @@ async function showGoCashForm() {
     showAddressPrompt((addr, notes, coords) => {
       deliveryData = { address: addr, coords };
       deliveryText.textContent = addr;
+      
+      const deliveryDetailsInput = modalEl.querySelector('#gocash-delivery-details');
+      if (deliveryDetailsInput && notes) {
+        deliveryDetailsInput.value = notes;
+      }
+      
       updateCost();
-    });
+    }, { mode: 'pick' });
   };
 
-  modalEl.querySelector('#confirm-gocash-btn').onclick = async () => {
+  modalEl.querySelector('#gocash-step-1-next-btn').onclick = () => {
     const amount = parseFloat(amountInput.value);
     if (isNaN(amount) || amount <= 0) {
       showToast('Ingresá un monto a cambiar válido', 'warning');
@@ -1117,16 +1522,46 @@ async function showGoCashForm() {
       showWarningModal('Por favor, ingresa el detalle de la dirección de entrega (Nro, depto, ref...)');
       return;
     }
+    if (!selectedType) {
+      showWarningModal('Por favor, selecciona un tipo de operación para Go Cash');
+      return;
+    }
+
+    modalEl.querySelector('#gocash-step-1-container').style.display = 'none';
+    modalEl.querySelector('#gocash-step-2-container').style.display = 'flex';
+  };
+
+  modalEl.querySelector('#gocash-step-2-back-btn').onclick = () => {
+    modalEl.querySelector('#gocash-step-1-container').style.display = 'flex';
+    modalEl.querySelector('#gocash-step-2-container').style.display = 'none';
+  };
+
+  modalEl.querySelector('#confirm-gocash-btn').onclick = async () => {
+    const amount = parseFloat(amountInput.value);
+    const deliveryDetailsInput = modalEl.querySelector('#gocash-delivery-details');
+    const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
 
     if (calculatedFee === 0) {
       await updateCost();
     }
 
+    let couponDiscount = 0;
+    if (appliedCoupon) {
+      if (appliedCoupon.type === 'free_delivery') {
+        couponDiscount = calculatedFee;
+      } else if (appliedCoupon.discountType === 'percentage') {
+        couponDiscount = Math.floor(calculatedFee * (Number(appliedCoupon.value || 0) / 100));
+      } else {
+        couponDiscount = Number(appliedCoupon.value || 0);
+      }
+    }
+
+    const total = Math.max(calculatedFee - couponDiscount + selectedTip, 0);
     const typeText = selectedType === 'cash_to_transfer' ? 'Efectivo a Transferencia' : 'Transferencia a Efectivo';
     
     showConfirm({
       title: '¿Confirmar Go Cash?',
-      message: `Se enviará un repartidor para cambiar <strong>${formatPrice(amount)}</strong> (${typeText}).<br><br>Costo estimado del envío: <strong>${formatPrice(calculatedFee)}</strong>`,
+      message: `Se enviará un repartidor para cambiar <strong>${formatPrice(amount)}</strong> (${typeText}).<br><br>Costo estimado del envío: <strong>${formatPrice(total)}</strong>`,
       onConfirm: async () => {
         try {
           const orderId = await createFavorOrder({
@@ -1138,7 +1573,11 @@ async function showGoCashForm() {
             details: `Go Cash: Cambiar ${typeText} por valor de ${formatPrice(amount)}`,
             deliveryCost: calculatedFee,
             appUsageFee: 0,
-            total: calculatedFee,
+            tip: selectedTip,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            couponDiscount: couponDiscount,
+            total: total,
+            paymentMethod: selectedType,
             isGoCash: true,
             goCashAmount: amount,
             goCashType: selectedType
@@ -1154,4 +1593,390 @@ async function showGoCashForm() {
       }
     });
   };
+
+  // Handle general info modal trigger
+  const showGoFavoresGeneralModal = () => {
+    showModal({
+      title: '📦 ¿Cómo funcionan los Mandados?',
+      height: 'auto',
+      content: `
+        <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
+          <p style="margin: 0; font-weight: 700;">GO! Mandados te permite solicitar cadetes y repartidores para realizar cualquier favor o encargo en el pueblo.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Seleccioná tu tipo de favor</h4>
+                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Encomienda (llevar/buscar algo), Mandado (ir a comprar) o GoCash (cambio de efectivo).</p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Indicá los puntos en el mapa</h4>
+                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Establecé dónde se realiza la recolección/compra y la dirección de entrega.</p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
+              <div>
+                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Aceptación y Chat en vivo</h4>
+                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">El repartidor cotizará el mandado y podrás coordinar detalles por el chat interno en tiempo real.</p>
+              </div>
+            </div>
+          </div>
+          <button id="close-info-general-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+        </div>
+      `,
+      onOpen: () => {
+        document.getElementById('close-info-general-modal-btn').onclick = () => closeModal();
+      }
+    });
+  };
+}
+
+export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
+  let selectedTip = 0;
+  let appliedCoupon = null;
+
+  function render() {
+    container.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+        <!-- Tip Pill -->
+        <button type="button" id="favor-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? '#10b981' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+          <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+            <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'var(--color-surface-hover)'}; color:${selectedTip > 0 ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('dollarSign', 18)}
+            </div>
+            <div style="min-width:0;">
+              <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Propina al Repartidor</div>
+              <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+                ${selectedTip > 0 ? `Propina aplicada: ${formatPrice(selectedTip)}` : 'Apoyar repartidor'}
+              </div>
+            </div>
+          </div>
+          <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
+            ${selectedTip > 0 ? icon('checkCircle', 16, '', '#10b981') : icon('chevronRight', 16)}
+          </div>
+        </button>
+
+        <!-- Coupon Pill -->
+        <button type="button" id="favor-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? '#a855f7' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+          <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+            <div style="width:36px; height:36px; background:${appliedCoupon ? 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)' : 'var(--color-surface-hover)'}; color:${appliedCoupon ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('tag', 18)}
+            </div>
+            <div style="min-width:0;">
+              <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Cupón de Descuento</div>
+              <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+                ${appliedCoupon ? `${appliedCoupon.code} - ${appliedCoupon.type === 'free_delivery' ? 'Envío Gratis' : (appliedCoupon.discountType === 'percentage' ? `${appliedCoupon.value}% OFF` : `$${appliedCoupon.value} OFF`)}` : 'Ingresar cupón'}
+              </div>
+            </div>
+          </div>
+          <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
+            ${appliedCoupon ? icon('checkCircle', 16, '', '#a855f7') : icon('chevronRight', 16)}
+          </div>
+        </button>
+      </div>
+    `;
+
+    container.querySelector('#favor-open-tip-btn').onclick = () => {
+      openTipModalLocal();
+    };
+
+    container.querySelector('#favor-open-coupon-btn').onclick = () => {
+      openCouponModalLocal();
+    };
+  }
+
+  function openTipModalLocal() {
+    const presetTips = [300, 500, 700];
+    const isCustom = selectedTip > 0 && !presetTips.includes(selectedTip);
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding: 24px 20px 40px; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; display: flex; flex-direction: column; gap: 20px;';
+
+    modalContent.innerHTML = `
+      <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
+      
+      <div style="text-align: center;">
+        <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25);">
+          ${icon('dollarSign', 28)}
+        </div>
+        <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
+          Propina al Repartidor
+        </h2>
+        <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; padding: 0 10px;">
+          El 100% de la propina va directamente al repartidor para apoyar su valioso servicio y dedicación.
+        </p>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:16px; margin-top:8px;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; width:100%;">
+          ${presetTips.map(amount => {
+            const isActive = selectedTip === amount;
+            return `
+              <button type="button" class="tip-modal-preset-btn ${isActive ? 'active' : ''}" 
+                      data-amount="${amount}"
+                      style="flex:1; min-width:80px; height:46px; border-radius:12px; border:2px solid ${isActive ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${isActive ? 'rgba(var(--color-primary-rgb),0.1)' : 'var(--color-bg-secondary)'}; color:${isActive ? 'var(--color-primary)' : 'var(--color-text-primary)'}; font-size:14px; font-weight:800; cursor:pointer; transition:all 0.2s;">
+                + ${formatPrice(amount)}
+              </button>
+            `;
+          }).join('')}
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Otro Monto (Opcional)</label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <span style="position:absolute; left:16px; font-size:16px; font-weight:800; color:var(--color-text-secondary);">$</span>
+            <input type="number" id="tip-modal-custom-input" 
+                   min="1" 
+                   placeholder="Ingresa otro valor" 
+                   value="${isCustom ? selectedTip : ''}"
+                   style="width:100%; height:50px; border-radius:14px; background:var(--color-bg-secondary); border:2px solid var(--color-border-light); padding:0 16px 0 32px; font-size:15px; font-weight:800; color:var(--color-text-primary); outline:none; transition:all 0.2s;" />
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px; margin-top: 12px;">
+        ${selectedTip > 0 ? `
+          <button type="button" id="tip-modal-clear-btn" class="btn btn-ghost" style="height: 52px; flex: 1; border-radius: 14px; font-weight: 800; color: var(--color-danger); background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; gap: 8px; padding:0;">
+            ${icon('trash', 16)} Eliminar
+          </button>
+        ` : ''}
+        <button type="button" id="tip-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          ${icon('check', 16)} APLICAR PROPINA
+        </button>
+      </div>
+    `;
+
+    const tipModal = showModal({
+      title: '',
+      hideHeader: true,
+      height: 'auto',
+      content: modalContent
+    });
+
+    const customInput = modalContent.querySelector('#tip-modal-custom-input');
+
+    modalContent.querySelectorAll('.tip-modal-preset-btn').forEach(btn => {
+      btn.onclick = () => {
+        modalContent.querySelectorAll('.tip-modal-preset-btn').forEach(b => {
+          b.classList.remove('active');
+          b.style.borderColor = 'var(--color-border-light)';
+          b.style.backgroundColor = 'var(--color-bg-secondary)';
+          b.style.color = 'var(--color-text-primary)';
+        });
+        btn.classList.add('active');
+        btn.style.borderColor = 'var(--color-primary)';
+        btn.style.backgroundColor = 'rgba(var(--color-primary-rgb),0.1)';
+        btn.style.color = 'var(--color-primary)';
+        
+        if (customInput) customInput.value = '';
+      };
+    });
+
+    if (customInput) {
+      customInput.oninput = () => {
+        modalContent.querySelectorAll('.tip-modal-preset-btn').forEach(b => {
+          b.classList.remove('active');
+          b.style.borderColor = 'var(--color-border-light)';
+          b.style.backgroundColor = 'var(--color-bg-secondary)';
+          b.style.color = 'var(--color-text-primary)';
+        });
+      };
+    }
+
+    const confirmBtn = modalContent.querySelector('#tip-modal-confirm-btn');
+    confirmBtn.onclick = () => {
+      let finalAmount = 0;
+      const activePreset = modalContent.querySelector('.tip-modal-preset-btn.active');
+      
+      if (activePreset) {
+        finalAmount = parseInt(activePreset.dataset.amount, 10);
+      } else if (customInput) {
+        const valStr = customInput.value.trim();
+        if (valStr) {
+          finalAmount = parseInt(valStr, 10);
+          if (isNaN(finalAmount) || finalAmount <= 0) {
+            showToast('Por favor ingresá un monto de propina válido.', 'warning');
+            return;
+          }
+        }
+      }
+
+      selectedTip = finalAmount;
+      if (finalAmount > 0) {
+        showToast(`Propina de ${formatPrice(finalAmount)} agregada.`, 'success');
+      } else {
+        showToast('Propina eliminada.', 'info');
+      }
+      tipModal.close();
+      render();
+      onUpdate(selectedTip, appliedCoupon);
+    };
+
+    const clearBtn = modalContent.querySelector('#tip-modal-clear-btn');
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        selectedTip = 0;
+        showToast('Propina eliminada.', 'info');
+        tipModal.close();
+        render();
+        onUpdate(selectedTip, appliedCoupon);
+      };
+    }
+  }
+
+  function openCouponModalLocal() {
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding: 24px 20px 40px; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; display: flex; flex-direction: column; gap: 20px;';
+
+    modalContent.innerHTML = `
+      <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
+      
+      <div style="text-align: center;">
+        <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(168, 85, 247, 0.35);">
+          ${icon('tag', 26)}
+        </div>
+        <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
+          Ingresar Cupón
+        </h2>
+        <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; padding: 0 10px;">
+          Ingresá un código promocional para obtener envíos gratis o descuentos.
+        </p>
+      </div>
+
+      ${appliedCoupon ? `
+        <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px solid rgba(168, 85, 247, 0.2); border-radius: 16px; padding: 14px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="font-size: 11px; font-weight: 900; color: #a855f7; text-transform: uppercase; letter-spacing: 0.5px;">CUPÓN ACTIVO</div>
+            <div style="font-size: 14px; font-weight: 800; color: var(--color-text-primary); margin-top: 2px;">
+              ${appliedCoupon.code} <span style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary); opacity: 0.85;">(${appliedCoupon.type === 'free_delivery' ? 'Envío Gratis' : `${appliedCoupon.value}% OFF`})</span>
+            </div>
+          </div>
+          <div style="width: 24px; height: 24px; color: #a855f7; display: flex; align-items: center; justify-content: center;">
+            ${icon('checkCircle', 18)}
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Código del Cupón</label>
+        <div style="position:relative; display:flex; align-items:center; width:100%;">
+          <input type="text" id="coupon-modal-input" 
+                 placeholder="Ej. GODEL-XYZ" 
+                 value="${appliedCoupon ? appliedCoupon.code : ''}"
+                 style="width:100%; height:50px; border-radius:14px; background:var(--color-bg-secondary); border:2px solid var(--color-border-light); padding:0 16px; font-size:15px; font-weight:800; color:var(--color-text-primary); outline:none; transition:all 0.2s; text-transform: uppercase;" />
+        </div>
+        <div id="coupon-modal-error" style="display:none; color:var(--color-danger); font-size:12px; font-weight:700; padding-left:4px; margin-top: 4px;"></div>
+      </div>
+
+      <div style="display: flex; gap: 12px; margin-top: 12px;">
+        ${appliedCoupon ? `
+          <button type="button" id="coupon-modal-clear-btn" class="btn btn-ghost" style="height: 52px; flex: 1; border-radius: 14px; font-weight: 800; color: var(--color-danger); background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0;">
+            ${icon('trash', 16)} Quitar
+          </button>
+        ` : ''}
+        <button type="button" id="coupon-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; box-shadow: 0 8px 20px rgba(168, 85, 247, 0.25);">
+          ${icon('check', 16)} APLICAR CUPÓN
+        </button>
+      </div>
+    `;
+
+    const couponModal = showModal({
+      title: '',
+      hideHeader: true,
+      height: 'auto',
+      content: modalContent
+    });
+
+    const input = modalContent.querySelector('#coupon-modal-input');
+    const errorMsg = modalContent.querySelector('#coupon-modal-error');
+    const confirmBtn = modalContent.querySelector('#coupon-modal-confirm-btn');
+    const clearBtn = modalContent.querySelector('#coupon-modal-clear-btn');
+
+    if (input) {
+      input.oninput = () => {
+        if (errorMsg) errorMsg.style.display = 'none';
+        input.value = input.value.toUpperCase();
+      };
+    }
+
+    confirmBtn.onclick = async () => {
+      const valStr = input.value.trim().toUpperCase();
+      if (!valStr) {
+        errorMsg.textContent = 'Por favor ingresá un código de cupón.';
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = `${icon('loader', 16, 'animate-spin')} VALIDANDO...`;
+      if (clearBtn) clearBtn.disabled = true;
+      if (input) input.disabled = true;
+
+      try {
+        const couponRef = doc(db, 'coupons', valStr);
+        const couponSnap = await getDoc(couponRef);
+
+        if (!couponSnap.exists()) {
+          throw new Error('El cupón ingresado no existe.');
+        }
+
+        const cData = couponSnap.data();
+
+        if (cData.active !== true) {
+          throw new Error('El cupón ingresado no está activo.');
+        }
+
+        if (typeof cData.remaining === 'number' && cData.remaining <= 0) {
+          throw new Error('Este cupón ya no tiene usos disponibles.');
+        }
+
+        if (cData.expirationDate) {
+          const expDate = new Date(cData.expirationDate + 'T23:59:59-03:00');
+          if (Date.now() > expDate.getTime()) {
+            throw new Error('Este cupón ha expirado.');
+          }
+        }
+
+        if (cData.ownerId && cData.ownerId !== 'admin') {
+          throw new Error('Este cupón es de un comercio específico y no aplica a envíos.');
+        }
+
+
+
+        appliedCoupon = {
+          code: valStr,
+          ...cData
+        };
+
+        showToast('Cupón aplicado con éxito', 'success');
+        couponModal.close();
+        render();
+        onUpdate(selectedTip, appliedCoupon);
+      } catch (err) {
+        errorMsg.textContent = err.message;
+        errorMsg.style.display = 'block';
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = `${icon('check', 16)} APLICAR CUPÓN`;
+        if (clearBtn) clearBtn.disabled = false;
+        if (input) input.disabled = false;
+      }
+    };
+
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        appliedCoupon = null;
+        showToast('Cupón removido', 'info');
+        couponModal.close();
+        render();
+        onUpdate(selectedTip, appliedCoupon);
+      };
+    }
+  }
+
+  render();
 }
