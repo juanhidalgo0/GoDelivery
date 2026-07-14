@@ -45,7 +45,7 @@ workflows:
       - name: Build iOS Package (.ipa)
         script: |
           xcode-project build-ipa \
-            --workspace ios/App/App.xcworkspace \
+            --project ios/App/App.xcodeproj \
             --scheme App \
             --bundle-identifier com.godelivery.magdalena
     artifacts:
