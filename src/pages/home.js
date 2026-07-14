@@ -528,18 +528,29 @@ function checkAndShowWelcomeModal() {
   `;
 
   modalEl.innerHTML = `
-    <div style="background: var(--color-surface, #ffffff); max-width: 440px; width: 100%; border-radius: 28px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; text-align: center; padding: 28px; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
-      <div style="font-size: 48px; margin-bottom: 12px; display: inline-block; animation: waveEmoji 2s infinite ease-in-out;">👋</div>
-      <h2 style="font-family: var(--font-display, inherit); font-size: 20px; font-weight: 950; color: var(--color-text-primary, #0f172a); margin: 0 0 10px 0;">¡Hola, Vecino! Te damos la bienvenida a GO!</h2>
-      <p style="font-size: 13.5px; line-height: 1.6; color: var(--color-text-secondary, #475569); margin: 0 0 18px 0; font-weight: 600; text-align: left;">
-        Estamos muy felices de traerte una aplicación creada por y para nuestro pueblo, pensada para hacernos el día a día más fácil a todos.<br><br>
-        Queremos contarte que actualmente nos encontramos en <strong>Fase Beta (en desarrollo y prueba)</strong>. Esto significa que, aunque le ponemos todo el corazón, de vez en cuando podría surgir algún pequeño error en el sistema.<br><br>
-        Si te encontrás con alguno, te agradeceríamos enormemente tu paciencia y que nos lo comentes directamente desde el botón de soporte. Tu feedback es nuestro motor para corregir los detalles, seguir mejorando y <strong>seguir creciendo juntos</strong>.<br><br>
-        ¡Gracias por ser parte de la comunidad de GO!
-      </p>
-      <button id="welcome-beta-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none; margin-top: 4px;">
-        ¡Entendido, vamos a GO!
-      </button>
+    <div style="background: var(--color-surface, #ffffff); max-width: 420px; width: 100%; height: 500px; max-height: 85vh; border-radius: 28px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
+      <!-- Cabecera fija -->
+      <div style="text-align: center; padding: 20px 24px 10px 24px; flex-shrink: 0;">
+        <div style="font-size: 36px; margin-bottom: 8px; display: inline-block; animation: waveEmoji 2s infinite ease-in-out;">👋</div>
+        <h2 style="font-family: var(--font-display, inherit); font-size: 20px; font-weight: 950; color: var(--color-text-primary, #0f172a); margin: 0;">¡Hola, Vecino! Te damos la bienvenida a GO!</h2>
+      </div>
+      
+      <!-- Cuerpo con scroll -->
+      <div style="overflow-y: auto; padding: 0 24px 12px 24px; flex-grow: 1; -webkit-overflow-scrolling: touch;">
+        <p style="font-size: 13.5px; line-height: 1.6; color: var(--color-text-secondary, #475569); margin: 0; font-weight: 600; text-align: left;">
+          Estamos muy felices de traerte una aplicación creada por y para nuestro pueblo, pensada para hacernos el día a día más fácil a todos.<br><br>
+          Queremos contarte que actualmente nos encontramos en <strong>Fase Beta (en desarrollo y prueba)</strong>. Esto significa que, aunque le ponemos todo el corazón, de vez en cuando podría surgir algún pequeño error en el sistema.<br><br>
+          Si te encontrás con alguno, te agradeceríamos enormemente tu paciencia y que nos lo comentes directamente desde el botón de soporte. Tu feedback es nuestro motor para corregir los detalles, seguir mejorando y <strong>seguir creciendo juntos</strong>.<br><br>
+          ¡Gracias por ser parte de la comunidad de GO!
+        </p>
+      </div>
+      
+      <!-- Pie de página fijo con el botón -->
+      <div style="padding: 12px 24px 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff); border-top: 1.5px solid var(--color-border-light, #f1f5f9);">
+        <button id="welcome-beta-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
+          ¡Entendido, vamos a GO!
+        </button>
+      </div>
     </div>
     
     <style>
