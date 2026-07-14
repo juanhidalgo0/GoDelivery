@@ -51,5 +51,11 @@
 	<string>Esta aplicación requiere acceso al micrófono para grabar y enviar mensajes de voz en el chat.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Esta aplicación requiere acceso a la cámara para tomar y enviar fotos en el chat.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Esta aplicación requiere acceso a tu galería de fotos para que puedas seleccionar y subir imágenes a tu perfil o enviarlas a través del chat.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Esta aplicación requiere acceso a tu ubicación cuando está en uso para mostrarte los comercios cercanos, calcular costos de envío y permitir el rastreo del pedido.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Esta aplicación requiere acceso a tu ubicación en segundo plano para rastrear el progreso de la entrega en tiempo real del repartidor.</string>
 </dict>
 </plist>
