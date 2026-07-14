@@ -13,6 +13,7 @@ export async function renderCategoryPage(categoryName, content) {
       const cachedGmId = localStorage.getItem('gd_gomarket_id');
       if (cachedGmId) {
         window.history.replaceState(null, '', `#/comercio/${cachedGmId}`);
+        import('../components/header.js').then(m => m.renderHeader());
         window.dispatchEvent(new HashChangeEvent('hashchange'));
         return;
       }
@@ -25,6 +26,7 @@ export async function renderCategoryPage(categoryName, content) {
         localStorage.setItem('gd_gomarket_id', goMarket.id);
         setState('goMarketId', goMarket.id);
         window.history.replaceState(null, '', `#/comercio/${goMarket.id}`);
+        import('../components/header.js').then(m => m.renderHeader());
         window.dispatchEvent(new HashChangeEvent('hashchange'));
         return;
       }
