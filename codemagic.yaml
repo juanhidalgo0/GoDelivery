@@ -47,6 +47,10 @@ workflows:
           xcode-project use-profiles
       - name: Build iOS Package (.ipa)
         script: |
+          # Resuelve las dependencias de Swift Package Manager
+          xcodebuild -resolvePackageDependencies -project ios/App/App.xcodeproj -scheme App
+          
+          # Compila el paquete IPA
           xcode-project build-ipa \
             --project ios/App/App.xcodeproj \
             --scheme App
