@@ -30,9 +30,7 @@ workflows:
       - name: Sync Capacitor iOS platform
         script: |
           npx cap sync ios
-      - name: Install CocoaPods dependencies
-        script: |
-          cd ios/App && pod install
+
       - name: Setup keychain and signing certificates
         script: |
           # Inicializa el llavero de Codemagic para firmas digitales
