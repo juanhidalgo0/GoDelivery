@@ -581,6 +581,7 @@ async function init() {
         const cachedGmId = localStorage.getItem('gd_gomarket_id') || getState().goMarketId;
         if (cachedGmId) {
           window.history.replaceState(null, '', `#/comercio/${cachedGmId}`);
+          import('./components/header.js').then(m => m.renderHeader());
           return import('./pages/comercio.js').then(m => m.renderComercio(c));
         }
       }
