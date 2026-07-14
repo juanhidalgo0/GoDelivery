@@ -42,6 +42,9 @@ workflows:
           
           # Añade los certificados al llavero para la compilación
           keychain add-certificates
+          
+          # Vincula los perfiles de aprovisionamiento con el proyecto Xcode
+          xcode-project use-profiles
       - name: Build iOS Package (.ipa)
         script: |
           xcode-project build-ipa \
