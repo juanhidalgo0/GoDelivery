@@ -47,6 +47,8 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Esta aplicación requiere acceso al micrófono para grabar y enviar mensajes de voz en el chat.</string>
 	<key>NSCameraUsageDescription</key>
