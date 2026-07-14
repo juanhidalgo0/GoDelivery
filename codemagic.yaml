@@ -38,7 +38,7 @@ workflows:
           
           # Descarga automáticamente perfiles y certificados usando la API de App Store Connect
           # (Requiere configurar las variables API de Apple en la web de Codemagic)
-          app-store-connect fetch-signing-files "com.godelivery.magdalena" --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "com.godelivery.magdalena" --type IOS_APP_STORE --create --certificate-key=@env:CERTIFICATE_PRIVATE_KEY
           
           # Añade los certificados al llavero para la compilación
           keychain add-certificates
