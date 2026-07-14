@@ -8,6 +8,8 @@ import { showConfirm, showModal } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
 
+let comerciosMap = {};
+
 export async function renderAdminUsers() {
   const content = document.getElementById('app-content');
   const currentUser = getState().user;
@@ -174,6 +176,16 @@ export async function renderAdminUsers() {
   try {
     const snap = await getDocs(collection(db, 'users'));
     users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+
+    try {
+      const comSnap = await getDocs(collection(db, 'comercios'));
+      comerciosMap = {};
+      comSnap.docs.forEach(d => {
+        comerciosMap[d.id] = d.data();
+      });
+    } catch (comErr) {
+      console.error('Error fetching comercios:', comErr);
+    }
     
     const totalBadge = document.getElementById('users-total-badge');
     if (totalBadge) {
@@ -445,6 +457,46 @@ export async function renderAdminUsers() {
       }
       return;
     }
+
+    // 5.5 Open Chat Click
+    const openChatBtn = e.target.closest('[data-open-chat]');
+    if (openChatBtn) {
+      const uid = openChatBtn.dataset.openChat;
+      const targetUser = users.find(u => u.uid === uid);
+      if (targetUser) {
+        // Initialize support chat with the target user
+        const { doc: fDoc, getDoc: fGetDoc, setDoc: fSetDoc, serverTimestamp: fServerTimestamp } = await import('firebase/firestore');
+        const chatRef = fDoc(db, 'support_chats', uid);
+        try {
+          const chatSnap = await fGetDoc(chatRef);
+          if (!chatSnap.exists()) {
+            const isComercio = targetUser.isComercio || targetUser.role === 'comercio';
+            const commerceName = isComercio ? (comerciosMap[uid]?.name || 'Tienda sin nombre') : null;
+            
+            await fSetDoc(chatRef, {
+              userName: commerceName || targetUser.displayName || 'Usuario',
+              userPhoto: targetUser.photoURL || '/logo.png',
+              userId: uid,
+              status: 'open',
+              ticketId: `#TK-${Math.floor(1000 + Math.random() * 9000)}`,
+              createdAt: fServerTimestamp(),
+              lastMessageText: 'Conversación iniciada por el administrador',
+              lastMessageTime: fServerTimestamp(),
+              unreadByAdmin: false,
+              unreadByUser: true
+            });
+          }
+          // Set in sessionStorage so the support chats page knows which chat to open
+          sessionStorage.setItem('admin-support-chat-target', uid);
+          // Redirect to support chats
+          location.hash = '#/admin/support-chats';
+        } catch (err) {
+          console.error('Error starting support chat:', err);
+          showToast('Error al iniciar chat de soporte', 'error');
+        }
+      }
+      return;
+    }
   });
 
   renderDeliveryRequests(users, canChangeRoles);
@@ -541,6 +593,15 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
     const { count, avg } = calculateStats(u);
     const avgText = count > 0 ? avg.toFixed(1) : null;
 
+    const isComercio = u.isComercio || u.role === 'comercio';
+    const commerceData = isComercio ? comerciosMap[u.uid] : null;
+    const phone = commerceData?.phone || commerceData?.whatsapp || u.phone || u.phoneNumber;
+    const phoneHTML = phone ? `
+      <div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:4px; font-weight:600; display:flex; align-items:center; gap:4px;">
+        ${icon('phone', 12)} +54 ${phone}
+      </div>
+    ` : '';
+
     const ratingBadgeHTML = avgText !== null ? `
       <span class="status-badge" data-view-ratings="${u.uid}" style="background:rgba(251,191,36,0.1); color:#d97706; border:1px solid rgba(251,191,36,0.2); cursor:pointer; user-select:none; display:flex; align-items:center; gap:4px; font-weight:800; transition:all 0.2s;" onmouseover="this.style.background='rgba(251,191,36,0.18)'" onmouseout="this.style.background='rgba(251,191,36,0.1)'">
         ${icon('star', 12)} ${avgText} (${count} ${count === 1 ? 'reseña' : 'reseñas'})
@@ -563,10 +624,12 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
           <img src="${u.photoURL || '/logo.png'}" class="user-avatar" style="flex-shrink:0;" referrerpolicy="no-referrer" />
           <div style="flex:1; min-width:0; padding-right: 40px;">
             <div style="font-weight:800; font-size:16px; color:var(--color-text); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              ${u.displayName || 'Sin nombre'}
+              ${commerceData ? `🏪 ${commerceData.name || 'Tienda sin nombre'}` : (u.displayName || 'Sin nombre')}
               ${isMe ? '<span style="font-size:10px; font-weight:800; color:var(--color-primary); background:rgba(var(--color-primary-rgb),0.1); padding:1px 6px; border-radius:4px;">VOS</span>' : ''}
             </div>
+            ${commerceData ? `<div style="font-size:12px; color:var(--color-text-tertiary); margin-bottom:2px; font-weight:600;">Dueño/a: ${u.displayName || 'Sin nombre'}</div>` : ''}
             ${u.email ? `<div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:4px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${u.email}</div>` : ''}
+            ${phoneHTML}
             <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
               <span class="id-badge id-go">${u.goId || '...'}</span>
               ${u.deliveryId ? `<span class="id-badge id-dl">${u.deliveryId}</span>` : ''}
@@ -611,13 +674,18 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
         ` : ''}
 
         <!-- Dedicated Reviews and Award Points Action Buttons -->
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 8px;">
-          <button data-view-ratings="${u.uid}" style="height:42px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text); font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='var(--color-border-light)';" onmouseout="this.style.background='var(--color-bg-secondary)';">
-            ${icon('star', 14)} Reseñas (${count})
+        <div style="display:grid; grid-template-columns: ${isMe ? '1fr 1fr' : '1fr 1fr 1fr'}; gap:10px; margin-top: 8px;">
+          <button data-view-ratings="${u.uid}" style="height:42px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='var(--color-border-light)';" onmouseout="this.style.background='var(--color-bg-secondary)';">
+            ${icon('star', 12)} Reseñas (${count})
           </button>
-          <button data-award-points="${u.uid}" style="height:42px; border-radius:12px; border:1px solid rgba(245, 158, 11, 0.25); background:rgba(245, 158, 11, 0.05); color:#d97706; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.12)';" onmouseout="this.style.background='rgba(245, 158, 11, 0.05)';">
-            ${icon('sparkles', 14)} Cargar Puntos
+          <button data-award-points="${u.uid}" style="height:42px; border-radius:12px; border:1px solid rgba(245, 158, 11, 0.25); background:rgba(245, 158, 11, 0.05); color:#d97706; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.12)';" onmouseout="this.style.background='rgba(245, 158, 11, 0.05)';">
+            ${icon('sparkles', 12)} Puntos
           </button>
+          ${!isMe ? `
+            <button data-open-chat="${u.uid}" style="height:42px; border-radius:12px; border:1px solid rgba(var(--color-primary-rgb), 0.25); background:rgba(var(--color-primary-rgb), 0.05); color:var(--color-primary); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(var(--color-primary-rgb), 0.12)';" onmouseout="this.style.background='rgba(var(--color-primary-rgb), 0.05)';">
+              ${icon('chat', 12)} Chat
+            </button>
+          ` : ''}
         </div>
 
         ${(u.deliveryDebt || 0) > 0 ? `

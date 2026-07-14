@@ -163,7 +163,8 @@ export async function renderAdminSupportChats() {
   }
 
   let allChats = [];
-  let selectedChatId = null;
+  let selectedChatId = sessionStorage.getItem('admin-support-chat-target') || null;
+  sessionStorage.removeItem('admin-support-chat-target');
   let activeChatsListener = null;
 
   // Clean up on unmount
