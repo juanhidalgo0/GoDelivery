@@ -5,7 +5,7 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
     integrations:
-      app_store_connect: Codemagic API Key
+      app_store_connect: GO! Key
     environment:
       groups:
         # Aquí puedes vincular el grupo de variables para credenciales de Apple
