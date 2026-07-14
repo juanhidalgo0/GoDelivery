@@ -46,8 +46,7 @@ workflows:
         script: |
           xcode-project build-ipa \
             --project ios/App/App.xcodeproj \
-            --scheme App \
-            --bundle-identifier com.godelivery.magdalena
+            --scheme App
     artifacts:
       - build/ios/ipa/*.ipa
     publishing:
