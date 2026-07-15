@@ -30,7 +30,7 @@ export async function renderAdminUsers() {
             <span>Gestión de Usuarios</span>
             <span id="users-total-badge" style="display:none; font-size:11px; font-weight:900; color:var(--color-primary); background:white; padding:2px 8px; border-radius:100px; line-height:1.2;">0</span>
           </h1>
-          <p style="font-size:11px;color:rgba(255,255,255,0.7);font-weight:800;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.05em;">Panel administrativo de permisos</p>
+          <p id="users-subtitle" style="font-size:11px;color:rgba(255,255,255,0.7);font-weight:800;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.05em;">Panel administrativo de permisos</p>
         </div>
       </div>
 
@@ -59,6 +59,7 @@ export async function renderAdminUsers() {
               <span style="color:var(--color-text-tertiary); display:flex; margin-right:6px;">${icon('sort', 16)}</span>
               <select id="users-sort" style="flex:1; border:none; background:transparent; font-size:13px; font-weight:700; color:var(--color-text); outline:none; appearance:none; cursor:pointer; padding-right:20px;">
                 <option value="none">Por defecto</option>
+                <option value="newest">Más nuevo</option>
                 <option value="rating-desc">Mayor puntuación</option>
                 <option value="rating-asc">Menor puntuación</option>
               </select>
@@ -191,6 +192,13 @@ export async function renderAdminUsers() {
     if (totalBadge) {
       totalBadge.textContent = `${users.length}`;
       totalBadge.style.display = 'inline-block';
+    }
+
+    const androidCount = users.filter(u => u.deviceOS === 'android').length;
+    const iosCount = users.filter(u => u.deviceOS === 'ios').length;
+    const subtitle = document.getElementById('users-subtitle');
+    if (subtitle) {
+      subtitle.textContent = `Panel administrativo • ${androidCount} Android • ${iosCount} iOS`;
     }
     
     // Auto-assign GO-IDs if missing
@@ -563,6 +571,11 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
       const aStats = calculateStats(a);
       const bStats = calculateStats(b);
       
+      if (sortVal === 'newest') {
+        const aTime = a.createdAt ? (a.createdAt.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt).getTime()) : 0;
+        const bTime = b.createdAt ? (b.createdAt.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt).getTime()) : 0;
+        return bTime - aTime;
+      }
       if (sortVal === 'rating-desc') {
         if (aStats.count === 0 && bStats.count === 0) return 0;
         if (aStats.count === 0) return 1;
