@@ -701,6 +701,26 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
           ` : ''}
         </div>
 
+        ${(!isMe && phone) ? (() => {
+          let formattedPhone = phone.toString().replace(/\D/g, '');
+          if (!formattedPhone.startsWith('54')) {
+            if (formattedPhone.length === 10) {
+              formattedPhone = '549' + formattedPhone;
+            } else {
+              formattedPhone = '54' + formattedPhone;
+            }
+          } else if (formattedPhone.startsWith('54') && !formattedPhone.startsWith('549') && formattedPhone.length === 12) {
+            formattedPhone = '549' + formattedPhone.slice(2);
+          }
+          return `
+            <div style="margin-top: 10px;">
+              <a href="https://wa.me/${formattedPhone}" target="_blank" style="height:42px; border-radius:12px; border:1px solid rgba(34, 197, 94, 0.3); background:rgba(34, 197, 94, 0.05); color:#22c55e; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(34, 197, 94, 0.12)';" onmouseout="this.style.background='rgba(34, 197, 94, 0.05)';">
+                ${icon('whatsapp', 14)} Contactar por WhatsApp
+              </a>
+            </div>
+          `;
+        })() : ''}
+
         ${(u.deliveryDebt || 0) > 0 ? `
           <!-- Beautiful Settle Debt Section -->
           <div style="background: rgba(239, 68, 68, 0.05); border: 1px dashed rgba(239, 68, 68, 0.25); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; margin-top: 4px; animation: fadeIn 0.2s ease-out;">
