@@ -2559,8 +2559,9 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
   const userName = data.userName || "Usuario";
   const lastMessageText = data.lastMessageText || "";
   const unreadByAdmin = data.unreadByAdmin === true;
+  const unreadByUser = data.unreadByUser === true;
 
-  // We only notify if unreadByAdmin is true, AND it was either just created or changed from false to true
+  // 1. Notify Admin on new message from user
   const isNewlyUnread = unreadByAdmin && (!previousData || previousData.unreadByAdmin !== true);
 
   if (isNewlyUnread && ticketId) {
@@ -2585,6 +2586,34 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
       }
     } catch (err) {
       logger.error(`Error sending push for support chat of user ${event.params.userId}:`, err);
+    }
+  }
+
+  // 2. Notify User on response from admin
+  const isNewlyUnreadByUser = unreadByUser && (!previousData || previousData.unreadByUser !== true);
+
+  if (isNewlyUnreadByUser) {
+    try {
+      const targetTokens = [];
+      const tSnap = await db.collection("users").doc(event.params.userId).collection("fcmTokens").get();
+      tSnap.docs.forEach(d => {
+        if (d.data().token) {
+          targetTokens.push(d.data().token);
+        }
+      });
+
+      if (targetTokens.length > 0) {
+        logger.info(`Sending support chat response push notification to user ${event.params.userId}.`);
+        await sendPush(targetTokens, {
+          title: "Soporte Técnico GO! Delivery",
+          body: lastMessageText || "Tienes un nuevo mensaje del administrador."
+        }, {
+          url: "/#/mis-chats", // Redirect user to their support chats page
+          type: "support_message"
+        });
+      }
+    } catch (err) {
+      logger.error(`Error sending push response to user ${event.params.userId}:`, err);
     }
   }
 });
