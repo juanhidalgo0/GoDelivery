@@ -1762,16 +1762,20 @@ function loadTabContent(tab, container, user) {
 
                       <!-- Actions -->
                       <div style="display:flex; gap:8px; align-items:center; height:48px; width:100%;">
-                        ${stop.type === 'PICKUP' ? `
-                          <button class="btn mark-picked-up-btn" 
-                                  data-id="${stop.docId}" 
-                                  data-istrip="${stop.isFavor ? 'false' : stop.orders.some(o => o.isTrip)}"
-                                  ${stop.pickedUp ? 'disabled' : ''}
-                                  style="height:100%; font-size:13.5px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; letter-spacing:0.02em;">
-                            ${stop.pickedUp ? icon('check', 16) : (stop.orders.some(o => o.isTrip) ? icon('user', 16) : icon('package', 16))} 
-                            ${stop.pickedUp ? (stop.orders.some(o => o.isTrip) ? 'EN VIAJE' : 'RETIRADO') : (stop.orders.some(o => o.isTrip) ? 'PASAJERO A BORDO' : 'RETIRAR')}
-                          </button>
-                        ` : ''}
+                        ${stop.type === 'PICKUP' ? (() => {
+                          const isDigitalReceipt = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.details?.includes('Foto Digital por Chat'));
+                          return `
+                            <button class="btn mark-picked-up-btn" 
+                                    data-id="${stop.docId}" 
+                                    data-istrip="${stop.isFavor ? 'false' : stop.orders.some(o => o.isTrip)}"
+                                    data-isdigitalreceipt="${isDigitalReceipt}"
+                                    ${stop.pickedUp ? 'disabled' : ''}
+                                    style="height:100%; font-size:13.5px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; letter-spacing:0.02em;">
+                              ${stop.pickedUp ? icon('check', 16) : (stop.orders.some(o => o.isTrip) ? icon('user', 16) : (isDigitalReceipt ? icon('checkCircle', 16) : icon('package', 16)))} 
+                              ${stop.pickedUp ? (stop.orders.some(o => o.isTrip) ? 'EN VIAJE' : 'RETIRADO') : (stop.orders.some(o => o.isTrip) ? 'PASAJERO A BORDO' : (isDigitalReceipt ? 'PAGADO' : 'RETIRAR'))}
+                            </button>
+                          `;
+                        })() : ''}
                         
                         ${stop.type === 'DROP_OFF' ? `
                           ${(() => {
@@ -1924,6 +1928,124 @@ function loadTabContent(tab, container, user) {
         container.querySelectorAll('.mark-picked-up-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             const isTrip = btn.dataset.istrip === 'true';
+            const isDigitalReceipt = btn.dataset.isdigitalreceipt === 'true';
+
+            if (isDigitalReceipt) {
+              showConfirm({
+                title: '¿Confirmar Pago de Servicio?',
+                message: 'Confirmá que realizaste el pago del servicio para proceder a tomarle una foto al recibo/comprobante de pago.',
+                confirmText: 'Confirmar y Abrir Cámara',
+                onConfirm: async () => {
+                  btn.disabled = true;
+                  btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Abriendo cámara...';
+                  
+                  const handleDigitalReceiptUpload = async (file) => {
+                    btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Subiendo comprobante...';
+                    try {
+                      const orderId = btn.dataset.id;
+                      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+                      const { storage } = await import('../firebase.js');
+
+                      // 1. Add uploading placeholder to chat
+                      const msgRef = await addDoc(collection(db, 'orders', orderId, 'messages'), {
+                        senderId: user.uid,
+                        senderName: user.displayName || user.name || 'Repartidor',
+                        text: 'Subiendo comprobante...',
+                        type: 'image',
+                        status: 'uploading',
+                        createdAt: serverTimestamp()
+                      });
+
+                      // 2. Upload file
+                      const fileRef = ref(storage, `chats/${orderId}/${Date.now()}_comprobante.jpg`);
+                      const metadata = { contentType: file.type || 'image/jpeg' };
+                      await uploadBytes(fileRef, file, metadata);
+                      const url = await getDownloadURL(fileRef);
+
+                      // 3. Update chat message
+                      await updateDoc(msgRef, {
+                        text: '',
+                        imageUrl: url,
+                        status: 'ready'
+                      });
+
+                      // 4. Mark order as picked up
+                      await markAsPickedUp(orderId);
+
+                      // 5. Send message requesting verification code to client
+                      await addDoc(collection(db, 'orders', orderId, 'messages'), {
+                        senderId: 'system',
+                        senderName: 'GoDelivery',
+                        text: `⚠️ **Código de Entrega Solicitado**\n\nEl repartidor ha subido la foto del comprobante de pago de tu servicio.\n\nPor favor, facilítale el **Código de Entrega de 4 dígitos** que ves en tu pantalla de seguimiento para que pueda finalizar el pedido.`,
+                        createdAt: serverTimestamp(),
+                        type: 'system'
+                      });
+
+                      showToast('¡Comprobante enviado y pedido marcado como pagado!', 'success');
+                    } catch (err) {
+                      console.error('Digital receipt upload error:', err);
+                      showToast('Error al subir el comprobante: ' + err.toString(), 'error');
+                      btn.disabled = false;
+                      btn.innerHTML = icon('checkCircle', 16) + ' PAGADO';
+                    }
+                  };
+
+                  const startCameraCapture = async () => {
+                    try {
+                      const { Capacitor } = await import('@capacitor/core');
+                      if (Capacitor.isNativePlatform()) {
+                        const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+                        const photo = await Camera.getPhoto({
+                          quality: 85,
+                          allowEditing: false,
+                          resultType: CameraResultType.Uri,
+                          source: CameraSource.Camera
+                        });
+                        const response = await fetch(photo.webPath);
+                        const blob = await response.blob();
+                        const file = new File([blob], `comprobante_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                        await handleDigitalReceiptUpload(file);
+                      } else {
+                        // Create web input element dynamically
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.setAttribute('capture', 'environment');
+                        input.onchange = async (e) => {
+                          const file = e.target.files[0];
+                          if (file) {
+                            await handleDigitalReceiptUpload(file);
+                          } else {
+                            btn.disabled = false;
+                            btn.innerHTML = icon('checkCircle', 16) + ' PAGADO';
+                          }
+                        };
+                        input.click();
+                      }
+                    } catch (err) {
+                      console.warn('Capacitor camera error, falling back to input file click', err);
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          await handleDigitalReceiptUpload(file);
+                        } else {
+                          btn.disabled = false;
+                          btn.innerHTML = icon('checkCircle', 16) + ' PAGADO';
+                        }
+                      };
+                      input.click();
+                    }
+                  };
+
+                  await startCameraCapture();
+                }
+              });
+              return;
+            }
+
             showConfirm({
               title: isTrip ? '¿Confirmar Inicio de Viaje?' : '¿Confirmar Retiro?',
               message: isTrip ? 'Confirmá que el pasajero ya está a bordo para iniciar el trayecto.' : 'Asegurate de haber recibido todos los productos del local.',
@@ -4574,6 +4696,27 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
       user.lastTripAcceptedAt = new Date();
       setState('user', { ...getState().user, lastActivityAt: new Date(), lastTripAcceptedAt: new Date() });
     });
+
+    // Send automated messages for Pago de Servicios orders
+    for (const o of ordersToTake) {
+      if (o.favorType === 'pagodeservicios') {
+        try {
+          const alias = userData.transferAlias || 'No configurado';
+          const totalTransfer = o.total || 0;
+          const driverName = user.displayName || user.name || 'Repartidor';
+          
+          await addDoc(collection(db, 'orders', o.id, 'messages'), {
+            senderId: 'system',
+            senderName: 'GoDelivery',
+            text: `👋 ¡Hola! El repartidor **${driverName}** ha aceptado tu Pago de Servicio.\n\n🏦 **Detalles para Transferencia**:\n• **Monto a transferir:** ${formatPrice(totalTransfer)}\n• **Alias:** \`${alias}\`\n\nPor favor realiza la transferencia y envía el comprobante por este chat para que el repartidor proceda a pagar tu servicio.`,
+            createdAt: serverTimestamp(),
+            type: 'system'
+          });
+        } catch (msgErr) {
+          console.error('Error sending automated accept message:', msgErr);
+        }
+      }
+    }
 
     showToast('¡Pedido tomado! Empezá tu ruta.', 'success');
     // Automatically switch to active tab

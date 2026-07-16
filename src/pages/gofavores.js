@@ -2386,7 +2386,7 @@ export async function showPagoServiciosForm() {
     const total = Math.max(logisticsCost + appFee - couponDiscount + selectedTip, 0);
 
     const deliveryTypeLabel = receiptDeliveryType === 'physical' ? 'Comprobante Físico a Domicilio' : 'Foto Digital por Chat';
-    const detailPayload = `🏢 **Servicio:** Pago de ${selectedService}\n📄 **Facturas & Código:** ${detailsText}\n📩 **Entrega Comprobante:** ${deliveryTypeLabel}`;
+    const detailPayload = `🏢 **Servicio:** ${selectedService}\n📄 **Facturas & Código:** ${detailsText}\n📩 **Entrega Comprobante:** ${deliveryTypeLabel}`;
 
     const pickupAddressVal = `Pago Fácil Centro (Trámite de Pago)`;
     const deliveryAddressVal = receiptDeliveryType === 'physical'
