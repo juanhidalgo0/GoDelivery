@@ -7,6 +7,13 @@ import { db } from '../firebase.js';
 import { App } from '@capacitor/app';
 
 import { isDelivery } from '../auth.js';
+
+export function getOrderDriverEarnings(o) {
+  if (o.isTrip || o.isFavor) {
+    return (o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0);
+  }
+  return (o.deliveryCost || 0) + (o.tip || o.tipAmount || 0);
+}
 import { showDeliveryMapModal } from '../components/delivery-map-modal.js';
 import { showConfirm, showModal, closeModal } from '../components/modal.js';
 
@@ -828,7 +835,7 @@ function loadTabContent(tab, container, user) {
                     <!-- Ganancia Tuya -->
                     <div style="flex:1; background: #10b981; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(16, 185, 129, 0.15); border: none;">
                       <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">Ganancia Tuya</div>
-                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice((isFavor || isTrip) ? ((b.deliveryCost || 0) + (b.purchaseFee || 0) + (b.extraStopsFee || 0) + (b.tip || b.tipAmount || 0) - (b.appUsageFee || 0)) : b.deliveryCost)}</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice(getOrderDriverEarnings(b))}</div>
                     </div>
                   </div>
  
@@ -2265,10 +2272,7 @@ function loadTabContent(tab, container, user) {
               const main = group[0];
               const totalAmount = group.reduce((sum, o) => sum + (o.total || 0), 0);
               const totalDelivery = group.reduce((sum, o) => {
-                const orderEarnings = o.isTrip || o.isFavor 
-                  ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-                  : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-                return sum + orderEarnings;
+                return sum + getOrderDriverEarnings(o);
               }, 0);
               const totalAppFee = group.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
               const isFromCurrentSession = currentSessionId && (main.deliverySessionId === currentSessionId);
@@ -2501,13 +2505,7 @@ function loadTabContent(tab, container, user) {
                 fWhere('deliverySessionId', '==', currentSessionId)
               ), (ordersSnap) => {
                 const totalEarned = ordersSnap.docs.reduce((sum, d) => {
-                  const o = d.data();
-                  // Driver net earnings for favors & trips: (deliveryCost + purchaseFee + extraStopsFee + tip) - appUsageFee
-                  // For normal store orders: deliveryCost + tip
-                  const orderEarnings = o.isTrip || o.isFavor 
-                    ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-                    : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-                  return sum + orderEarnings;
+                  return sum + getOrderDriverEarnings(d.data());
                 }, 0);
                 const count = ordersSnap.size;
                 
@@ -2552,11 +2550,7 @@ function loadTabContent(tab, container, user) {
                    ));
                    if (!liveSnap.empty) {
                      displayTotal = liveSnap.docs.reduce((s, d) => {
-                        const o = d.data();
-                        const orderEarnings = o.isTrip || o.isFavor 
-                          ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-                          : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-                        return s + orderEarnings;
+                        return s + getOrderDriverEarnings(d.data());
                       }, 0);
                      displayCount = liveSnap.size;
                    }
@@ -3422,11 +3416,7 @@ async function endSession(user) {
           where('status', '==', 'completed')
         ));
         const total = ordersSnap.docs.reduce((s, d) => {
-          const o = d.data();
-          const orderEarnings = o.isTrip || o.isFavor 
-            ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-            : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-          return s + orderEarnings;
+          return s + getOrderDriverEarnings(d.data());
         }, 0);
         
         await updateDoc(sessRef, {
@@ -3732,9 +3722,7 @@ async function loadProfessionalStats(driverId, callback = null) {
       } else {
         deliveredDate = new Date();
       }
-      const netEarnings = data.isTrip || data.isFavor 
-        ? ((data.deliveryCost || 0) + (data.purchaseFee || 0) + (data.extraStopsFee || 0) + (data.tip || data.tipAmount || 0) - (data.appUsageFee || 0))
-        : ((data.deliveryCost || 0) + (data.tip || data.tipAmount || 0));
+      const netEarnings = getOrderDriverEarnings(data);
       return {
         ...data,
         deliveryCost: netEarnings,
@@ -3952,10 +3940,7 @@ async function loadRecentSessionsList(uid) {
       });
 
       const total = sessOrders.reduce((sum, o) => {
-        const orderEarnings = o.isTrip || o.isFavor 
-          ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-          : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-        return sum + orderEarnings;
+        return sum + getOrderDriverEarnings(o);
       }, 0);
 
       const uniqueBundles = new Set(sessOrders.map(o => o.bundleId || o.id));
@@ -4066,10 +4051,7 @@ async function showSessionsHistoryModal(driverId) {
         });
 
         const totalEarned = sessOrders.reduce((sum, o) => {
-          const orderEarnings = o.isTrip || o.isFavor 
-            ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-            : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-          return sum + orderEarnings;
+          return sum + getOrderDriverEarnings(o);
         }, 0);
 
         const uniqueBundles = new Set(sessOrders.map(o => o.bundleId || o.id));
@@ -4215,9 +4197,7 @@ async function showSessionsHistoryModal(driverId) {
       ));
       const orders = ordersSnap.docs.map(d => {
         const data = d.data();
-        const netEarnings = data.isTrip || data.isFavor 
-          ? ((data.deliveryCost || 0) + (data.purchaseFee || 0) + (data.extraStopsFee || 0) + (data.tip || data.tipAmount || 0) - (data.appUsageFee || 0))
-          : ((data.deliveryCost || 0) + (data.tip || data.tipAmount || 0));
+        const netEarnings = getOrderDriverEarnings(data);
         return {
           ...data,
           deliveryCost: netEarnings,
@@ -4956,10 +4936,7 @@ export async function showSuccessCelebration(orders, onFinish) {
   let currentDebt = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
 
   const totalEarned = orders.reduce((sum, o) => {
-    const orderEarnings = o.isTrip || o.isFavor 
-      ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-      : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
-    return sum + orderEarnings;
+    return sum + getOrderDriverEarnings(o);
   }, 0);
 
   if (currentSessionId) {
@@ -4974,9 +4951,7 @@ export async function showSuccessCelebration(orders, onFinish) {
       let totalCompletedInSession = 0;
       snap.docs.forEach(d => {
         const o = d.data();
-        const netEarnings = o.isTrip || o.isFavor
-          ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-          : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+        const netEarnings = getOrderDriverEarnings(o);
         totalCompletedInSession += netEarnings;
       });
 
@@ -4985,9 +4960,7 @@ export async function showSuccessCelebration(orders, onFinish) {
       snap.docs.forEach(d => {
         if (currentOrderIds.includes(d.id)) {
           const o = d.data();
-          const netEarnings = o.isTrip || o.isFavor
-            ? ((o.deliveryCost || 0) + (o.purchaseFee || 0) + (o.extraStopsFee || 0) + (o.tip || o.tipAmount || 0) - (o.appUsageFee || 0))
-            : ((o.deliveryCost || 0) + (o.tip || o.tipAmount || 0));
+          const netEarnings = getOrderDriverEarnings(o);
           currentOrdersSessionEarnings += netEarnings;
         }
       });
