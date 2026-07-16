@@ -2093,36 +2093,44 @@ function loadTabContent(tab, container, user) {
               }
             }
 
-            btn.disabled = true;
-            btn.innerHTML = icon('loader', 14, 'animate-spin') + ' NOTIFICANDO...';
-            
-            try {
-              for (const orderId of ids) {
-                const order = orders.find(o => o.id === orderId);
-                if (!order) continue;
+            showConfirm({
+              title: '¿Avisar que estás afuera?',
+              message: 'Se le enviará una notificación en tiempo real al cliente indicándole que ya te encuentras afuera en la puerta de su domicilio.',
+              confirmText: 'Sí, Avisar',
+              cancelText: 'Cancelar',
+              onConfirm: async () => {
+                btn.disabled = true;
+                btn.innerHTML = icon('loader', 14, 'animate-spin') + ' NOTIFICANDO...';
                 
-                await updateDoc(doc(db, 'orders', orderId), {
-                  isAtDoor: true,
-                  atDoorAt: serverTimestamp()
-                });
-                
-                if (order.userId) {
-                  await addDoc(collection(db, 'users', order.userId, 'notifications'), {
-                    title: '¡Tu repartidor está en la puerta!',
-                    body: order.isFavor ? 'El repartidor llegó con tu favor. ¡Salí a recibirlo!' : 'Prepárate para recibir tu pedido. ¡Ya llegó!',
-                    type: 'system',
-                    status: 'unread',
-                    createdAt: serverTimestamp()
-                  });
+                try {
+                  for (const orderId of ids) {
+                    const order = orders.find(o => o.id === orderId);
+                    if (!order) continue;
+                    
+                    await updateDoc(doc(db, 'orders', orderId), {
+                      isAtDoor: true,
+                      atDoorAt: serverTimestamp()
+                    });
+                    
+                    if (order.userId) {
+                      await addDoc(collection(db, 'users', order.userId, 'notifications'), {
+                        title: '¡Tu repartidor está en la puerta!',
+                        body: order.isFavor ? 'El repartidor llegó con tu favor. ¡Salí a recibirlo!' : 'Prepárate para recibir tu pedido. ¡Ya llegó!',
+                        type: 'system',
+                        status: 'unread',
+                        createdAt: serverTimestamp()
+                      });
+                    }
+                  }
+                  showToast('Cliente notificado', 'success');
+                } catch (err) {
+                  console.error('Error in notify-at-door:', err);
+                  showToast('Error al notificar al cliente', 'danger');
+                  btn.disabled = false;
+                  btn.innerHTML = icon('bell', 14) + ' AVISAR AFUERA';
                 }
               }
-              showToast('Cliente notificado', 'success');
-            } catch (err) {
-              console.error('Error in notify-at-door:', err);
-              showToast('Error al notificar al cliente', 'danger');
-              btn.disabled = false;
-              btn.innerHTML = icon('bell', 18) + ' AVISAR QUE ESTOY AFUERA';
-            }
+            });
           });
         });
 
