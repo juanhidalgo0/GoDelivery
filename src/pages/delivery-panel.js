@@ -2182,9 +2182,12 @@ function loadTabContent(tab, container, user) {
                     });
                     
                     if (order.userId) {
+                      const codeStr = order.verificationCode ? ` Tené listo tu código de entrega: ${order.verificationCode}` : '';
                       await addDoc(collection(db, 'users', order.userId, 'notifications'), {
                         title: '¡Tu repartidor está en la puerta!',
-                        body: order.isFavor ? 'El repartidor llegó con tu favor. ¡Salí a recibirlo!' : 'Prepárate para recibir tu pedido. ¡Ya llegó!',
+                        body: order.isFavor 
+                          ? `El repartidor llegó con tu favor. ¡Salí a recibirlo!${codeStr}` 
+                          : `Prepárate para recibir tu pedido. ¡Ya llegó!${codeStr}`,
                         type: 'system',
                         status: 'unread',
                         createdAt: serverTimestamp()
@@ -4850,6 +4853,31 @@ export async function markAsPickedUp(orderIdOrIds) {
         batch.update(doc(db, 'orders', id), updates);
       });
       await batch.commit();
+      
+      // Send real-time push/in-app notifications to the clients with their verification codes
+      for (const id of ids) {
+        try {
+          const orderSnap = await getDoc(doc(db, 'orders', id));
+          if (orderSnap.exists()) {
+            const orderData = orderSnap.data();
+            if (orderData.userId) {
+              const codeStr = orderData.verificationCode ? ` Tené listo tu código de entrega: ${orderData.verificationCode}` : '';
+              await addDoc(collection(db, 'users', orderData.userId, 'notifications'), {
+                title: orderData.isFavor ? '¡Tu favor va en camino! 🚴' : '¡Tu pedido va en camino! 🚴',
+                body: orderData.isFavor 
+                  ? `El repartidor ya retiró tu favor y va para allá.${codeStr}` 
+                  : `El repartidor retiró tu pedido y va hacia tu domicilio.${codeStr}`,
+                type: 'system',
+                status: 'unread',
+                createdAt: serverTimestamp()
+              });
+            }
+          }
+        } catch (notifErr) {
+          console.warn('Could not send pickup notification to user:', notifErr);
+        }
+      }
+
       showToast(ids.length > 1 ? 'Pedidos retirados con éxito' : 'Pedido retirado con éxito', 'success');
     } catch (err) {
       console.warn('Network issue, order marked picked up locally:', err);
