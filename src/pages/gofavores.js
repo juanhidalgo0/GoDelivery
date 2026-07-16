@@ -2059,7 +2059,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 
 export async function showPagoServiciosForm() {
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px; display: flex; flex-direction: column; gap: 16px; min-height: 100%; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;';
 
   let currentAddress = getState().deliveryAddress || '';
   let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
@@ -2072,29 +2072,28 @@ export async function showPagoServiciosForm() {
   let appliedCoupon = null;
 
   modalEl.innerHTML = `
-    <div style="flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y:auto; scrollbar-width:none;">
-      
-      <!-- STEP 1 CONTAINER -->
-      <div id="ps-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+    <!-- STEP 1 CONTAINER -->
+    <div id="ps-step-1-container" style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; height: 100%; overflow: hidden;">
+      <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
         
         <!-- Service Chooser List -->
         <div style="display:flex; flex-direction:column; gap:8px;">
           <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
-          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;" id="ps-service-grid">
-            <button class="ps-service-btn active" data-service="Cyber" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
-              🏪 Cyber
+          <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:12px;" id="ps-service-grid">
+            <button class="ps-service-btn active" data-service="Cyber" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
+              ${icon('monitor', 22)} Cyber
             </button>
-            <button class="ps-service-btn" data-service="ABSA" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
-              💧 ABSA
+            <button class="ps-service-btn" data-service="ABSA" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
+              ${icon('droplet', 22)} ABSA
             </button>
-            <button class="ps-service-btn" data-service="Canal 4" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
-              📺 Canal 4
+            <button class="ps-service-btn" data-service="Canal 4" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
+              ${icon('tv', 22)} Canal 4
             </button>
-            <button class="ps-service-btn" data-service="Rapipago" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
-              💳 Rapipago
+            <button class="ps-service-btn" data-service="Rapipago" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
+              ${icon('creditCard', 22)} Rapipago
             </button>
-            <button class="ps-service-btn" data-service="PagoFácil" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
-              ⚡ PagoFácil
+            <button class="ps-service-btn" data-service="PagoFácil" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s; grid-column: span 2;">
+              ${icon('zap', 22)} PagoFácil
             </button>
           </div>
         </div>
@@ -2102,23 +2101,30 @@ export async function showPagoServiciosForm() {
         <!-- Detail Input -->
         <div style="display:flex; flex-direction:column; gap:8px;">
           <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Servicios y Detalles a Pagar</label>
-          <textarea id="ps-details-input" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares para el chofer" style="width:100%; height:90px; border-radius:16px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none; font-family:inherit; resize:none;"></textarea>
+          <textarea id="ps-details-input" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares del delivery" style="width:100%; height:90px; border-radius:18px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none; font-family:inherit; resize:none; transition:border-color 0.2s;"></textarea>
         </div>
 
         <!-- Receipt Delivery Selector -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; flex-direction:column; gap:10px;">
           <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Forma de Recibir el Comprobante</label>
-          <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
-            <button id="ps-delivery-digital" class="ps-del-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); display:flex; align-items:center; justify-content:center; text-align:center;">
-              Foto Digital<br><span style="font-size:9px; font-weight:600; opacity:0.8;">Sin costo adicional</span>
+          <div style="display: flex; background: var(--color-bg-secondary); padding: 5px; border-radius: 18px; border: 1.5px solid var(--color-border-light);">
+            <button type="button" id="ps-delivery-digital" class="ps-del-btn active" style="flex: 1; height: 50px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: #10B981; color: white; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+              ${icon('image', 18)} Foto Digital
             </button>
-            <button id="ps-delivery-physical" class="ps-del-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; text-align:center;">
-              Comprobante Físico<br><span style="font-size:9px; font-weight:600; opacity:0.8;">A Domicilio (+ Envío)</span>
+            <button type="button" id="ps-delivery-physical" class="ps-del-btn" style="flex: 1; height: 50px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; gap:8px;">
+              ${icon('mapPin', 18)} Comprobante Físico
             </button>
+          </div>
+          <!-- Helper subtexts outside of the buttons -->
+          <div id="ps-del-subtext-digital" style="font-size: 11px; color: var(--color-success); font-weight: 800; text-align: center; margin-top: 2px; display: block; line-height: 1.4;">
+            🟢 Sin costo adicional (Recibís foto del ticket por chat)
+          </div>
+          <div id="ps-del-subtext-physical" style="font-size: 11px; color: var(--color-primary); font-weight: 800; text-align: center; margin-top: 2px; display: none; line-height: 1.4;">
+            🚚 Envío a Domicilio (+ Envío por Distancia del Viaje)
           </div>
         </div>
 
-        <!-- Physical Delivery Address Details (Shown conditionally) -->
+        <!-- Physical Delivery Address Details -->
         <div id="ps-address-section" style="display:none; flex-direction:column; gap:8px;">
           <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Tu Dirección de Entrega</label>
           <button id="ps-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
@@ -2128,15 +2134,17 @@ export async function showPagoServiciosForm() {
           </button>
           <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
         </div>
-
-        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
-          Siguiente ${icon('chevronRight', 16)}
-        </button>
       </div>
 
-      <!-- STEP 2 CONTAINER -->
-      <div id="ps-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+      <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 10px;">
+        Siguiente ${icon('chevronRight', 16)}
+      </button>
+    </div>
+
+    <!-- STEP 2 CONTAINER -->
+    <div id="ps-step-2-container" style="display: none; flex-direction: column; justify-content: space-between; height: 100%; overflow: hidden;">
+      <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
+        <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content; margin-bottom: 10px;">
           ${icon('chevronLeft', 16)} Volver a Paso 1
         </button>
 
@@ -2165,19 +2173,18 @@ export async function showPagoServiciosForm() {
             * El dinero de la factura a pagar se coordina y se abona al repartidor al momento de iniciar la gestión o por transferencia.
           </p>
         </div>
-
-        <button id="confirm-ps-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
-          ${icon('check', 20)} Solicitar Pago de Servicios
-        </button>
       </div>
 
+      <button id="confirm-ps-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 10px;">
+        ${icon('check', 20)} Solicitar Pago de Servicios
+      </button>
     </div>
   `;
 
   showModal({
     title: 'Solicitar Pago de Servicios',
     content: modalEl,
-    height: '80dvh',
+    height: '85dvh',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
     headerTextColor: '#ffffff'
@@ -2187,6 +2194,8 @@ export async function showPagoServiciosForm() {
   const detailsInput = modalEl.querySelector('#ps-details-input');
   const btnDigital = modalEl.querySelector('#ps-delivery-digital');
   const btnPhysical = modalEl.querySelector('#ps-delivery-physical');
+  const subtextDigital = modalEl.querySelector('#ps-del-subtext-digital');
+  const subtextPhysical = modalEl.querySelector('#ps-del-subtext-physical');
   const addressSection = modalEl.querySelector('#ps-address-section');
   const deliveryBtn = modalEl.querySelector('#ps-delivery-addr-btn');
   const deliveryText = modalEl.querySelector('#ps-delivery-text');
@@ -2207,10 +2216,13 @@ export async function showPagoServiciosForm() {
         b.style.background = 'var(--color-surface)';
         b.style.borderColor = 'var(--color-border-light)';
         b.style.boxShadow = 'none';
+        b.style.color = 'var(--color-text-primary)';
       });
       btn.classList.add('active');
-      btn.style.background = 'rgba(245, 158, 11, 0.08)';
-      btn.style.borderColor = 'var(--color-primary)';
+      btn.style.background = 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
+      btn.style.borderColor = 'transparent';
+      btn.style.color = 'white';
+      btn.style.boxShadow = '0 4px 12px rgba(217, 119, 6, 0.3)';
       selectedService = btn.dataset.service;
     };
   });
@@ -2218,21 +2230,25 @@ export async function showPagoServiciosForm() {
   // Highlight first service active style initially
   const activeBtn = serviceGrid.querySelector('.ps-service-btn.active');
   if (activeBtn) {
-    activeBtn.style.background = 'rgba(245, 158, 11, 0.08)';
-    activeBtn.style.borderColor = 'var(--color-primary)';
+    activeBtn.style.background = 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
+    activeBtn.style.borderColor = 'transparent';
+    activeBtn.style.color = 'white';
+    activeBtn.style.boxShadow = '0 4px 12px rgba(217, 119, 6, 0.3)';
   }
 
   // Toggle receipt delivery methods
   btnDigital.onclick = () => {
     receiptDeliveryType = 'digital';
     btnDigital.classList.add('active');
-    btnDigital.style.background = 'var(--color-surface)';
-    btnDigital.style.color = 'var(--color-text-primary)';
-    btnDigital.style.boxShadow = 'var(--shadow-sm)';
+    btnDigital.style.background = '#10B981';
+    btnDigital.style.color = '#ffffff';
+    btnDigital.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.2)';
     btnPhysical.classList.remove('active');
     btnPhysical.style.background = 'transparent';
     btnPhysical.style.color = 'var(--color-text-tertiary)';
     btnPhysical.style.boxShadow = 'none';
+    subtextDigital.style.display = 'block';
+    subtextPhysical.style.display = 'none';
     addressSection.style.display = 'none';
     updateCost();
   };
@@ -2240,13 +2256,15 @@ export async function showPagoServiciosForm() {
   btnPhysical.onclick = () => {
     receiptDeliveryType = 'physical';
     btnPhysical.classList.add('active');
-    btnPhysical.style.background = 'var(--color-surface)';
-    btnPhysical.style.color = 'var(--color-text-primary)';
-    btnPhysical.style.boxShadow = 'var(--shadow-sm)';
+    btnPhysical.style.background = 'var(--color-primary)';
+    btnPhysical.style.color = '#ffffff';
+    btnPhysical.style.boxShadow = '0 4px 12px rgba(var(--color-primary-rgb), 0.2)';
     btnDigital.classList.remove('active');
     btnDigital.style.background = 'transparent';
     btnDigital.style.color = 'var(--color-text-tertiary)';
     btnDigital.style.boxShadow = 'none';
+    subtextDigital.style.display = 'none';
+    subtextPhysical.style.display = 'block';
     addressSection.style.display = 'flex';
     updateCost();
   };
