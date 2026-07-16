@@ -5,6 +5,48 @@ import { getState } from '../../state.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
 
+function getFavorTypeMeta(favorType) {
+  switch (favorType) {
+    case 'gocash':
+      return {
+        title: 'Go Cash',
+        label: 'GO CASH',
+        color: '#6366f1',
+        bg: 'rgba(99, 102, 241, 0.1)'
+      };
+    case 'encomienda':
+      return {
+        title: 'GoFavor: Encomienda',
+        label: 'ENCOMIENDA',
+        color: '#10b981',
+        bg: 'rgba(16, 185, 129, 0.1)'
+      };
+    case 'pagodeservicios':
+      return {
+        title: 'GoFavor: PAGO DE SERVICIO',
+        label: 'PAGO DE SERVICIOS',
+        color: '#d97706',
+        bg: 'rgba(217, 119, 6, 0.1)'
+      };
+    case 'mandado':
+    case 'compra':
+    default:
+      return {
+        title: favorType === 'compra' ? 'Go Favor: Compra' : 'Go Favor: Mandado',
+        label: 'GO FAVOR',
+        color: '#ef4444',
+        bg: 'rgba(239, 68, 68, 0.1)'
+      };
+  }
+}
+
+function cleanFavorDetailsText(detailsStr) {
+  if (!detailsStr) return '';
+  return detailsStr
+    .replace(/\*\*/g, '')
+    .replace(/\n/g, ' · ');
+}
+
 export async function renderProfileOrders(content) {
   const user = getState().user;
 
@@ -134,13 +176,13 @@ function renderOrders(orders) {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
           <div style="flex:1; min-width:0;">
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-              <span style="font-size:10px; font-weight:900; padding:2px 8px; border-radius:8px; background:${o.isFavor ? (o.favorType === 'mandado' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)') : 'rgba(var(--color-primary-rgb),0.1)'}; color:${o.isFavor ? (o.favorType === 'mandado' ? '#22c55e' : '#ef4444') : 'var(--color-primary)'}; text-transform:uppercase; letter-spacing:0.05em;">
-                ${o.isFavor ? 'GO FAVOR' : 'PEDIDO'}
+              <span style="font-size:10px; font-weight:900; padding:2px 8px; border-radius:8px; background:${o.isFavor ? getFavorTypeMeta(o.favorType).bg : 'rgba(var(--color-primary-rgb),0.1)'}; color:${o.isFavor ? getFavorTypeMeta(o.favorType).color : 'var(--color-primary)'}; text-transform:uppercase; letter-spacing:0.05em;">
+                ${o.isFavor ? getFavorTypeMeta(o.favorType).label : 'PEDIDO'}
               </span>
               <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase;">#${o.orderId || o.id.slice(0,6)}</span>
             </div>
             <div style="font-weight:900; font-size:18px; color:var(--color-text); letter-spacing:-0.02em;">
-              ${o.isFavor ? `Go Favor: ${o.favorType === 'mandado' ? 'Mandado' : 'Compra'}` : (o.comercioName || 'Pedido')}
+              ${o.isFavor ? getFavorTypeMeta(o.favorType).title : (o.comercioName || 'Pedido')}
             </div>
             <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase; margin-top:4px; display:flex; align-items:center; gap:6px;">
               ${icon('clock', 12)}
@@ -169,7 +211,7 @@ function renderOrders(orders) {
  
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; max-width:65%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            ${o.isFavor ? (o.details || 'Ver detalles...') : (o.items ? o.items.map(i => i.name).join(', ') : 'Detalle no disponible')}
+            ${o.isFavor ? (cleanFavorDetailsText(o.details) || 'Ver detalles...') : (o.items ? o.items.map(i => i.name).join(', ') : 'Detalle no disponible')}
           </div>
           <div style="font-weight:950; font-size:18px; color:var(--color-text); letter-spacing:-0.03em;">${formatPrice(o.total)}</div>
         </div>
