@@ -829,8 +829,8 @@ function loadTabContent(tab, container, user) {
                   <div style="display:flex; gap:12px; margin-top:16px; margin-bottom:20px;">
                     <!-- Costo Productos / Servicio -->
                     <div style="flex:1; background: ${isTrip ? '#3b82f6' : favorColor}; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px ${isTrip ? 'rgba(59, 130, 246, 0.15)' : `rgba(${favorRgb}, 0.15)`}; border: none;">
-                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${isTrip ? 'Costo Viaje' : (isFavor ? (favorType === 'pagodeservicios' ? 'Costo Trámite' : (favorType === 'gocash' ? 'Costo Gestión' : 'Costo Productos')) : 'Costo Productos')}</div>
-                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice(isTrip ? b.total : (b.subtotal || 0))}</div>
+                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${isTrip ? 'Costo Viaje' : (isFavor ? (favorType === 'pagodeservicios' ? 'Costo Servicios' : (favorType === 'gocash' ? 'Costo Gestión' : 'Costo Productos')) : 'Costo Productos')}</div>
+                      <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${isTrip ? formatPrice(b.total) : ((b.subtotal || 0) > 0 ? formatPrice(b.subtotal) : 'PENDIENTE')}</div>
                     </div>
                     <!-- Ganancia Tuya -->
                     <div style="flex:1; background: #10b981; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(16, 185, 129, 0.15); border: none;">
@@ -1764,11 +1764,11 @@ function loadTabContent(tab, container, user) {
                             <span style="font-size:12px; color:var(--color-text-primary); font-weight:900; text-transform:uppercase;">TOTAL A COBRAR</span>
                             <span style="font-size:18px; color:var(--color-text-primary); font-weight:900; letter-spacing:-0.03em;">${formatPrice(stop.orders.reduce((s, o) => s + (o.total || 0), 0))}</span>
                           </div>
-                          ${stop.orders.some(o => o.isFavor && o.favorType === 'compra') ? `
+                          ${stop.orders.some(o => o.isFavor && (o.favorType === 'compra' || o.favorType === 'pagodeservicios')) ? `
                             <button class="btn edit-favor-price-btn" 
-                                    data-id="${stop.orders.find(o => o.isFavor && o.favorType === 'compra').id}"
+                                    data-id="${stop.orders.find(o => o.isFavor && (o.favorType === 'compra' || o.favorType === 'pagodeservicios')).id}"
                                     style="width:100%; height:42px; border-radius:14px; background:rgba(var(--color-primary-rgb),0.1); border:1px solid rgba(var(--color-primary-rgb),0.2); color:var(--color-primary); font-size:12px; font-weight:900; margin-top:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-                              ${icon('edit', 14)} Cargar valor de productos
+                              ${icon('edit', 14)} ${stop.orders.some(o => o.favorType === 'pagodeservicios') ? 'Cargar valor de servicios' : 'Cargar valor de productos'}
                             </button>
                           ` : ''}
                         </div>
@@ -2086,8 +2086,8 @@ function loadTabContent(tab, container, user) {
             // Check if any order is GoFavor Compra and hasn't loaded product prices
             for (const orderId of ids) {
               const order = orders.find(o => o.id === orderId);
-              if (order && order.isFavor && order.favorType === 'compra' && !order.subtotal) {
-                showToast('⚠️ Debes ingresar el valor de los productos antes de avisar que estás afuera', 'warning');
+              if (order && order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios') && !order.subtotal) {
+                showToast(order.favorType === 'pagodeservicios' ? '⚠️ Debes ingresar el valor de las facturas antes de avisar que estás afuera' : '⚠️ Debes ingresar el valor de los productos antes de avisar que estás afuera', 'warning');
                 showEditFavorPriceModal(order, true);
                 return;
               }
@@ -2143,8 +2143,8 @@ function loadTabContent(tab, container, user) {
             // Check if it's a GoFavor Compra and hasn't loaded product prices (subtotal is 0 or empty)
             const orderId = ids[0];
             const order = orders.find(o => o.id === orderId);
-            if (order && order.isFavor && order.favorType === 'compra' && !order.subtotal) {
-              showToast('⚠️ Debes ingresar el valor de los productos antes de entregar el pedido', 'warning');
+            if (order && order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios') && !order.subtotal) {
+              showToast(order.favorType === 'pagodeservicios' ? '⚠️ Debes ingresar el valor de las facturas antes de entregar el pedido' : '⚠️ Debes ingresar el valor de los productos antes de entregar el pedido', 'warning');
               showEditFavorPriceModal(order, true);
               return;
             }
@@ -3108,7 +3108,18 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
   const tip = order.tip || order.tipAmount || 0;
   const serviceTotal = deliveryFee + appFee + pFee + extraStops - couponDiscount + tip;
 
-  const stores = parseFavorDetails(order.details || order.description);
+  let stores = parseFavorDetails(order.details || order.description);
+  if (stores.length === 0) {
+    let serviceName = 'Servicio';
+    if (order.details) {
+      const match = order.details.match(/(?:Servicio|Trámite):\s*([^\n]+)/i);
+      if (match) serviceName = match[1].trim();
+    }
+    stores = [{
+      name: serviceName,
+      items: 'Pago de Servicio'
+    }];
+  }
   const currentPrices = order.storePrices || {};
 
   const modalEl = document.createElement('div');
@@ -3117,18 +3128,18 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
       <div style="width:64px; height:64px; background:rgba(var(--color-primary-rgb),0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--color-primary); margin:0 auto 20px;">
         ${icon('edit', 32)}
       </div>
-      <h3 style="font-size:20px; font-weight:950; color:var(--color-text); margin-bottom:8px;">Precios por Comercio</h3>
-      <p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:20px;">Ingresá el valor de los productos comprados en cada local individualmente.</p>
+      <h3 style="font-size:20px; font-weight:950; color:var(--color-text); margin-bottom:8px;">${order.favorType === 'pagodeservicios' ? 'Monto de Servicios' : 'Precios por Comercio'}</h3>
+      <p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:20px;">${order.favorType === 'pagodeservicios' ? 'Ingresá el valor total de las facturas o servicios abonados.' : 'Ingresá el valor de los productos comprados en cada local individualmente.'}</p>
       
       <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1px solid var(--color-border-light); margin-bottom:20px; display:flex; flex-direction:column; gap:16px;">
-        <div style="font-size:11px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; text-align:left; margin-bottom:4px;">Costo de productos</div>
+        <div style="font-size:11px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; text-align:left; margin-bottom:4px;">${order.favorType === 'pagodeservicios' ? 'Costo facturas' : 'Costo de productos'}</div>
         
         ${stores.map((st, idx) => {
           const price = currentPrices[st.name] || '';
           return `
             <div style="display:flex; flex-direction:column; gap:6px; text-align:left;">
               <label style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; justify-content:space-between; gap:6px;">
-                <span>🏪 <strong>${st.name}</strong></span>
+                <span>${order.favorType === 'pagodeservicios' ? '🧾' : '🏪'} <strong>${st.name}</strong></span>
                 <span style="font-weight:500; font-size:11px; color:var(--color-text-secondary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:180px;">${st.items}</span>
               </label>
               <div style="position:relative;">
@@ -3140,7 +3151,7 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
         }).join('')}
 
         <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800; color:var(--color-text-primary);">
-          <span>Total Productos:</span>
+          <span>${order.favorType === 'pagodeservicios' ? 'Total Servicios:' : 'Total Productos:'}</span>
           <span id="favor-products-sum" style="font-size:17px; font-weight:950; color:#10b981;">${formatPrice(order.subtotal || 0)}</span>
         </div>
 
@@ -3222,7 +3233,7 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
     }
 
     if (isPersistent && sum <= 0) {
-      showToast('⚠️ Debes ingresar el valor de los productos comprados.', 'warning');
+      showToast(order.favorType === 'pagodeservicios' ? '⚠️ Debes ingresar el valor de las facturas pagadas.' : '⚠️ Debes ingresar el valor de los productos comprados.', 'warning');
       return;
     }
 
