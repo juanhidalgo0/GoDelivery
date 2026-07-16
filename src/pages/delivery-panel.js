@@ -4714,6 +4714,18 @@ export async function showSuccessCelebration(orders, onFinish) {
   const user = getState().user;
   const currentSessionId = user?.currentSessionId;
   let previousSessionEarned = 0;
+  let currentDebt = 0;
+
+  try {
+    const { getDoc, doc } = await import('firebase/firestore');
+    const uSnap = await getDoc(doc(db, 'users', user.uid));
+    if (uSnap.exists()) {
+      currentDebt = uSnap.data().deliveryDebt || 0;
+    }
+  } catch (err) {
+    console.error('Error fetching user debt for celebration:', err);
+    currentDebt = user?.deliveryDebt || 0;
+  }
 
   const totalEarned = orders.reduce((sum, o) => {
     const orderEarnings = o.isTrip || o.isFavor 
@@ -4813,6 +4825,13 @@ export async function showSuccessCelebration(orders, onFinish) {
           <span style="display: flex; align-items: center; gap: 6px;">💼 Total Sesión Actual</span>
           <span id="celebration-session-amount" style="font-size: 18px; font-weight: 950; color: white;">$ 0.00</span>
         </div>
+
+        <div style="height: 1px; background: rgba(255,255,255,0.08); width: 100%;"></div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 800; color: #f87171;">
+          <span style="display: flex; align-items: center; gap: 6px;">💳 Tarifa App a Rendir</span>
+          <span id="celebration-debt-amount" style="font-size: 18px; font-weight: 950; color: #f87171;">$ 0.00</span>
+        </div>
       </div>
 
       <button id="celebration-continue-btn" class="btn btn-primary" style="
@@ -4906,8 +4925,12 @@ export async function showSuccessCelebration(orders, onFinish) {
 
   const amountEl = overlay.querySelector('#celebration-amount');
   const sessionAmountEl = overlay.querySelector('#celebration-session-amount');
+  const debtAmountEl = overlay.querySelector('#celebration-debt-amount');
   
   sessionAmountEl.textContent = formatPrice(previousSessionEarned);
+  if (debtAmountEl) {
+    debtAmountEl.textContent = formatPrice(currentDebt);
+  }
 
   let currentVal = 0;
   const duration = 1200;
