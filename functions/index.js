@@ -1506,7 +1506,7 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
   }
 
   const uid = decodedToken.uid;
-  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total, tip, couponCode, couponDiscount, paymentMethod } = req.body;
+  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total, tip, couponCode, couponDiscount, paymentMethod, receiptDeliveryType } = req.body;
 
   if (!pickupAddress || !deliveryAddress || !details) {
     return res.status(400).json({ error: "Faltan campos obligatorios (direcciones o detalles)" });
@@ -1572,7 +1572,9 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
       const dLng = deliveryCoords && (deliveryCoords.lng !== undefined ? deliveryCoords.lng : deliveryCoords.longitude);
 
       let secureDeliveryCost = 0;
-      if (pLat !== undefined && pLng !== undefined && dLat !== undefined && dLng !== undefined) {
+      if (type === 'pagodeservicios' && receiptDeliveryType === 'digital') {
+         secureDeliveryCost = 0;
+      } else if (pLat !== undefined && pLng !== undefined && dLat !== undefined && dLng !== undefined) {
          const distance = getDistance(pLat, pLng, dLat, dLng);
          const basePriceVal = globalSettings.deliveryBasePrice !== undefined ? Number(globalSettings.deliveryBasePrice) : 350;
          const pricePerKmVal = globalSettings.deliveryPricePerKm !== undefined ? Number(globalSettings.deliveryPricePerKm) : 120;

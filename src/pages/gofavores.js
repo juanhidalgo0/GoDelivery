@@ -913,7 +913,8 @@ async function createFavorOrder(data) {
     paymentMethod: data.paymentMethod,
     tip: data.tip || 0,
     couponCode: data.couponCode || null,
-    couponDiscount: data.couponDiscount || 0
+    couponDiscount: data.couponDiscount || 0,
+    receiptDeliveryType: data.receiptDeliveryType || null
   };
 
   if (data.isGoCash) {
