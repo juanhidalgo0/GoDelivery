@@ -302,9 +302,26 @@ export async function renderDeliveryPanel() {
           <a href="#/delivery/config" title="Configuración de Perfil" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
             ${icon('settings', 22)}
           </a>
+          <button id="delivery-contact-support-btn" title="Contactar a Soporte" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+            ${icon('helpCircle', 22)}
+          </button>
         </div>
       </div>
     `;
+
+    document.getElementById('delivery-contact-support-btn')?.addEventListener('click', () => {
+      const fab = document.getElementById('support-bot-fab-btn');
+      if (fab) {
+        fab.click();
+      } else {
+        import('../components/support-bot.js').then(m => {
+          m.initSupportBot();
+          setTimeout(() => {
+            document.getElementById('support-bot-fab-btn')?.click();
+          }, 150);
+        });
+      }
+    });
   }
 
   const barContainer = document.getElementById('session-status-bar-container');

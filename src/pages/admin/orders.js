@@ -478,32 +478,37 @@ window.showOrderDetail = async (idOrObject) => {
     </div>
 
     <!-- Logistics & Participants -->
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
-       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-         <div>
-           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Cliente</div>
-           <div style="font-weight:800; font-size:13px; margin-bottom:2px;">${o.userName}</div>
-           <div id="audit-client-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.goId || 'Cargando...'}</div>
+    <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
+       <!-- Cliente Card -->
+       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+         <div style="min-width:0; flex:1;">
+           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Cliente</div>
+           <div style="font-weight:900; font-size:15px; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.userName}</div>
+           <div id="audit-client-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.goId || 'Cargando...'}</div>
          </div>
-         <div id="audit-client-wa-container">
+         <div id="audit-client-wa-container" style="flex-shrink:0;">
            ${o.userPhone ? `
-             <a href="https://wa.me/${o.userPhone.replace(/\D/g, '').startsWith('54') ? o.userPhone.replace(/\D/g, '') : '54' + o.userPhone.replace(/\D/g, '')}" target="_blank" style="display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:10px; background:#25D366; color:white; font-size:11px; font-weight:800; text-decoration:none; box-shadow:0 2px 8px rgba(37,211,102,0.25); transition:all 0.2s;" onmouseover="this.style.opacity='0.9';" onmouseout="this.style.opacity='1';">
-               ${icon('whatsapp', 13, '', '#FFF')} WhatsApp
+             <a href="https://wa.me/${o.userPhone.replace(/\D/g, '').startsWith('54') ? o.userPhone.replace(/\D/g, '') : '54' + o.userPhone.replace(/\D/g, '')}" target="_blank" style="display:flex; align-items:center; gap:6px; padding:8px 16px; border-radius:12px; background:#25D366; color:white; font-size:12.5px; font-weight:800; text-decoration:none; box-shadow:0 4px 12px rgba(37,211,102,0.25); transition:all 0.2s;" onmouseover="this.style.opacity='0.9'; this.style.transform='translateY(-1px)';" onmouseout="this.style.opacity='1'; this.style.transform='none';">
+               ${icon('whatsapp', 14, '', '#FFF')} WhatsApp
              </a>
            ` : ''}
          </div>
        </div>
-       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-         <div>
-           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Repartidor</div>
-           <div style="font-weight:800; font-size:13px; margin-bottom:2px; color:var(--color-primary);">${o.driverName || 'Sin asignar'}</div>
-           <div id="audit-driver-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
+
+       <!-- Repartidor Card -->
+       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+         <div style="min-width:0; flex:1;">
+           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Repartidor</div>
+           <div style="font-weight:900; font-size:15px; color:var(--color-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.driverName || 'Sin asignar'}</div>
+           <div id="audit-driver-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
          </div>
-         ${o.driverId ? `
-           <button id="btn-msg-support-driver" style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:10px; background:rgba(225,29,72,0.1); color:var(--color-primary); border:none; cursor:pointer; transition:all 0.2s;" title="Enviar mensaje de soporte al repartidor">
-             ${icon('send', 16)}
-           </button>
-         ` : ''}
+         <div style="flex-shrink:0;">
+           ${o.driverId ? `
+             <button id="btn-msg-support-driver" style="display:flex; align-items:center; gap:6px; padding:8px 16px; border-radius:12px; background:rgba(225,29,72,0.08); color:var(--color-primary); border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; box-shadow:0 4px 12px rgba(225,29,72,0.15);" onmouseover="this.style.transform='translateY(-1px)';" onmouseout="this.style.transform='none';">
+               ${icon('send', 14)} Soporte
+             </button>
+           ` : ''}
+         </div>
        </div>
     </div>
 
