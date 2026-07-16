@@ -22,6 +22,7 @@ function getComercioDisplayName(o) {
     if (o.favorType === 'gocash') return 'Go Cash';
     if (o.favorType === 'encomienda') return 'Encomienda';
     if (o.favorType === 'mandado' || o.favorType === 'compra') return 'Mandado';
+    if (o.favorType === 'pagodeservicios') return 'Pago de Servicios';
     return 'Mandado';
   }
   return o.comercioName || 'Comercio';
@@ -377,7 +378,7 @@ window.showOrderDetail = async (idOrObject) => {
        
        ${o.isFavor ? `
          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:15px;">
-           ${parsedStores.map((s, idx) => `
+           ${parsedStores.length > 0 ? parsedStores.map((s, idx) => `
              <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:16px;">
                <div style="font-weight:900; font-size:13px; color:var(--color-primary); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                  🏪 Comercio ${idx + 1}: <span style="color:var(--color-text);">${s.name}</span>
@@ -386,7 +387,13 @@ window.showOrderDetail = async (idOrObject) => {
                  ${s.items || 'Sin detalles'}
                </div>
              </div>
-           `).join('')}
+           `).join('') : `
+             <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:16px;">
+               <div style="font-size:13px; font-weight:700; color:var(--color-text-secondary); white-space:pre-line; line-height:1.4;">
+                 ${o.details || o.description || 'Sin detalles'}
+               </div>
+             </div>
+           `}
          </div>
        ` : `
          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:15px;">

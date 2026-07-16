@@ -103,6 +103,7 @@ export async function initSettings() {
         state.rainMode = data.rainMode || 'auto';
         state.useDarkBrandTheme = data.useDarkBrandTheme || false;
         state.favorPurchaseFee = data.favorPurchaseFee !== undefined ? data.favorPurchaseFee : 800;
+        state.servicePaymentErrandFee = data.servicePaymentErrandFee !== undefined ? data.servicePaymentErrandFee : 2000;
         state.maintenanceMode = data.maintenanceMode !== undefined ? data.maintenanceMode : false;
         state.maintenanceMessage = data.maintenanceMessage || 'La aplicación se encuentra en mantenimiento temporal para realizar mejoras. Volvemos en unos minutos.';
         state.servicesAppFeeConfig = data.servicesAppFeeConfig || {

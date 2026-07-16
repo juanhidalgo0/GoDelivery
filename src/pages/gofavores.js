@@ -106,6 +106,30 @@ export async function renderGoFavores(content) {
               </div>
             </div>
           </div>
+
+          <!-- Option 4: Pago de Servicios -->
+          <div id="favor-pagodeservicios-btn" class="gofavores-card card-pagodeservicios glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.2s both;">
+            <!-- Ambient light reflection -->
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
+              ${icon('fileText', 22)}
+            </div>
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
+              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Pago de Servicios</h3>
+              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Pagá tus facturas (ABSA, Canal 4, Cyber, etc) a domicilio o digital.</p>
+              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                Facturas 📄 Trámites
+              </span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
+              <div id="info-pagodeservicios-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
+                ${icon('info', 14)}
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Info Section (Stretches to fill available space) -->
@@ -245,6 +269,11 @@ export async function renderGoFavores(content) {
         border-color: rgba(99, 102, 241, 0.3) !important;
         box-shadow: 0 8px 20px rgba(99, 102, 241, 0.15) !important;
       }
+      .card-pagodeservicios {
+        background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important;
+        border-color: rgba(245, 158, 11, 0.3) !important;
+        box-shadow: 0 8px 20px rgba(245, 158, 11, 0.15) !important;
+      }
       .gofavores-info-section {
         background: rgba(255, 255, 255, 0.65) !important;
         border: 1.5px solid rgba(226, 232, 240, 0.8) !important;
@@ -268,6 +297,11 @@ export async function renderGoFavores(content) {
         background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important;
         border-color: rgba(67, 56, 202, 0.3) !important;
         box-shadow: 0 8px 20px rgba(67, 56, 202, 0.25) !important;
+      }
+      [data-theme="dark"] .card-pagodeservicios {
+        background: linear-gradient(135deg, #78350F 0%, #D97706 100%) !important;
+        border-color: rgba(217, 119, 6, 0.3) !important;
+        box-shadow: 0 8px 20px rgba(217, 119, 6, 0.25) !important;
       }
       [data-theme="dark"] .gofavores-info-section {
         background: rgba(16, 25, 44, 0.65) !important;
@@ -323,6 +357,7 @@ export async function renderGoFavores(content) {
   document.getElementById('favor-mandado-btn').onclick = () => checkPhoneAndOpen(showMandadoForm);
   document.getElementById('favor-compra-btn').onclick = () => checkPhoneAndOpen(showCompraForm);
   document.getElementById('favor-gocash-btn').onclick = () => checkPhoneAndOpen(showGoCashForm);
+  document.getElementById('favor-pagodeservicios-btn').onclick = () => checkPhoneAndOpen(showPagoServiciosForm);
 
   document.getElementById('info-mandado-btn').onclick = (e) => {
     e.stopPropagation();
@@ -335,6 +370,10 @@ export async function renderGoFavores(content) {
   document.getElementById('info-gocash-btn').onclick = (e) => {
     e.stopPropagation();
     showServiceInfoModal('gocash');
+  };
+  document.getElementById('info-pagodeservicios-btn').onclick = (e) => {
+    e.stopPropagation();
+    showServiceInfoModal('pagodeservicios');
   };
 
   const helpBtn = document.getElementById('gofavores-help-header-btn');
@@ -396,6 +435,21 @@ export function showServiceInfoModal(service) {
         <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
           <li><strong>Límite máximo:</strong> La transacción tiene un límite estricto de hasta $70.000 por motivos de seguridad del chofer y del cliente.</li>
           <li><strong>Validación obligatoria:</strong> La transferencia bancaria/Mercado Pago debe realizarse e impactar en la cuenta de destino obligatoriamente frente al repartidor antes del intercambio del efectivo.</li>
+        </ul>
+        <button id="modal-entendido-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+      </div>
+    `;
+  } else if (service === 'pagodeservicios') {
+    title = '📄 Pago de Servicios / Impuestos';
+    contentHtml = `
+      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
+        <p style="margin: 0; font-weight: 700;">¿Cómo funciona el servicio?</p>
+        <p style="margin: 0; color: var(--color-text-secondary);">Envía a un repartidor a pagar tus facturas e impuestos (Cyber, ABSA, Canal 4, Rapipago o PagoFácil). Puedes elegir entre recibir el comprobante digitalmente (foto por chat) o recibir el comprobante físico en tu domicilio.</p>
+        
+        <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Opciones de Envío:</p>
+        <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
+          <li><strong>Foto digital:</strong> El repartidor te envía una foto nítida de la factura abonada. Solo se cobra la tarifa base de trámite.</li>
+          <li><strong>Comprobante físico:</strong> El repartidor regresa a tu dirección para entregarte el ticket en papel. Esta opción suma un costo de envío logístico adicional por el viaje de regreso.</li>
         </ul>
         <button id="modal-entendido-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
       </div>
@@ -2001,4 +2055,367 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
   }
 
   render();
+}
+
+export async function showPagoServiciosForm() {
+  const modalEl = document.createElement('div');
+  modalEl.style.cssText = 'padding: 20px; display: flex; flex-direction: column; gap: 16px; min-height: 100%; box-sizing: border-box;';
+
+  let currentAddress = getState().deliveryAddress || '';
+  let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
+  let selectedService = 'Cyber'; 
+  let receiptDeliveryType = 'digital'; 
+  let calculatedDistFee = 0;
+  let baseFee = getState().servicePaymentErrandFee !== undefined ? getState().servicePaymentErrandFee : 2000;
+  let appFee = 0;
+  let selectedTip = 0;
+  let appliedCoupon = null;
+
+  modalEl.innerHTML = `
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y:auto; scrollbar-width:none;">
+      
+      <!-- STEP 1 CONTAINER -->
+      <div id="ps-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        
+        <!-- Service Chooser List -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;" id="ps-service-grid">
+            <button class="ps-service-btn active" data-service="Cyber" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
+              🏪 Cyber
+            </button>
+            <button class="ps-service-btn" data-service="ABSA" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
+              💧 ABSA
+            </button>
+            <button class="ps-service-btn" data-service="Canal 4" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
+              📺 Canal 4
+            </button>
+            <button class="ps-service-btn" data-service="Rapipago" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
+              💳 Rapipago
+            </button>
+            <button class="ps-service-btn" data-service="PagoFácil" style="height:56px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:11px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; transition:all 0.2s;">
+              ⚡ PagoFácil
+            </button>
+          </div>
+        </div>
+
+        <!-- Detail Input -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Servicios y Detalles a Pagar</label>
+          <textarea id="ps-details-input" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares para el chofer" style="width:100%; height:90px; border-radius:16px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none; font-family:inherit; resize:none;"></textarea>
+        </div>
+
+        <!-- Receipt Delivery Selector -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Forma de Recibir el Comprobante</label>
+          <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
+            <button id="ps-delivery-digital" class="ps-del-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); display:flex; align-items:center; justify-content:center; text-align:center;">
+              Foto Digital<br><span style="font-size:9px; font-weight:600; opacity:0.8;">Sin costo adicional</span>
+            </button>
+            <button id="ps-delivery-physical" class="ps-del-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; text-align:center;">
+              Comprobante Físico<br><span style="font-size:9px; font-weight:600; opacity:0.8;">A Domicilio (+ Envío)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Physical Delivery Address Details (Shown conditionally) -->
+        <div id="ps-address-section" style="display:none; flex-direction:column; gap:8px;">
+          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Tu Dirección de Entrega</label>
+          <button id="ps-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
+             <div style="width:36px; height:36px; border-radius:12px; background:rgba(245, 158, 11, 0.1); color:#D97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+             <span id="ps-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+             ${icon('chevronRight', 16)}
+          </button>
+          <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
+        </div>
+
+        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          Siguiente ${icon('chevronRight', 16)}
+        </button>
+      </div>
+
+      <!-- STEP 2 CONTAINER -->
+      <div id="ps-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+          ${icon('chevronLeft', 16)} Volver a Paso 1
+        </button>
+
+        <!-- Benefits Container -->
+        <div id="ps-benefits-container"></div>
+
+        <!-- Cost Preview -->
+        <div id="ps-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Base Trámite Pago de Servicios</span>
+            <span id="ps-base-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
+          <div id="ps-dist-row" style="display:none; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío de Comprobante (Regreso)</span>
+            <span id="ps-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
+            <span id="ps-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
+            <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Trámite Estimado</span>
+            <span id="ps-estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
+          </div>
+          <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
+            * El dinero de la factura a pagar se coordina y se abona al repartidor al momento de iniciar la gestión o por transferencia.
+          </p>
+        </div>
+
+        <button id="confirm-ps-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+          ${icon('check', 20)} Solicitar Pago de Servicios
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  showModal({
+    title: 'Solicitar Pago de Servicios',
+    content: modalEl,
+    height: '80dvh',
+    hideHeader: false,
+    headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+    headerTextColor: '#ffffff'
+  });
+
+  const serviceGrid = modalEl.querySelector('#ps-service-grid');
+  const detailsInput = modalEl.querySelector('#ps-details-input');
+  const btnDigital = modalEl.querySelector('#ps-delivery-digital');
+  const btnPhysical = modalEl.querySelector('#ps-delivery-physical');
+  const addressSection = modalEl.querySelector('#ps-address-section');
+  const deliveryBtn = modalEl.querySelector('#ps-delivery-addr-btn');
+  const deliveryText = modalEl.querySelector('#ps-delivery-text');
+  const deliveryDetailsInput = modalEl.querySelector('#ps-delivery-details');
+
+  const previewBox = modalEl.querySelector('#ps-cost-preview');
+  const distRow = modalEl.querySelector('#ps-dist-row');
+  const baseCostEl = modalEl.querySelector('#ps-base-cost');
+  const distCostEl = modalEl.querySelector('#ps-dist-cost');
+  const appFeeEl = modalEl.querySelector('#ps-app-fee');
+  const totalCostEl = modalEl.querySelector('#ps-estimated-cost');
+
+  // Handle service button selection
+  serviceGrid.querySelectorAll('.ps-service-btn').forEach(btn => {
+    btn.onclick = () => {
+      serviceGrid.querySelectorAll('.ps-service-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'var(--color-surface)';
+        b.style.borderColor = 'var(--color-border-light)';
+        b.style.boxShadow = 'none';
+      });
+      btn.classList.add('active');
+      btn.style.background = 'rgba(245, 158, 11, 0.08)';
+      btn.style.borderColor = 'var(--color-primary)';
+      selectedService = btn.dataset.service;
+    };
+  });
+
+  // Highlight first service active style initially
+  const activeBtn = serviceGrid.querySelector('.ps-service-btn.active');
+  if (activeBtn) {
+    activeBtn.style.background = 'rgba(245, 158, 11, 0.08)';
+    activeBtn.style.borderColor = 'var(--color-primary)';
+  }
+
+  // Toggle receipt delivery methods
+  btnDigital.onclick = () => {
+    receiptDeliveryType = 'digital';
+    btnDigital.classList.add('active');
+    btnDigital.style.background = 'var(--color-surface)';
+    btnDigital.style.color = 'var(--color-text-primary)';
+    btnDigital.style.boxShadow = 'var(--shadow-sm)';
+    btnPhysical.classList.remove('active');
+    btnPhysical.style.background = 'transparent';
+    btnPhysical.style.color = 'var(--color-text-tertiary)';
+    btnPhysical.style.boxShadow = 'none';
+    addressSection.style.display = 'none';
+    updateCost();
+  };
+
+  btnPhysical.onclick = () => {
+    receiptDeliveryType = 'physical';
+    btnPhysical.classList.add('active');
+    btnPhysical.style.background = 'var(--color-surface)';
+    btnPhysical.style.color = 'var(--color-text-primary)';
+    btnPhysical.style.boxShadow = 'var(--shadow-sm)';
+    btnDigital.classList.remove('active');
+    btnDigital.style.background = 'transparent';
+    btnDigital.style.color = 'var(--color-text-tertiary)';
+    btnDigital.style.boxShadow = 'none';
+    addressSection.style.display = 'flex';
+    updateCost();
+  };
+
+  const updateCost = async () => {
+    try {
+      baseCostEl.textContent = formatPrice(baseFee);
+
+      let logisticsCost = baseFee;
+
+      if (receiptDeliveryType === 'physical' && deliveryData) {
+        const centerCoords = { lat: -35.0811, lng: -57.5146 };
+        const dist = await getDistance(centerCoords.lat, centerCoords.lng, deliveryData.coords.lat, deliveryData.coords.lng);
+        calculatedDistFee = calculateDynamicFee(dist);
+        distRow.style.display = 'flex';
+        distCostEl.textContent = formatPrice(calculatedDistFee);
+        logisticsCost += calculatedDistFee;
+      } else {
+        distRow.style.display = 'none';
+        calculatedDistFee = 0;
+      }
+
+      // App fee configuration (calculates on shipping logistics value)
+      const config = getState().servicesAppFeeConfig?.gofavor || { type: 'percentage', value: 1.2 };
+      if (config.type === 'fixed') {
+        appFee = config.value;
+      } else {
+        appFee = Math.ceil((logisticsCost * (config.value / 100)) / 10) * 10;
+      }
+
+      let couponDiscount = 0;
+      if (appliedCoupon) {
+        if (appliedCoupon.type === 'free_delivery') {
+          couponDiscount = calculatedDistFee;
+        } else if (appliedCoupon.discountType === 'percentage') {
+          couponDiscount = Math.floor(calculatedDistFee * (Number(appliedCoupon.value || 0) / 100));
+        } else {
+          couponDiscount = Number(appliedCoupon.value || 0);
+        }
+      }
+
+      const total = Math.max(logisticsCost + appFee - couponDiscount + selectedTip, 0);
+
+      appFeeEl.textContent = formatPrice(appFee);
+      totalCostEl.textContent = formatPrice(total);
+      previewBox.style.display = 'flex';
+    } catch (err) {
+      console.error('Error updating cost in Pago de Servicios:', err);
+    }
+  };
+
+  // Address picking trigger
+  deliveryBtn.onclick = () => {
+    showAddressPrompt((addr, notes, coords) => {
+      deliveryData = { address: addr, coords };
+      deliveryText.textContent = addr;
+      if (deliveryDetailsInput) {
+        deliveryDetailsInput.value = notes || '';
+      }
+      updateCost();
+    }, { mode: 'pick' });
+  };
+
+  const benefitsContainer = modalEl.querySelector('#ps-benefits-container');
+  renderBenefitsSection(benefitsContainer, (tip, coupon) => {
+    selectedTip = tip;
+    appliedCoupon = coupon;
+    updateCost();
+  }, () => calculatedDistFee);
+
+  // Next step click trigger
+  modalEl.querySelector('#ps-step-1-next-btn').onclick = () => {
+    const detailsText = detailsInput.value.trim();
+    if (!detailsText) {
+      showToast('Por favor describe los detalles de la factura a pagar.', 'warning');
+      return;
+    }
+
+    if (receiptDeliveryType === 'physical') {
+      if (!deliveryData) {
+        showToast('Por favor selecciona una dirección de entrega.', 'warning');
+        return;
+      }
+      const detailsVal = deliveryDetailsInput.value.trim();
+      if (!detailsVal) {
+        showToast('El detalle de dirección es obligatorio.', 'warning');
+        return;
+      }
+    }
+
+    modalEl.querySelector('#ps-step-1-container').style.display = 'none';
+    modalEl.querySelector('#ps-step-2-container').style.display = 'flex';
+    updateCost();
+  };
+
+  modalEl.querySelector('#ps-step-2-back-btn').onclick = () => {
+    modalEl.querySelector('#ps-step-1-container').style.display = 'flex';
+    modalEl.querySelector('#ps-step-2-container').style.display = 'none';
+  };
+
+  modalEl.querySelector('#confirm-ps-btn').onclick = async () => {
+    const detailsText = detailsInput.value.trim();
+    const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
+
+    if (receiptDeliveryType === 'physical' && !deliveryData) {
+      showToast('Por favor selecciona una dirección de entrega.', 'warning');
+      return;
+    }
+
+    let couponDiscount = 0;
+    if (appliedCoupon) {
+      if (appliedCoupon.type === 'free_delivery') {
+        couponDiscount = calculatedDistFee;
+      } else if (appliedCoupon.discountType === 'percentage') {
+        couponDiscount = Math.floor(calculatedDistFee * (Number(appliedCoupon.value || 0) / 100));
+      } else {
+        couponDiscount = Number(appliedCoupon.value || 0);
+      }
+    }
+
+    const logisticsCost = baseFee + calculatedDistFee;
+    const total = Math.max(logisticsCost + appFee - couponDiscount + selectedTip, 0);
+
+    const deliveryTypeLabel = receiptDeliveryType === 'physical' ? 'Comprobante Físico a Domicilio' : 'Foto Digital por Chat';
+    const detailPayload = `🏢 **Servicio:** Pago de ${selectedService}\n📄 **Facturas & Código:** ${detailsText}\n📩 **Entrega Comprobante:** ${deliveryTypeLabel}`;
+
+    const pickupAddressVal = `Pago Fácil Centro (Trámite de Pago)`;
+    const deliveryAddressVal = receiptDeliveryType === 'physical'
+      ? `${deliveryData.address} (Detalle: ${deliveryDetails})`
+      : 'Envío Digital (Sin Dirección)';
+
+    const deliveryCoordsVal = receiptDeliveryType === 'physical'
+      ? deliveryData.coords
+      : { lat: -35.0811, lng: -57.5146 };
+
+    showConfirm({
+      title: '¿Confirmar Trámite?',
+      message: `Se enviará un repartidor a pagar tu factura de <strong>${selectedService}</strong>.<br><br>Costo del servicio: <strong>${formatPrice(total)}</strong>`,
+      onConfirm: async () => {
+        try {
+          const orderId = await createFavorOrder({
+            type: 'pagodeservicios',
+            pickupAddress: pickupAddressVal,
+            pickupCoords: { lat: -35.0811, lng: -57.5146 },
+            deliveryAddress: deliveryAddressVal,
+            deliveryCoords: deliveryCoordsVal,
+            details: detailPayload,
+            deliveryCost: calculatedDistFee,
+            purchaseFee: baseFee,
+            appUsageFee: appFee,
+            tip: selectedTip,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            couponDiscount: couponDiscount,
+            total: total,
+            paymentMethod: 'efectivo',
+            isPagoServicios: true,
+            receiptDeliveryType: receiptDeliveryType
+          });
+          closeModal();
+          setTimeout(() => {
+            location.hash = `#/pedido/${orderId}`;
+          }, 150);
+        } catch (e) {
+          console.error('Error creating Pago de Servicios order:', e);
+          showToast('Error al crear el trámite de pago: ' + e.message, 'error');
+        }
+      }
+    });
+  };
+
+  updateCost();
 }

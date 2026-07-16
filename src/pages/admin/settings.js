@@ -135,10 +135,14 @@ export async function renderAdminSettings() {
               <!-- Go Favores -->
               <div style="border-bottom:1px dashed var(--color-border-light);padding-bottom:14px;">
                 <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Go Favores</h4>
-                <div style="display:grid;grid-template-columns:1fr;gap:14px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
                   <div>
                     <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Gestión GoFavor ($)</label>
                     <input type="number" class="input" id="global-favor-purchase-fee" value="${getState().favorPurchaseFee || 800}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Base Pago de Servicios ($)</label>
+                    <input type="number" class="input" id="global-service-payment-errand-fee" value="${getState().servicePaymentErrandFee || 2000}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
                   </div>
                 </div>
               </div>
@@ -647,6 +651,7 @@ export async function renderAdminSettings() {
     const commissionRate = (parseFloat(document.getElementById('global-commission-rate').value) || 10) / 100;
     const appUsageFeeRate = (parseFloat(document.getElementById('global-app-fee-rate').value) || 5) / 100;
     const favorPurchaseFee = parseFloat(document.getElementById('global-favor-purchase-fee').value) || 0;
+    const servicePaymentErrandFee = parseFloat(document.getElementById('global-service-payment-errand-fee').value) || 2000;
     const whatsappPayments = document.getElementById('global-whatsapp-payments').value || '5491123456789';
     const pointsPerDollar = (parseFloat(document.getElementById('global-points-rate').value) || 1) / 100;
     const dollarPerPoint = parseFloat(document.getElementById('global-point-value').value) || 1;
@@ -728,7 +733,7 @@ export async function renderAdminSettings() {
         deliveryBasePrice, deliveryMinPrice, deliveryPricePerKm, deliveryExtraStopFee, deliveryRainSurcharge,
         tripBasePrice, tripMinPrice, tripPricePerKm,
         commissionRate, appUsageFeeRate, pointsPerDollar, dollarPerPoint, referralPoints, weeklyChallenges,
-        favorPurchaseFee, whatsappPayments, nightSurchargeConfig, driverIncentiveConfig, pushMessages,
+        favorPurchaseFee, servicePaymentErrandFee, whatsappPayments, nightSurchargeConfig, driverIncentiveConfig, pushMessages,
         rainMode, useDarkBrandTheme, maintenanceMode, maintenanceMessage, servicesAppFeeConfig
       }, { merge: true });
 
@@ -750,6 +755,7 @@ export async function renderAdminSettings() {
       setState('referralPoints', referralPoints);
       setState('weeklyChallenges', weeklyChallenges);
       setState('favorPurchaseFee', favorPurchaseFee);
+      setState('servicePaymentErrandFee', servicePaymentErrandFee);
       setState('whatsappPayments', whatsappPayments);
       setState('nightSurchargeConfig', nightSurchargeConfig);
       setState('driverIncentiveConfig', driverIncentiveConfig);
