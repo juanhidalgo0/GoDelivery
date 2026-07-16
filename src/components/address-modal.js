@@ -836,11 +836,12 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
 
 export function ensureAddress(onSuccess) {
   const address = getState().deliveryAddress;
-  if (!address) {
+  const hasSaved = (getState().savedAddresses || []).length > 0;
+  if (!address && !hasSaved) {
     showAddressPrompt(onSuccess);
     return false;
   }
-  if (onSuccess) onSuccess(address);
+  if (onSuccess) onSuccess(address || (getState().savedAddresses && getState().savedAddresses[0]?.address) || '');
   return true;
 }
 
