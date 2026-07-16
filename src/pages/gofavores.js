@@ -2058,6 +2058,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 }
 
 export async function showPagoServiciosForm() {
+  const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;';
 
