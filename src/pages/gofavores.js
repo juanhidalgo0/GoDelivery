@@ -2063,7 +2063,7 @@ export async function showPagoServiciosForm() {
 
   let currentAddress = getState().deliveryAddress || '';
   let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
-  let selectedService = 'Cyber'; 
+  let selectedService = null; 
   let receiptDeliveryType = 'digital'; 
   let calculatedDistFee = 0;
   let baseFee = getState().servicePaymentErrandFee !== undefined ? getState().servicePaymentErrandFee : 2000;
@@ -2080,7 +2080,7 @@ export async function showPagoServiciosForm() {
         <div style="display:flex; flex-direction:column; gap:8px;">
           <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
           <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:12px;" id="ps-service-grid">
-            <button class="ps-service-btn active" data-service="Cyber" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
+            <button class="ps-service-btn" data-service="Cyber" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
               ${icon('monitor', 22)} Cyber
             </button>
             <button class="ps-service-btn" data-service="ABSA" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
@@ -2227,14 +2227,7 @@ export async function showPagoServiciosForm() {
     };
   });
 
-  // Highlight first service active style initially
-  const activeBtn = serviceGrid.querySelector('.ps-service-btn.active');
-  if (activeBtn) {
-    activeBtn.style.background = 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
-    activeBtn.style.borderColor = 'transparent';
-    activeBtn.style.color = 'white';
-    activeBtn.style.boxShadow = '0 4px 12px rgba(217, 119, 6, 0.3)';
-  }
+
 
   // Toggle receipt delivery methods
   btnDigital.onclick = () => {
@@ -2337,6 +2330,10 @@ export async function showPagoServiciosForm() {
 
   // Next step click trigger
   modalEl.querySelector('#ps-step-1-next-btn').onclick = () => {
+    if (!selectedService) {
+      showToast('Por favor selecciona el servicio que deseas pagar.', 'warning');
+      return;
+    }
     const detailsText = detailsInput.value.trim();
     if (!detailsText) {
       showToast('Por favor describe los detalles de la factura a pagar.', 'warning');
