@@ -2243,6 +2243,13 @@ export async function showPagoServiciosForm() {
     subtextDigital.style.display = 'block';
     subtextPhysical.style.display = 'none';
     addressSection.style.display = 'none';
+    
+    const dialogEl = modalEl.closest('.modal');
+    if (dialogEl) {
+      dialogEl.style.height = '85dvh';
+      dialogEl.style.marginTop = 'calc(100dvh - 85dvh)';
+    }
+    
     updateCost();
   };
 
@@ -2259,6 +2266,13 @@ export async function showPagoServiciosForm() {
     subtextDigital.style.display = 'none';
     subtextPhysical.style.display = 'block';
     addressSection.style.display = 'flex';
+    
+    const dialogEl = modalEl.closest('.modal');
+    if (dialogEl) {
+      dialogEl.style.height = '94dvh';
+      dialogEl.style.marginTop = 'calc(100dvh - 94dvh)';
+    }
+    
     updateCost();
   };
 
