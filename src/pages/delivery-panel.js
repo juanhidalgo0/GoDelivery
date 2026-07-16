@@ -4986,8 +4986,7 @@ export async function showSuccessCelebration(orders, onFinish) {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(248, 250, 252, 0.97);
-    backdrop-filter: blur(16px);
+    background: #E11D48;
     z-index: 99999;
     display: flex;
     flex-direction: column;
@@ -4997,18 +4996,35 @@ export async function showSuccessCelebration(orders, onFinish) {
     font-family: var(--font-display, 'Outfit', sans-serif);
     opacity: 0;
     transition: opacity 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+    overflow: hidden;
   `;
 
   const previousDebt = Math.max(0, (getState().user?.deliveryDebt || 0) - currentDebt);
 
   overlay.innerHTML = `
-    <canvas id="confetti-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+    <!-- Expanding Morphing White Sphere from Center -->
+    <div class="celebration-circle-grow" style="
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: rgba(248, 250, 252, 1);
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      transform-origin: center;
+      animation: expandWhiteCircle 1.6s cubic-bezier(0.85, 0, 0.15, 1) forwards;
+      z-index: 1;
+      pointer-events: none;
+    "></div>
+
+    <canvas id="confetti-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 2; opacity: 0; animation: fadeInConfetti 1s ease 1s forwards;"></canvas>
     
-    <div style="text-align:center; z-index: 10; padding:36px 28px; max-width:400px; display:flex; flex-direction:column; align-items:center; gap:24px; width:92%; box-sizing:border-box; background: white; border: 1.5px solid rgba(0,0,0,0.06); border-radius: 36px; box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.12); transform: scale(0.9); opacity: 0; animation: modalEntrance 0.7s cubic-bezier(0.19, 1, 0.22, 1) forwards;">
+    <div style="text-align:center; z-index: 10; padding:36px 28px; max-width:400px; display:flex; flex-direction:column; align-items:center; gap:24px; width:92%; box-sizing:border-box; background: white; border: 1.5px solid rgba(0,0,0,0.06); border-radius: 36px; box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.12); transform: scale(0.9) translateY(20px); opacity: 0; animation: modalEntrance 0.8s cubic-bezier(0.19, 1, 0.22, 1) 0.5s forwards;">
       
       <!-- Brand Logo Header -->
       <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 2px;">
-        <img src="/go! (2).png" alt="Go!" style="width: 86px; height: 86px; object-fit: contain; filter: drop-shadow(0 6px 15px rgba(225, 29, 72, 0.25)); animation: bounceLogo 2.2s infinite ease-in-out;">
+        <img src="/go! (2).png" alt="Go!" style="width: 86px; height: 86px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 6px 15px rgba(0, 0, 0, 0.15)); animation: bounceLogo 2.2s infinite ease-in-out;">
       </div>
 
       <div style="text-align: center; display: flex; flex-direction: column; gap: 6px;">
@@ -5058,8 +5074,19 @@ export async function showSuccessCelebration(orders, onFinish) {
     </div>
 
     <style>
+      @keyframes expandWhiteCircle {
+        0% {
+          transform: translate(-50%, -50%) scale(0);
+        }
+        100% {
+          transform: translate(-50%, -50%) scale(350);
+        }
+      }
       @keyframes modalEntrance {
-        to { transform: scale(1); opacity: 1; }
+        to { transform: scale(1) translateY(0); opacity: 1; }
+      }
+      @keyframes fadeInConfetti {
+        to { opacity: 1; }
       }
       @keyframes bounceLogo {
         0%, 100% { transform: translateY(0); }
