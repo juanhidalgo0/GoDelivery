@@ -492,12 +492,12 @@ export async function showMandadoForm() {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
   modalEl.innerHTML = `
-    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+    <div style="display: flex; flex-direction: column;">
       <!-- Paso 1 Container -->
-      <div id="step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; scrollbar-width: none;">
+      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px; scrollbar-width: none;">
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
             <button id="pickup-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
@@ -530,8 +530,8 @@ export async function showMandadoForm() {
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; scrollbar-width: none;">
+      <div id="step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px; scrollbar-width: none;">
           <button type="button" id="step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -581,7 +581,7 @@ export async function showMandadoForm() {
   showModal({
     title: 'Detalles de la Encomienda',
     content: modalEl,
-    height: '80dvh',
+    height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
     headerTextColor: '#ffffff'
@@ -954,13 +954,13 @@ export async function showCompraForm() {
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
   modalEl.innerHTML = `
-    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+    <div style="display: flex; flex-direction: column;">
       
       <!-- Paso 1 Container -->
-      <div id="compra-step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+      <div id="compra-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:4px; scrollbar-width: none;">
           <div style="display:flex; flex-direction:column; gap:12px; margin-top: 4px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
             <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
@@ -998,8 +998,8 @@ export async function showCompraForm() {
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="compra-step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+      <div id="compra-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:4px; scrollbar-width: none;">
           <button type="button" id="compra-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -1056,7 +1056,7 @@ export async function showCompraForm() {
   showModal({
     title: 'Mandado: Comprar algo',
     content: modalEl,
-    height: '85dvh',
+    height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
     headerTextColor: '#ffffff'
@@ -1368,13 +1368,13 @@ export async function showGoCashForm() {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
   modalEl.innerHTML = `
-    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+    <div style="display: flex; flex-direction: column;">
       
       <!-- Paso 1 Container -->
-      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
           <!-- Type Selector Segmented Control -->
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Operación</label>
@@ -1414,8 +1414,8 @@ export async function showGoCashForm() {
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="gocash-step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+      <div id="gocash-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
           <button type="button" id="gocash-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -1453,7 +1453,7 @@ export async function showGoCashForm() {
   showModal({
     title: 'Solicitar Go Cash',
     content: modalEl,
-    height: '80dvh',
+    height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
     headerTextColor: '#ffffff'
@@ -2072,7 +2072,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 
 export async function showPagoServiciosForm() {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
 
   let currentAddress = '';
   let deliveryData = null;
@@ -2085,10 +2085,10 @@ export async function showPagoServiciosForm() {
   let appliedCoupon = null;
 
   modalEl.innerHTML = `
-    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+    <div style="display: flex; flex-direction: column;">
       <!-- STEP 1 CONTAINER -->
-      <div id="ps-step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
+      <div id="ps-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px;">
           
           <!-- Service Chooser List -->
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
@@ -2156,8 +2156,8 @@ export async function showPagoServiciosForm() {
       </div>
 
       <!-- STEP 2 CONTAINER -->
-      <div id="ps-step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
-        <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
+      <div id="ps-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
+        <div style="max-height: 50dvh; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px;">
           <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content; margin-bottom: 10px;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -2199,7 +2199,7 @@ export async function showPagoServiciosForm() {
   showModal({
     title: 'Solicitar Pago de Servicios',
     content: modalEl,
-    height: '85dvh',
+    height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
     headerTextColor: '#ffffff'
