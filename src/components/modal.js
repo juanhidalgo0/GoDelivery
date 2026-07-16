@@ -29,7 +29,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
         height:${finalHeight}; margin:0 auto; overflow:hidden; position:relative; display:flex; flex-direction:column;
         animation: ${isFullscreen ? 'fadeIn' : 'springUp'} 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.1);
         box-shadow: ${isFullscreen ? 'none' : '0 -12px 60px rgba(0,0,0,0.35)'};
-        margin-top: ${isFullscreen ? '0' : `calc(100dvh - ${finalHeight})`};
+        margin-top: ${isFullscreen ? '0' : (finalHeight === 'auto' ? 'auto' : `calc(100dvh - ${finalHeight})`)};
         will-change: transform, opacity;
       ">
         ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(120,120,120,0.4); border-radius:var(--radius-full); position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab;"></div>` : ''}

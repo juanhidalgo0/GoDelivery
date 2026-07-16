@@ -5375,7 +5375,8 @@ export function showCustomerRatingModal(orders, index = 0) {
   showModal({
     title: '',
     content: modalContent,
-    hideHeader: true
+    hideHeader: true,
+    height: 'auto'
   });
 }
 

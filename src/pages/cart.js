@@ -31,6 +31,7 @@ export async function renderCart(content) {
 
   currentCartStep = 1; // Reset to step 1 when page loads
   selectedPaymentMethod = null; // Reset to null on page load
+  setDeliveryAddress('', '', null, ''); // Clear default address to force user choice
 
   // Start calculating dynamic fees in background
   calculateAllFees();
@@ -1741,7 +1742,7 @@ async function openCheckoutConfirmationModal() {
       </div>
       <div style="display: flex; flex-direction: column; gap: 2px;">
         <div id="confirm-address-text" style="font-weight: 800; font-size: var(--confirm-text-size); color: var(--color-text-primary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
-          ${address}
+          ${address || '<span style="color: var(--color-danger);">⚠️ Elegir dirección de entrega...</span>'}
         </div>
         ${state.addressNotes ? `
           <div id="confirm-address-notes" style="font-size: var(--confirm-subtitle-size); color: var(--color-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
@@ -2125,6 +2126,10 @@ async function openCheckoutConfirmationModal() {
   submitBtn.onclick = async () => {
     if (!hasDelivery) {
       showToast('No es posible confirmar el pedido sin repartidores online', 'error');
+      return;
+    }
+    if (!getState().deliveryAddress) {
+      showToast('Por favor selecciona una dirección de entrega.', 'warning');
       return;
     }
     const finalAddressNotes = getState().addressNotes || '';

@@ -489,7 +489,7 @@ function showWarningModal(message) {
 export async function showMandadoForm() {
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
-  const currentAddress = getState().deliveryAddress || '';
+  const currentAddress = '';
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
@@ -945,7 +945,7 @@ async function createFavorOrder(data) {
 export async function showCompraForm() {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
-  const currentAddress = getState().deliveryAddress || '';
+  const currentAddress = '';
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
@@ -1356,7 +1356,7 @@ export async function showCompraForm() {
 export async function showGoCashForm() {
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
-  const currentAddress = getState().deliveryAddress || '';
+  const currentAddress = '';
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
@@ -2061,8 +2061,8 @@ export async function showPagoServiciosForm() {
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;';
 
-  let currentAddress = getState().deliveryAddress || '';
-  let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
+  let currentAddress = '';
+  let deliveryData = null;
   let selectedService = null; 
   let receiptDeliveryType = 'digital'; 
   let calculatedDistFee = 0;
