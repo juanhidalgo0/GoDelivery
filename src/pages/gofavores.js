@@ -2367,9 +2367,25 @@ export async function showPagoServiciosForm() {
       }
     }
 
-    modalEl.querySelector('#ps-step-1-container').style.display = 'none';
-    modalEl.querySelector('#ps-step-2-container').style.display = 'flex';
-    updateCost();
+    const proceedToStep2 = () => {
+      modalEl.querySelector('#ps-step-1-container').style.display = 'none';
+      modalEl.querySelector('#ps-step-2-container').style.display = 'flex';
+      updateCost();
+    };
+
+    if (receiptDeliveryType === 'digital') {
+      showConfirm({
+        title: '⚠️ Advertencia Importante',
+        message: 'Al seleccionar <strong>Foto Digital</strong>, el pago debe ser realizado <strong>sí o sí mediante transferencia bancaria</strong>.<br><br>Se te solicitará enviar una foto del comprobante de transferencia por el chat del pedido antes de que el repartidor realice el pago de tu servicio.',
+        confirmText: 'Aceptar',
+        cancelText: 'Cancelar',
+        onConfirm: () => {
+          proceedToStep2();
+        }
+      });
+    } else {
+      proceedToStep2();
+    }
   };
 
   modalEl.querySelector('#ps-step-2-back-btn').onclick = () => {
