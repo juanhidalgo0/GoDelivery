@@ -6,6 +6,57 @@ import { showConfirm, closeModal, showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { getState } from '../state.js';
 
+function getFavorTypeMeta(favorType) {
+  switch (favorType) {
+    case 'gocash':
+      return {
+        title: 'Go Cash',
+        label: 'GO CASH',
+        headerText: 'Detalles del Cambio (Go Cash)',
+        color: '#6366f1',
+        textColor: '#6366f1'
+      };
+    case 'encomienda':
+      return {
+        title: 'GoFavor: Encomienda',
+        label: 'ENCOMIENDA',
+        headerText: 'Detalles de la Encomienda',
+        color: '#10b981',
+        textColor: '#10b981'
+      };
+    case 'pagodeservicios':
+      return {
+        title: 'GoFavor: PAGO DE SERVICIO',
+        label: 'PAGO DE SERVICIOS',
+        headerText: 'Detalles de Pago de Servicios',
+        color: '#d97706',
+        textColor: '#d97706'
+      };
+    case 'mandado':
+    case 'compra':
+    default:
+      return {
+        title: 'GoFavor: Mandado',
+        label: 'GO FAVOR',
+        headerText: 'Detalles del Favor',
+        color: '#ef4444',
+        textColor: '#ef4444'
+      };
+  }
+}
+
+function formatFavorDetailsHTML(detailsStr) {
+  if (!detailsStr) return '';
+  let html = detailsStr;
+  const lines = html.split('\n');
+  return `<div style="display:flex; flex-direction:column; gap:6px;">
+    ${lines.map(line => {
+      let lineHtml = line.replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--color-text-primary); font-weight:800;">$1</strong>');
+      return `<div style="font-size:12.5px; line-height:1.4; color:var(--color-text-secondary);">${lineHtml}</div>`;
+    }).join('')}
+  </div>`;
+}
+
 let liveMap = null;
 let riderMarker = null;
 let homeMarker = null;
@@ -700,8 +751,8 @@ function updateUI(order) {
     <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
       ${order.isFavor ? `
         <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left;">
-          <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Detalles del Favor</div>
-          <p style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4; white-space:pre-wrap;">${order.details}</p>
+          <div style="font-size:9px; font-weight:900; color:${getFavorTypeMeta(order.favorType).textColor}; text-transform:uppercase; margin-bottom:8px;">${getFavorTypeMeta(order.favorType).headerText}</div>
+          <div style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${formatFavorDetailsHTML(order.details)}</div>
           ${order.pickupAddress ? `
             <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
               ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}

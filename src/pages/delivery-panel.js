@@ -64,6 +64,64 @@ try {
   console.warn('Capacitor App state tracking not available in this environment:', e);
 }
 
+function getFavorTypeMeta(favorType) {
+  switch (favorType) {
+    case 'gocash':
+      return {
+        title: 'Go Cash',
+        label: 'GO CASH',
+        headerText: 'Detalles del Cambio (Go Cash)',
+        color: '#6366f1',
+        textColor: '#6366f1'
+      };
+    case 'encomienda':
+      return {
+        title: 'GoFavor: Encomienda',
+        label: 'ENCOMIENDA',
+        headerText: 'Detalles de la Encomienda',
+        color: '#10b981',
+        textColor: '#10b981'
+      };
+    case 'pagodeservicios':
+      return {
+        title: 'GoFavor: PAGO DE SERVICIO',
+        label: 'PAGO DE SERVICIOS',
+        headerText: 'Detalles de Pago de Servicios',
+        color: '#d97706',
+        textColor: '#d97706'
+      };
+    case 'mandado':
+    case 'compra':
+    default:
+      return {
+        title: 'GoFavor: Mandado',
+        label: 'GO FAVOR',
+        headerText: 'Detalles del Favor',
+        color: '#ef4444',
+        textColor: '#ef4444'
+      };
+  }
+}
+
+function getRgbString(colorHex) {
+  if (colorHex === '#6366f1') return '99, 102, 241';
+  if (colorHex === '#10b981') return '16, 185, 129';
+  if (colorHex === '#d97706') return '217, 119, 6';
+  return '239, 68, 68';
+}
+
+function formatFavorDetailsHTML(detailsStr) {
+  if (!detailsStr) return '';
+  let html = detailsStr;
+  const lines = html.split('\n');
+  return `<div style="display:flex; flex-direction:column; gap:6px;">
+    ${lines.map(line => {
+      let lineHtml = line.replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--color-text-primary); font-weight:800;">$1</strong>');
+      return `<div style="font-size:12.5px; line-height:1.4; color:var(--color-text-secondary);">${lineHtml}</div>`;
+    }).join('')}
+  </div>`;
+}
+
 function parseFavorDetails(details) {
   if (!details) return [];
   const stores = [];
@@ -82,12 +140,6 @@ function parseFavorDetails(details) {
     });
   });
   
-  if (stores.length === 0) {
-    stores.push({
-      name: 'Favor',
-      items: details
-    });
-  }
   return stores;
 }
 
@@ -726,11 +778,7 @@ function loadTabContent(tab, container, user) {
                   title = `Lote Multi-Local (${b.orders.length} locales)`;
                 }
               } else if (isFavor) {
-                if (favorType === 'gocash') {
-                  title = 'Go Cash';
-                } else {
-                  title = favorType === 'mandado' ? 'GoFavor: Encomienda' : 'GoFavor: Mandado';
-                }
+                title = getFavorTypeMeta(favorType).title;
               } else if (isTrip) {
                 title = tripType === 'moto' ? 'Viaje en Moto solicitado' : 'Viaje en Auto solicitado';
               }
@@ -748,14 +796,18 @@ function loadTabContent(tab, container, user) {
               const anyPending = isBundle ? b.orders.some(o => o.status === 'pending') : false;
               const allReady = isBundle ? b.orders.every(o => o.status === 'ready') : (isFavor || isTrip || b.order.status === 'ready');
 
+              const favorMeta = isFavor ? getFavorTypeMeta(favorType) : null;
+              const favorColor = favorMeta ? favorMeta.color : '#ef4444';
+              const favorRgb = favorMeta ? getRgbString(favorMeta.color) : '239, 68, 68';
+
               return `
                 <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
-                  <div style="position:absolute; top:0; left:0; width:6px; height:100%; background:${isTrip ? '#3b82f6' : (isFavor ? (favorType === 'gocash' ? '#6366f1' : (favorType === 'mandado' ? '#22c55e' : '#ef4444')) : '#00D67F')};"></div>
+                  <div style="position:absolute; top:0; left:0; width:6px; height:100%; background:${isTrip ? '#3b82f6' : (isFavor ? favorColor : '#00D67F')};"></div>
                   
                   <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
                     <div style="flex:1;">
                       <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap: wrap;">
-                        <span style="font-size:10px; font-weight:900; color:white; background:${isTrip ? '#3b82f6' : (isFavor ? (favorType === 'gocash' ? '#6366f1' : (favorType === 'mandado' ? '#22c55e' : '#ef4444')) : '#00D67F')}; padding:3px 10px; border-radius:8px; text-transform:uppercase; letter-spacing: 0.03em;">${isTrip ? 'VIAJE' : (isFavor ? (favorType === 'gocash' ? 'GO CASH' : 'GO FAVOR') : 'DISPONIBLE')}</span>
+                        <span style="font-size:10px; font-weight:900; color:white; background:${isTrip ? '#3b82f6' : (isFavor ? favorColor : '#00D67F')}; padding:3px 10px; border-radius:8px; text-transform:uppercase; letter-spacing: 0.03em;">${isTrip ? 'VIAJE' : (isFavor ? favorMeta.label : 'DISPONIBLE')}</span>
                         <span style="font-size:10.5px; font-weight:800; color:var(--color-text-tertiary);">${new Date(b.createdAt?.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <strong style="font-size:19px; font-weight:950; letter-spacing:-0.5px; display:block; color:var(--color-text-primary); line-height: 1.25;">${title}</strong>
@@ -769,8 +821,8 @@ function loadTabContent(tab, container, user) {
  
                   <div style="display:flex; gap:12px; margin-top:16px; margin-bottom:20px;">
                     <!-- Costo Productos / Servicio -->
-                    <div style="flex:1; background: #ef4444; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px rgba(239, 68, 68, 0.15); border: none;">
-                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${isTrip ? 'Costo Viaje' : 'Costo Productos'}</div>
+                    <div style="flex:1; background: ${isTrip ? '#3b82f6' : favorColor}; padding:14px 10px; border-radius:18px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; box-shadow: 0 6px 15px ${isTrip ? 'rgba(59, 130, 246, 0.15)' : `rgba(${favorRgb}, 0.15)`}; border: none;">
+                      <div style="font-size:9.5px; font-weight:800; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing: 0.05em;">${isTrip ? 'Costo Viaje' : (isFavor ? (favorType === 'pagodeservicios' ? 'Costo Trámite' : (favorType === 'gocash' ? 'Costo Gestión' : 'Costo Productos')) : 'Costo Productos')}</div>
                       <div style="font-size:18px; font-weight:950; color:white; letter-spacing: -0.5px;">${formatPrice(isTrip ? b.total : (b.subtotal || 0))}</div>
                     </div>
                     <!-- Ganancia Tuya -->
@@ -813,7 +865,7 @@ function loadTabContent(tab, container, user) {
                     <span class="expand-text-span"></span>
                     <span class="expand-icon-span" style="display: flex; align-items: center; transition: transform 0.3s ease;">${icon('caretDown', 14)}</span>
                   </div>
-
+ 
                   <div class="card-details-area">
                     ${isTrip ? `
                       <div style="margin-bottom:16px; padding:14px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light);">
@@ -831,23 +883,27 @@ function loadTabContent(tab, container, user) {
                       </div>
                     ` : isFavor ? `
                       <div style="margin-bottom:16px; padding:14px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light); text-align:left;">
-                        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:10px; letter-spacing:0.04em;">Detalles del Favor</div>
+                        <div style="font-size:9px; font-weight:900; color:${favorMeta.textColor}; text-transform:uppercase; margin-bottom:10px; letter-spacing:0.04em;">${favorMeta.headerText}</div>
                         ${(() => {
                           const stores = parseFavorDetails(b.order.details || b.order.description);
                           const storePrices = b.order.storePrices || {};
-                          return `
-                            <div style="display:flex; flex-direction:column; gap:8px; width:100%; margin-bottom:10px;">
-                              ${stores.map(st => `
-                                <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:12.5px; border-bottom:1.5px solid var(--color-border-light); padding-bottom:8px; margin-bottom:2px;">
-                                  <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
-                                    <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
-                                    <span style="color:var(--color-text-secondary); font-size:11.5px; font-weight:500;">${st.items}</span>
+                          if (stores.length > 0) {
+                            return `
+                              <div style="display:flex; flex-direction:column; gap:8px; width:100%; margin-bottom:10px;">
+                                ${stores.map(st => `
+                                  <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:12.5px; border-bottom:1.5px solid var(--color-border-light); padding-bottom:8px; margin-bottom:2px;">
+                                    <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
+                                      <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
+                                      <span style="color:var(--color-text-secondary); font-size:11.5px; font-weight:500;">${st.items}</span>
+                                    </div>
+                                    ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
                                   </div>
-                                  ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
-                                </div>
-                              `).join('')}
-                            </div>
-                          `;
+                                `).join('')}
+                              </div>
+                            `;
+                          } else {
+                            return `<div style="margin-bottom:10px;">${formatFavorDetailsHTML(b.order.details || b.order.description)}</div>`;
+                          }
                         })()}
                         ${b.order.pickupAddress ? `
                           <div style="font-size:11px; font-weight:700; color:var(--color-text-primary); margin-top:10px; display:flex; align-items:flex-start; gap:6px;">
@@ -1545,21 +1601,25 @@ function loadTabContent(tab, container, user) {
                             </div>
                           ` : `
                             <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3); display:flex; flex-direction:column; gap:8px; text-align:left;">
-                              <div style="font-size:9px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px; text-align:left;">Detalle del Favor</div>
+                              <div style="font-size:9px; font-weight:850; color:${getFavorTypeMeta(stop.orders[0].favorType).textColor}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px; text-align:left;">${getFavorTypeMeta(stop.orders[0].favorType).headerText}</div>
                               ${(() => {
                                 const order = stop.orders[0];
                                 const details = order.details || '';
                                 const stores = parseFavorDetails(details);
                                 const storePrices = order.storePrices || {};
-                                return stores.map(st => `
-                                  <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:13px; font-weight:600; color:var(--color-text-secondary); line-height:1.4; border-bottom:1.5px solid var(--color-border-light); padding-bottom:6px; margin-bottom:2px;">
-                                    <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
-                                      <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
-                                      <span style="font-size:11.5px; color:var(--color-text-secondary); font-weight:500;">${st.items}</span>
+                                if (stores.length > 0) {
+                                  return stores.map(st => `
+                                    <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:13px; font-weight:600; color:var(--color-text-secondary); line-height:1.4; border-bottom:1.5px solid var(--color-border-light); padding-bottom:6px; margin-bottom:2px;">
+                                      <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
+                                        <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
+                                        <span style="font-size:11.5px; color:var(--color-text-secondary); font-weight:500;">${st.items}</span>
+                                      </div>
+                                      ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
                                     </div>
-                                    ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
-                                  </div>
-                                `).join('');
+                                  `).join('');
+                                } else {
+                                  return formatFavorDetailsHTML(details);
+                                }
                               })()}
                             </div>
                             ${!stop.isFavor ? `
@@ -2066,7 +2126,7 @@ function loadTabContent(tab, container, user) {
                     ${isFromCurrentSession ? `<div style="position:absolute; top:8px; right:16px; background:#10b981; color:white; font-size:7px; font-weight:900; padding:2px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.05em;">Sesión</div>` : ''}
                     <div style="flex:1; min-width:0;">
                       <div style="font-size:15px; font-weight:800; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:3px;">
-                        ${isBundle ? `Lote · ${group.length} pedidos` : (main.isFavor ? (main.favorType === 'gocash' ? 'Go Cash' : (main.favorType === 'mandado' ? 'GoFavor: Encomienda' : 'GoFavor: Mandado')) : (main.comercioName || 'Pedido'))}
+                        ${isBundle ? `Lote · ${group.length} pedidos` : (main.isFavor ? getFavorTypeMeta(main.favorType).title : (main.comercioName || 'Pedido'))}
                       </div>
                       <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--color-text-tertiary); font-weight:600;">
                         <span style="color:${main.status === 'completed' ? '#10b981' : '#ef4444'};">${main.status === 'completed' ? '✓ Entregado' : '✕ Cancelado'}</span>
@@ -2098,25 +2158,29 @@ function loadTabContent(tab, container, user) {
                       ${group.map(o => `
                         <div style="margin-bottom:12px; padding:12px; background:var(--color-bg-secondary); border-radius:14px; border:1px solid var(--color-border-light);">
                           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${o.isFavor ? 'Detalles del Favor' : (o.comercioName || 'Pedido')}</span>
+                            <span style="font-size:13px; font-weight:800; color:${o.isFavor ? getFavorTypeMeta(o.favorType).textColor : 'var(--color-text-primary)'};">${o.isFavor ? getFavorTypeMeta(o.favorType).headerText : (o.comercioName || 'Pedido')}</span>
                             <span style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${formatPrice(o.subtotal || 0)}</span>
                           </div>
                           ${o.isFavor ? (() => {
                             const stores = parseFavorDetails(o.details || o.description);
                             const storePrices = o.storePrices || {};
-                            return `
-                              <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
-                                ${stores.map(st => `
-                                  <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:12.5px; border-bottom:1.5px solid var(--color-border-light); padding-bottom:6px; margin-bottom:2px;">
-                                    <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
-                                      <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
-                                      <span style="color:var(--color-text-secondary); font-size:11.5px; font-weight:500;">${st.items}</span>
+                            if (stores.length > 0) {
+                              return `
+                                <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
+                                  ${stores.map(st => `
+                                    <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:12.5px; border-bottom:1.5px solid var(--color-border-light); padding-bottom:6px; margin-bottom:2px;">
+                                      <div style="display:flex; flex-direction:column; gap:2px; text-align:left; align-items:flex-start; flex:1; padding-right:8px;">
+                                        <strong style="color:var(--color-text-primary); font-weight:800;">${st.name}</strong>
+                                        <span style="color:var(--color-text-secondary); font-size:11.5px; font-weight:500;">${st.items}</span>
+                                      </div>
+                                      ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
                                     </div>
-                                    ${storePrices[st.name] ? `<span style="font-weight:900; color:var(--color-text-primary); margin-left:12px; white-space:nowrap;">${formatPrice(storePrices[st.name])}</span>` : ''}
-                                  </div>
-                                `).join('')}
-                              </div>
-                            `;
+                                  `).join('')}
+                                </div>
+                              `;
+                            } else {
+                              return formatFavorDetailsHTML(o.details || o.description);
+                            }
                           })() : (o.items ? o.items.map(item => `
                             <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px; padding-left:8px;">
                               <span style="color:var(--color-text-tertiary); font-weight:600;">${item.qty || 1}× ${item.name}</span>
