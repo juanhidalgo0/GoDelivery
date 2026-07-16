@@ -274,7 +274,7 @@ async function startWatching() {
         backgroundTitle: "GO! Repartidor Activo",
         requestPermissions: true,
         stale: false,
-        distanceFilter: 10
+        distanceFilter: 20
       }, async (location, error) => {
         if (error) {
           console.error('Background Tracking Native Error:', error);

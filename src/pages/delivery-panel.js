@@ -1,13 +1,68 @@
-import { collection, query, where, getDocs, doc, updateDoc, onSnapshot, runTransaction, serverTimestamp, writeBatch, increment, addDoc, getDoc, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, onSnapshot as firebaseOnSnapshot, runTransaction, serverTimestamp, writeBatch, increment, addDoc, getDoc, arrayUnion } from 'firebase/firestore';
 import { getState, setState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { db } from '../firebase.js';
+import { App } from '@capacitor/app';
 
 import { isDelivery } from '../auth.js';
 import { showDeliveryMapModal } from '../components/delivery-map-modal.js';
 import { showConfirm, showModal, closeModal } from '../components/modal.js';
+
+// --- LIFECYCLE AWARE ONSNAPSHOT WRAPPER FOR BATTERY & DATA OPTIMIZATION ---
+let isAppActive = true;
+let activeListeners = [];
+
+function onSnapshot(q, callback, errCallback) {
+  let unsub = null;
+  const listener = {
+    q,
+    callback,
+    errCallback,
+    start: () => {
+      if (unsub) return;
+      try {
+        unsub = firebaseOnSnapshot(q, callback, errCallback);
+      } catch (err) {
+        console.error('Error starting snapshot listener:', err);
+      }
+    },
+    stop: () => {
+      if (unsub) {
+        unsub();
+        unsub = null;
+      }
+    }
+  };
+
+  activeListeners.push(listener);
+  if (isAppActive) {
+    listener.start();
+  }
+
+  return () => {
+    listener.stop();
+    activeListeners = activeListeners.filter(l => l !== listener);
+  };
+}
+
+// Track application background/foreground state changes
+try {
+  App.addListener('appStateChange', (state) => {
+    console.log('Delivery Panel Lifecycle: App state changed. isActive =', state.isActive);
+    isAppActive = state.isActive;
+    if (isAppActive) {
+      console.log(`Delivery Panel Lifecycle: Resuming ${activeListeners.length} active Firestore listeners...`);
+      activeListeners.forEach(l => l.start());
+    } else {
+      console.log(`Delivery Panel Lifecycle: Pausing ${activeListeners.length} active Firestore listeners to save battery & data...`);
+      activeListeners.forEach(l => l.stop());
+    }
+  });
+} catch (e) {
+  console.warn('Capacitor App state tracking not available in this environment:', e);
+}
 
 function parseFavorDetails(details) {
   if (!details) return [];
