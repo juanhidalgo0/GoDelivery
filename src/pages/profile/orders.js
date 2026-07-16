@@ -154,6 +154,7 @@ function renderOrders(orders) {
     };
 
     const config = statusConfig[o.status] || statusConfig.pending;
+    const cardLeftColor = o.isFavor ? getFavorTypeMeta(o.favorType).color : (isActive ? config.color : 'transparent');
 
     // Use page-enter only for initial load/staggering, avoid re-adding animation classes on status changes to prevent flash
     const animationClass = container.dataset.lastOrdersFingerprint ? '' : `page-enter stagger-${Math.min(index + 1, 6)}`;
@@ -171,7 +172,7 @@ function renderOrders(orders) {
         position: relative;
         overflow: hidden;
       ">
-        ${isActive ? `<div style="position:absolute; top:0; left:0; width:4px; height:100%; background:${config.color};"></div>` : ''}
+        ${cardLeftColor !== 'transparent' ? `<div style="position:absolute; top:0; left:0; width:4px; height:100%; background:${cardLeftColor};"></div>` : ''}
         
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
           <div style="flex:1; min-width:0;">
