@@ -76,6 +76,9 @@ export async function renderAdminOrders() {
             <span id="conn-diag" style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.8); letter-spacing:0.05em; text-transform:uppercase;">AUDITORÍA GLOBAL</span>
           </div>
         </div>
+        <a href="#/admin/support-chats" id="orders-support-chats-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s; position:relative; z-index:2; margin-right:4px;" title="Mesa de Ayuda">
+          ${icon('chatBubble', 22)}
+        </a>
         <button id="refresh-orders-btn" style="background:rgba(255,255,255,0.15); border:none; width:40px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; transition:all 0.2s; position:relative; z-index:2;">
           ${icon('history', 22)}
         </button>
@@ -648,24 +651,7 @@ window.showOrderDetail = async (idOrObject) => {
 
   // Handle direct support message to driver
   document.getElementById('btn-msg-support-driver')?.addEventListener('click', async () => {
-    const msg = prompt('Escribí el mensaje que querés enviarle al repartidor de parte de Soporte:');
-    if (!msg || !msg.trim()) return;
-    
-    try {
-      const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-      const { showToast } = await import('../../components/toast.js');
-      await addDoc(collection(db, 'users', o.driverId, 'notifications'), {
-        title: '🚨 Mensaje urgente de Soporte',
-        body: msg.trim(),
-        type: 'system',
-        status: 'unread',
-        createdAt: serverTimestamp()
-      });
-      showToast('Mensaje de soporte enviado al repartidor con éxito', 'success');
-    } catch (e) {
-      const { showToast } = await import('../../components/toast.js');
-      showToast('Error al enviar el mensaje', 'danger');
-    }
+    openAdminToDriverSupportChatModal(o.driverId, o.driverName || 'Repartidor', o.id, o.orderId);
   });
 
   detailHtml.querySelectorAll('.btn-chat-audit').forEach(btn => {
@@ -681,3 +667,146 @@ window.showOrderDetail = async (idOrObject) => {
     };
   });
 };
+
+async function openAdminToDriverSupportChatModal(driverId, driverName, orderId, orderNum) {
+  const { doc, getDoc, setDoc, updateDoc, onSnapshot, arrayUnion, serverTimestamp, addDoc, collection } = await import('firebase/firestore');
+  const { showModal, closeModal } = await import('../../components/modal.js');
+  const { showToast } = await import('../../components/toast.js');
+  
+  const chatRef = doc(db, 'support_chats', driverId);
+  
+  // Render structure inside modal
+  const chatContainer = document.createElement('div');
+  chatContainer.style.cssText = 'display:flex; flex-direction:column; height:80dvh; background:var(--color-bg); overflow:hidden;';
+  chatContainer.innerHTML = `
+    <!-- Header -->
+    <div style="background:var(--color-surface); border-bottom:1px solid var(--color-border); padding:16px 20px; display:flex; align-items:center; gap:12px; flex-shrink:0;">
+      <div style="width:40px; height:40px; border-radius:50%; background:rgba(225,29,72,0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:16px;">
+        ${icon('bike', 20)}
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:900; font-size:14.5px; color:var(--color-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Soporte: ${driverName}</div>
+        <div style="font-size:11px; font-weight:700; color:var(--color-text-tertiary);">Repartidor</div>
+      </div>
+    </div>
+    <!-- Messages Box -->
+    <div id="support-modal-messages" style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; background:var(--color-bg-secondary);">
+      <div style="text-align:center; padding:40px 10px; color:var(--color-text-tertiary); font-weight:600; font-size:13px;">
+        Iniciá la conversación escribiendo un mensaje abajo.
+      </div>
+    </div>
+    <!-- Input Footer -->
+    <div style="padding:12px 20px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:10px; align-items:center; flex-shrink:0;">
+      <input type="text" id="support-modal-input" placeholder="Escribí tu mensaje..." style="flex:1; height:46px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 16px; font-weight:700; font-size:13.5px; outline:none; background:var(--color-bg); color:var(--color-text);" />
+      <button id="support-modal-send-btn" style="width:46px; height:46px; border-radius:14px; border:none; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 6px 15px rgba(var(--color-primary-rgb),0.25);">
+        ${icon('send', 20)}
+      </button>
+    </div>
+  `;
+
+  const modalInstance = showModal({
+    title: '',
+    content: chatContainer,
+    hideHeader: true,
+    height: '80dvh'
+  });
+
+  const messagesBox = chatContainer.querySelector('#support-modal-messages');
+  const inputEl = chatContainer.querySelector('#support-modal-input');
+  const sendBtn = chatContainer.querySelector('#support-modal-send-btn');
+
+  // Real-time messages listener
+  let unsub = onSnapshot(chatRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const chatData = docSnap.data();
+      const messages = chatData.messages || [];
+      if (messages.length > 0) {
+        messagesBox.innerHTML = messages.map(msg => {
+          const isAdmin = msg.sender === 'admin';
+          return `
+            <div style="display:flex; flex-direction:column; align-items:${isAdmin ? 'flex-end' : 'flex-start'}; gap:4px;">
+              <div style="max-width:80%; padding:10px 14px; border-radius:${isAdmin ? '16px 16px 4px 16px' : '16px 16px 16px 4px'}; background:${isAdmin ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${isAdmin ? 'white' : 'var(--color-text)'}; font-size:13.5px; font-weight:700; word-break:break-word; box-shadow:var(--shadow-sm);">
+                ${msg.text}
+              </div>
+              <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); margin:0 4px;">
+                ${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          `;
+        }).join('');
+        messagesBox.scrollTop = messagesBox.scrollHeight;
+      }
+    }
+  });
+
+  // Clean up snapshot listener on modal close
+  modalInstance.onClose = () => {
+    if (unsub) unsub();
+  };
+
+  const handleSend = async () => {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+
+    try {
+      const chatSnap = await getDoc(chatRef);
+      const newMessage = {
+        sender: 'admin',
+        text: text,
+        timestamp: Date.now()
+      };
+
+      if (!chatSnap.exists()) {
+        const ticketNum = Math.floor(100000 + Math.random() * 900000);
+        // Create support chat document in Firestore
+        await setDoc(chatRef, {
+          userId: driverId,
+          userName: driverName,
+          userRole: 'driver',
+          status: 'open',
+          ticketId: `#TK-${ticketNum}`,
+          createdAt: serverTimestamp(),
+          lastMessageText: text,
+          lastMessageTime: serverTimestamp(),
+          unreadByAdmin: false,
+          unreadByUser: true,
+          messages: [newMessage],
+          activeOrderId: orderId || '',
+          activeOrderNum: orderNum || ''
+        });
+      } else {
+        await updateDoc(chatRef, {
+          status: 'open',
+          lastMessageText: text,
+          lastMessageTime: serverTimestamp(),
+          unreadByAdmin: false,
+          unreadByUser: true,
+          messages: arrayUnion(newMessage),
+          activeOrderId: orderId || chatSnap.data().activeOrderId || '',
+          activeOrderNum: orderNum || chatSnap.data().activeOrderNum || ''
+        });
+      }
+
+      // Also trigger a push notification to the driver
+      try {
+        await addDoc(collection(db, 'users', driverId, 'notifications'), {
+          title: '🚨 Mensaje de Soporte',
+          body: text,
+          type: 'system',
+          status: 'unread',
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {}
+
+    } catch (err) {
+      console.error('Error sending support message:', err);
+      showToast('Error al enviar mensaje', 'danger');
+    }
+  };
+
+  sendBtn.onclick = handleSend;
+  inputEl.onkeydown = (e) => {
+    if (e.key === 'Enter') handleSend();
+  };
+}

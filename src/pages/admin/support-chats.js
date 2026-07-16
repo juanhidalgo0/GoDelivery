@@ -19,15 +19,26 @@ export async function renderAdminSupportChats() {
         <!-- Left Side: Chat Sessions List -->
         <div id="chats-list-sidebar" style="width:100%; max-width:360px; border-right:1px solid var(--color-border); display:flex; flex-direction:column; background:var(--color-surface); flex-shrink:0;">
           <div style="padding:16px; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-            <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; display:flex; gap:8px; align-items:center;">
-              <span>Conversaciones</span>
-              <span id="unread-count-badge" style="background:var(--color-primary); color:white; padding:2px 8px; border-radius:100px; font-size:10px; font-weight:900; display:none;">0</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <a href="#/admin/orders" style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:10px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); color:var(--color-text); text-decoration:none;" title="Volver a Registro de Ventas">
+                ${icon('chevronLeft', 20)}
+              </a>
+              <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; display:flex; gap:6px; align-items:center;">
+                <span>Chats</span>
+                <span id="unread-count-badge" style="background:var(--color-primary); color:white; padding:2px 8px; border-radius:100px; font-size:10px; font-weight:900; display:none;">0</span>
+              </div>
             </div>
             
             <!-- Bulk Delete Action -->
             <button id="delete-all-chats-btn" style="border:none; background:transparent; color:var(--color-danger); cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; transition: opacity 0.2s;">
               ${icon('trash', 14)} Eliminar Todo
             </button>
+          </div>
+          <!-- Role Selector Filter Tabs -->
+          <div id="support-role-filter-container" style="padding:8px 16px 12px; border-bottom:1px solid var(--color-border); display:flex; gap:8px; flex-shrink:0; background:var(--color-surface);">
+            <button class="support-filter-btn active" data-role="all" style="flex:1; height:32px; border-radius:10px; border:none; font-weight:800; font-size:11px; cursor:pointer; background:var(--color-primary); color:white; transition:all 0.2s;">Todos</button>
+            <button class="support-filter-btn" data-role="user" style="flex:1; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s;">Clientes</button>
+            <button class="support-filter-btn" data-role="driver" style="flex:1; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s;">Repartidores</button>
           </div>
           <div id="support-chats-list" style="flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:8px;">
             <div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>
@@ -191,8 +202,15 @@ export async function renderAdminSupportChats() {
 
     // Populate active user header
     activeUserName.textContent = chat.userName || 'Usuario';
-    activeUserMeta.textContent = `${chat.email || ''} | Rol: ${chat.userRole || 'Cliente'}`;
     activeUserAvatar.textContent = (chat.userName || 'U')[0].toUpperCase();
+    
+    let metaText = `${chat.email || ''} | Rol: ${chat.userRole || 'Cliente'}`;
+    if (chat.activeOrderNum && chat.activeOrderId) {
+      metaText += ` | ⚠️ <a href="#/admin/orders" onclick="window.closeModal?.(); setTimeout(() => window.showOrderDetail('${chat.activeOrderId}'), 200); return false;" style="color:var(--color-primary); font-weight:900; text-decoration:underline;">Ver Pedido #${chat.activeOrderNum}</a>`;
+      activeUserMeta.innerHTML = metaText;
+    } else {
+      activeUserMeta.textContent = metaText;
+    }
     
     const goIdEl = document.getElementById('active-user-goid');
     if (goIdEl) {
@@ -565,39 +583,42 @@ export async function renderAdminSupportChats() {
     });
   };
 
-  // Real-time listener for support chats collection
-  activeChatsListener = onSnapshot(collection(db, 'support_chats'), (snap) => {
-    allChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  let currentRoleFilter = 'all';
 
-    // Sort by last message time descending
-    allChats.sort((a, b) => {
-      const tA = a.lastMessageTime?.seconds || 0;
-      const tB = b.lastMessageTime?.seconds || 0;
-      return tB - tA;
-    });
+  // Attach filter buttons click listener
+  document.querySelectorAll('.support-filter-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.support-filter-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'var(--color-surface)';
+        b.style.color = 'var(--color-text-secondary)';
+        b.style.border = '1px solid var(--color-border)';
+      });
+      btn.classList.add('active');
+      btn.style.background = 'var(--color-primary)';
+      btn.style.color = 'white';
+      btn.style.border = 'none';
+      
+      currentRoleFilter = btn.dataset.role;
+      renderFilteredChatsList();
+    };
+  });
 
-    // Update unread count badge
-    const unreadCount = allChats.filter(c => c.unreadByAdmin).length;
-    if (unreadCount > 0) {
-      unreadCountBadge.textContent = unreadCount;
-      unreadCountBadge.style.display = 'inline-block';
-    } else {
-      unreadCountBadge.style.display = 'none';
+  const renderFilteredChatsList = () => {
+    let filteredChats = allChats;
+    if (currentRoleFilter === 'user') {
+      filteredChats = allChats.filter(c => c.userRole === 'user' || c.userRole === 'client' || !c.userRole);
+    } else if (currentRoleFilter === 'driver') {
+      filteredChats = allChats.filter(c => c.userRole === 'driver' || c.userRole === 'delivery');
     }
 
-    // Explicitly synchronize with global state so footer navbar badge remains 100% in sync
-    import('../../state.js').then(m => m.setState('unreadSupportCount', unreadCount)).catch(() => {});
-
-    if (allChats.length === 0) {
-      chatsList.innerHTML = `<div style="text-align:center; padding:30px; font-size:13px; color:var(--color-text-tertiary); font-weight:600;">No hay chats activos</div>`;
-      selectedChatId = null;
-      chatArea.style.display = 'none';
-      if (placeholderArea) placeholderArea.style.display = 'flex';
+    if (filteredChats.length === 0) {
+      chatsList.innerHTML = `<div style="text-align:center; padding:30px; font-size:13px; color:var(--color-text-tertiary); font-weight:600;">No hay chats en esta categoría</div>`;
       return;
     }
 
     // Render sessions sidebar
-    chatsList.innerHTML = allChats.map(c => {
+    chatsList.innerHTML = filteredChats.map(c => {
       const activeText = c.unreadByAdmin ? 'font-weight:900;' : 'font-weight:600;';
       const indicatorColor = c.unreadByAdmin ? 'var(--color-primary)' : 'transparent';
       const timeStr = c.lastMessageTime && c.lastMessageTime.seconds ? new Date(c.lastMessageTime.seconds * 1000).toLocaleTimeString('es-AR', {
@@ -649,6 +670,40 @@ export async function renderAdminSupportChats() {
     chatsList.querySelectorAll('.admin-chat-item-card').forEach(card => {
       card.onclick = () => selectChat(card.dataset.id);
     });
+  };
+
+  // Real-time listener for support chats collection
+  activeChatsListener = onSnapshot(collection(db, 'support_chats'), (snap) => {
+    allChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Sort by last message time descending
+    allChats.sort((a, b) => {
+      const tA = a.lastMessageTime?.seconds || 0;
+      const tB = b.lastMessageTime?.seconds || 0;
+      return tB - tA;
+    });
+
+    // Update unread count badge
+    const unreadCount = allChats.filter(c => c.unreadByAdmin).length;
+    if (unreadCount > 0) {
+      unreadCountBadge.textContent = unreadCount;
+      unreadCountBadge.style.display = 'inline-block';
+    } else {
+      unreadCountBadge.style.display = 'none';
+    }
+
+    // Explicitly synchronize with global state so footer navbar badge remains 100% in sync
+    import('../../state.js').then(m => m.setState('unreadSupportCount', unreadCount)).catch(() => {});
+
+    if (allChats.length === 0) {
+      chatsList.innerHTML = `<div style="text-align:center; padding:30px; font-size:13px; color:var(--color-text-tertiary); font-weight:600;">No hay chats activos</div>`;
+      selectedChatId = null;
+      chatArea.style.display = 'none';
+      if (placeholderArea) placeholderArea.style.display = 'flex';
+      return;
+    }
+
+    renderFilteredChatsList();
 
     // Update active chat if currently open
     if (selectedChatId) {

@@ -1849,9 +1849,11 @@ function loadTabContent(tab, container, user) {
                         ${stop.type === 'DROP_OFF' ? `
                            <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.userName}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
                            <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.userName}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
+                           <button class="btn delivery-support-order-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Soporte Técnico">${icon('helpCircle', 20)}</button>
                          ` : `
                            <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.orders[0].userName || 'Cliente'}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
                            <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.orders[0].userName || 'Cliente'}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
+                           <button class="btn delivery-support-order-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Soporte Técnico">${icon('helpCircle', 20)}</button>
                          `}
                       </div>
                     </div>
@@ -2324,6 +2326,53 @@ function loadTabContent(tab, container, user) {
             const msg = encodeURIComponent(`Hola ${clientName}, soy el repartidor de GoDelivery en camino con tu pedido #${orderNum}.`);
             const waUrl = `https://wa.me/${cleanedPhone}?text=${msg}`;
             window.open(waUrl, '_blank');
+          });
+        });
+
+        container.querySelectorAll('.delivery-support-order-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const orderId = btn.dataset.orderId;
+            const orderNum = btn.dataset.orderNum;
+
+            const fab = document.getElementById('support-bot-fab-btn');
+            const openSupport = async () => {
+              if (fab) {
+                try {
+                  const { doc, getDoc, updateDoc } = await import('firebase/firestore');
+                  const chatRef = doc(db, 'support_chats', user.uid);
+                  const chatSnap = await getDoc(chatRef);
+                  if (chatSnap.exists()) {
+                    await updateDoc(chatRef, {
+                      activeOrderId: orderId,
+                      activeOrderNum: orderNum
+                    });
+                  }
+                } catch (e) {
+                  console.warn('Could not set active order context in support chat:', e);
+                }
+                
+                fab.click();
+
+                setTimeout(() => {
+                  const input = document.getElementById('support-bot-input');
+                  if (input) {
+                    input.value = `⚠️ Hola Soporte, tengo un problema con el Pedido #${orderNum}: `;
+                    input.focus();
+                  }
+                }, 200);
+              }
+            };
+
+            if (fab) {
+              await openSupport();
+            } else {
+              import('../components/support-bot.js').then(async (m) => {
+                m.initSupportBot();
+                setTimeout(async () => {
+                  await openSupport();
+                }, 200);
+              });
+            }
           });
         });
       }
