@@ -13,7 +13,9 @@ async function loadSearchData() {
   if (isLoaded) return;
   try {
     const comSnap = await getDocs(query(collection(db, 'comercios')));
-    allComercios = comSnap.docs.map(doc => ({ id: doc.id, type: 'comercio', ...doc.data() }));
+    allComercios = comSnap.docs
+      .map(doc => ({ id: doc.id, type: 'comercio', ...doc.data() }))
+      .filter(c => c.isActive !== false);
 
     // Fetch products with fallback if collectionGroup fails or index is missing
     try {

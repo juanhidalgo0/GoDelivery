@@ -484,6 +484,34 @@ export async function renderAdminSettings() {
             </div>
           </div>
 
+          <!-- 5.5 Maintenance Mode -->
+          <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border-light);border-radius:24px;overflow:hidden;margin-bottom:18px;">
+            <button class="settings-section-toggle" data-target="section-maintenance" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
+              <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#fee2e2,#fee2e2);color:#ef4444;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${icon('alertTriangle', 22)}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-family:var(--font-display);font-size:15px;font-weight:900;color:var(--color-text);letter-spacing:-0.01em;">Modo Mantenimiento</div>
+                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;font-weight:600;">Bloqueo global de la aplicación</div>
+              </div>
+              <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
+            </button>
+            <div id="section-maintenance" class="settings-section-body" style="display:none;padding:0 20px 20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--color-bg-secondary);border-radius:18px;padding:16px;border:1px solid var(--color-border-light);margin-bottom:14px;">
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                  <span style="font-size:13px;font-weight:800;color:var(--color-text);">Activar Modo Mantenimiento</span>
+                  <span style="font-size:11px;color:var(--color-text-secondary);font-weight:500;">Bloquea el acceso a clientes, comercios y repartidores de inmediato.</span>
+                </div>
+                <label class="settings-switch">
+                  <input type="checkbox" id="global-maintenance-mode" ${getState().maintenanceMode ? 'checked' : ''}>
+                  <span class="settings-slider"></span>
+                </label>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:10px;color:var(--color-text-tertiary);font-weight:700;text-transform:uppercase;">Mensaje para los usuarios</label>
+                <textarea id="global-maintenance-message" class="input" style="width:100%;height:80px;border-radius:12px;padding:10px;font-weight:600;font-size:13px;background:var(--color-bg-secondary);border:1px solid var(--color-border-light);resize:none;">${getState().maintenanceMessage || ''}</textarea>
+              </div>
+            </div>
+          </div>
+
           <!-- 6. Danger Zone -->
           <div class="settings-section" style="background:rgba(239,68,68,0.03);border:1.5px solid rgba(239,68,68,0.15);border-radius:24px;overflow:hidden;">
             <button class="settings-section-toggle" data-target="section-danger" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
@@ -565,6 +593,8 @@ export async function renderAdminSettings() {
     const dollarPerPoint = parseFloat(document.getElementById('global-point-value').value) || 1;
     const referralPoints = parseFloat(document.getElementById('global-referral-points').value) || 500;
     const useDarkBrandTheme = document.getElementById('global-use-dark-brand-theme').checked;
+    const maintenanceMode = document.getElementById('global-maintenance-mode').checked;
+    const maintenanceMessage = document.getElementById('global-maintenance-message').value.trim();
 
     btn.disabled = true;
     btn.innerHTML = icon('loader', 16, 'animate-spin');
@@ -625,7 +655,7 @@ export async function renderAdminSettings() {
         tripBasePrice, tripMinPrice, tripPricePerKm,
         commissionRate, appUsageFeeRate, pointsPerDollar, dollarPerPoint, referralPoints, weeklyChallenges,
         favorPurchaseFee, whatsappPayments, nightSurchargeConfig, driverIncentiveConfig, pushMessages,
-        rainMode, useDarkBrandTheme
+        rainMode, useDarkBrandTheme, maintenanceMode, maintenanceMessage
       }, { merge: true });
 
       await setDoc(doc(db, 'settings', 'levels'), currentLevels);
@@ -651,6 +681,8 @@ export async function renderAdminSettings() {
       setState('driverIncentiveConfig', driverIncentiveConfig);
       setState('pushMessages', pushMessages);
       setState('useDarkBrandTheme', useDarkBrandTheme);
+      setState('maintenanceMode', maintenanceMode);
+      setState('maintenanceMessage', maintenanceMessage);
 
       showModal({
         title: '<div style="text-align:center;">¡Cambios Guardados!</div>',

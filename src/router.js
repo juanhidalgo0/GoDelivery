@@ -89,6 +89,14 @@ async function handleRoute() {
 
     if (getState().loading) return;
 
+    const maintenanceMode = getState().maintenanceMode === true;
+    const isUserAdmin = isAdmin();
+    if (maintenanceMode && !isUserAdmin) {
+      checkMaintenanceState();
+      isRouting = false;
+      return;
+    }
+
     const match = matchRoute(hash);
     if (!match) return;
 
@@ -364,22 +372,86 @@ export function initRouter() {
   };
 
   setupSliderSync();
+  
+  // Sincronizar estado de mantenimiento en tiempo real
+  subscribe('maintenanceMode', () => checkMaintenanceState());
+  subscribe('user', () => checkMaintenanceState());
+  
+  checkMaintenanceState();
   handleRoute();
 }
 
-
-
-
-
-
-
-
-
-
-
-
+export function checkMaintenanceState() {
+  const maintenanceMode = getState().maintenanceMode === true;
+  const isUserAdmin = isAdmin();
+  
+  let overlay = document.getElementById('maintenance-overlay');
+  
+  if (maintenanceMode && !isUserAdmin) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'maintenance-overlay';
+      overlay.style = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100dvw;
+        height: 100dvh;
+        background: var(--color-bg-secondary);
+        color: var(--color-text);
+        z-index: 9999999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 30px;
+        box-sizing: border-box;
+        text-align: center;
+        font-family: var(--font-body);
+      `;
+      document.body.appendChild(overlay);
+    }
+    
+    const message = getState().maintenanceMessage || 'La aplicación se encuentra en mantenimiento temporal para realizar mejoras. Volvemos en unos minutos.';
+    
+    overlay.innerHTML = `
+      <div style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 28px; padding: 40px 30px; max-width: 420px; width: 100%; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; align-items: center; gap: 20px; box-sizing: border-box; animation: maintenance-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+        <style>
+          @keyframes maintenance-pop {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          @keyframes rotate-gear {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+        <div style="width: 80px; height: 80px; border-radius: 24px; background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); display: flex; align-items: center; justify-content: center; font-size: 40px; position: relative;">
+          🚧
+          <span style="position: absolute; bottom: 8px; right: 8px; font-size: 20px; animation: rotate-gear 6s linear infinite; display: block;">⚙️</span>
+        </div>
+        
+        <h2 style="font-family: var(--font-display); font-weight: 900; font-size: 22px; margin: 0; color: var(--color-text-primary); letter-spacing: -0.01em;">Modo Mantenimiento</h2>
+        
+        <p style="font-size: 14px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; font-weight: 600;">
+          ${message}
+        </p>
+        
+        <div style="border-top: 1px solid var(--color-border-light); width: 100%; padding-top: 20px; font-size: 11px; color: var(--color-text-tertiary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">
+          GO! Delivery • Soporte Técnico
+        </div>
+      </div>
+    `;
+    overlay.style.display = 'flex';
+  } else {
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+  }
+}
 
 // Called after auth is ready
 export function routerReady() {
+  checkMaintenanceState();
   handleRoute();
 }
