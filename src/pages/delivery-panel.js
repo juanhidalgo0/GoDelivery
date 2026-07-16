@@ -4978,8 +4978,8 @@ export async function showSuccessCelebration(orders, onFinish) {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(15, 23, 42, 0.95);
-    backdrop-filter: blur(8px);
+    background: rgba(10, 15, 30, 0.96);
+    backdrop-filter: blur(12px);
     z-index: 99999;
     display: flex;
     flex-direction: column;
@@ -4988,77 +4988,101 @@ export async function showSuccessCelebration(orders, onFinish) {
     color: white;
     font-family: var(--font-display, 'Outfit', sans-serif);
     opacity: 0;
-    transition: opacity 0.4s ease;
+    transition: opacity 0.5s cubic-bezier(0.19, 1, 0.22, 1);
   `;
+
+  const previousDebt = Math.max(0, (getState().user?.deliveryDebt || 0) - currentDebt);
 
   overlay.innerHTML = `
     <canvas id="confetti-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
-    <div style="text-align:center; z-index: 10; padding:24px; max-width:400px; display:flex; flex-direction:column; align-items:center; gap:20px; width:100%; box-sizing:border-box;">
-      <div class="success-ring" style="
-        width: 90px; 
-        height: 90px; 
-        background: linear-gradient(135deg, #10b981, #059669); 
-        border-radius: 50%; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center;
-        box-shadow: 0 0 30px rgba(16, 185, 129, 0.4);
-        transform: scale(0);
-        animation: popScale 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-      ">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="20 6 9 17 4 12"></polyline>
-        </svg>
-      </div>
-
-      <h1 style="font-size: 26px; font-weight: 900; margin: 10px 0 0; letter-spacing: -0.5px; color: white;">¡Entrega Completada!</h1>
-      <p style="font-size: 13.5px; color: #94a3b8; margin: 0; line-height: 1.45;">¡Excelente trabajo! Has sumado ganancias a tu cuenta.</p>
+    
+    <div style="text-align:center; z-index: 10; padding:32px 24px; max-width:420px; display:flex; flex-direction:column; align-items:center; gap:24px; width:92%; box-sizing:border-box; background: rgba(255,255,255,0.03); border: 1.5px solid rgba(255,255,255,0.06); border-radius: 36px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); backdrop-filter: blur(20px); transform: scale(0.9); opacity: 0; animation: modalEntrance 0.7s cubic-bezier(0.19, 1, 0.22, 1) forwards;">
       
-      <div style="background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.08); padding: 20px; border-radius: 24px; margin: 8px 0; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px;">
-        <div style="text-align: center;">
-          <span style="font-size: 10px; font-weight: 900; text-transform: uppercase; color: #10b981; letter-spacing: 0.08em; display: block; margin-bottom: 4px;">Ganado en este viaje</span>
-          <div id="celebration-amount" style="font-size: 38px; font-weight: 950; color: white; letter-spacing: -1px; line-height: 1;">$ 0.00</div>
-        </div>
-        
-        <div style="height: 1px; background: rgba(255,255,255,0.08); width: 100%;"></div>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 800; color: #94a3b8;">
-          <span style="display: flex; align-items: center; gap: 6px;">💼 Total Sesión Actual</span>
-          <span id="celebration-session-amount" style="font-size: 18px; font-weight: 950; color: white;">$ 0.00</span>
-        </div>
-
-        <div style="height: 1px; background: rgba(255,255,255,0.08); width: 100%;"></div>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 800; color: #f87171;">
-          <span style="display: flex; align-items: center; gap: 6px;">💳 Tarifa App a Rendir</span>
-          <span id="celebration-debt-amount" style="font-size: 18px; font-weight: 950; color: #f87171;">$ 0.00</span>
+      <!-- Brand Logo Header -->
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 4px;">
+        <img src="/LOGOapp.png" alt="GoDelivery" style="height: 64px; object-fit: contain; filter: drop-shadow(0 4px 12px rgba(225, 29, 72, 0.35)); animation: bounceLogo 2s infinite ease-in-out;" onerror="this.style.display='none'">
+        <div style="
+          width: 72px; 
+          height: 72px; 
+          background: linear-gradient(135deg, #E11D48, #BE123C); 
+          border-radius: 50%; 
+          display: flex; 
+          align-items: center; 
+          justify-content: center;
+          box-shadow: 0 0 25px rgba(225, 29, 72, 0.45);
+          animation: popScale 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.2s forwards;
+          transform: scale(0);
+        ">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
         </div>
       </div>
 
-      <button id="celebration-continue-btn" class="btn btn-primary" style="
-        background: white; 
-        color: #0f172a; 
+      <div style="text-align: center; display: flex; flex-direction: column; gap: 6px;">
+        <h1 style="font-size: 28px; font-weight: 950; margin: 0; letter-spacing: -0.8px; background: linear-gradient(to right, #FFFFFF, #E2E8F0); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">¡Entrega Completada!</h1>
+        <p style="font-size: 14px; color: #94A3B8; margin: 0; line-height: 1.45; font-weight: 550;">¡Excelente trabajo! Has sumado ganancias a tu cuenta.</p>
+      </div>
+      
+      <div style="background: rgba(255,255,255,0.02); border: 1.5px solid rgba(255,255,255,0.05); padding: 24px; border-radius: 28px; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px; box-shadow: inset 0 2px 4px rgba(255,255,255,0.02);">
+        <div style="text-align: center;">
+          <span style="font-size: 10.5px; font-weight: 900; text-transform: uppercase; color: #10B981; letter-spacing: 0.1em; display: block; margin-bottom: 6px;">Ganado en este viaje</span>
+          <div id="celebration-amount" style="font-size: 42px; font-weight: 950; color: white; letter-spacing: -1.5px; line-height: 1;">$ 0.00</div>
+        </div>
+        
+        <div style="height: 1.5px; background: rgba(255,255,255,0.06); width: 100%;"></div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 800; color: #94A3B8;">
+          <span style="display: flex; align-items: center; gap: 8px;">💼 Total Sesión Actual</span>
+          <span id="celebration-session-amount" style="font-size: 19px; font-weight: 950; color: white; letter-spacing: -0.5px;">$ 0.00</span>
+        </div>
+
+        <div style="height: 1.5px; background: rgba(255,255,255,0.06); width: 100%;"></div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 800; color: #FDA4AF;">
+          <span style="display: flex; align-items: center; gap: 8px;">💳 Tarifa App a Rendir (Total)</span>
+          <span id="celebration-debt-amount" style="font-size: 19px; font-weight: 950; color: #F43F5E; letter-spacing: -0.5px;">$ 0.00</span>
+        </div>
+      </div>
+
+      <button id="celebration-continue-btn" style="
+        background: linear-gradient(135deg, #E11D48 0%, #BE123C 100%); 
+        color: white; 
         border: none; 
-        padding: 16px 40px; 
+        padding: 18px 40px; 
         font-weight: 900; 
-        font-size: 14.5px; 
-        border-radius: 18px; 
+        font-size: 15px; 
+        border-radius: 20px; 
         cursor: pointer; 
-        box-shadow: 0 10px 25px rgba(255,255,255,0.1);
-        transition: all 0.2s;
+        box-shadow: 0 10px 25px rgba(225, 29, 72, 0.35);
+        transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
         width: 100%;
         height: auto;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
       ">
-        CONTINUAR
+        Entendido
       </button>
     </div>
 
     <style>
+      @keyframes modalEntrance {
+        to { transform: scale(1); opacity: 1; }
+      }
       @keyframes popScale {
         to { transform: scale(1); }
       }
+      @keyframes bounceLogo {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-6px); }
+      }
+      #celebration-continue-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 15px 30px rgba(225, 29, 72, 0.45);
+      }
       #celebration-continue-btn:active {
-        transform: scale(0.97);
+        transform: translateY(1px) scale(0.98);
+        box-shadow: 0 5px 15px rgba(225, 29, 72, 0.25);
       }
     </style>
   `;
@@ -5130,7 +5154,7 @@ export async function showSuccessCelebration(orders, onFinish) {
   
   sessionAmountEl.textContent = formatPrice(previousSessionEarned);
   if (debtAmountEl) {
-    debtAmountEl.textContent = formatPrice(currentDebt);
+    debtAmountEl.textContent = formatPrice(previousDebt);
   }
 
   let currentVal = 0;
@@ -5138,15 +5162,26 @@ export async function showSuccessCelebration(orders, onFinish) {
   const stepTime = 20;
   const totalSteps = duration / stepTime;
   const stepAmount = totalEarned / totalSteps;
+  const stepDebt = currentDebt / totalSteps;
 
   const counterInterval = setInterval(() => {
     currentVal += stepAmount;
+    let isDone = false;
     if (currentVal >= totalEarned) {
       currentVal = totalEarned;
-      clearInterval(counterInterval);
+      isDone = true;
     }
     amountEl.textContent = formatPrice(currentVal);
     sessionAmountEl.textContent = formatPrice(previousSessionEarned + currentVal);
+    
+    if (debtAmountEl) {
+      const currentDebtVal = isDone ? (previousDebt + currentDebt) : (previousDebt + (currentVal / (totalEarned || 1)) * currentDebt);
+      debtAmountEl.textContent = formatPrice(currentDebtVal);
+    }
+    
+    if (isDone) {
+      clearInterval(counterInterval);
+    }
   }, stepTime);
 
   const cleanup = () => {
