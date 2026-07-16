@@ -492,82 +492,86 @@ export async function showMandadoForm() {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
   modalEl.innerHTML = `
-    <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px;">
+    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
       <!-- Paso 1 Container -->
-      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
-          <button id="pickup-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s;">
-             <div style="width:36px; height:36px; border-radius:12px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 20)}</div>
-             <span id="pickup-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Elegir dirección en el mapa...</span>
-             ${icon('chevronRight', 16)}
-          </button>
-          <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
+      <div id="step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; scrollbar-width: none;">
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
+            <button id="pickup-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:36px; height:36px; border-radius:12px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 20)}</div>
+               <span id="pickup-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Elegir dirección en el mapa...</span>
+               ${icon('chevronRight', 16)}
+            </button>
+            <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
+            <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+               <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+               ${icon('chevronRight', 16)}
+            </button>
+            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; margin-bottom:4px; display:block;">Detalles de la Encomienda</label>
+            <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 100px; border-radius: 16px; border: 1.5px solid var(--color-border-light); padding: 14px; background: var(--color-surface); color: var(--color-text-primary); font-size: 13.5px; font-weight: 600; resize: none; outline:none; font-family:inherit; transition:all 0.2s;"></textarea>
+          </div>
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
-          <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-             <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-             <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-             ${icon('chevronRight', 16)}
-          </button>
-          <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
-        </div>
-
-        <div>
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; margin-bottom:12px; display:block;">Detalles de la Encomienda</label>
-          <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 110px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 600; resize: none; outline:none; font-family:inherit;"></textarea>
-        </div>
-
-        <button type="button" id="step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <button type="button" id="step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <button type="button" id="step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
-          ${icon('chevronLeft', 16)} Volver a Paso 1
-        </button>
+      <div id="step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; scrollbar-width: none;">
+          <button type="button" id="step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+            ${icon('chevronLeft', 16)} Volver a Paso 1
+          </button>
 
-        <!-- Método de pago -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
-          <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
-            <button type="button" id="mandado-pay-efectivo" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('dollarSign', 14)} Efectivo
-            </button>
-            <button type="button" id="mandado-pay-transfer" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('creditCard', 14)} Transferencia
-            </button>
+          <!-- Método de pago -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
+            <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
+              <button type="button" id="mandado-pay-efectivo" style="flex:1; height:42px; border-radius:12px; border:none; font-size:13px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('dollarSign', 14)} Efectivo
+              </button>
+              <button type="button" id="mandado-pay-transfer" style="flex:1; height:42px; border-radius:12px; border:none; font-size:13px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('creditCard', 14)} Transferencia
+              </button>
+            </div>
+          </div>
+
+          <!-- Benefits Container -->
+          <div id="benefits-container"></div>
+          
+          <div id="cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío (distancia)</span>
+              <span id="dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa servicio</span>
+              <span id="service-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
+              <span style="font-weight: 900; color: #059669; font-size: 15px;">Total Servicio</span>
+              <span id="estimated-cost" style="font-size: 20px; font-weight: 950; color: #059669;">$ 0</span>
+            </div>
+            <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center;">
+              * Este es el costo por el servicio de envío.
+            </p>
           </div>
         </div>
 
-        <!-- Benefits Container -->
-        <div id="benefits-container"></div>
-        
-        <div id="cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío (distancia)</span>
-            <span id="dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa servicio</span>
-            <span id="service-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-            <span style="font-weight: 900; color: #059669; font-size: 15px;">Total Servicio</span>
-            <span id="estimated-cost" style="font-size: 20px; font-weight: 950; color: #059669;">$ 0</span>
-          </div>
-          <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center;">
-            * Este es el costo por el servicio de envío.
-          </p>
-        </div>
-
-        <button id="confirm-favor-btn" style="width: 100%; height: 60px; border-radius: 20px; background: #059669; color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(5,150,105, 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <button id="confirm-favor-btn" style="width: 100%; height: 56px; border-radius: 18px; background: #059669; color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(5,150,105, 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0;">
           ${icon('check', 20)} Solicitar Encomienda
         </button>
       </div>
@@ -950,95 +954,99 @@ export async function showCompraForm() {
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
   modalEl.innerHTML = `
-    <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px;">
+    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
       
       <!-- Paso 1 Container -->
-      <div id="compra-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="display:flex; flex-direction:column; gap:12px; margin-top: 4px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
-          <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
-            ${[1, 2, 3, 4, 5].map(n => `
-              <button type="button" class="stop-count-btn" data-stops="${n}" style="height:44px; border-radius:12px; border:2px solid ${n === 1 ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${n === 1 ? 'rgba(var(--color-primary-rgb),0.08)' : 'var(--color-bg-card)'}; color:${n === 1 ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight:900; font-size:14px; cursor:pointer;">
-                ${n}
-              </button>
-            `).join('')}
+      <div id="compra-step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+          <div style="display:flex; flex-direction:column; gap:12px; margin-top: 4px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
+            <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
+              ${[1, 2, 3, 4, 5].map(n => `
+                <button type="button" class="stop-count-btn" data-stops="${n}" style="height:48px; border-radius:16px; border:2px solid ${n === 1 ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${n === 1 ? 'rgba(var(--color-primary-rgb),0.08)' : 'var(--color-surface)'}; color:${n === 1 ? 'var(--color-primary)' : 'var(--color-text-primary)'}; font-weight:900; font-size:15px; cursor:pointer; transition:all 0.2s; box-shadow: ${n === 1 ? '0 4px 12px rgba(var(--color-primary-rgb), 0.15)' : 'none'};">
+                  ${n}
+                </button>
+              `).join('')}
+            </div>
+            <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:4px 0 0; font-weight:600; display:none; line-height:1.4;">
+              📍 Se cobra una parada extra por cada comercio adicional al primero.
+            </p>
           </div>
-          <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:6px 0 0; font-weight:600; display:none; line-height:1.4;">
-            📍 Se cobra una parada extra por cada comercio adicional al primero.
-          </p>
+
+          <!-- Dynamically generated list of stores -->
+          <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:16px;">
+            <!-- Filled dynamically -->
+          </div>
+
+          <!-- Delivery destination -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
+            <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+               <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+               ${icon('chevronRight', 16)}
+            </button>
+            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          </div>
         </div>
 
-        <!-- Dynamically generated list of stores -->
-        <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:16px;">
-          <!-- Filled dynamically -->
-        </div>
-
-        <!-- Delivery destination -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
-          <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-             <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-             <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-             ${icon('chevronRight', 16)}
-          </button>
-          <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
-        </div>
-
-        <button type="button" id="compra-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <button type="button" id="compra-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="compra-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <button type="button" id="compra-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
-          ${icon('chevronLeft', 16)} Volver a Paso 1
-        </button>
+      <div id="compra-step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+          <button type="button" id="compra-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+            ${icon('chevronLeft', 16)} Volver a Paso 1
+          </button>
 
-        <!-- Método de pago -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
-          <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
-            <button type="button" id="compra-pay-efectivo" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('dollarSign', 14)} Efectivo
-            </button>
-            <button type="button" id="compra-pay-transfer" style="flex:1; height:40px; border-radius:12px; border:none; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('creditCard', 14)} Transferencia
-            </button>
+          <!-- Método de pago -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
+            <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
+              <button type="button" id="compra-pay-efectivo" style="flex:1; height:42px; border-radius:12px; border:none; font-size:13px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('dollarSign', 14)} Efectivo
+              </button>
+              <button type="button" id="compra-pay-transfer" style="flex:1; height:42px; border-radius:12px; border:none; font-size:13px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('creditCard', 14)} Transferencia
+              </button>
+            </div>
+          </div>
+          
+          <!-- Benefits Container -->
+          <div id="compra-benefits-container"></div>
+          
+          <!-- Cost Preview -->
+          <div id="compra-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+              <span>Envío (distancia)</span><span id="dist-fee">$ ---</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+              <span>Gestión Especial</span><span id="purchase-fee">$ ---</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+              <span>Compra de mercadería</span><span>Cobro en mano</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+              <span id="extra-stops-label">Paradas extra</span><span id="extra-stops-fee">$ ---</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
+              <span>Servicio App</span><span id="app-service-fee">$ ---</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:1px dashed var(--color-border-light); padding-top:8px; margin-top:2px;">
+              <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
+            </div>
+            <p style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; line-height:1.3; font-weight:600; text-align:center;">
+              * El valor de los productos se abona al repartidor al recibirlos.
+            </p>
           </div>
         </div>
-        
-        <!-- Benefits Container -->
-        <div id="compra-benefits-container"></div>
-        
-        <!-- Cost Preview -->
-        <div id="compra-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-            <span>Envío (distancia)</span><span id="dist-fee">$ ---</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-            <span>Gestión Especial</span><span id="purchase-fee">$ ---</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-            <span>Compra de mercadería</span><span>Cobro en mano</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-            <span id="extra-stops-label">Paradas extra</span><span id="extra-stops-fee">$ ---</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-            <span>Servicio App</span><span id="app-service-fee">$ ---</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:1px dashed var(--color-border-light); padding-top:8px; margin-top:2px;">
-            <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
-          </div>
-          <p style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; line-height:1.3; font-weight:600; text-align:center;">
-            * El valor de los productos se abona al repartidor al recibirlos.
-          </p>
-        </div>
 
-        <button id="confirm-buy-btn" style="width:100%; height:60px; border-radius:20px; background:#E11D48; color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 25px rgba(225,29,72,0.3); text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:10px; flex-shrink:0;">
+        <button id="confirm-buy-btn" style="width:100%; height:56px; border-radius:18px; background:#E11D48; color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; box-shadow:0 8px 20px rgba(225,29,72,0.25); text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:10px; flex-shrink:0;">
           ${icon('check', 20)} Solicitar Compra
         </button>
       </div>
@@ -1360,78 +1368,82 @@ export async function showGoCashForm() {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
   modalEl.innerHTML = `
-    <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px;">
+    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
       
       <!-- Paso 1 Container -->
-      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <!-- Type Selector Segmented Control -->
-        <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Operación</label>
-          <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
-            <button id="gocash-type-c2t" class="gocash-type-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); display:flex; align-items:center; justify-content:center; text-align:center;">
-              Doy Efectivo<br/>Recibo Transf.
+      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+          <!-- Type Selector Segmented Control -->
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Operación</label>
+            <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
+              <button id="gocash-type-c2t" class="gocash-type-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); display:flex; align-items:center; justify-content:center; text-align:center;">
+                Doy Efectivo<br/>Recibo Transf.
+              </button>
+              <button id="gocash-type-t2c" class="gocash-type-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; text-align:center;">
+                Doy Transf.<br/>Recibo Efectivo
+              </button>
+            </div>
+          </div>
+
+          <!-- Amount Input -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Monto a Cambiar (Máx $70.000)</label>
+            <div style="position:relative;">
+              <span style="position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; font-weight:900; color:var(--color-text-tertiary);">$</span>
+              <input type="number" id="gocash-amount" placeholder="0" min="1" max="70000" style="width: 100%; height: 50px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 16px 0 35px; background: var(--color-surface); color:var(--color-text-primary); font-size: 18px; font-weight: 800; outline: none; transition: all 0.2s;" />
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde nos encontramos?</label>
+            <button id="gocash-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+               <span id="gocash-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+               ${icon('chevronRight', 16)}
             </button>
-            <button id="gocash-type-t2c" class="gocash-type-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 11px; font-weight: 850; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; text-align:center;">
-              Doy Transf.<br/>Recibo Efectivo
-            </button>
+            <input type="text" id="gocash-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
         </div>
 
-        <!-- Amount Input -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Monto a Cambiar (Máx $70.000)</label>
-          <div style="position:relative;">
-            <span style="position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; font-weight:900; color:var(--color-text-tertiary);">$</span>
-            <input type="number" id="gocash-amount" placeholder="0" min="1" max="70000" style="width: 100%; height: 54px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px 0 35px; background: var(--color-bg-card); font-size: 18px; font-weight: 800; outline: none; transition: border-color 0.2s;" />
-          </div>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde nos encontramos?</label>
-          <button id="gocash-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-             <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-             <span id="gocash-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-             ${icon('chevronRight', 16)}
-          </button>
-          <input type="text" id="gocash-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
-        </div>
-
-        <button type="button" id="gocash-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <button type="button" id="gocash-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="gocash-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <button type="button" id="gocash-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
-          ${icon('chevronLeft', 16)} Volver a Paso 1
-        </button>
+      <div id="gocash-step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+          <button type="button" id="gocash-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
+            ${icon('chevronLeft', 16)} Volver a Paso 1
+          </button>
 
-        <!-- Benefits Container -->
-        <div id="gocash-benefits-container"></div>
+          <!-- Benefits Container -->
+          <div id="gocash-benefits-container"></div>
 
-        <!-- Cost Preview -->
-        <div id="gocash-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío estimado (desde centro)</span>
-            <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          <!-- Cost Preview -->
+          <div id="gocash-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío estimado (desde centro)</span>
+              <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
+              <span id="gocash-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
+              <span style="font-weight: 900; color: #4F46E5; font-size: 15px;">Total Envío Estimado</span>
+              <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: #4F46E5;">$ 0</span>
+            </div>
+            <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
+              * Se cobra únicamente el envío. El costo final se recalculará en base a la ubicación real del repartidor al aceptar.
+            </p>
           </div>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
-            <span id="gocash-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-            <span style="font-weight: 900; color: #4F46E5; font-size: 15px;">Total Envío Estimado</span>
-            <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: #4F46E5;">$ 0</span>
-          </div>
-          <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
-            * Se cobra únicamente el envío. El costo final se recalculará en base a la ubicación real del repartidor al aceptar.
-          </p>
         </div>
 
-        <button id="confirm-gocash-btn" style="width: 100%; height: 60px; border-radius: 20px; background: #4F46E5; color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(79,70,229, 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <button id="confirm-gocash-btn" style="width: 100%; height: 56px; border-radius: 18px; background: #4F46E5; color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(79,70,229, 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0;">
           ${icon('check', 20)} Solicitar Go Cash
         </button>
       </div>
@@ -2060,8 +2072,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 
 export async function showPagoServiciosForm() {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
-  const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 20px calc(16px + env(safe-area-inset-bottom, 16px)) 20px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;';
 
   let currentAddress = '';
   let deliveryData = null;
@@ -2074,112 +2085,114 @@ export async function showPagoServiciosForm() {
   let appliedCoupon = null;
 
   modalEl.innerHTML = `
-    <!-- STEP 1 CONTAINER -->
-    <div id="ps-step-1-container" style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; height: 100%; overflow: hidden;">
-      <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
-        
-        <!-- Service Chooser List -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
-          <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:12px;" id="ps-service-grid">
-            <button class="ps-service-btn" data-service="Cyber" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
-              ${icon('monitor', 22)} Cyber
+    <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+      <!-- STEP 1 CONTAINER -->
+      <div id="ps-step-1-container" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
+          
+          <!-- Service Chooser List -->
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
+            <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:12px;" id="ps-service-grid">
+              <button class="ps-service-btn" data-service="Cyber" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+                ${icon('monitor', 20)} Cyber
+              </button>
+              <button class="ps-service-btn" data-service="ABSA" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+                ${icon('droplet', 20)} ABSA
+              </button>
+              <button class="ps-service-btn" data-service="Canal 4" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+                ${icon('tv', 20)} Canal 4
+              </button>
+              <button class="ps-service-btn" data-service="Rapipago" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+                ${icon('creditCard', 20)} Rapipago
+              </button>
+              <button class="ps-service-btn" data-service="PagoFácil" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s; grid-column: span 2;">
+                ${icon('zap', 20)} PagoFácil
+              </button>
+            </div>
+          </div>
+
+          <!-- Detail Input -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Servicios y Detalles a Pagar</label>
+            <textarea id="ps-details-input" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares del delivery" style="width:100%; height:90px; border-radius:16px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; font-family:inherit; resize:none; transition:all 0.2s;"></textarea>
+          </div>
+
+          <!-- Receipt Delivery Selector -->
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Forma de Recibir el Comprobante</label>
+            <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
+              <button type="button" id="ps-delivery-digital" class="ps-del-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: #10B981; color: white; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);">
+                ${icon('image', 18)} Foto Digital
+              </button>
+              <button type="button" id="ps-delivery-physical" class="ps-del-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('mapPin', 18)} Físico
+              </button>
+            </div>
+            <!-- Helper subtexts -->
+            <div id="ps-del-subtext-digital" style="font-size: 11px; color: var(--color-success); font-weight: 800; text-align: center; margin-top: 2px; display: block; line-height: 1.4;">
+              🟢 Sin costo adicional (Recibís foto del ticket por chat)
+            </div>
+            <div id="ps-del-subtext-physical" style="font-size: 11px; color: var(--color-primary); font-weight: 800; text-align: center; margin-top: 2px; display: none; line-height: 1.4;">
+              🚚 Envío a Domicilio (+ Envío por Distancia del Viaje)
+            </div>
+          </div>
+
+          <!-- Physical Delivery Address Details -->
+          <div id="ps-address-section" style="display:none; flex-direction:column; gap:8px;">
+            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Tu Dirección de Entrega</label>
+            <button id="ps-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:36px; height:36px; border-radius:12px; background:rgba(245, 158, 11, 0.1); color:#D97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+               <span id="ps-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+               ${icon('chevronRight', 16)}
             </button>
-            <button class="ps-service-btn" data-service="ABSA" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
-              ${icon('droplet', 22)} ABSA
-            </button>
-            <button class="ps-service-btn" data-service="Canal 4" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
-              ${icon('tv', 22)} Canal 4
-            </button>
-            <button class="ps-service-btn" data-service="Rapipago" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s;">
-              ${icon('creditCard', 22)} Rapipago
-            </button>
-            <button class="ps-service-btn" data-service="PagoFácil" style="height:70px; border-radius:18px; border:1px solid var(--color-border-light); background:var(--color-surface); font-size:13px; font-weight:900; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s; grid-column: span 2;">
-              ${icon('zap', 22)} PagoFácil
-            </button>
+            <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
         </div>
 
-        <!-- Detail Input -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Servicios y Detalles a Pagar</label>
-          <textarea id="ps-details-input" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares del delivery" style="width:100%; height:90px; border-radius:18px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none; font-family:inherit; resize:none; transition:border-color 0.2s;"></textarea>
-        </div>
-
-        <!-- Receipt Delivery Selector -->
-        <div style="display:flex; flex-direction:column; gap:10px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Forma de Recibir el Comprobante</label>
-          <div style="display: flex; background: var(--color-bg-secondary); padding: 5px; border-radius: 18px; border: 1.5px solid var(--color-border-light);">
-            <button type="button" id="ps-delivery-digital" class="ps-del-btn active" style="flex: 1; height: 50px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: #10B981; color: white; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
-              ${icon('image', 18)} Foto Digital
-            </button>
-            <button type="button" id="ps-delivery-physical" class="ps-del-btn" style="flex: 1; height: 50px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; gap:8px;">
-              ${icon('mapPin', 18)} Comprobante Físico
-            </button>
-          </div>
-          <!-- Helper subtexts outside of the buttons -->
-          <div id="ps-del-subtext-digital" style="font-size: 11px; color: var(--color-success); font-weight: 800; text-align: center; margin-top: 2px; display: block; line-height: 1.4;">
-            🟢 Sin costo adicional (Recibís foto del ticket por chat)
-          </div>
-          <div id="ps-del-subtext-physical" style="font-size: 11px; color: var(--color-primary); font-weight: 800; text-align: center; margin-top: 2px; display: none; line-height: 1.4;">
-            🚚 Envío a Domicilio (+ Envío por Distancia del Viaje)
-          </div>
-        </div>
-
-        <!-- Physical Delivery Address Details -->
-        <div id="ps-address-section" style="display:none; flex-direction:column; gap:8px;">
-          <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Tu Dirección de Entrega</label>
-          <button id="ps-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-bg-card); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s;">
-             <div style="width:36px; height:36px; border-radius:12px; background:rgba(245, 158, 11, 0.1); color:#D97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-             <span id="ps-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-             ${icon('chevronRight', 16)}
-          </button>
-          <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; outline:none;" />
-        </div>
-      </div>
-
-      <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 10px;">
-        Siguiente ${icon('chevronRight', 16)}
-      </button>
-    </div>
-
-    <!-- STEP 2 CONTAINER -->
-    <div id="ps-step-2-container" style="display: none; flex-direction: column; justify-content: space-between; height: 100%; overflow: hidden;">
-      <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
-        <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content; margin-bottom: 10px;">
-          ${icon('chevronLeft', 16)} Volver a Paso 1
+        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
+          Siguiente ${icon('chevronRight', 16)}
         </button>
-
-        <!-- Benefits Container -->
-        <div id="ps-benefits-container"></div>
-
-        <!-- Cost Preview -->
-        <div id="ps-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Base Trámite Pago de Servicios</span>
-            <span id="ps-base-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-          </div>
-          <div id="ps-dist-row" style="display:none; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío de Comprobante (Regreso)</span>
-            <span id="ps-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
-            <span id="ps-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-            <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Trámite Estimado</span>
-            <span id="ps-estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
-          </div>
-          <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
-            * El dinero de la factura a pagar se coordina y se abona al repartidor al momento de iniciar la gestión o por transferencia.
-          </p>
-        </div>
       </div>
 
-      <button id="confirm-ps-btn" style="width: 100%; height: 60px; border-radius: 20px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 16px; cursor: pointer; box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 10px;">
-        ${icon('check', 20)} Solicitar Pago de Servicios
-      </button>
+      <!-- STEP 2 CONTAINER -->
+      <div id="ps-step-2-container" style="display: none; flex-direction: column; height: 100%; overflow: hidden; justify-content: space-between;">
+        <div style="flex: 1; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px;">
+          <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content; margin-bottom: 10px;">
+            ${icon('chevronLeft', 16)} Volver a Paso 1
+          </button>
+
+          <!-- Benefits Container -->
+          <div id="ps-benefits-container"></div>
+
+          <!-- Cost Preview -->
+          <div id="ps-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Base Trámite Pago de Servicios</span>
+              <span id="ps-base-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div id="ps-dist-row" style="display:none; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío de Comprobante (Regreso)</span>
+              <span id="ps-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
+              <span id="ps-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
+              <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Trámite Estimado</span>
+              <span id="ps-estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
+            </div>
+            <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
+              * El dinero de la factura a pagar se coordina y se abona al repartidor al momento de iniciar la gestión o por transferencia.
+            </p>
+          </div>
+        </div>
+
+        <button id="confirm-ps-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 8px;">
+          ${icon('check', 20)} Solicitar Pago de Servicios
+        </button>
+      </div>
     </div>
   `;
 
