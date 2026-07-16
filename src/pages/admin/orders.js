@@ -20,11 +20,38 @@ function getComercioDisplayName(o) {
   if (o.isTrip) return 'Go Viaje';
   if (o.isFavor) {
     if (o.favorType === 'gocash') return 'Go Cash';
-    if (o.favorType === 'mandado') return 'Go Favor: Mandado';
-    if (o.favorType === 'compra') return 'Go Favor: Compra';
-    return 'Go Favor';
+    if (o.favorType === 'encomienda') return 'Encomienda';
+    if (o.favorType === 'mandado' || o.favorType === 'compra') return 'Mandado';
+    return 'Mandado';
   }
-  return o.comercioName || 'Vendedor Desconocido';
+  return o.comercioName || 'Comercio';
+}
+
+function parseFavorDetails(details) {
+  if (!details) return [];
+  const stores = [];
+  const regex = /🏪\s*\*\*?\d+\.\s*Comercio:\*\*?\s*(.*?)(?=\s*📦|$)/gi;
+  const matches = [...details.matchAll(regex)];
+  
+  matches.forEach((match, index) => {
+    const storeName = match[1].trim();
+    const nextIndex = index + 1 < matches.length ? matches[index + 1].index : details.length;
+    const subStr = details.slice(match.index, nextIndex);
+    const pedMatch = subStr.match(/📦\s*\*\*?Pedido:\*\*?\s*([\s\S]*?)(?=\n*🏪|$)/i);
+    
+    stores.push({
+      name: storeName,
+      items: pedMatch ? pedMatch[1].trim() : ''
+    });
+  });
+  
+  if (stores.length === 0) {
+    stores.push({
+      name: 'Favor',
+      items: details
+    });
+  }
+  return stores;
 }
 
 export async function renderAdminOrders() {
@@ -69,6 +96,28 @@ export async function renderAdminOrders() {
           <button class="f-chip-v4" data-status="completed" style="--c:#27AE60;">Éxito</button>
           <button class="f-chip-v4" data-status="cancelled" style="--c:#E74C3C;">Bajas</button>
         </div>
+
+        <!-- Order Type Filter Bar -->
+        <div class="type-filter-bar" style="display:flex; gap:8px; margin-top:12px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none;">
+          <button class="t-chip active" data-type="all">Todos los Tipos</button>
+          <button class="t-chip" data-type="comercio">Comercio</button>
+          <button class="t-chip" data-type="mandado">Mandado</button>
+          <button class="t-chip" data-type="encomienda">Encomienda</button>
+          <button class="t-chip" data-type="gocash">Go Cash</button>
+          <button class="t-chip" data-type="trip">Go Viaje</button>
+        </div>
+
+        <!-- Date Range Filter -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;">
+          <div>
+            <label style="font-size:9px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; display:block; margin-bottom:4px; letter-spacing:0.02em;">Desde (Fecha/Hora)</label>
+            <input type="datetime-local" id="filter-date-start" style="width:100%; height:38px; border-radius:10px; padding:0 8px; font-size:12px; font-weight:700; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); outline:none;" />
+          </div>
+          <div>
+            <label style="font-size:9px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; display:block; margin-bottom:4px; letter-spacing:0.02em;">Hasta (Fecha/Hora)</label>
+            <input type="datetime-local" id="filter-date-end" style="width:100%; height:38px; border-radius:10px; padding:0 8px; font-size:12px; font-weight:700; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); outline:none;" />
+          </div>
+        </div>
       </div>
 
       <div id="admin-registry-list-container" style="flex:1; overflow-y:auto; padding:0 20px 20px;">
@@ -83,6 +132,9 @@ export async function renderAdminOrders() {
       .f-chip-v4 { padding:10px 20px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; font-size:12px; font-weight:900; color:var(--color-text-tertiary); cursor:pointer; white-space:nowrap; transition:all 0.2s; }
       .f-chip-v4.active { background:var(--c, var(--color-primary)); color:white; border-color:transparent; box-shadow:0 4px 12px var(--c, rgba(227,27,35,0.3)); }
       
+      .t-chip { padding:10px 18px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; font-size:11px; font-weight:900; color:var(--color-text-tertiary); cursor:pointer; white-space:nowrap; transition:all 0.2s; }
+      .t-chip.active { background:var(--color-primary); color:white; border-color:transparent; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.3); }
+
       .order-card-v4 { 
         background:var(--color-surface); 
         border:1px solid var(--color-border); 
@@ -114,6 +166,15 @@ function setupEventListeners() {
       renderOrdersList();
     };
   });
+  document.querySelectorAll('.t-chip').forEach(chip => {
+    chip.onclick = () => {
+      document.querySelectorAll('.t-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      renderOrdersList();
+    };
+  });
+  document.getElementById('filter-date-start')?.addEventListener('change', () => renderOrdersList());
+  document.getElementById('filter-date-end')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('refresh-orders-btn').onclick = () => loadAllOrders();
 }
 
@@ -159,6 +220,9 @@ function renderOrdersList() {
 
   const searchText = (document.getElementById('order-search')?.value || '').toLowerCase();
   const filter = document.querySelector('.f-chip-v4.active')?.dataset.status || 'all';
+  const typeFilter = document.querySelector('.t-chip.active')?.dataset.type || 'all';
+  const dateStartVal = document.getElementById('filter-date-start')?.value;
+  const dateEndVal = document.getElementById('filter-date-end')?.value;
 
   let filtered = allOrders.filter(o => 
     (o.comercioName || '').toLowerCase().includes(searchText) ||
@@ -181,6 +245,33 @@ function renderOrdersList() {
     });
   }
 
+  if (typeFilter !== 'all') {
+    filtered = filtered.filter(o => {
+      if (typeFilter === 'trip') return !!o.isTrip;
+      if (typeFilter === 'gocash') return !!o.isFavor && o.favorType === 'gocash';
+      if (typeFilter === 'encomienda') return !!o.isFavor && o.favorType === 'encomienda';
+      if (typeFilter === 'mandado') return !!o.isFavor && (o.favorType === 'mandado' || o.favorType === 'compra');
+      if (typeFilter === 'comercio') return !o.isTrip && !o.isFavor;
+      return true;
+    });
+  }
+
+  if (dateStartVal) {
+    const startMs = new Date(dateStartVal).getTime();
+    filtered = filtered.filter(o => {
+      const orderMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
+      return orderMs >= startMs;
+    });
+  }
+
+  if (dateEndVal) {
+    const endMs = new Date(dateEndVal).getTime();
+    filtered = filtered.filter(o => {
+      const orderMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
+      return orderMs <= endMs;
+    });
+  }
+
   if (filtered.length === 0) {
     container.innerHTML = `
       <div style="text-align:center; padding:100px 20px; opacity:0.4;">
@@ -196,6 +287,9 @@ function renderOrdersList() {
     const sKey = getStatusKey(o.status);
     const config = STATUS_CONFIG[sKey] || STATUS_CONFIG.pending;
     
+    const dateObj = o.createdAt?.toDate ? o.createdAt.toDate() : (o.createdAt ? new Date(o.createdAt) : null);
+    const dateStr = dateObj ? (dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : 'Fecha desconocida';
+
     const scheduledBadge = o.isScheduled ? `
       <div style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
         📅 Programado: ${o.scheduledTime}
@@ -211,7 +305,7 @@ function renderOrdersList() {
             </div>
             <div>
               <div style="font-weight:900; font-size:16px; color:var(--color-text);">#${o.orderId || '---'}</div>
-              <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">${formatDate(o.createdAt)}</div>
+              <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">${dateStr}</div>
               ${scheduledBadge}
             </div>
           </div>
@@ -264,7 +358,10 @@ window.showOrderDetail = async (idOrObject) => {
     const snap = await getDoc(doc(db, 'orders', idOrObject));
     if (snap.exists()) o = { id: snap.id, ...snap.data() };
   }
-  if (!o) return;
+  const isProductsPending = o.isFavor && (o.favorType === 'compra' || o.favorType === 'mandado') && !o.subtotal;
+  const subtotalDisplay = isProductsPending ? 'Pendiente' : formatPrice(o.subtotal || 0);
+  const parsedStores = o.isFavor ? parseFavorDetails(o.details || o.description) : [];
+  const hasCommerce = !o.isTrip && (!o.isFavor || (o.isFavor && o.favorType !== 'gocash' && o.favorType !== 'encomienda' && o.comercioName));
 
   const detailHtml = document.createElement('div');
   detailHtml.style.cssText = 'flex:1; overflow-y:auto; padding:20px; scrollbar-width:none;';
@@ -276,29 +373,63 @@ window.showOrderDetail = async (idOrObject) => {
 
     <!-- Product List -->
     <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border); border-radius:24px; padding:20px; margin-bottom:20px;">
-       <h3 style="font-size:11px; font-weight:900; text-transform:uppercase; color:var(--color-text-tertiary); margin-bottom:15px; letter-spacing:0.05em;">Productos</h3>
-       <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:15px;">
-         ${o.items?.map(i => `
-           <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14px;">
-             <span style="color:var(--color-text);"><span style="color:var(--color-primary);">${i.qty}x</span> ${i.name}</span>
-             <span style="color:var(--color-text-secondary);">${formatPrice(i.price * i.qty)}</span>
-           </div>
-         `).join('') || '<p style="text-align:center; opacity:0.5;">Sin productos</p>'}
-       </div>
+       <h3 style="font-size:11px; font-weight:900; text-transform:uppercase; color:var(--color-text-tertiary); margin-bottom:15px; letter-spacing:0.05em;">Detalles del Pedido / Mandado</h3>
+       
+       ${o.isFavor ? `
+         <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:15px;">
+           ${parsedStores.map((s, idx) => `
+             <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:16px;">
+               <div style="font-weight:900; font-size:13px; color:var(--color-primary); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                 🏪 Comercio ${idx + 1}: <span style="color:var(--color-text);">${s.name}</span>
+               </div>
+               <div style="font-size:13px; font-weight:700; color:var(--color-text-secondary); white-space:pre-line; line-height:1.4;">
+                 ${s.items || 'Sin detalles'}
+               </div>
+             </div>
+           `).join('')}
+         </div>
+       ` : `
+         <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:15px;">
+           ${o.items?.map(i => `
+             <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14px;">
+               <span style="color:var(--color-text);"><span style="color:var(--color-primary);">${i.qty}x</span> ${i.name}</span>
+               <span style="color:var(--color-text-secondary);">${formatPrice(i.price * i.qty)}</span>
+             </div>
+           `).join('') || '<p style="text-align:center; opacity:0.5;">Sin productos</p>'}
+         </div>
+       `}
        
        <div style="border-top:1px dashed var(--color-border); padding-top:15px; display:flex; flex-direction:column; gap:8px;">
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
            <span>Subtotal Productos</span>
-           <span>${formatPrice(o.subtotal || (o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0)))}</span>
+           <span style="font-weight:800; color:${isProductsPending ? '#d97706' : 'var(--color-text-secondary)'};">${subtotalDisplay}</span>
          </div>
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
            <span>Costo de Envío</span>
            <span style="color:var(--color-success);">${formatPrice(o.deliveryCost || 0)}</span>
          </div>
+         ${o.isFavor ? `
+           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
+             <span>Tarifa de Gestión (Mandado)</span>
+             <span>${formatPrice(o.purchaseFee || 0)}</span>
+           </div>
+           ${o.extraStopsFee ? `
+             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
+               <span>Paradas Extra</span>
+               <span>${formatPrice(o.extraStopsFee)}</span>
+             </div>
+           ` : ''}
+         ` : ''}
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
-           <span>Tarifa de Servicio</span>
+           <span>Tarifa de Servicio (App)</span>
            <span>${formatPrice(o.appUsageFee || 0)}</span>
          </div>
+         ${o.tip || o.tipAmount ? `
+           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
+             <span>Propina</span>
+             <span>${formatPrice(o.tip || o.tipAmount || 0)}</span>
+           </div>
+         ` : ''}
          <div style="margin-top:10px; padding-top:15px; border-top:2px solid var(--color-border); display:flex; justify-content:space-between; font-size:24px; font-weight:900; color:var(--color-primary);">
            <span>Total Final</span>
            <span>${formatPrice(o.total || 0)}</span>
@@ -350,17 +481,25 @@ window.showOrderDetail = async (idOrObject) => {
          <span style="font-size:12px; font-weight:700; opacity:0.6;">Ubicación:</span>
          <span style="font-size:12px; font-weight:800; text-align:right; max-width:180px;">${o.deliveryAddress}</span>
        </div>
-       <div style="display:flex; justify-content:space-between;">
+       <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
          <span style="font-size:12px; font-weight:700; opacity:0.6;">Método:</span>
          <span style="font-size:12px; font-weight:800; text-transform:uppercase;">${o.paymentMethod || 'Efectivo'}</span>
+       </div>
+       <div style="display:flex; justify-content:space-between; border-top:1px dashed var(--color-border-light); padding-top:12px;">
+         <span style="font-size:12px; font-weight:700; opacity:0.6;">Código de Entrega:</span>
+         <span style="font-size:12px; font-weight:800; color:${o.verificationCode ? 'var(--color-primary)' : 'var(--color-text-tertiary)'}; letter-spacing: ${o.verificationCode ? '2px' : 'normal'};">
+           ${o.verificationCode || 'Pendiente / No disponible'}
+         </span>
        </div>
     </div>
 
     <!-- Auditory Chats -->
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:30px; padding-bottom:10px;">
-       <button class="btn-chat-audit" data-type="client-commerce" data-other="${o.comercioName}" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); border:1px solid var(--color-border); color:var(--color-text); font-weight:900; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-         ${icon('messageSquare', 18)} CHAT COMERCIO
-       </button>
+    <div style="display:grid; grid-template-columns:${hasCommerce ? '1fr 1fr' : '1fr'}; gap:12px; margin-bottom:30px; padding-bottom:10px;">
+       ${hasCommerce ? `
+         <button class="btn-chat-audit" data-type="client-commerce" data-other="${o.comercioName}" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); border:1px solid var(--color-border); color:var(--color-text); font-weight:900; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+           ${icon('messageSquare', 18)} CHAT COMERCIO
+         </button>
+       ` : ''}
        <button class="btn-chat-audit" data-type="client-delivery" data-other="${o.driverName || 'Delivery'}" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); border:1px solid var(--color-border); color:var(--color-text); font-weight:900; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
          ${icon('bike', 18)} CHAT DELIVERY
        </button>
