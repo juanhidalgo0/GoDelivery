@@ -27,7 +27,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       <div class="modal" id="${modalId}-dialog" style="
         background:var(--color-bg); border-radius:${isFullscreen ? '0' : '28px 28px 0 0'}; width:100%; max-width:${isFullscreen ? 'none' : '500px'}; max-height:${isFullscreen ? 'none' : '94dvh'};
         height:${finalHeight}; margin:0 auto; overflow:hidden; position:relative; display:flex; flex-direction:column;
-        animation: ${isFullscreen ? 'fadeIn' : 'springUp'} 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.1);
+        animation: ${isFullscreen ? 'fadeIn' : 'springUp'} 0.28s cubic-bezier(0.25, 0.8, 0.25, 1);
         box-shadow: ${isFullscreen ? 'none' : '0 -12px 60px rgba(0,0,0,0.35)'};
         margin-top: ${isFullscreen ? '0' : (finalHeight === 'auto' ? 'auto' : `calc(100dvh - ${finalHeight})`)};
         will-change: transform, opacity;
@@ -70,10 +70,10 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     }
 
     // Ultra-fluid spring down animation
-    dialog.style.transition = 'transform 0.45s cubic-bezier(0.32, 0, 0.67, 0), opacity 0.4s ease-out';
+    dialog.style.transition = 'transform 0.24s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.2s ease-out';
     dialog.style.transform = 'translateY(100%) scale(0.95)';
     
-    overlay.style.transition = 'opacity 0.35s ease-out';
+    overlay.style.transition = 'opacity 0.2s ease-out';
     overlay.style.opacity = '0';
     
     setTimeout(() => {
@@ -90,7 +90,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       }
       
       if (onClose) onClose();
-    }, 450);
+    }, 240);
   };
 
   const modalObj = { id: modalId, wrapper: modalWrapper, onClose, close };

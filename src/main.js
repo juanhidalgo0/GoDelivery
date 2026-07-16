@@ -1144,25 +1144,19 @@ async function init() {
     } catch (err) {
       console.error('GoDelivery: Error during initialization', err);
     } finally {
-      let updateRequired = false;
-      try {
-        updateRequired = await checkAppUpdate();
-      } catch (err) {
-        console.warn('GoDelivery: Update check failed', err);
-      }
+      // Run update check in the background without blocking the startup flow
+      checkAppUpdate().catch(err => console.warn('GoDelivery: Update check failed', err));
 
-      if (!updateRequired) {
-        routerReady();
-        const splash = document.getElementById('splash-screen');
-        if (splash) {
-          const elapsedTime = Date.now() - startTime;
-          const minDuration = 1200; // Reduced for faster perceived load
-          const remainingTime = Math.max(0, minDuration - elapsedTime);
-          setTimeout(() => {
-            splash.classList.add('fade-out');
-            document.getElementById('app')?.classList.add('ready');
-          }, remainingTime);
-        }
+      routerReady();
+      const splash = document.getElementById('splash-screen');
+      if (splash) {
+        const elapsedTime = Date.now() - startTime;
+        const minDuration = 250; // Minimal display time for smooth fading animation
+        const remainingTime = Math.max(0, minDuration - elapsedTime);
+        setTimeout(() => {
+          splash.classList.add('fade-out');
+          document.getElementById('app')?.classList.add('ready');
+        }, remainingTime);
       }
     }
   });

@@ -24,36 +24,47 @@ export async function renderComercio(content) {
     return;
   }
 
-  // Resolve actual commerce ID (allowing matching by name/subdomain or fallback to the first commerce document)
+  // Resolve actual commerce ID (allowing matching by name/subdomain or fallback to cache)
   let comercio = null;
   try {
-    const { doc, getDoc, collection, getDocs, query, limit } = await import('firebase/firestore');
-    const docRef = doc(db, 'comercios', comercioId);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      comercio = { id: snap.id, ...snap.data() };
-    } else {
-      const q = query(collection(db, 'comercios'), limit(5));
-      const allComSnap = await getDocs(q);
-      if (!allComSnap.empty) {
-        let matchedDoc = allComSnap.docs.find(d => {
-          const name = (d.data().name || '').toLowerCase();
-          const sub = (d.data().subdomain || '').toLowerCase();
-          const target = comercioId.toLowerCase();
-          return name.includes(target) || target.includes(name) || sub === target;
-        });
-        if (!matchedDoc) {
-          matchedDoc = allComSnap.docs[0];
-        }
-        comercio = { id: matchedDoc.id, ...matchedDoc.data() };
-        console.log(`[Preview Fallback] Resolved commerce '${comercioId}' to '${comercio.id}'`);
-      }
+    const cachedComerciosRaw = localStorage.getItem('gd_cached_comercios');
+    if (cachedComerciosRaw) {
+      const list = JSON.parse(cachedComerciosRaw);
+      comercio = list.find(c => c.id === comercioId || (c.name && c.name.toLowerCase().includes(comercioId.toLowerCase())) || (c.subdomain && c.subdomain.toLowerCase() === comercioId.toLowerCase()));
     }
-  } catch (err) {
-    console.error('Error resolving commerce document:', err);
+  } catch (e) {
+    console.warn('Error matching commerce from cache:', e);
   }
 
-
+  // Fallback to Firestore fetch if not found in local cache
+  if (!comercio) {
+    try {
+      const { doc, getDoc, collection, getDocs, query, limit } = await import('firebase/firestore');
+      const docRef = doc(db, 'comercios', comercioId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        comercio = { id: snap.id, ...snap.data() };
+      } else {
+        const q = query(collection(db, 'comercios'), limit(5));
+        const allComSnap = await getDocs(q);
+        if (!allComSnap.empty) {
+          let matchedDoc = allComSnap.docs.find(d => {
+            const name = (d.data().name || '').toLowerCase();
+            const sub = (d.data().subdomain || '').toLowerCase();
+            const target = comercioId.toLowerCase();
+            return name.includes(target) || target.includes(name) || sub === target;
+          });
+          if (!matchedDoc) {
+            matchedDoc = allComSnap.docs[0];
+          }
+          comercio = { id: matchedDoc.id, ...matchedDoc.data() };
+          console.log(`[Preview Fallback] Resolved commerce '${comercioId}' to '${comercio.id}'`);
+        }
+      }
+    } catch (err) {
+      console.error('Error resolving commerce document:', err);
+    }
+  }
 
   if (!comercio) {
     content.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('store', 40)}</div><div class="empty-state-title">Comercio no encontrado</div><button class="btn btn-primary" onclick="location.hash='/#'">Volver</button></div>`;
@@ -643,7 +654,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
   content.innerHTML = `
     <div class="comercio-page">
       <!-- Minimal Sticky Navbar -->
-      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: flex-end; padding: 0 16px 10px 16px; box-sizing: border-box; transition: background 0.3s, box-shadow 0.3s; background: transparent;">
+      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; padding: calc(env(safe-area-inset-top, 0px)) 16px 0 16px; box-sizing: border-box; transition: background 0.3s, box-shadow 0.3s; background: transparent;">
         <button class="comercio-header-back" id="comercio-nav-back" onclick="location.hash = '#/'" style="position: relative; top: 0; left: 0; margin: 0; z-index: 10; border: none; background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: background 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: #000;">${icon('back', 20)}</button>
         <div id="comercio-nav-title" style="display: flex; align-items: center; gap: 10px; margin-left: 14px; opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(4px); overflow: hidden; flex: 1; height: 36px;">
           ${comercio.logo 
