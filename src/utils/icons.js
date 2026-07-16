@@ -17,7 +17,7 @@ export const ICONS = {
   chevronDown: s('<polyline points="6 9 12 15 18 9"/>'),
   menu: s('<line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>'),
   list: s('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'),
-  navigationArrow: s('<polygon points="3 11 22 2 13 21 11 13 3 11"/>'),
+  navigationArrow: s('<polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>'),
   route: s('<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 1 0 0-7h-11a3.5 3.5 0 1 1 0-7H15"/><circle cx="18" cy="5" r="3"/>'),
 
   // Actions

@@ -1825,7 +1825,7 @@ function loadTabContent(tab, container, user) {
                         <button class="btn view-active-map-btn" 
                                 data-id="${stop.type === 'PICKUP' ? stop.docId : stop.orders[0].id}" 
                                 ${stop.type === 'PICKUP' && stop.pickedUp ? 'disabled' : ''}
-                                style="width:48px; height:48px; min-width:48px; display:flex; align-items:center; justify-content:center; border-radius:16px; border:none; background:rgba(var(--color-primary-rgb), 0.15); color:var(--color-primary); transition:all 0.3s; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.1); ${stop.type === 'PICKUP' && stop.pickedUp ? 'opacity:0.2; cursor:not-allowed; box-shadow:none;' : ''}">
+                                style="width:48px; height:48px; min-width:48px; display:flex; align-items:center; justify-content:center; border-radius:16px; border:none; background:rgba(var(--color-primary-rgb), 0.15); color:var(--color-primary); transition:all 0.3s; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.1); ${stop.type === 'PICKUP' && stop.pickedUp ? 'opacity:0.45; cursor:not-allowed; box-shadow:none;' : ''}">
                           ${icon('navigationArrow', 26)} 
                         </button>
 
