@@ -176,13 +176,6 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
                 `).join('')}
               </div>
             </div>
-            <!-- Quick Reply Pills -->
-            <div class="chat-quick-replies" id="quick-replies-${chatId}">
-              <button class="quick-pill-btn">¡Ya bajo!</button>
-              <button class="quick-pill-btn">Dejalo en la puerta, gracias</button>
-              <button class="quick-pill-btn">¿Por dónde venís?</button>
-              <button class="quick-pill-btn">¡Perfecto, muchas gracias!</button>
-            </div>
             <div class="chat-input-bar">
               <button class="chat-emoji-btn" id="emoji-btn-${chatId}">${icon('smile', 22)}</button>
               <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen" style="color:var(--color-text-secondary);">${icon('camera', 22)}</button>

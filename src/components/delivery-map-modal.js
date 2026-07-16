@@ -178,7 +178,7 @@ async function initDeliveryMap(order, orders) {
     // 1.1 Support GoFavor Pickup Coords
     if (o.isFavor && o.pickupCoords) {
       const isPickedUp = !!o.pickedUpAt || o.status === 'picked_up' || o.status === 'delivered';
-      addOverlayMarker(o.pickupCoords, o.favorType === 'mandado' ? 'mapPin' : 'store', isPickedUp ? 'var(--color-success)' : 'var(--color-primary)', isPickedUp);
+      addOverlayMarker(o.pickupCoords, o.favorType === 'mandado' ? 'mapPin' : 'store', isPickedUp ? '#94a3b8' : '#f59e0b', isPickedUp);
       resolvedStores.push({ ...o.pickupCoords, id: `favor-${o.id}`, isPickedUp });
       continue;
     }
@@ -199,7 +199,7 @@ async function initDeliveryMap(order, orders) {
 
       if (coords) {
         const isPickedUp = !!o.pickedUpAt || o.status === 'picked_up' || o.status === 'delivered';
-        addOverlayMarker(coords, isPickedUp ? 'check' : 'store', isPickedUp ? 'var(--color-success)' : 'var(--color-primary)', isPickedUp);
+        addOverlayMarker(coords, isPickedUp ? 'check' : 'store', isPickedUp ? '#94a3b8' : '#f59e0b', isPickedUp);
         storeSet.add(o.comercioId);
         resolvedStores.push({ ...coords, id: o.comercioId, isPickedUp });
       }
@@ -207,7 +207,7 @@ async function initDeliveryMap(order, orders) {
   }
 
   // 2. Destination Marker (Home)
-  addOverlayMarker(destCoords, 'home', '#0f172a');
+  addOverlayMarker(destCoords, 'home', '#10b981');
   
   // 3. Instant Initial State
   if (window.lastRiderPos) {
