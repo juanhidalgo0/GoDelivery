@@ -1454,19 +1454,26 @@ function loadTabContent(tab, container, user) {
                   const stopKey = (stop.type + '_' + (stop.type === 'PICKUP' ? stop.docId : stop.address)).replace(/[^a-zA-Z0-9]/g, '_');
                   container._expandedStops = container._expandedStops || new Set();
                   const isExpanded = container._expandedStops.has(stopKey);
+
+                  const firstOrder = stop.orders?.[0];
+                  const stopColor = stop.type === 'PICKUP' 
+                    ? (firstOrder?.isFavor ? getFavorTypeMeta(firstOrder.favorType).color : '#ef4444') 
+                    : '#10b981';
+                  const stopRgb = getRgbString(stopColor);
+
                   return `
                   <div class="stop-item" style="position:relative; margin-bottom:36px; animation: slide-up 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; animation-delay: ${idx * 0.1}s; opacity:0;">
                     <!-- Timeline Dot -->
-                    <div style="position:absolute; left:-38px; top:8px; width:20px; height:20px; border-radius:50%; background:${stop.pickedUp ? 'var(--color-success)' : (isActive ? 'var(--color-primary)' : 'var(--color-border-light)')}; border:4px solid var(--color-bg-card); z-index:2; box-shadow:0 6px 15px rgba(0,0,0,0.12); transition:all 0.4s;">
-                      ${isActive ? `<div style="position:absolute; inset:-8px; border-radius:50%; border:2.5px solid var(--color-primary); opacity:0.4; animation: pulse-dot 2s infinite;"></div>` : ''}
+                    <div style="position:absolute; left:-38px; top:8px; width:20px; height:20px; border-radius:50%; background:${stop.pickedUp ? '#10b981' : (isActive ? stopColor : 'var(--color-border-light)')}; border:4px solid var(--color-bg-card); z-index:2; box-shadow:0 6px 15px rgba(0,0,0,0.12); transition:all 0.4s;">
+                      ${isActive ? `<div style="position:absolute; inset:-8px; border-radius:50%; border:2.5px solid ${stopColor}; opacity:0.4; animation: pulse-dot 2s infinite;"></div>` : ''}
                     </div>
                     
-                    <div style="background:${isActive ? 'var(--color-bg)' : 'rgba(var(--color-bg-secondary-rgb), 0.5)'}; border:1.5px solid ${isActive ? 'var(--color-primary)' : 'var(--color-border-light)'}; border-radius:26px; padding:24px; transition:all 0.4s; ${isActive ? 'box-shadow: 0 15px 40px rgba(var(--color-primary-rgb), 0.12);' : ''}">
+                    <div style="background:${isActive ? 'var(--color-bg)' : 'rgba(var(--color-bg-secondary-rgb), 0.5)'}; border:${isActive ? '2.5px' : '1.5px'} solid ${isActive ? stopColor : stopColor + '44'}; border-radius:26px; padding:24px; transition:all 0.4s; ${isActive ? `box-shadow: 0 15px 40px rgba(${stopRgb}, 0.12);` : ''}">
                       
                       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
                         <div>
                           <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                            <span style="font-size:10px; font-weight:900; text-transform:uppercase; color:${isActive ? 'var(--color-primary)' : 'var(--color-text-tertiary)'}; letter-spacing:0.1em;">
+                            <span style="font-size:10px; font-weight:900; text-transform:uppercase; color:${isActive ? stopColor : 'var(--color-text-tertiary)'}; letter-spacing:0.1em;">
                               ${(() => {
                                 const hasTrip = (stop.orders || []).some(o => o.isTrip);
                                 if (hasTrip) {
@@ -4946,18 +4953,7 @@ export async function showSuccessCelebration(orders, onFinish) {
   const user = getState().user;
   const currentSessionId = user?.currentSessionId;
   let previousSessionEarned = 0;
-  let currentDebt = 0;
-
-  try {
-    const { getDoc, doc } = await import('firebase/firestore');
-    const uSnap = await getDoc(doc(db, 'users', user.uid));
-    if (uSnap.exists()) {
-      currentDebt = uSnap.data().deliveryDebt || 0;
-    }
-  } catch (err) {
-    console.error('Error fetching user debt for celebration:', err);
-    currentDebt = user?.deliveryDebt || 0;
-  }
+  let currentDebt = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
 
   const totalEarned = orders.reduce((sum, o) => {
     const orderEarnings = o.isTrip || o.isFavor 
@@ -5204,6 +5200,7 @@ export async function markAsDelivered(orderIdOrIds) {
     const snap = await getDocs(q);
     const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+    const totalAppFee = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
     const batch = writeBatch(db);
 
     // 2. Update orders to completed (this is fully authorized by the driver's write rules on orders)
@@ -5215,6 +5212,16 @@ export async function markAsDelivered(orderIdOrIds) {
         deliverySessionId: user.currentSessionId || orderData?.deliverySessionId || null
       });
     });
+
+    if (totalAppFee > 0) {
+      batch.update(doc(db, 'users', user.uid), {
+        deliveryDebt: increment(totalAppFee)
+      });
+      
+      const currentLocalUser = getState().user || {};
+      const newDebt = (currentLocalUser.deliveryDebt || 0) + totalAppFee;
+      setState('user', { ...currentLocalUser, deliveryDebt: newDebt });
+    }
 
     try {
       await batch.commit();
