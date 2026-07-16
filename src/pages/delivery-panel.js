@@ -2004,7 +2004,61 @@ function loadTabContent(tab, container, user) {
                     }
                   };
 
+                  const showPhotoPreviewModal = async (file, onConfirm, onCancel) => {
+                    const { showModal, closeModal } = await import('../components/modal.js');
+                    const { icon: previewIcon } = await import('../utils/icons.js');
+
+                    const fileUrl = URL.createObjectURL(file);
+                    const modalEl = document.createElement('div');
+                    modalEl.innerHTML = `
+                      <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 20px; align-items: center;">
+                        <h3 style="font-size: 19px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comprobante de Pago</h3>
+                        
+                        <div style="width: 100%; max-height: 350px; overflow: hidden; border-radius: 20px; border: 1.5px solid var(--color-border-light); display: flex; justify-content: center; align-items: center; background: #000;">
+                          <img src="${fileUrl}" style="max-width: 100%; max-height: 350px; object-fit: contain;">
+                        </div>
+                        
+                        <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                          Asegúrate de que la foto sea totalmente legible antes de subirla.
+                        </p>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%;">
+                          <button id="cancel-preview-btn" style="height: 52px; border-radius: 16px; background: var(--color-bg-secondary); color: var(--color-text-secondary); border: none; font-weight: 900; cursor: pointer; text-transform: uppercase; font-size: 13.5px;">
+                            Cancelar
+                          </button>
+                          <button id="upload-preview-btn" style="height: 52px; border-radius: 16px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; font-weight: 950; cursor: pointer; text-transform: uppercase; font-size: 13.5px; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.25);">
+                            Subir
+                          </button>
+                        </div>
+                      </div>
+                    `;
+
+                    showModal({
+                      content: modalEl,
+                      height: 'auto',
+                      hideHeader: true,
+                      persistent: true
+                    });
+
+                    modalEl.querySelector('#cancel-preview-btn').onclick = () => {
+                      URL.revokeObjectURL(fileUrl);
+                      closeModal();
+                      if (onCancel) onCancel();
+                    };
+
+                    modalEl.querySelector('#upload-preview-btn').onclick = () => {
+                      URL.revokeObjectURL(fileUrl);
+                      closeModal();
+                      if (onConfirm) onConfirm();
+                    };
+                  };
+
                   const startCameraCapture = async () => {
+                    const resetBtnState = () => {
+                      btn.disabled = false;
+                      btn.innerHTML = icon('checkCircle', 16) + ' PAGADO';
+                    };
+
                     try {
                       const { Capacitor } = await import('@capacitor/core');
                       if (Capacitor.isNativePlatform()) {
@@ -2018,7 +2072,7 @@ function loadTabContent(tab, container, user) {
                         const response = await fetch(photo.webPath);
                         const blob = await response.blob();
                         const file = new File([blob], `comprobante_${Date.now()}.jpg`, { type: 'image/jpeg' });
-                        await handleDigitalReceiptUpload(file);
+                        await showPhotoPreviewModal(file, () => handleDigitalReceiptUpload(file), resetBtnState);
                       } else {
                         // Create web input element dynamically
                         const input = document.createElement('input');
@@ -2028,10 +2082,9 @@ function loadTabContent(tab, container, user) {
                         input.onchange = async (e) => {
                           const file = e.target.files[0];
                           if (file) {
-                            await handleDigitalReceiptUpload(file);
+                            await showPhotoPreviewModal(file, () => handleDigitalReceiptUpload(file), resetBtnState);
                           } else {
-                            btn.disabled = false;
-                            btn.innerHTML = icon('checkCircle', 16) + ' PAGADO';
+                            resetBtnState();
                           }
                         };
                         input.click();
@@ -2044,10 +2097,9 @@ function loadTabContent(tab, container, user) {
                       input.onchange = async (e) => {
                         const file = e.target.files[0];
                         if (file) {
-                          await handleDigitalReceiptUpload(file);
+                          await showPhotoPreviewModal(file, () => handleDigitalReceiptUpload(file), resetBtnState);
                         } else {
-                          btn.disabled = false;
-                          btn.innerHTML = icon('checkCircle', 16) + ' PAGADO';
+                          resetBtnState();
                         }
                       };
                       input.click();
