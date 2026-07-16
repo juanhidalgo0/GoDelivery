@@ -2508,15 +2508,32 @@ async function showMandadosOverlayModal() {
           </div>
         </div>
       </div>
+
+      <!-- Option 4: Pago de Servicios -->
+      <div id="modal-favor-pagodeservicios-btn" class="gofavores-card card-pagodeservicios glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
+        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+        <div style="text-align: left; z-index: 2; width: 100%;">
+          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Pago de Servicios</h3>
+          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Pagá tus facturas (ABSA, Canal 4, Cyber, etc) a domicilio o digital.</p>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+              Facturas 📄 Trámites
+            </span>
+            <span id="modal-info-pagodeservicios-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
+          </div>
+        </div>
+      </div>
     </div>
     
     <style>
       .card-encomienda { background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important; border-color: rgba(16,185,129,0.3) !important; box-shadow: 0 8px 20px rgba(16,185,129,0.15) !important; }
       .card-mandado { background: linear-gradient(135deg, #E11D48 0%, #F43F5E 100%) !important; border-color: rgba(244,63,94,0.3) !important; box-shadow: 0 8px 20px rgba(244,63,94,0.15) !important; }
       .card-gocash { background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important; border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 8px 20px rgba(99,102,241,0.15) !important; }
+      .card-pagodeservicios { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important; border-color: rgba(245,158,11,0.3) !important; box-shadow: 0 8px 20px rgba(245,158,11,0.15) !important; }
       [data-theme="dark"] .card-encomienda { background: linear-gradient(135deg, #064e3b 0%, #047857 100%) !important; }
       [data-theme="dark"] .card-mandado { background: linear-gradient(135deg, #7f1d1d 0%, #E11D48 100%) !important; }
       [data-theme="dark"] .card-gocash { background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important; }
+      [data-theme="dark"] .card-pagodeservicios { background: linear-gradient(135deg, #78350F 0%, #D97706 100%) !important; }
       .gofavores-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12) !important; }
       .gofavores-card:active { transform: translateY(0) scale(0.98); }
     </style>
@@ -2537,7 +2554,7 @@ async function showMandadosOverlayModal() {
         setTimeout(() => { window.location.reload(); }, 600);
         return;
       }
-      const { showMandadoForm, showCompraForm, showGoCashForm, showServiceInfoModal } = goFav;
+      const { showMandadoForm, showCompraForm, showGoCashForm, showPagoServiciosForm, showServiceInfoModal } = goFav;
       const { getState } = await import('../state.js');
 
       const checkPhoneAndOpen = (openFn) => {
@@ -2573,10 +2590,15 @@ async function showMandadosOverlayModal() {
         if (e.target.id === 'modal-info-gocash-btn') return;
         checkPhoneAndOpen(showGoCashForm);
       };
+      document.getElementById('modal-favor-pagodeservicios-btn').onclick = (e) => {
+        if (e.target.id === 'modal-info-pagodeservicios-btn') return;
+        checkPhoneAndOpen(showPagoServiciosForm);
+      };
 
       document.getElementById('modal-info-mandado-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('encomienda'); };
       document.getElementById('modal-info-compra-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('mandado'); };
       document.getElementById('modal-info-gocash-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('gocash'); };
+      document.getElementById('modal-info-pagodeservicios-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('pagodeservicios'); };
     }
   });
 }
