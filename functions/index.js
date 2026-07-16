@@ -1596,13 +1596,13 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
 
       const securePurchaseFee = type === 'compra' 
         ? (globalSettings.favorPurchaseFee !== undefined ? Number(globalSettings.favorPurchaseFee) : 800)
-        : 0;
+        : (type === 'pagodeservicios' ? (globalSettings.servicePaymentErrandFee !== undefined ? Number(globalSettings.servicePaymentErrandFee) : 2000) : 0);
 
       let finalPurchaseFee = Number(purchaseFee || 0);
-      if (type === 'compra' && finalPurchaseFee < 0.9 * securePurchaseFee) {
+      if ((type === 'compra' || type === 'pagodeservicios') && finalPurchaseFee < 0.9 * securePurchaseFee) {
         logger.warn(`GoFavor Purchase fee tampering detected! Client: ${finalPurchaseFee}, calculated: ${securePurchaseFee}. Overwriting.`);
         finalPurchaseFee = securePurchaseFee;
-      } else if (type !== 'compra') {
+      } else if (type !== 'compra' && type !== 'pagodeservicios') {
         finalPurchaseFee = 0;
       }
 
