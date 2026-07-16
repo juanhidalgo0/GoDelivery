@@ -120,6 +120,11 @@ export function showAddressPrompt(onSuccess, config = {}) {
         </div>
 
         <!-- Saved Addresses Horizontal List -->
+        ${(getState().savedAddresses || []).length > 0 ? `
+          <div style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">
+            Tus direcciones
+          </div>
+        ` : ''}
         <div id="saved-addresses-list" style="margin-bottom: 20px; display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; scrollbar-width: none; -ms-overflow-style: none;">
           ${(getState().savedAddresses || []).map(addr => `
             <div class="saved-addr-chip" data-id="${addr.id}" style="flex-shrink:0; padding:10px 16px; background:var(--color-bg-secondary); border-radius:14px; border:1.5px solid var(--color-border-light); display:flex; align-items:center; gap:10px; cursor:pointer; transition:all 0.2s;">
