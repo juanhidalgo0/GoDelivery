@@ -1310,8 +1310,26 @@ function loadTabContent(tab, container, user) {
           } else {
             let key = o.comercioId || (o.isFavor ? `favor_${o.id}` : `order_${o.id}`);
             if (!pickupsByCommerce.has(key)) {
+              let stopName = o.comercioName;
+              if (!stopName) {
+                if (o.isTrip) {
+                  stopName = 'Punto de Encuentro';
+                } else if (o.isFavor) {
+                  if (o.favorType === 'pagodeservicios') {
+                    const match = o.details?.match(/🏢\s*\*\*Servicio:\*\*\s*(.*?)(?=\n|$)/i);
+                    stopName = match ? match[1].trim() : 'Pago de Servicio';
+                  } else if (o.favorType === 'mandado') {
+                    stopName = 'Punto de Retiro';
+                  } else {
+                    stopName = 'Comercio a Comprar';
+                  }
+                } else {
+                  stopName = 'Comercio a Comprar';
+                }
+              }
+
               pickupsByCommerce.set(key, {
-                comercioName: o.comercioName || (o.isTrip ? 'Punto de Encuentro' : (o.favorType === 'mandado' ? 'Punto de Retiro' : 'Comercio a Comprar')),
+                comercioName: stopName,
                 address: o.pickupAddress || o.comercioAddress || '',
                 isFavor: !!o.isFavor,
                 orders: []
@@ -1467,7 +1485,7 @@ function loadTabContent(tab, container, user) {
                               if (o.isTrip) return 'viaje';
                               if (o.isFavor) {
                                 if (o.favorType === 'gocash') return 'go cash';
-                                if (o.favorType === 'mandado') return 'mandado';
+                                if (o.favorType === 'pagodeservicios') return 'pago de servicios';
                                 if (o.favorType === 'encomienda') return 'encomienda';
                                 return 'mandado';
                               }
@@ -1477,10 +1495,16 @@ function loadTabContent(tab, container, user) {
                               <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; margin-bottom:2px;">
                                 ${orderTypes.map(t => {
                                   let bg = '', border = '', color = '', iconName = '', label = '';
-                                  if (t === 'mandado') {
-                                    bg = 'rgba(245, 158, 11, 0.12)';
-                                    border = '1px solid rgba(245, 158, 11, 0.25)';
+                                  if (t === 'pago de servicios') {
+                                    bg = 'rgba(217, 119, 6, 0.12)';
+                                    border = '1px solid rgba(217, 119, 6, 0.25)';
                                     color = '#d97706';
+                                    iconName = 'creditCard';
+                                    label = 'Pago de Servicio';
+                                  } else if (t === 'mandado') {
+                                    bg = 'rgba(244, 63, 94, 0.12)';
+                                    border = '1px solid rgba(244, 63, 94, 0.25)';
+                                    color = '#e11d48';
                                     iconName = 'shoppingBag';
                                     label = 'Mandado';
                                   } else if (t === 'encomienda') {
@@ -1754,8 +1778,9 @@ function loadTabContent(tab, container, user) {
                             const hasNotifiedAtDoor = stop.orders.every(o => o.isAtDoor);
                             const allPickedUp = stop.orders.every(o => !!o.pickedUpAt);
                             const isTrip = stop.orders.some(o => o.isTrip);
+                            const isPagoServicios = stop.orders.some(o => o.favorType === 'pagodeservicios');
 
-                            if (!isTrip && !hasNotifiedAtDoor) {
+                            if (!isTrip && !hasNotifiedAtDoor && !isPagoServicios) {
                               return `
                                 <button class="btn notify-at-door-btn" 
                                         data-ids="${stop.orders.map(o => o.id).join(',')}" 
