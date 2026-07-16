@@ -411,6 +411,18 @@ window.showOrderDetail = async (idOrObject) => {
            <span>Subtotal Productos</span>
            <span style="font-weight:800; color:${isProductsPending ? '#d97706' : 'var(--color-text-secondary)'};">${subtotalDisplay}</span>
          </div>
+         ${o.pointsRedeemed > 0 ? `
+           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#a855f7;">
+             <span>Puntos Usados</span>
+             <span>-${formatPrice(o.pointsRedeemed)}</span>
+           </div>
+         ` : ''}
+         ${o.couponCode ? `
+           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#a855f7;">
+             <span>Cupón Usado (${o.couponCode})</span>
+             <span>-${formatPrice(o.couponDiscount || 0)}</span>
+           </div>
+         ` : ''}
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
            <span>Costo de Envío</span>
            <span style="color:var(--color-success);">${formatPrice(o.deliveryCost || 0)}</span>
@@ -467,15 +479,31 @@ window.showOrderDetail = async (idOrObject) => {
 
     <!-- Logistics & Participants -->
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
-       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px;">
-         <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Cliente</div>
-         <div style="font-weight:800; font-size:13px; margin-bottom:2px;">${o.userName}</div>
-         <div id="audit-client-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.goId || 'Cargando...'}</div>
+       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+         <div>
+           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Cliente</div>
+           <div style="font-weight:800; font-size:13px; margin-bottom:2px;">${o.userName}</div>
+           <div id="audit-client-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.goId || 'Cargando...'}</div>
+         </div>
+         <div id="audit-client-wa-container">
+           ${o.userPhone ? `
+             <a href="https://wa.me/${o.userPhone.replace(/\D/g, '').startsWith('54') ? o.userPhone.replace(/\D/g, '') : '54' + o.userPhone.replace(/\D/g, '')}" target="_blank" style="display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:10px; background:#25D366; color:white; font-size:11px; font-weight:800; text-decoration:none; box-shadow:0 2px 8px rgba(37,211,102,0.25); transition:all 0.2s;" onmouseover="this.style.opacity='0.9';" onmouseout="this.style.opacity='1';">
+               ${icon('whatsapp', 13, '', '#FFF')} WhatsApp
+             </a>
+           ` : ''}
+         </div>
        </div>
-       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px;">
-         <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Repartidor</div>
-         <div style="font-weight:800; font-size:13px; margin-bottom:2px; color:var(--color-primary);">${o.driverName || 'Sin asignar'}</div>
-         <div id="audit-driver-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
+       <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:15px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+         <div>
+           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Repartidor</div>
+           <div style="font-weight:800; font-size:13px; margin-bottom:2px; color:var(--color-primary);">${o.driverName || 'Sin asignar'}</div>
+           <div id="audit-driver-goid" style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
+         </div>
+         ${o.driverId ? `
+           <button id="btn-msg-support-driver" style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:10px; background:rgba(225,29,72,0.1); color:var(--color-primary); border:none; cursor:pointer; transition:all 0.2s;" title="Enviar mensaje de soporte al repartidor">
+             ${icon('send', 16)}
+           </button>
+         ` : ''}
        </div>
     </div>
 
@@ -579,7 +607,22 @@ window.showOrderDetail = async (idOrObject) => {
       if (snap.exists()) {
         const u = snap.data();
         const clientBadge = document.getElementById('audit-client-goid');
-        if (clientBadge) clientBadge.textContent = `ID: ${u.goId || 'Sin ID'}`;
+        if (clientBadge) clientBadge.textContent = `ID: ${u.goPointsId || u.goId || 'Sin ID'}`;
+
+        // Update client WhatsApp link if not present on order document
+        const phone = u.phone || u.phoneNumber || '';
+        if (phone && !o.userPhone) {
+          const clean = phone.replace(/\D/g, '');
+          const url = `https://wa.me/${clean.startsWith('54') ? clean : '54' + clean}`;
+          const waContainer = document.getElementById('audit-client-wa-container');
+          if (waContainer) {
+            waContainer.innerHTML = `
+              <a href="${url}" target="_blank" style="display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:10px; background:#25D366; color:white; font-size:11px; font-weight:800; text-decoration:none; box-shadow:0 2px 8px rgba(37,211,102,0.25); transition:all 0.2s;" onmouseover="this.style.opacity='0.9';" onmouseout="this.style.opacity='1';">
+                ${icon('whatsapp', 13, '', '#FFF')} WhatsApp
+              </a>
+            `;
+          }
+        }
       }
     }).catch(() => {});
   } else {
@@ -597,6 +640,28 @@ window.showOrderDetail = async (idOrObject) => {
       }
     }).catch(() => {});
   }
+
+  // Handle direct support message to driver
+  document.getElementById('btn-msg-support-driver')?.addEventListener('click', async () => {
+    const msg = prompt('Escribí el mensaje que querés enviarle al repartidor de parte de Soporte:');
+    if (!msg || !msg.trim()) return;
+    
+    try {
+      const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+      const { showToast } = await import('../../components/toast.js');
+      await addDoc(collection(db, 'users', o.driverId, 'notifications'), {
+        title: '🚨 Mensaje urgente de Soporte',
+        body: msg.trim(),
+        type: 'system',
+        status: 'unread',
+        createdAt: serverTimestamp()
+      });
+      showToast('Mensaje de soporte enviado al repartidor con éxito', 'success');
+    } catch (e) {
+      const { showToast } = await import('../../components/toast.js');
+      showToast('Error al enviar el mensaje', 'danger');
+    }
+  });
 
   detailHtml.querySelectorAll('.btn-chat-audit').forEach(btn => {
     btn.onclick = async () => {
