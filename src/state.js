@@ -105,6 +105,11 @@ export async function initSettings() {
         state.favorPurchaseFee = data.favorPurchaseFee !== undefined ? data.favorPurchaseFee : 800;
         state.maintenanceMode = data.maintenanceMode !== undefined ? data.maintenanceMode : false;
         state.maintenanceMessage = data.maintenanceMessage || 'La aplicación se encuentra en mantenimiento temporal para realizar mejoras. Volvemos en unos minutos.';
+        state.servicesAppFeeConfig = data.servicesAppFeeConfig || {
+          gofavor: { type: 'percentage', value: 1.2 },
+          gocash: { type: 'percentage', value: 1.2 },
+          goviaje: { type: 'percentage', value: 1.2 }
+        };
 
         // Dynamically apply brand theme
         const primaryColor = state.useDarkBrandTheme ? '#0F172A' : '#E11D48';

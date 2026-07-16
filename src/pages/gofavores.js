@@ -628,8 +628,12 @@ export async function showMandadoForm() {
         const dist = await getDistance(pickupData.coords.lat, pickupData.coords.lng, deliveryData.coords.lat, deliveryData.coords.lng);
         calculatedFee = calculateDynamicFee(dist);
         
-        const appUsageFeeRate = getState().appUsageFeeRate || 0.05;
-        appFee = Math.ceil((calculatedFee * appUsageFeeRate) / 10) * 10;
+        const config = getState().servicesAppFeeConfig?.gofavor || { type: 'percentage', value: 1.2 };
+        if (config.type === 'fixed') {
+          appFee = config.value;
+        } else {
+          appFee = Math.ceil((calculatedFee * (config.value / 100)) / 10) * 10;
+        }
 
         let couponDiscount = 0;
         if (appliedCoupon) {
@@ -1098,8 +1102,12 @@ export async function showCompraForm() {
 
       const extraStopsTotal = (stopsCount - 1) * extraStopFee;
       const subtotal = calculatedDistFee + purchaseFee + extraStopsTotal;
-      const appUsageFeeRate = getState().appUsageFeeRate || 0.05;
-      appFee = Math.ceil((subtotal * appUsageFeeRate) / 10) * 10;
+      const config = getState().servicesAppFeeConfig?.gofavor || { type: 'percentage', value: 1.2 };
+      if (config.type === 'fixed') {
+        appFee = config.value;
+      } else {
+        appFee = Math.ceil((subtotal * (config.value / 100)) / 10) * 10;
+      }
 
       let couponDiscount = 0;
       if (appliedCoupon) {
@@ -1355,6 +1363,10 @@ export async function showGoCashForm() {
             <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío estimado (desde centro)</span>
             <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
           </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
+            <span id="gocash-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+          </div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
             <span style="font-weight: 900; color: #4F46E5; font-size: 15px;">Total Envío Estimado</span>
             <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: #4F46E5;">$ 0</span>
@@ -1392,6 +1404,7 @@ export async function showGoCashForm() {
   let selectedType = 'cash_to_transfer'; // or 'transfer_to_cash'
   let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
   let calculatedFee = 0;
+  let appFee = 0;
   let selectedTip = 0;
   let appliedCoupon = null;
 
@@ -1433,6 +1446,13 @@ export async function showGoCashForm() {
         const dist = await getDistance(centerCoords.lat, centerCoords.lng, deliveryData.coords.lat, deliveryData.coords.lng);
         calculatedFee = calculateDynamicFee(dist);
 
+        const config = getState().servicesAppFeeConfig?.gocash || { type: 'percentage', value: 1.2 };
+        if (config.type === 'fixed') {
+          appFee = config.value;
+        } else {
+          appFee = Math.ceil((calculatedFee * (config.value / 100)) / 10) * 10;
+        }
+
         let couponDiscount = 0;
         if (appliedCoupon) {
           if (appliedCoupon.type === 'free_delivery') {
@@ -1444,9 +1464,11 @@ export async function showGoCashForm() {
           }
         }
 
-        const total = Math.max(calculatedFee - couponDiscount + selectedTip, 0);
+        const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
 
         distCostEl.textContent = formatPrice(calculatedFee);
+        const appFeeEl = modalEl.querySelector('#gocash-app-fee');
+        if (appFeeEl) appFeeEl.textContent = formatPrice(appFee);
 
         let couponRow = previewBox.querySelector('.coupon-preview-row');
         const finalFeeRow = totalCostEl.parentElement;
@@ -1556,7 +1578,7 @@ export async function showGoCashForm() {
       }
     }
 
-    const total = Math.max(calculatedFee - couponDiscount + selectedTip, 0);
+    const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
     const typeText = selectedType === 'cash_to_transfer' ? 'Efectivo a Transferencia' : 'Transferencia a Efectivo';
     
     showConfirm({
@@ -1572,7 +1594,7 @@ export async function showGoCashForm() {
             deliveryCoords: deliveryData.coords,
             details: `Go Cash: Cambiar ${typeText} por valor de ${formatPrice(amount)}`,
             deliveryCost: calculatedFee,
-            appUsageFee: 0,
+            appUsageFee: appFee,
             tip: selectedTip,
             couponCode: appliedCoupon ? appliedCoupon.code : null,
             couponDiscount: couponDiscount,

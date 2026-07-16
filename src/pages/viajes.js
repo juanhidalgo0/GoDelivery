@@ -458,7 +458,10 @@ export async function renderViajes(content) {
           deliveryAddress: destData.address,
           deliveryCoords: destData.coords,
           deliveryCost: cost,
-          appUsageFee: Math.ceil((cost * (getState().appUsageFeeRate || 0.05)) / 10) * 10,
+          appUsageFee: (() => {
+            const config = getState().servicesAppFeeConfig?.goviaje || { type: 'percentage', value: 1.2 };
+            return config.type === 'fixed' ? config.value : Math.ceil((cost * (config.value / 100)) / 10) * 10;
+          })(),
           total: cost,
           status: 'scheduled',
           isTrip: true,
@@ -562,7 +565,10 @@ export async function renderViajes(content) {
             deliveryAddress: destData.address,
             deliveryCoords: destData.coords,
             deliveryCost: cost,
-            appUsageFee: Math.ceil((cost * (getState().appUsageFeeRate || 0.05)) / 10) * 10,
+            appUsageFee: (() => {
+              const config = getState().servicesAppFeeConfig?.goviaje || { type: 'percentage', value: 1.2 };
+              return config.type === 'fixed' ? config.value : Math.ceil((cost * (config.value / 100)) / 10) * 10;
+            })(),
             total: cost,
             status: 'ready',
             isTrip: true,

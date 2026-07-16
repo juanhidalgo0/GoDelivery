@@ -192,6 +192,65 @@ export async function renderAdminSettings() {
                   <input type="text" class="input" id="global-whatsapp-payments" value="${getState().whatsappPayments || ''}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:14px;" />
                 </div>
               </div>
+
+              <!-- Custom Service Fees Config -->
+              <div style="border-top:1px dashed var(--color-border-light); margin-top:20px; padding-top:20px;">
+                <h4 style="font-family:var(--font-display); font-size:12px; font-weight:800; margin-bottom:14px; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Tasas de Servicio Especiales</h4>
+                
+                <!-- Mandados / Encomiendas -->
+                <div style="background:var(--color-bg-secondary); border-radius:18px; padding:16px; border:1px solid var(--color-border-light); margin-bottom:14px;">
+                  <div style="font-size:13px; font-weight:850; color:var(--color-text); margin-bottom:12px;">Mandados y Encomiendas</div>
+                  <div style="display:grid; grid-template-columns:1fr 1.2fr; gap:12px;">
+                    <div>
+                      <label style="font-size:10px; color:var(--color-text-tertiary); margin-bottom:4px; display:block; font-weight:700;">Tipo</label>
+                      <select class="input" id="fee-config-gofavor-type" style="width:100%; height:40px; border-radius:10px; padding:0 8px; font-size:13px; font-weight:700; background:var(--color-surface); border:1px solid var(--color-border);">
+                        <option value="percentage" ${getState().servicesAppFeeConfig?.gofavor?.type === 'percentage' ? 'selected' : ''}>Porcentaje (%)</option>
+                        <option value="fixed" ${getState().servicesAppFeeConfig?.gofavor?.type === 'fixed' ? 'selected' : ''}>Monto Fijo ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:10px; color:var(--color-text-tertiary); margin-bottom:4px; display:block; font-weight:700;">Valor</label>
+                      <input type="number" step="any" class="input" id="fee-config-gofavor-value" value="${getState().servicesAppFeeConfig?.gofavor?.value !== undefined ? getState().servicesAppFeeConfig?.gofavor?.value : 1.2}" style="width:100%; height:40px; border-radius:10px; padding:0 10px; font-weight:700; font-size:14px; border:1px solid var(--color-border);" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Go Cash -->
+                <div style="background:var(--color-bg-secondary); border-radius:18px; padding:16px; border:1px solid var(--color-border-light); margin-bottom:14px;">
+                  <div style="font-size:13px; font-weight:850; color:var(--color-text); margin-bottom:12px;">Go Cash (Retiro de Efectivo)</div>
+                  <div style="display:grid; grid-template-columns:1fr 1.2fr; gap:12px;">
+                    <div>
+                      <label style="font-size:10px; color:var(--color-text-tertiary); margin-bottom:4px; display:block; font-weight:700;">Tipo</label>
+                      <select class="input" id="fee-config-gocash-type" style="width:100%; height:40px; border-radius:10px; padding:0 8px; font-size:13px; font-weight:700; background:var(--color-surface); border:1px solid var(--color-border);">
+                        <option value="percentage" ${getState().servicesAppFeeConfig?.gocash?.type === 'percentage' ? 'selected' : ''}>Porcentaje (%)</option>
+                        <option value="fixed" ${getState().servicesAppFeeConfig?.gocash?.type === 'fixed' ? 'selected' : ''}>Monto Fijo ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:10px; color:var(--color-text-tertiary); margin-bottom:4px; display:block; font-weight:700;">Valor</label>
+                      <input type="number" step="any" class="input" id="fee-config-gocash-value" value="${getState().servicesAppFeeConfig?.gocash?.value !== undefined ? getState().servicesAppFeeConfig?.gocash?.value : 1.2}" style="width:100%; height:40px; border-radius:10px; padding:0 10px; font-weight:700; font-size:14px; border:1px solid var(--color-border);" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Go Viajes -->
+                <div style="background:var(--color-bg-secondary); border-radius:18px; padding:16px; border:1px solid var(--color-border-light);">
+                  <div style="font-size:13px; font-weight:850; color:var(--color-text); margin-bottom:12px;">Go Viajes</div>
+                  <div style="display:grid; grid-template-columns:1fr 1.2fr; gap:12px;">
+                    <div>
+                      <label style="font-size:10px; color:var(--color-text-tertiary); margin-bottom:4px; display:block; font-weight:700;">Tipo</label>
+                      <select class="input" id="fee-config-goviaje-type" style="width:100%; height:40px; border-radius:10px; padding:0 8px; font-size:13px; font-weight:700; background:var(--color-surface); border:1px solid var(--color-border);">
+                        <option value="percentage" ${getState().servicesAppFeeConfig?.goviaje?.type === 'percentage' ? 'selected' : ''}>Porcentaje (%)</option>
+                        <option value="fixed" ${getState().servicesAppFeeConfig?.goviaje?.type === 'fixed' ? 'selected' : ''}>Monto Fijo ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:10px; color:var(--color-text-tertiary); margin-bottom:4px; display:block; font-weight:700;">Valor</label>
+                      <input type="number" step="any" class="input" id="fee-config-goviaje-value" value="${getState().servicesAppFeeConfig?.goviaje?.value !== undefined ? getState().servicesAppFeeConfig?.goviaje?.value : 1.2}" style="width:100%; height:40px; border-radius:10px; padding:0 10px; font-weight:700; font-size:14px; border:1px solid var(--color-border);" />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -596,6 +655,21 @@ export async function renderAdminSettings() {
     const maintenanceMode = document.getElementById('global-maintenance-mode').checked;
     const maintenanceMessage = document.getElementById('global-maintenance-message').value.trim();
 
+    const servicesAppFeeConfig = {
+      gofavor: {
+        type: document.getElementById('fee-config-gofavor-type').value,
+        value: parseFloat(document.getElementById('fee-config-gofavor-value').value) || 0
+      },
+      gocash: {
+        type: document.getElementById('fee-config-gocash-type').value,
+        value: parseFloat(document.getElementById('fee-config-gocash-value').value) || 0
+      },
+      goviaje: {
+        type: document.getElementById('fee-config-goviaje-type').value,
+        value: parseFloat(document.getElementById('fee-config-goviaje-value').value) || 0
+      }
+    };
+
     btn.disabled = true;
     btn.innerHTML = icon('loader', 16, 'animate-spin');
 
@@ -655,7 +729,7 @@ export async function renderAdminSettings() {
         tripBasePrice, tripMinPrice, tripPricePerKm,
         commissionRate, appUsageFeeRate, pointsPerDollar, dollarPerPoint, referralPoints, weeklyChallenges,
         favorPurchaseFee, whatsappPayments, nightSurchargeConfig, driverIncentiveConfig, pushMessages,
-        rainMode, useDarkBrandTheme, maintenanceMode, maintenanceMessage
+        rainMode, useDarkBrandTheme, maintenanceMode, maintenanceMessage, servicesAppFeeConfig
       }, { merge: true });
 
       await setDoc(doc(db, 'settings', 'levels'), currentLevels);
@@ -683,6 +757,7 @@ export async function renderAdminSettings() {
       setState('useDarkBrandTheme', useDarkBrandTheme);
       setState('maintenanceMode', maintenanceMode);
       setState('maintenanceMessage', maintenanceMessage);
+      setState('servicesAppFeeConfig', servicesAppFeeConfig);
 
       showModal({
         title: '<div style="text-align:center;">¡Cambios Guardados!</div>',
