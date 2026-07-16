@@ -2005,51 +2005,68 @@ function loadTabContent(tab, container, user) {
                   };
 
                   const showPhotoPreviewModal = async (file, onConfirm, onCancel) => {
-                    const { showModal, closeModal } = await import('../components/modal.js');
-                    const { icon: previewIcon } = await import('../utils/icons.js');
-
                     const fileUrl = URL.createObjectURL(file);
-                    const modalEl = document.createElement('div');
-                    modalEl.innerHTML = `
-                      <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 20px; align-items: center;">
-                        <h3 style="font-size: 19px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comprobante de Pago</h3>
-                        
-                        <div style="width: 100%; max-height: 350px; overflow: hidden; border-radius: 20px; border: 1.5px solid var(--color-border-light); display: flex; justify-content: center; align-items: center; background: #000;">
-                          <img src="${fileUrl}" style="max-width: 100%; max-height: 350px; object-fit: contain;">
-                        </div>
-                        
-                        <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
-                          Asegúrate de que la foto sea totalmente legible antes de subirla.
-                        </p>
-                        
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%;">
-                          <button id="cancel-preview-btn" style="height: 52px; border-radius: 16px; background: var(--color-bg-secondary); color: var(--color-text-secondary); border: none; font-weight: 900; cursor: pointer; text-transform: uppercase; font-size: 13.5px;">
-                            Cancelar
-                          </button>
-                          <button id="upload-preview-btn" style="height: 52px; border-radius: 16px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; font-weight: 950; cursor: pointer; text-transform: uppercase; font-size: 13.5px; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.25);">
-                            Subir
-                          </button>
-                        </div>
+                    const overlayEl = document.createElement('div');
+                    overlayEl.style.cssText = `
+                      position: fixed;
+                      top: 0;
+                      left: 0;
+                      width: 100vw;
+                      height: 100vh;
+                      background: #090d16;
+                      z-index: 999999;
+                      display: flex;
+                      flex-direction: column;
+                      justify-content: space-between;
+                      font-family: var(--font-display, 'Outfit', sans-serif);
+                      color: white;
+                      opacity: 0;
+                      transition: opacity 0.3s ease;
+                    `;
+                    overlayEl.innerHTML = `
+                      <!-- Top Translucent Header -->
+                      <div style="padding: calc(16px + env(safe-area-inset-top, 16px)) 20px 16px; text-align: center; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); z-index: 10;">
+                        <h3 style="margin: 0; font-size: 19px; font-weight: 950; letter-spacing: -0.5px; color: white;">Comprobante de Pago</h3>
+                        <p style="margin: 4px 0 0; font-size: 12.5px; color: #94a3b8; font-weight: 550;">Asegúrate de que la foto sea totalmente legible</p>
+                      </div>
+
+                      <!-- Image Fill Container -->
+                      <div style="flex: 1; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; position: relative;">
+                        <img src="${fileUrl}" style="width: 100%; height: 100%; object-fit: contain;">
+                      </div>
+
+                      <!-- Bottom Translucent Controls -->
+                      <div style="padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)); background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0)); display: grid; grid-template-columns: 1fr 1fr; gap: 16px; z-index: 10; width: 100%; box-sizing: border-box;">
+                        <button id="cancel-preview-btn" style="height: 54px; border-radius: 18px; background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); color: white; border: 1.5px solid rgba(255,255,255,0.15); font-weight: 900; cursor: pointer; text-transform: uppercase; font-size: 14px; transition: all 0.2s;">
+                          Cancelar
+                        </button>
+                        <button id="upload-preview-btn" style="height: 54px; border-radius: 18px; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; border: none; font-weight: 950; cursor: pointer; text-transform: uppercase; font-size: 14px; box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3); transition: all 0.2s;">
+                          Subir
+                        </button>
                       </div>
                     `;
 
-                    showModal({
-                      content: modalEl,
-                      height: 'auto',
-                      hideHeader: true,
-                      persistent: true
+                    document.body.appendChild(overlayEl);
+                    requestAnimationFrame(() => {
+                      overlayEl.style.opacity = '1';
                     });
 
-                    modalEl.querySelector('#cancel-preview-btn').onclick = () => {
+                    overlayEl.querySelector('#cancel-preview-btn').onclick = () => {
                       URL.revokeObjectURL(fileUrl);
-                      closeModal();
-                      if (onCancel) onCancel();
+                      overlayEl.style.opacity = '0';
+                      setTimeout(() => {
+                        overlayEl.remove();
+                        if (onCancel) onCancel();
+                      }, 300);
                     };
 
-                    modalEl.querySelector('#upload-preview-btn').onclick = () => {
+                    overlayEl.querySelector('#upload-preview-btn').onclick = () => {
                       URL.revokeObjectURL(fileUrl);
-                      closeModal();
-                      if (onConfirm) onConfirm();
+                      overlayEl.style.opacity = '0';
+                      setTimeout(() => {
+                        overlayEl.remove();
+                        if (onConfirm) onConfirm();
+                      }, 300);
                     };
                   };
 
