@@ -31,6 +31,10 @@ export async function initPushNotifications() {
   }
   if (!user) return;
 
+  if (user.role === 'admin') {
+    initAdminOrderListener();
+  }
+
   try {
     const isNativeApp = window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web';
     if (isNativeApp) {
@@ -372,4 +376,70 @@ function showPushRequiredLockScreen() {
       showToast('Error al solicitar permisos', 'danger');
     }
   };
+}
+
+export async function initAdminOrderListener() {
+  const user = getState().user;
+  if (!user || user.role !== 'admin') return;
+
+  const { collection, query, where, onSnapshot, limit, addDoc } = await import('firebase/firestore');
+  const sessionStartTime = new Date();
+  
+  console.log('[AdminPush] Starting new orders monitoring listener...');
+
+  // Query only new orders created after the admin logged in / session started
+  const q = query(
+    collection(db, 'orders'),
+    where('createdAt', '>=', sessionStartTime)
+  );
+
+  onSnapshot(q, async (snapshot) => {
+    snapshot.docChanges().forEach(async (change) => {
+      if (change.type === 'added') {
+        const orderData = change.doc.data();
+        const orderId = change.doc.id;
+        const shortOrderId = orderData.orderId || orderId.slice(0, 6).toUpperCase();
+        
+        console.log(`[AdminPush] New order detected: ${shortOrderId}`);
+
+        // Define friendly name for order types
+        let orderTypeLabel = 'Pedido general';
+        if (orderData.isFavor) {
+          const favorTypes = {
+            compra: 'Favor de Compra 🛒',
+            pagodeservicios: 'Pago de Servicios ⚡',
+            gocash: 'Go Cash 💵',
+            encomienda: 'Encomienda 📦'
+          };
+          orderTypeLabel = favorTypes[orderData.favorType] || 'Favor especial 🌟';
+        } else if (orderData.isTrip) {
+          orderTypeLabel = 'Viaje solicitado 🚴';
+        } else {
+          orderTypeLabel = `Compra en ${orderData.comercioName || 'Tienda'} 🏪`;
+        }
+
+        // 1. Play visual in-app toast
+        showToast(`🔔 Nuevo Pedido #${shortOrderId}: ${orderTypeLabel}`, 'success');
+
+        // 2. Play sound
+        try {
+          AudioManager.playSound('/assets/sounds/notification.mp3');
+        } catch (e) {}
+
+        // 3. Write notification document to trigger Cloud Function FCM push notification
+        try {
+          await addDoc(collection(db, 'users', user.uid, 'notifications'), {
+            title: `🔔 Nuevo Pedido #${shortOrderId}`,
+            body: `Se ha registrado una nueva orden de tipo: ${orderTypeLabel}`,
+            type: 'system',
+            status: 'unread',
+            url: `#/pedido/${orderId}`,
+            createdAt: new Date()
+          });
+        } catch (err) {
+          console.error('[AdminPush] Failed to register notification doc for admin:', err);
+        }
+      }
+    });
+  });
 }
