@@ -1796,9 +1796,9 @@ function loadTabContent(tab, container, user) {
                             const hasNotifiedAtDoor = stop.orders.every(o => o.isAtDoor);
                             const allPickedUp = stop.orders.every(o => !!o.pickedUpAt);
                             const isTrip = stop.orders.some(o => o.isTrip);
-                            const isPagoServicios = stop.orders.some(o => o.favorType === 'pagodeservicios');
+                            const isPagoServiciosDigital = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.receiptDeliveryType === 'digital');
 
-                            if (!isTrip && !hasNotifiedAtDoor && !isPagoServicios) {
+                            if (!isTrip && !hasNotifiedAtDoor && !isPagoServiciosDigital) {
                               return `
                                 <button class="btn notify-at-door-btn" 
                                         data-ids="${stop.orders.map(o => o.id).join(',')}" 
