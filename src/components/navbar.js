@@ -17,10 +17,10 @@ export function renderNavbar() {
 
   const user = getState().user;
 
-  const isOverlayFullscreen = hash.startsWith('/profile/') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || (hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/');
+  const isOverlayFullscreen = hash.startsWith('/profile/') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/');
 
-  // Hide on admin/panel pages or tracking (except support-chats)
-  if ((hash.startsWith('/admin') && !hash.startsWith('/admin/support-chats')) || hash.startsWith('/pedido/')) {
+  // Hide on admin/panel pages or tracking
+  if (hash.startsWith('/admin') || hash.startsWith('/pedido/')) {
     navbar.innerHTML = '';
     navbar.style.display = 'none';
     const appContent = document.getElementById('app-content');

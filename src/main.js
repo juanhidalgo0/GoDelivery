@@ -206,7 +206,18 @@ async function init() {
         console.log('GoDelivery: SW navigation message received:', event.data.url);
         const match = event.data.url.match(/#\/.*$/);
         if (match) {
-          window.location.hash = match[0];
+          const hashUrl = match[0];
+          if (hashUrl.includes('admin/support-chats') && hashUrl.includes('userId=')) {
+            const queryPart = hashUrl.split('?')[1];
+            if (queryPart) {
+              const urlParams = new URLSearchParams(queryPart);
+              const targetUserId = urlParams.get('userId');
+              if (targetUserId) {
+                sessionStorage.setItem('admin-support-chat-target', targetUserId);
+              }
+            }
+          }
+          window.location.hash = hashUrl;
         } else {
           window.location.hash = '#/';
         }
@@ -621,7 +632,18 @@ async function init() {
   const params = new URLSearchParams(window.location.search);
   const redirect = params.get('redirect');
   if (redirect) {
-    window.location.hash = `#/${redirect}`;
+    const decodedRedirect = decodeURIComponent(redirect);
+    if (decodedRedirect.includes('admin/support-chats') && decodedRedirect.includes('userId=')) {
+      const parts = decodedRedirect.split('?');
+      if (parts[1]) {
+        const urlParams = new URLSearchParams(parts[1]);
+        const targetUserId = urlParams.get('userId');
+        if (targetUserId) {
+          sessionStorage.setItem('admin-support-chat-target', targetUserId);
+        }
+      }
+    }
+    window.location.hash = `#/${decodedRedirect}`;
     // Clean up query param from URL bar
     window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
   }

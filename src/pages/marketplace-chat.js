@@ -251,9 +251,17 @@ export async function renderMarketplaceChat(chatId, content) {
     let audioChunks = [];
     let recordTimer;
     let isRecording = false;
+    let startX = 0;
+    let isCancelled = false;
 
     micBtn.addEventListener('pointerdown', async (e) => {
       e.preventDefault();
+      startX = e.clientX;
+      isCancelled = false;
+      try {
+        micBtn.setPointerCapture(e.pointerId);
+      } catch (err) {}
+
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -268,12 +276,17 @@ export async function renderMarketplaceChat(chatId, content) {
             isRecording = true;
             const startTime = Date.now();
             audioIndicator.style.display = 'flex';
-            micBtn.style.color = 'red';
+            micBtn.style.backgroundColor = 'var(--color-primary)';
+            micBtn.style.color = 'white';
+            micBtn.style.transform = 'scale(1.4)';
+            micBtn.style.boxShadow = '0 0 15px rgba(225, 29, 72, 0.5)';
+            micBtn.style.borderRadius = '50%';
+
             recordTimer = setInterval(() => {
               const elapsed = Math.floor((Date.now() - startTime) / 1000);
               const m = Math.floor(elapsed / 60);
               const s = (elapsed % 60).toString().padStart(2, '0');
-              audioTimer.textContent = `${m}:${s}`;
+              audioTimer.textContent = `${m}:${s} (Deslizá < para cancelar)`;
             }, 1000);
           };
 
@@ -281,11 +294,15 @@ export async function renderMarketplaceChat(chatId, content) {
             isRecording = false;
             clearInterval(recordTimer);
             audioIndicator.style.display = 'none';
+            micBtn.style.backgroundColor = '';
             micBtn.style.color = '';
+            micBtn.style.transform = '';
+            micBtn.style.boxShadow = '';
+            micBtn.style.borderRadius = '';
             
             stream.getTracks().forEach(track => track.stop());
 
-            if (audioChunks.length > 0) {
+            if (audioChunks.length > 0 && !isCancelled) {
               const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
               try {
                 const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
@@ -317,6 +334,17 @@ export async function renderMarketplaceChat(chatId, content) {
           mediaRecorder.start();
         } catch (err) {
           console.error(err);
+        }
+      }
+    });
+
+    micBtn.addEventListener('pointermove', (e) => {
+      if (isRecording) {
+        const diffX = startX - e.clientX;
+        if (diffX > 60) {
+          isCancelled = true;
+          stopRec();
+          import('../components/toast.js').then(m => m.showToast('Grabación cancelada', 'warning'));
         }
       }
     });

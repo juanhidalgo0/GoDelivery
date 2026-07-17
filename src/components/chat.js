@@ -310,8 +310,11 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
         isRecording = true;
         recordStartTime = Date.now();
         audioIndicator.style.display = 'flex';
-        micBtn.style.color = 'red';
-        micBtn.style.transform = 'scale(1.22)';
+        micBtn.style.backgroundColor = 'var(--color-primary)';
+        micBtn.style.color = 'white';
+        micBtn.style.transform = 'scale(1.4)';
+        micBtn.style.boxShadow = '0 0 15px rgba(225, 29, 72, 0.5)';
+        micBtn.style.borderRadius = '50%';
         audioTimer.textContent = '0:00';
         recordTimer = setInterval(() => {
           const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
@@ -325,8 +328,11 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
         isRecording = false;
         clearInterval(recordTimer);
         audioIndicator.style.display = 'none';
+        micBtn.style.backgroundColor = '';
         micBtn.style.color = '';
         micBtn.style.transform = '';
+        micBtn.style.boxShadow = '';
+        micBtn.style.borderRadius = '';
         
         stream.getTracks().forEach(track => track.stop());
 

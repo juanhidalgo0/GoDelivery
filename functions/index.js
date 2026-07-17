@@ -2581,7 +2581,7 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
           title: title,
           body: `${userName}: ${lastMessageText}`
         }, {
-          url: "/#/admin/support", // Redirect admin to their support chats page
+          url: `/#/admin/support-chats?userId=${event.params.userId}`, // Redirect admin to their support chats page
           type: "new_support_ticket",
           ticketId: ticketId
         });
