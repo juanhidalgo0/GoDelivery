@@ -160,15 +160,15 @@
     }
 
     .btn-ios {
-      background: var(--color-primary);
-      color: white;
-      border: none;
-      box-shadow: 0 8px 24px rgba(225, 29, 72, 0.25);
+      background: #27272a;
+      color: #71717a;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      cursor: not-allowed;
+      pointer-events: none;
     }
 
     .btn-ios:active {
-      transform: scale(0.98);
-      background: var(--color-primary-dark);
+      transform: none;
     }
 
     .footer-text {
@@ -219,12 +219,12 @@
         Descargar para Android
       </a>
 
-      <!-- iOS Button -->
-      <a id="ios-link" href="https://apps.apple.com/app/id6504288599" class="btn btn-ios">
+      <!-- iOS Button (Disabled) -->
+      <a id="ios-link" href="#" class="btn btn-ios" onclick="return false;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.48C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.1 16.67C20.08 16.74 19.67 18.11 18.71 19.5M15.97 4.17C16.63 3.37 17.07 2.28 16.95 1C16 1.04 14.9 1.6 14.24 2.38C13.68 3.04 13.19 4.14 13.34 5.4C14.39 5.48 15.4 4.88 15.97 4.17Z"/>
         </svg>
-        Descargar para iPhone (iOS)
+        iPhone (iOS) — Próximamente
       </a>
     </div>
 
@@ -237,15 +237,14 @@
     const statusLabel = document.getElementById('status-label');
     
     const playStoreUrl = "https://play.google.com/store/apps/details?id=com.godelivery.magdalena";
-    const appStoreUrl = "https://apps.apple.com/app/id6504288599"; // Reemplazar con ID de App Store final cuando esté aprobado
 
     setTimeout(() => {
       if (/android/i.test(userAgent)) {
         statusLabel.textContent = "Redireccionando a Google Play...";
         window.location.href = playStoreUrl;
       } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-        statusLabel.textContent = "Redireccionando a App Store...";
-        window.location.href = appStoreUrl;
+        statusLabel.textContent = "Próximamente para iPhone";
+        document.querySelector('.spinner').style.display = 'none';
       } else {
         statusLabel.textContent = "Selecciona tu dispositivo";
         document.querySelector('.spinner').style.display = 'none';
