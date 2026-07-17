@@ -52,6 +52,48 @@ export async function renderCart(content) {
     }
   }
 
+  // Auto-apply welcome coupon for new users (first order)
+  if (auth.currentUser && !isPreview && sessionStorage.getItem('welcome-coupon-cleared') !== 'true') {
+    const userObj = getState().user;
+    const currentApplied = getState().appliedCoupon;
+    if (userObj && (userObj.completedOrdersCount || 0) === 0 && !currentApplied) {
+      try {
+        const welcomeRef = doc(db, 'coupons', 'BIENVENIDA');
+        const welcomeSnap = await getDoc(welcomeRef);
+        let wData;
+        if (!welcomeSnap.exists()) {
+          // Auto-create welcome coupon if missing in Firestore
+          wData = {
+            active: true,
+            ownerId: 'admin',
+            comercioIds: [],
+            scope: 'products',
+            discountType: 'fixed',
+            absorbedBy: 'platform',
+            type: 'fixed',
+            value: 3000,
+            usageLimit: 999999,
+            remaining: 999999,
+            usedCount: 0,
+            createdAt: new Date(),
+            description: 'Cupón automático de bienvenida para tu primer pedido'
+          };
+          const { setDoc } = await import('firebase/firestore');
+          await setDoc(welcomeRef, wData);
+          console.log('[Cart] Welcome coupon BIENVENIDA initialized.');
+        } else {
+          wData = welcomeSnap.data();
+        }
+
+        if (wData.active === true) {
+          setState('appliedCoupon', { id: 'BIENVENIDA', code: 'BIENVENIDA', ...wData });
+        }
+      } catch (err) {
+        console.warn('Welcome coupon check failed:', err);
+      }
+    }
+  }
+
   renderCartContent(content);
 
   const unsubCart = subscribe('cart', () => {
@@ -1438,6 +1480,7 @@ function openCouponModal() {
   if (clearBtn) {
     clearBtn.onclick = () => {
       setState('appliedCoupon', null);
+      sessionStorage.setItem('welcome-coupon-cleared', 'true');
       showToast('Cupón removido.', 'info');
       close();
     };

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Descargar GO! Delivery</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --color-primary: #e11d48;
+      --color-primary-dark: #be123c;
+      --color-bg: #09090b;
+      --color-card: #18181b;
+      --color-text: #f4f4f5;
+      --color-text-secondary: #a1a1aa;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--color-bg);
+      color: var(--color-text);
+      font-family: 'Outfit', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      text-align: center;
+      position: relative;
+    }
+
+    /* Ambient background glow */
+    .glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(225, 29, 72, 0.15) 0%, rgba(0,0,0,0) 70%);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .container {
+      position: relative;
+      z-index: 2;
+      max-width: 400px;
+      width: 90%;
+      padding: 40px 24px;
+      background: rgba(24, 24, 27, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 32px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+      animation: fadeInUp 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    .logo-container {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      margin: 0 auto 28px;
+    }
+
+    .logo-glow {
+      position: absolute;
+      inset: -4px;
+      background: linear-gradient(135deg, var(--color-primary) 0%, #7e22ce 100%);
+      border-radius: 50%;
+      opacity: 0.7;
+      filter: blur(8px);
+      animation: pulse 2.5s infinite;
+    }
+
+    .logo {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: white;
+      border: 4px solid var(--color-card);
+      box-sizing: border-box;
+      object-fit: cover;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 900;
+      margin: 0 0 8px;
+      letter-spacing: -1px;
+      background: linear-gradient(to right, #ffffff, #d4d4d8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p {
+      font-size: 15px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+      margin: 0 0 32px;
+      font-weight: 500;
+    }
+
+    .loading-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--color-primary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 24px;
+    }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 3px solid rgba(225, 29, 72, 0.2);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    .store-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 8px;
+    }
+
+    .btn {
+      height: 54px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 14px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+
+    .btn-android {
+      background: #ffffff;
+      color: #121214;
+      border: none;
+    }
+
+    .btn-android:active {
+      transform: scale(0.98);
+      background: #e4e4e7;
+    }
+
+    .btn-ios {
+      background: var(--color-primary);
+      color: white;
+      border: none;
+      box-shadow: 0 8px 24px rgba(225, 29, 72, 0.25);
+    }
+
+    .btn-ios:active {
+      transform: scale(0.98);
+      background: var(--color-primary-dark);
+    }
+
+    .footer-text {
+      font-size: 11px;
+      color: var(--color-text-secondary);
+      margin-top: 32px;
+      opacity: 0.6;
+      font-weight: 600;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.6; }
+      50% { transform: scale(1.05); opacity: 0.95; }
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <div class="container">
+    <div class="logo-container">
+      <div class="logo-glow"></div>
+      <img src="logo-brand.jpg" alt="GO!" class="logo" onerror="this.src='/logo-brand.jpg'">
+    </div>
+
+    <h1>¡Pedí desde la App!</h1>
+    <p>Te estamos redireccionando a la tienda para descargar la aplicación oficial de GO! Delivery en tu zona.</p>
+
+    <div class="loading-status">
+      <div class="spinner"></div>
+      <span id="status-label">Detectando dispositivo...</span>
+    </div>
+
+    <div class="store-buttons">
+      <!-- Android Button -->
+      <a href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android">
+        <!-- Play Store logo simplified representation -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3,5.27V18.73L16.5,12L3,5.27M17.87,11.33L21,12.9L17.87,14.47L16.5,12L17.87,11.33M3,3C2.8,3 2.6,3.05 2.43,3.15L15.35,11L18.84,7.5L3,3M3,21L18.84,16.5L15.35,13L2.43,20.85C2.6,20.95 2.8,21 3,21Z"/>
+        </svg>
+        Descargar para Android
+      </a>
+
+      <!-- iOS Button -->
+      <a id="ios-link" href="https://apps.apple.com/app/id6504288599" class="btn btn-ios">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.48C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.1 16.67C20.08 16.74 19.67 18.11 18.71 19.5M15.97 4.17C16.63 3.37 17.07 2.28 16.95 1C16 1.04 14.9 1.6 14.24 2.38C13.68 3.04 13.19 4.14 13.34 5.4C14.39 5.48 15.4 4.88 15.97 4.17Z"/>
+        </svg>
+        Descargar para iPhone (iOS)
+      </a>
+    </div>
+
+    <div class="footer-text">GO! Delivery — Magdalena, Buenos Aires</div>
+  </div>
+
+  <script>
+    // Detect OS and redirect
+    const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+    const statusLabel = document.getElementById('status-label');
+    
+    const playStoreUrl = "https://play.google.com/store/apps/details?id=com.godelivery.magdalena";
+    const appStoreUrl = "https://apps.apple.com/app/id6504288599"; // Reemplazar con ID de App Store final cuando esté aprobado
+
+    setTimeout(() => {
+      if (/android/i.test(userAgent)) {
+        statusLabel.textContent = "Redireccionando a Google Play...";
+        window.location.href = playStoreUrl;
+      } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+        statusLabel.textContent = "Redireccionando a App Store...";
+        window.location.href = appStoreUrl;
+      } else {
+        statusLabel.textContent = "Selecciona tu dispositivo";
+        document.querySelector('.spinner').style.display = 'none';
+      }
+    }, 1500);
+  </script>
+</body>
+</html>

@@ -93,6 +93,15 @@ import { getState } from '../state.js';
 export function calculateDynamicFee(distanceKm) {
   const state = getState();
   
+  // Check if fixed price threshold is set and exceeded
+  const fixedThreshold = state.deliveryFixedThresholdKm;
+  const fixedPrice = state.deliveryFixedThresholdPrice;
+  if (fixedThreshold !== undefined && fixedPrice !== undefined && fixedThreshold > 0 && fixedPrice > 0) {
+    if (distanceKm >= fixedThreshold) {
+      return Math.ceil(fixedPrice / 10) * 10;
+    }
+  }
+
   const basePrice = state.deliveryBasePrice || 1500;
   const pricePerKm = state.deliveryPricePerKm || 300;
   const minPrice = state.deliveryMinPrice || 1500;

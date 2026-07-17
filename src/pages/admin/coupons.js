@@ -71,6 +71,28 @@ export async function renderAdminCoupons() {
   // Load and Render Coupons
   async function loadCoupons() {
     try {
+      // Ensure the BIENVENIDA coupon exists in the database
+      const welcomeRef = doc(db, 'coupons', 'BIENVENIDA');
+      const welcomeSnap = await getDoc(welcomeRef);
+      if (!welcomeSnap.exists()) {
+        await setDoc(welcomeRef, {
+          active: true,
+          ownerId: 'admin',
+          comercioIds: [],
+          scope: 'products',
+          discountType: 'fixed',
+          absorbedBy: 'platform',
+          type: 'fixed',
+          value: 3000,
+          usageLimit: 999999,
+          remaining: 999999,
+          usedCount: 0,
+          createdAt: serverTimestamp(),
+          description: 'Cupón automático de bienvenida para tu primer pedido'
+        });
+        console.log('[Admin] Welcome coupon BIENVENIDA initialized.');
+      }
+
       const snap = await getDocs(query(collection(db, 'coupons'), orderBy('createdAt', 'desc')));
       coupons = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
@@ -228,6 +250,10 @@ export async function renderAdminCoupons() {
 
     if (deleteBtn) {
       const code = deleteBtn.dataset.id;
+      if (code === 'BIENVENIDA') {
+        showToast('El cupón automático (BIENVENIDA) no se puede eliminar.', 'warning');
+        return;
+      }
       showConfirm({
         title: 'Eliminar Cupón',
         message: `¿Estás seguro de que querés eliminar el cupón <b>${code}</b>? Esta acción no se puede deshacer y los usuarios no podrán volver a utilizarlo.`,

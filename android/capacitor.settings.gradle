@@ -23,5 +23,8 @@ project(':capacitor-splash-screen').projectDir = new File('../node_modules/@capa
 include ':capawesome-capacitor-app-update'
 project(':capawesome-capacitor-app-update').projectDir = new File('../node_modules/@capawesome/capacitor-app-update/android')
 
+include ':capawesome-capacitor-apple-sign-in'
+project(':capawesome-capacitor-apple-sign-in').projectDir = new File('../node_modules/@capawesome/capacitor-apple-sign-in/android')
+
 include ':codetrix-studio-capacitor-google-auth'
 project(':codetrix-studio-capacitor-google-auth').projectDir = new File('../node_modules/@codetrix-studio/capacitor-google-auth/android')

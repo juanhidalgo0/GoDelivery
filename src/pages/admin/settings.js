@@ -129,6 +129,14 @@ export async function renderAdminSettings() {
                       <option value="off" ${getState().rainMode === 'off' ? 'selected' : ''}>Siempre Desactivado (Forzado)</option>
                     </select>
                   </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Límite Km p/ Precio Fijo</label>
+                    <input type="number" step="0.1" class="input" id="global-delivery-fixed-threshold-km" value="${getState().deliveryFixedThresholdKm || 0}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" placeholder="Ej. 5 (0 para desactivar)" />
+                  </div>
+                  <div>
+                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Precio Fijo p/ Límite ($)</label>
+                    <input type="number" class="input" id="global-delivery-fixed-threshold-price" value="${getState().deliveryFixedThresholdPrice || 0}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" placeholder="Ej. 3500" />
+                  </div>
                 </div>
               </div>
 
@@ -644,6 +652,8 @@ export async function renderAdminSettings() {
     const deliveryPricePerKm = parseFloat(document.getElementById('global-delivery-km').value) || 0;
     const deliveryExtraStopFee = parseFloat(document.getElementById('global-delivery-extra-stop').value) || 0;
     const deliveryRainSurcharge = parseFloat(document.getElementById('global-delivery-rain-surcharge').value) || 0;
+    const deliveryFixedThresholdKm = parseFloat(document.getElementById('global-delivery-fixed-threshold-km').value) || 0;
+    const deliveryFixedThresholdPrice = parseFloat(document.getElementById('global-delivery-fixed-threshold-price').value) || 0;
     const rainMode = document.getElementById('global-rain-mode').value || 'auto';
     const tripBasePrice = parseFloat(document.getElementById('global-trip-base').value) || 0;
     const tripMinPrice = parseFloat(document.getElementById('global-trip-min').value) || 0;
@@ -731,6 +741,7 @@ export async function renderAdminSettings() {
 
       await setDoc(doc(db, 'settings', 'global'), {
         deliveryBasePrice, deliveryMinPrice, deliveryPricePerKm, deliveryExtraStopFee, deliveryRainSurcharge,
+        deliveryFixedThresholdKm, deliveryFixedThresholdPrice,
         tripBasePrice, tripMinPrice, tripPricePerKm,
         commissionRate, appUsageFeeRate, pointsPerDollar, dollarPerPoint, referralPoints, weeklyChallenges,
         favorPurchaseFee, servicePaymentErrandFee, whatsappPayments, nightSurchargeConfig, driverIncentiveConfig, pushMessages,
@@ -745,6 +756,8 @@ export async function renderAdminSettings() {
       setState('deliveryPricePerKm', deliveryPricePerKm);
       setState('deliveryExtraStopFee', deliveryExtraStopFee);
       setState('deliveryRainSurcharge', deliveryRainSurcharge);
+      setState('deliveryFixedThresholdKm', deliveryFixedThresholdKm);
+      setState('deliveryFixedThresholdPrice', deliveryFixedThresholdPrice);
       setState('tripBasePrice', tripBasePrice);
       setState('tripMinPrice', tripMinPrice);
       setState('tripPricePerKm', tripPricePerKm);
