@@ -485,6 +485,7 @@ async function init() {
     '/admin/orders': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
     '/admin/commissions': (c) => import('./pages/admin/commissions.js').then(m => m.renderAdminCommissions(c)),
     '/admin/settings': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminSettings(c)),
+    '/admin/settings/logistics': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminLogisticsSettings(c)),
     '/admin/broadcasts': (c) => import('./pages/admin/broadcasts.js').then(m => m.renderAdminBroadcasts(c)),
     '/admin/broadcasts/history': (c) => import('./pages/admin/broadcasts.js').then(m => m.renderAdminBroadcastsHistory(c)),
     '/admin/ads': (c) => import('./pages/admin/ads.js').then(m => m.renderAdminAds(c)),

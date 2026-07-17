@@ -70,111 +70,16 @@ export async function renderAdminSettings() {
       <div style="flex:1;overflow-y:auto;padding:20px 20px calc(20px + env(safe-area-inset-bottom, 0px));-webkit-overflow-scrolling:touch;">
         <div style="display:flex;flex-direction:column;gap:16px;padding-bottom:40px;">
 
-          <!-- 1. Logistics Section -->
+          <!-- 1. Logistics Section (Redirect to dedicated full screen subpage) -->
           <div class="settings-section" style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;overflow:hidden;">
-            <button class="settings-section-toggle" data-target="section-logistics" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;">
+            <a href="#/admin/settings/logistics" style="width:100%;display:flex;align-items:center;gap:14px;padding:20px;background:none;border:none;cursor:pointer;text-align:left;text-decoration:none;box-sizing:border-box;">
               <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#dbeafe,#bfdbfe);color:#2563eb;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${icon('bike', 22)}</div>
               <div style="flex:1;min-width:0;">
                 <div style="font-family:var(--font-display);font-size:15px;font-weight:900;color:var(--color-text);letter-spacing:-0.01em;">Tarifas de Logística</div>
-                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;font-weight:600;">Precios de envío, costo por km y paradas extra</div>
+                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;font-weight:600;">Precios de envío, costo por km, viajes y precios fijos</div>
               </div>
-              <div class="section-chevron" style="color:var(--color-text-tertiary);transition:transform 0.3s;">${icon('chevronDown', 18)}</div>
-            </button>
-            <div id="section-logistics" class="settings-section-body" style="display:none;padding:0 20px 20px;">
-              <div style="display:flex;flex-direction:column;gap:18px;">
-              <!-- Delivery General -->
-              <div style="border-bottom:1px dashed var(--color-border-light);padding-bottom:14px;">
-                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Delivery General</h4>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
-                      Costo Base ($)
-                      <button type="button" onclick="showDeliveryConfigHelp('base')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
-                    </label>
-                    <input type="number" class="input" id="global-delivery-base" value="${getState().deliveryBasePrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
-                      Costo Mín. ($)
-                      <button type="button" onclick="showDeliveryConfigHelp('min')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
-                    </label>
-                    <input type="number" class="input" id="global-delivery-min" value="${getState().deliveryMinPrice || 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
-                      Extra por KM ($)
-                      <button type="button" onclick="showDeliveryConfigHelp('km')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
-                    </label>
-                    <input type="number" class="input" id="global-delivery-km" value="${getState().deliveryPricePerKm || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
-                      Parada Extra ($)
-                      <button type="button" onclick="showDeliveryConfigHelp('stop')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
-                    </label>
-                    <input type="number" class="input" id="global-delivery-extra-stop" value="${getState().deliveryExtraStopFee || 500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">
-                      Recargo por Lluvia ($)
-                      <button type="button" onclick="showDeliveryConfigHelp('rain')" style="cursor:pointer;background:var(--color-primary);color:white;border:none;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(var(--color-primary-rgb),0.2);">${icon('info', 10)}</button>
-                    </label>
-                    <input type="number" class="input" id="global-delivery-rain-surcharge" value="${getState().deliveryRainSurcharge || 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Modo del Recargo</label>
-                    <select id="global-rain-mode" class="input" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:14px;background:var(--color-surface);border:1px solid var(--color-border-light);">
-                      <option value="auto" ${getState().rainMode === 'auto' ? 'selected' : ''}>Automático (API)</option>
-                      <option value="on" ${getState().rainMode === 'on' ? 'selected' : ''}>Siempre Activo (Forzado)</option>
-                      <option value="off" ${getState().rainMode === 'off' ? 'selected' : ''}>Siempre Desactivado (Forzado)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Límite Km p/ Precio Fijo</label>
-                    <input type="number" step="0.1" class="input" id="global-delivery-fixed-threshold-km" value="${getState().deliveryFixedThresholdKm || 0}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" placeholder="Ej. 5 (0 para desactivar)" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Precio Fijo p/ Límite ($)</label>
-                    <input type="number" class="input" id="global-delivery-fixed-threshold-price" value="${getState().deliveryFixedThresholdPrice || 0}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" placeholder="Ej. 3500" />
-                  </div>
-                </div>
-              </div>
-
-              <!-- Go Favores -->
-              <div style="border-bottom:1px dashed var(--color-border-light);padding-bottom:14px;">
-                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Go Favores</h4>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Gestión GoFavor ($)</label>
-                    <input type="number" class="input" id="global-favor-purchase-fee" value="${getState().favorPurchaseFee || 800}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Base Pago de Servicios ($)</label>
-                    <input type="number" class="input" id="global-service-payment-errand-fee" value="${getState().servicePaymentErrandFee || 2000}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                </div>
-              </div>
-
-              <!-- Viajes -->
-              <div>
-                <h4 style="font-family:var(--font-display);font-size:12px;font-weight:800;margin:0 0 12px 0;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Viajes (Moto / Auto)</h4>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Base ($)</label>
-                    <input type="number" class="input" id="global-trip-base" value="${getState().tripBasePrice !== undefined ? getState().tripBasePrice : 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div>
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Costo Mín. ($)</label>
-                    <input type="number" class="input" id="global-trip-min" value="${getState().tripMinPrice !== undefined ? getState().tripMinPrice : 1500}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                  <div style="grid-column: span 2;">
-                    <label style="font-weight:700;font-size:11px;margin-bottom:6px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Extra por KM ($)</label>
-                    <input type="number" class="input" id="global-trip-km" value="${getState().tripPricePerKm !== undefined ? getState().tripPricePerKm : 300}" style="width:100%;height:48px;border-radius:14px;padding:0 14px;font-weight:700;font-size:15px;" />
-                  </div>
-                </div>
-              </div>
-              </div>
-            </div>
+              <div style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</div>
+            </a>
           </div>
 
           <!-- 2. Economy Section -->
@@ -647,21 +552,21 @@ export async function renderAdminSettings() {
   // Save logic
   document.getElementById('save-global-settings-btn')?.addEventListener('click', async () => {
     const btn = document.getElementById('save-global-settings-btn');
-    const deliveryBasePrice = parseFloat(document.getElementById('global-delivery-base').value) || 0;
-    const deliveryMinPrice = parseFloat(document.getElementById('global-delivery-min').value) || 0;
-    const deliveryPricePerKm = parseFloat(document.getElementById('global-delivery-km').value) || 0;
-    const deliveryExtraStopFee = parseFloat(document.getElementById('global-delivery-extra-stop').value) || 0;
-    const deliveryRainSurcharge = parseFloat(document.getElementById('global-delivery-rain-surcharge').value) || 0;
-    const deliveryFixedThresholdKm = parseFloat(document.getElementById('global-delivery-fixed-threshold-km').value) || 0;
-    const deliveryFixedThresholdPrice = parseFloat(document.getElementById('global-delivery-fixed-threshold-price').value) || 0;
-    const rainMode = document.getElementById('global-rain-mode').value || 'auto';
-    const tripBasePrice = parseFloat(document.getElementById('global-trip-base').value) || 0;
-    const tripMinPrice = parseFloat(document.getElementById('global-trip-min').value) || 0;
-    const tripPricePerKm = parseFloat(document.getElementById('global-trip-km').value) || 0;
+    const deliveryBasePrice = getState().deliveryBasePrice || 1500;
+    const deliveryMinPrice = getState().deliveryMinPrice || 1500;
+    const deliveryPricePerKm = getState().deliveryPricePerKm || 300;
+    const deliveryExtraStopFee = getState().deliveryExtraStopFee || 500;
+    const deliveryRainSurcharge = getState().deliveryRainSurcharge || 300;
+    const deliveryFixedThresholdKm = getState().deliveryFixedThresholdKm || 0;
+    const deliveryFixedThresholdPrice = getState().deliveryFixedThresholdPrice || 0;
+    const rainMode = getState().rainMode || 'auto';
+    const tripBasePrice = getState().tripBasePrice || 1500;
+    const tripMinPrice = getState().tripMinPrice || 1500;
+    const tripPricePerKm = getState().tripPricePerKm || 300;
     const commissionRate = (parseFloat(document.getElementById('global-commission-rate').value) || 10) / 100;
     const appUsageFeeRate = (parseFloat(document.getElementById('global-app-fee-rate').value) || 5) / 100;
-    const favorPurchaseFee = parseFloat(document.getElementById('global-favor-purchase-fee').value) || 0;
-    const servicePaymentErrandFee = parseFloat(document.getElementById('global-service-payment-errand-fee').value) || 2000;
+    const favorPurchaseFee = getState().favorPurchaseFee || 800;
+    const servicePaymentErrandFee = getState().servicePaymentErrandFee || 2000;
     const whatsappPayments = document.getElementById('global-whatsapp-payments').value || '5491123456789';
     const pointsPerDollar = (parseFloat(document.getElementById('global-points-rate').value) || 1) / 100;
     const dollarPerPoint = parseFloat(document.getElementById('global-point-value').value) || 1;
@@ -1103,6 +1008,427 @@ async function performHardReset({ keepPoints = false, keepAds = false, keepOffer
     console.error('Hard Reset error:', err);
     showToast(`Error crítico en el Hard Reset: ${err.message}`, 'error');
   }
+}
+
+export async function renderAdminLogisticsSettings(container) {
+  if (!container) container = document.getElementById('app-content');
+  if (!container) return;
+
+  const renderContent = () => {
+    const rules = getState().deliveryDistanceRules || [];
+    
+    // Sort rules to display them logically by km ascending
+    const sortedRules = [...rules].sort((a, b) => a.limitKm - b.limitKm);
+
+    container.innerHTML = `
+      <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
+          <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
+            ${icon('chevronLeft', 24)}
+          </a>
+          <div style="flex:1;">
+            <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; line-height:1.2; letter-spacing:-0.02em;">Tarifas de Logística</h1>
+            <p style="font-size:11px; color:rgba(255,255,255,0.75); font-weight:800; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.06em;">Gestión de tarifas y reglas fijas</p>
+          </div>
+        </div>
+
+        <!-- Main Body -->
+        <div style="flex:1; overflow-y:auto; padding:24px 20px; display:flex; flex-direction:column; gap:20px; -webkit-overflow-scrolling:touch;">
+          
+          <p style="font-size:13px; color:var(--color-text-secondary); margin:0; font-weight:600; line-height:1.5;">
+            Configura los precios del sistema para el delivery general, el costo de favores y recados, las tarifas de viajes en vehículos y las reglas de precios fijos por kilómetro.
+          </p>
+
+          <!-- Buttons Menu Grid -->
+          <div style="display:flex; flex-direction:column; gap:16px; margin-top:8px;">
+            
+            <!-- Delivery General Button -->
+            <button id="btn-show-delivery-general" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:24px; cursor:pointer; text-align:left; transition:all 0.25s ease;">
+              <div style="display:flex; align-items:center; gap:16px;">
+                <div style="width:44px; height:44px; border-radius:14px; background:rgba(168, 85, 247, 0.1); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon('bike', 22)}
+                </div>
+                <div>
+                  <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">DELIVERY GENERAL</div>
+                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Costo base, costo por km, recargo lluvia y paradas</div>
+                </div>
+              </div>
+              <div style="color:var(--color-text-tertiary);">${icon('chevronRight', 20)}</div>
+            </button>
+
+            <!-- Go Favores Button -->
+            <button id="btn-show-go-favores" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:24px; cursor:pointer; text-align:left; transition:all 0.25s ease;">
+              <div style="display:flex; align-items:center; gap:16px;">
+                <div style="width:44px; height:44px; border-radius:14px; background:rgba(59, 130, 246, 0.1); color:#3b82f6; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon('tag', 22)}
+                </div>
+                <div>
+                  <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">GO FAVORES</div>
+                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Gestión de favores y base para pago de servicios</div>
+                </div>
+              </div>
+              <div style="color:var(--color-text-tertiary);">${icon('chevronRight', 20)}</div>
+            </button>
+
+            <!-- Viajes Button -->
+            <button id="btn-show-viajes" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:24px; cursor:pointer; text-align:left; transition:all 0.25s ease;">
+              <div style="display:flex; align-items:center; gap:16px;">
+                <div style="width:44px; height:44px; border-radius:14px; background:rgba(16, 185, 129, 0.1); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon('mapPin', 22)}
+                </div>
+                <div>
+                  <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">VIAJES (MOTO / AUTO)</div>
+                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Costo base, mínimo y extra por kilómetro</div>
+                </div>
+              </div>
+              <div style="color:var(--color-text-tertiary);">${icon('chevronRight', 20)}</div>
+            </button>
+
+            <!-- Precio Fijo por KM Button -->
+            <button id="btn-show-precio-fijo" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:24px; cursor:pointer; text-align:left; transition:all 0.25s ease;">
+              <div style="display:flex; align-items:center; gap:16px;">
+                <div style="width:44px; height:44px; border-radius:14px; background:rgba(245, 158, 11, 0.1); color:#f59e0b; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon('trendingUp', 22)}
+                </div>
+                <div>
+                  <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">PRECIO FIJO POR KM</div>
+                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Reglas dinámicas de precio fijo según rango de km</div>
+                </div>
+              </div>
+              <div style="color:var(--color-text-tertiary);">${icon('chevronRight', 20)}</div>
+            </button>
+
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    // Bind event listeners for each configuration overlay
+    document.getElementById('btn-show-delivery-general').onclick = openDeliveryGeneralModal;
+    document.getElementById('btn-show-go-favores').onclick = openGoFavoresModal;
+    document.getElementById('btn-show-viajes').onclick = openViajesModal;
+    document.getElementById('btn-show-precio-fijo').onclick = openPrecioFijoModal;
+  };
+
+  const openDeliveryGeneralModal = () => {
+    const s = getState();
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg);';
+    modalContent.innerHTML = `
+      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Delivery General</h3>
+      <div style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo Base ($)</label>
+          <input type="number" id="logistics-delivery-base" value="${s.deliveryBasePrice || 1500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo Mínimo ($)</label>
+          <input type="number" id="logistics-delivery-min" value="${s.deliveryMinPrice || 1500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Extra por Kilómetro ($)</label>
+          <input type="number" id="logistics-delivery-km" value="${s.deliveryPricePerKm || 300}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Parada Extra ($)</label>
+          <input type="number" id="logistics-delivery-extra-stop" value="${s.deliveryExtraStopFee || 500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Recargo por Lluvia ($)</label>
+          <input type="number" id="logistics-delivery-rain-surcharge" value="${s.deliveryRainSurcharge || 300}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Modo del Recargo</label>
+          <select id="logistics-rain-mode" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);">
+            <option value="auto" ${s.rainMode === 'auto' ? 'selected' : ''}>Automático (API)</option>
+            <option value="on" ${s.rainMode === 'on' ? 'selected' : ''}>Siempre Activo</option>
+            <option value="off" ${s.rainMode === 'off' ? 'selected' : ''}>Siempre Desactivado</option>
+          </select>
+        </div>
+      </div>
+      <button id="btn-save-delivery-general" style="margin-top:16px; height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:850; font-size:14px; cursor:pointer; width:100%;">
+        Guardar Ajustes
+      </button>
+    `;
+
+    showModal({
+      title: '',
+      content: modalContent,
+      height: 'auto',
+      hideHeader: true,
+      onOpen: () => {
+        modalContent.querySelector('#btn-save-delivery-general').onclick = async () => {
+          const btn = modalContent.querySelector('#btn-save-delivery-general');
+          btn.disabled = true;
+          btn.textContent = 'Guardando...';
+          
+          const deliveryBasePrice = parseFloat(modalContent.querySelector('#logistics-delivery-base').value) || 0;
+          const deliveryMinPrice = parseFloat(modalContent.querySelector('#logistics-delivery-min').value) || 0;
+          const deliveryPricePerKm = parseFloat(modalContent.querySelector('#logistics-delivery-km').value) || 0;
+          const deliveryExtraStopFee = parseFloat(modalContent.querySelector('#logistics-delivery-extra-stop').value) || 0;
+          const deliveryRainSurcharge = parseFloat(modalContent.querySelector('#logistics-delivery-rain-surcharge').value) || 0;
+          const rainMode = modalContent.querySelector('#logistics-rain-mode').value;
+
+          try {
+            await setDoc(doc(db, 'settings', 'global'), {
+              deliveryBasePrice, deliveryMinPrice, deliveryPricePerKm, deliveryExtraStopFee, deliveryRainSurcharge, rainMode
+            }, { merge: true });
+            
+            setState('deliveryBasePrice', deliveryBasePrice);
+            setState('deliveryMinPrice', deliveryMinPrice);
+            setState('deliveryPricePerKm', deliveryPricePerKm);
+            setState('deliveryExtraStopFee', deliveryExtraStopFee);
+            setState('deliveryRainSurcharge', deliveryRainSurcharge);
+            setState('rainMode', rainMode);
+
+            showToast('Ajustes de Delivery General guardados.', 'success');
+            closeModal();
+          } catch (err) {
+            console.error(err);
+            showToast('Error al guardar ajustes.', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Guardar Ajustes';
+          }
+        };
+      }
+    });
+  };
+
+  const openGoFavoresModal = () => {
+    const s = getState();
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg);';
+    modalContent.innerHTML = `
+      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Go Favores</h3>
+      <div style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Gestión GoFavor ($)</label>
+          <input type="number" id="logistics-favor-fee" value="${s.favorPurchaseFee || 800}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Base Pago de Servicios ($)</label>
+          <input type="number" id="logistics-service-fee" value="${s.servicePaymentErrandFee || 2000}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+      </div>
+      <button id="btn-save-go-favores" style="margin-top:16px; height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:850; font-size:14px; cursor:pointer; width:100%;">
+        Guardar Ajustes
+      </button>
+    `;
+
+    showModal({
+      title: '',
+      content: modalContent,
+      height: 'auto',
+      hideHeader: true,
+      onOpen: () => {
+        modalContent.querySelector('#btn-save-go-favores').onclick = async () => {
+          const btn = modalContent.querySelector('#btn-save-go-favores');
+          btn.disabled = true;
+          btn.textContent = 'Guardando...';
+
+          const favorPurchaseFee = parseFloat(modalContent.querySelector('#logistics-favor-fee').value) || 0;
+          const servicePaymentErrandFee = parseFloat(modalContent.querySelector('#logistics-service-fee').value) || 0;
+
+          try {
+            await setDoc(doc(db, 'settings', 'global'), { favorPurchaseFee, servicePaymentErrandFee }, { merge: true });
+            setState('favorPurchaseFee', favorPurchaseFee);
+            setState('servicePaymentErrandFee', servicePaymentErrandFee);
+            showToast('Ajustes de Go Favores guardados.', 'success');
+            closeModal();
+          } catch (err) {
+            console.error(err);
+            showToast('Error al guardar ajustes.', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Guardar Ajustes';
+          }
+        };
+      }
+    });
+  };
+
+  const openViajesModal = () => {
+    const s = getState();
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg);';
+    modalContent.innerHTML = `
+      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Viajes (Moto / Auto)</h3>
+      <div style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo Base ($)</label>
+          <input type="number" id="logistics-trip-base" value="${s.tripBasePrice !== undefined ? s.tripBasePrice : 1500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo Mínimo ($)</label>
+          <input type="number" id="logistics-trip-min" value="${s.tripMinPrice !== undefined ? s.tripMinPrice : 1500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Extra por Kilómetro ($)</label>
+          <input type="number" id="logistics-trip-km" value="${s.tripPricePerKm !== undefined ? s.tripPricePerKm : 300}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+      </div>
+      <button id="btn-save-viajes" style="margin-top:16px; height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:850; font-size:14px; cursor:pointer; width:100%;">
+        Guardar Ajustes
+      </button>
+    `;
+
+    showModal({
+      title: '',
+      content: modalContent,
+      height: 'auto',
+      hideHeader: true,
+      onOpen: () => {
+        modalContent.querySelector('#btn-save-viajes').onclick = async () => {
+          const btn = modalContent.querySelector('#btn-save-viajes');
+          btn.disabled = true;
+          btn.textContent = 'Guardando...';
+
+          const tripBasePrice = parseFloat(modalContent.querySelector('#logistics-trip-base').value) || 0;
+          const tripMinPrice = parseFloat(modalContent.querySelector('#logistics-trip-min').value) || 0;
+          const tripPricePerKm = parseFloat(modalContent.querySelector('#logistics-trip-km').value) || 0;
+
+          try {
+            await setDoc(doc(db, 'settings', 'global'), { tripBasePrice, tripMinPrice, tripPricePerKm }, { merge: true });
+            setState('tripBasePrice', tripBasePrice);
+            setState('tripMinPrice', tripMinPrice);
+            setState('tripPricePerKm', tripPricePerKm);
+            showToast('Ajustes de Viajes guardados.', 'success');
+            closeModal();
+          } catch (err) {
+            console.error(err);
+            showToast('Error al guardar ajustes.', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Guardar Ajustes';
+          }
+        };
+      }
+    });
+  };
+
+  const openPrecioFijoModal = () => {
+    let localRules = [...(getState().deliveryDistanceRules || [])];
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg); max-height:85vh; overflow-y:auto;';
+
+    const renderRulesList = () => {
+      const containerEl = modalContent.querySelector('#rules-list-container');
+      if (!containerEl) return;
+
+      if (localRules.length === 0) {
+        containerEl.innerHTML = `
+          <div style="text-align:center; padding:24px; color:var(--color-text-tertiary); font-size:12px; font-weight:600; border:1.5px dashed var(--color-border); border-radius:18px;">
+            No hay reglas configuradas. Se usará el cálculo dinámico.
+          </div>
+        `;
+        return;
+      }
+
+      containerEl.innerHTML = localRules.map((rule, index) => `
+        <div class="rule-row" data-index="${index}" style="display:flex; align-items:center; gap:10px; background:var(--color-bg-card); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; box-shadow:var(--shadow-sm); margin-bottom:8px;">
+          <div style="flex:1;">
+            <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Distancia Mínima</div>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <input type="number" step="0.1" class="rule-limit-input" value="${rule.limitKm}" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:14px; font-weight:700; background:var(--color-bg); color:var(--color-text);" />
+              <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">Km</span>
+            </div>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Precio Fijo</div>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">$</span>
+              <input type="number" class="rule-price-input" value="${rule.price}" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:14px; font-weight:700; background:var(--color-bg); color:var(--color-text);" />
+            </div>
+          </div>
+          <button class="rule-delete-btn" style="width:36px; height:36px; border-radius:10px; background:rgba(239, 68, 68, 0.08); border:none; display:flex; align-items:center; justify-content:center; color:var(--color-danger); cursor:pointer; margin-top:14px;">
+            ${icon('trash', 14)}
+          </button>
+        </div>
+      `).join('');
+
+      // Bind delete handlers
+      containerEl.querySelectorAll('.rule-delete-btn').forEach((btn, i) => {
+        btn.onclick = () => {
+          localRules.splice(i, 1);
+          renderRulesList();
+        };
+      });
+
+      // Bind input changes to keep state synced
+      containerEl.querySelectorAll('.rule-row').forEach(row => {
+        const i = parseInt(row.dataset.index);
+        const limitInput = row.querySelector('.rule-limit-input');
+        const priceInput = row.querySelector('.rule-price-input');
+        
+        limitInput.oninput = () => {
+          localRules[i].limitKm = parseFloat(limitInput.value) || 0;
+        };
+        priceInput.oninput = () => {
+          localRules[i].price = parseFloat(priceInput.value) || 0;
+        };
+      });
+    };
+
+    modalContent.innerHTML = `
+      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Precio Fijo por KM</h3>
+      <p style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 10px 0; font-weight:600; line-height:1.4;">
+        Define tarifas planas para rangos de distancia. Ej: Pasados los 5km cobrar $3000, pasados los 7km cobrar $4000.
+      </p>
+
+      <div id="rules-list-container" style="display:flex; flex-direction:column; gap:10px; margin-top:8px;">
+        <!-- Rules injected here -->
+      </div>
+
+      <button id="btn-add-rule" class="btn btn-ghost" style="margin-top:8px; height:46px; border-radius:12px; border:1.5px dashed var(--color-border); font-weight:800; font-size:13px; color:var(--color-primary); display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; width:100%; background:none;">
+        ${icon('plus', 14)} AGREGAR REGLA DE DISTANCIA
+      </button>
+
+      <button id="btn-save-precio-fijo" style="margin-top:16px; height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:850; font-size:14px; cursor:pointer; width:100%;">
+        Guardar Configuración
+      </button>
+    `;
+
+    showModal({
+      title: '',
+      content: modalContent,
+      height: 'auto',
+      hideHeader: true,
+      onOpen: () => {
+        renderRulesList();
+
+        modalContent.querySelector('#btn-add-rule').onclick = () => {
+          localRules.push({ limitKm: 0, price: 0 });
+          renderRulesList();
+        };
+
+        modalContent.querySelector('#btn-save-precio-fijo').onclick = async () => {
+          const btn = modalContent.querySelector('#btn-save-precio-fijo');
+          btn.disabled = true;
+          btn.textContent = 'Guardando...';
+
+          // Clean rules: remove empty/invalid rules
+          const cleanRules = localRules
+            .filter(r => r.limitKm > 0 && r.price > 0)
+            .map(r => ({ limitKm: Number(r.limitKm), price: Number(r.price) }));
+
+          try {
+            await setDoc(doc(db, 'settings', 'global'), { deliveryDistanceRules: cleanRules }, { merge: true });
+            setState('deliveryDistanceRules', cleanRules);
+            showToast('Reglas de Precio Fijo guardadas.', 'success');
+            closeModal();
+            renderContent();
+          } catch (err) {
+            console.error(err);
+            showToast('Error al guardar configuración.', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Guardar Configuración';
+          }
+        };
+      }
+    });
+  };
+
+  renderContent();
 }
 
 

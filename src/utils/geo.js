@@ -93,7 +93,19 @@ import { getState } from '../state.js';
 export function calculateDynamicFee(distanceKm) {
   const state = getState();
   
-  // Check if fixed price threshold is set and exceeded
+  // 1. Check multi-tier distance fixed rules (e.g., limitKm: 5 -> price: 3000)
+  const rules = state.deliveryDistanceRules || [];
+  if (rules.length > 0) {
+    // Sort rules descending by limitKm to match the highest threshold first
+    const sortedRules = [...rules].sort((a, b) => b.limitKm - a.limitKm);
+    for (const rule of sortedRules) {
+      if (distanceKm >= rule.limitKm) {
+        return Math.ceil(rule.price / 10) * 10;
+      }
+    }
+  }
+
+  // 2. Fallback to legacy single fixed threshold if configured
   const fixedThreshold = state.deliveryFixedThresholdKm;
   const fixedPrice = state.deliveryFixedThresholdPrice;
   if (fixedThreshold !== undefined && fixedPrice !== undefined && fixedThreshold > 0 && fixedPrice > 0) {

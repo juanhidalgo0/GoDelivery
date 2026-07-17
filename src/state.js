@@ -21,6 +21,7 @@ const state = {
   deliveryRainSurcharge: 300, // Default $300 rain surcharge
   deliveryFixedThresholdKm: 0,
   deliveryFixedThresholdPrice: 0,
+  deliveryDistanceRules: [],
   tripBasePrice: 1500,
   tripPricePerKm: 300,
   tripMinPrice: 1500,
@@ -92,6 +93,7 @@ export async function initSettings() {
         state.deliveryRainSurcharge = data.deliveryRainSurcharge !== undefined ? data.deliveryRainSurcharge : 300;
         state.deliveryFixedThresholdKm = data.deliveryFixedThresholdKm !== undefined ? data.deliveryFixedThresholdKm : 0;
         state.deliveryFixedThresholdPrice = data.deliveryFixedThresholdPrice !== undefined ? data.deliveryFixedThresholdPrice : 0;
+        state.deliveryDistanceRules = data.deliveryDistanceRules || [];
         state.tripBasePrice = data.tripBasePrice !== undefined ? data.tripBasePrice : 1500;
         state.tripPricePerKm = data.tripPricePerKm !== undefined ? data.tripPricePerKm : 300;
         state.tripMinPrice = data.tripMinPrice !== undefined ? data.tripMinPrice : 1500;
@@ -155,7 +157,7 @@ export async function initSettings() {
 
         const keys = [
           'deliveryCost', 'deliveryBasePrice', 'deliveryPricePerKm', 'deliveryMinPrice',
-          'deliveryExtraStopFee', 'deliveryRainSurcharge', 'deliveryFixedThresholdKm', 'deliveryFixedThresholdPrice',
+          'deliveryExtraStopFee', 'deliveryRainSurcharge', 'deliveryFixedThresholdKm', 'deliveryFixedThresholdPrice', 'deliveryDistanceRules',
           'tripBasePrice', 'tripPricePerKm',
           'tripMinPrice', 'commissionRate', 'appUsageFeeRate', 'pointsPerDollar',
           'dollarPerPoint', 'referralPoints', 'weeklyChallenges', 'whatsappPayments',
