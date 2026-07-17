@@ -3,17 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Descargar GO! Delivery</title>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <title>Llegó GO! Delivery</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <style>
     :root {
+      --color-dark: #0d0d0e;
+      --color-sticker-bg: #fafaf9;
+      --color-sticker-text: #1c1917;
       --color-primary: #e11d48;
-      --color-primary-dark: #be123c;
-      --color-bg: #09090b;
-      --color-card: #18181b;
-      --color-text: #f4f4f5;
-      --color-text-secondary: #a1a1aa;
-      --color-border: rgba(255, 255, 255, 0.08);
+      --color-primary-hover: #be123c;
+      --color-border: #e7e5e4;
       --font-family: 'Outfit', sans-serif;
     }
 
@@ -24,8 +23,8 @@
     }
 
     body {
-      background-color: var(--color-bg);
-      color: var(--color-text);
+      background-color: var(--color-dark);
+      color: #fafaf9;
       font-family: var(--font-family);
       min-height: 100vh;
       display: flex;
@@ -33,28 +32,29 @@
       justify-content: center;
       overflow-x: hidden;
       position: relative;
-      padding: 20px;
+      padding: 24px;
     }
 
-    /* Animated background gradients */
-    .bg-glow-1 {
+    /* Tactile grid background pattern */
+    .bg-grid {
       position: absolute;
-      top: -10%;
-      right: -10%;
-      width: 50vw;
-      height: 50vw;
-      background: radial-gradient(circle, rgba(225, 29, 72, 0.15) 0%, rgba(0,0,0,0) 70%);
+      inset: 0;
+      background-size: 24px 24px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
       pointer-events: none;
       z-index: 1;
     }
 
-    .bg-glow-2 {
+    .bg-gradient-glow {
       position: absolute;
-      bottom: -10%;
-      left: -10%;
-      width: 50vw;
-      height: 50vw;
-      background: radial-gradient(circle, rgba(126, 34, 206, 0.12) 0%, rgba(0,0,0,0) 70%);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(225, 29, 72, 0.08) 0%, rgba(0,0,0,0) 70%);
       pointer-events: none;
       z-index: 1;
     }
@@ -63,118 +63,154 @@
       position: relative;
       z-index: 2;
       display: flex;
-      align-items: center;
-      gap: 60px;
-      max-width: 900px;
+      align-items: stretch;
+      gap: 40px;
+      max-width: 820px;
       width: 100%;
       justify-content: center;
     }
 
-    /* Container Card styling */
-    .container {
+    /* Sticker (Central Ticket Card) */
+    .sticker {
       flex: 1;
-      max-width: 440px;
-      padding: 44px 32px;
-      background: rgba(24, 24, 27, 0.75);
-      border: 1px solid var(--color-border);
-      border-radius: 36px;
-      backdrop-filter: blur(20px);
-      box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-      animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 410px;
+      background: var(--color-sticker-bg);
+      color: var(--color-sticker-text);
+      border-radius: 28px;
+      padding: 40px 32px 32px 32px;
+      box-shadow: 
+        0 30px 60px -15px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        offset-x offset-y rgba(225, 29, 72, 0.1);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      animation: stickerEntrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      transform-origin: center top;
     }
 
-    /* Preview phone layout (hidden on mobile) */
-    .phone-mockup-wrapper {
+    /* Dashed ticket separator line */
+    .ticket-separator {
+      height: 1px;
+      border-top: 2px dashed #d6d3d1;
+      margin: 24px 0;
+      position: relative;
+    }
+
+    .ticket-separator::before,
+    .ticket-separator::after {
+      content: '';
+      position: absolute;
+      top: -9px;
+      width: 16px;
+      height: 16px;
+      background-color: var(--color-dark);
+      border-radius: 50%;
+    }
+
+    .ticket-separator::before {
+      left: -41px;
+    }
+
+    .ticket-separator::after {
+      right: -41px;
+    }
+
+    /* Side app presentation (Hidden on mobile) */
+    .side-info {
       flex: 1;
-      max-width: 360px;
+      max-width: 350px;
       display: flex;
+      flex-direction: column;
       justify-content: center;
-      align-items: center;
-      animation: phoneEntrance 1s cubic-bezier(0.16, 1, 0.3, 1);
+      text-align: left;
+      padding: 20px;
+      animation: fadeInRight 0.8s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     @media (max-width: 768px) {
-      .phone-mockup-wrapper {
+      .side-info {
         display: none;
       }
       .main-wrapper {
         gap: 0;
       }
-      .container {
-        padding: 36px 24px;
+      .sticker {
+        padding: 32px 24px 24px 24px;
       }
+      .ticket-separator::before { left: -33px; }
+      .ticket-separator::after { right: -33px; }
     }
 
-    .logo-container {
-      position: relative;
-      width: 88px;
-      height: 88px;
-      margin-bottom: 24px;
-    }
-
-    .logo-glow {
-      position: absolute;
-      inset: -4px;
-      background: linear-gradient(135deg, var(--color-primary) 0%, #7e22ce 100%);
-      border-radius: 24px;
-      opacity: 0.65;
-      filter: blur(10px);
-      animation: logoPulse 3s infinite ease-in-out;
-    }
-
-    .logo {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      border-radius: 24px;
-      background: white;
-      border: 3px solid #1c1c1f;
-      box-sizing: border-box;
-      object-fit: cover;
-    }
-
-    h1 {
-      font-size: 2.2rem;
-      font-weight: 900;
-      line-height: 1.15;
-      margin-bottom: 12px;
-      letter-spacing: -1.2px;
-      background: linear-gradient(135deg, #ffffff 30%, #a1a1aa 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .tagline {
-      font-size: 14.5px;
-      color: var(--color-text-secondary);
-      line-height: 1.6;
-      margin-bottom: 28px;
-      font-weight: 500;
-    }
-
-    /* Bullet points of features */
-    .features-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 28px;
-      text-align: left;
-    }
-
-    .feature-item {
+    .header-logo {
       display: flex;
       align-items: center;
       gap: 12px;
-      font-size: 13.5px;
-      color: var(--color-text);
-      font-weight: 600;
-      background: rgba(255, 255, 255, 0.03);
-      padding: 10px 14px;
-      border-radius: 14px;
-      border: 1px solid rgba(255, 255, 255, 0.04);
+      margin-bottom: 24px;
     }
 
-    .feature-icon {
+    .logo-badge {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--color-dark);
+      color: #fafaf9;
+      font-weight: 900;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    }
+
+    .brand-title {
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--color-primary);
+    }
+
+    h1 {
+      font-size: 1.95rem;
+      font-weight: 900;
+      line-height: 1.2;
+      letter-spacing: -1px;
+      color: #121214;
+      margin-bottom: 8px;
+    }
+
+    .description {
+      font-size: 13.5px;
+      color: #57534e;
+      line-height: 1.55;
+      font-weight: 500;
+      margin-bottom: 20px;
+    }
+
+    /* Bullet list */
+    .checklist {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      color: #292524;
+      font-weight: 700;
+    }
+
+    .check-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(225, 29, 72, 0.08);
       color: var(--color-primary);
       display: flex;
       align-items: center;
@@ -182,324 +218,259 @@
       flex-shrink: 0;
     }
 
-    .loading-status {
+    /* Real Barcode style representation */
+    .barcode-container {
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
-      font-size: 12px;
+      gap: 6px;
+      margin-top: 24px;
+      opacity: 0.85;
+    }
+
+    .barcode-lines {
+      width: 100%;
+      height: 32px;
+      background-image: repeating-linear-gradient(
+        90deg,
+        #1c1917,
+        #1c1917 2px,
+        transparent 2px,
+        transparent 5px,
+        #1c1917 5px,
+        #1c1917 6px,
+        transparent 6px,
+        transparent 9px,
+        #1c1917 9px,
+        #1c1917 12px,
+        transparent 12px,
+        transparent 14px
+      );
+    }
+
+    .barcode-number {
+      font-family: monospace;
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: #78716c;
+      font-weight: bold;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
       font-weight: 800;
       color: var(--color-primary);
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
+      background: rgba(225, 29, 72, 0.06);
+      padding: 6px 12px;
+      border-radius: 20px;
+      align-self: flex-start;
       margin-bottom: 20px;
-      background: rgba(225, 29, 72, 0.08);
-      padding: 8px 16px;
-      border-radius: 30px;
-      display: inline-flex;
     }
 
-    .spinner {
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(225, 29, 72, 0.2);
-      border-top-color: var(--color-primary);
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--color-primary);
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: statusBlink 1.5s infinite;
     }
 
     .store-buttons {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
 
     .btn {
-      height: 56px;
-      border-radius: 18px;
+      height: 50px;
+      border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: 10px;
       text-decoration: none;
       font-weight: 800;
-      font-size: 14.5px;
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      font-size: 13.5px;
+      transition: all 0.2s ease;
       cursor: pointer;
-      box-sizing: border-box;
-      position: relative;
-      overflow: hidden;
     }
 
     .btn-android {
-      background: #ffffff;
-      color: #09090b;
+      background: var(--color-dark);
+      color: #fafaf9;
       border: none;
-      box-shadow: 0 4px 20px rgba(255, 255, 255, 0.1);
     }
 
     .btn-android:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(255, 255, 255, 0.18);
-      background: #f4f4f5;
-    }
-
-    .btn-android:active {
-      transform: translateY(0);
+      background: #1c1917;
+      transform: translateY(-1px);
     }
 
     .btn-ios {
-      background: rgba(39, 39, 42, 0.6);
-      color: #71717a;
-      border: 1px solid rgba(255, 255, 255, 0.04);
+      background: transparent;
+      color: #a8a29e;
+      border: 1.5px dashed #d6d3d1;
       cursor: not-allowed;
       pointer-events: none;
     }
 
-    .footer-text {
-      font-size: 11px;
-      color: var(--color-text-secondary);
-      margin-top: 32px;
-      opacity: 0.55;
-      font-weight: 600;
-      letter-spacing: 0.3px;
-    }
-
-    /* Vector Phone mockup styling */
-    .phone-body {
-      width: 290px;
-      height: 580px;
-      border-radius: 40px;
-      background: #09090b;
-      border: 10px solid #27272a;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255,255,255,0.05);
-      position: relative;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .phone-notch {
-      width: 110px;
-      height: 25px;
-      background: #27272a;
-      border-bottom-left-radius: 16px;
-      border-bottom-right-radius: 16px;
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-    }
-
-    .phone-screen {
-      flex: 1;
-      background: linear-gradient(180deg, #18181b 0%, #09090b 100%);
-      padding: 40px 18px 20px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      position: relative;
-    }
-
-    .phone-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 20px;
-    }
-
-    .phone-logo {
-      font-family: var(--font-family);
-      font-weight: 950;
-      font-size: 20px;
-      color: var(--color-primary);
-      letter-spacing: -0.5px;
-    }
-
-    .phone-card {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 16px;
-      padding: 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .phone-card-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      background: rgba(225, 29, 72, 0.1);
-      color: var(--color-primary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .phone-card-text {
-      flex: 1;
-      text-align: left;
-    }
-
-    .phone-card-title {
-      font-size: 11.5px;
-      font-weight: 800;
-      color: white;
-    }
-
-    .phone-card-subtitle {
-      font-size: 9.5px;
-      color: var(--color-text-secondary);
-      margin-top: 2px;
-    }
-
-    .phone-footer {
-      background: var(--color-primary);
-      border-radius: 14px;
-      padding: 12px;
-      color: white;
+    /* Side info details */
+    .side-eyebrow {
+      font-size: 12px;
       font-weight: 900;
-      font-size: 11.5px;
-      letter-spacing: 0.5px;
       text-transform: uppercase;
-      box-shadow: 0 4px 15px rgba(225, 29, 72, 0.3);
+      letter-spacing: 2px;
+      color: var(--color-primary);
+      margin-bottom: 12px;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    .side-title {
+      font-size: 2rem;
+      font-weight: 900;
+      line-height: 1.15;
+      letter-spacing: -1px;
+      margin-bottom: 16px;
     }
-    @keyframes logoPulse {
-      0%, 100% { transform: scale(1); opacity: 0.65; filter: blur(10px); }
-      50% { transform: scale(1.08); opacity: 0.85; filter: blur(14px); }
+
+    .side-desc {
+      font-size: 14px;
+      color: #a8a29e;
+      line-height: 1.6;
+      margin-bottom: 24px;
     }
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(30px); }
-      to { opacity: 1; transform: translateY(0); }
+
+    .side-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      color: #fafaf9;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 6px 12px;
+      border-radius: 30px;
+      margin-top: 10px;
     }
-    @keyframes phoneEntrance {
-      from { opacity: 0; transform: translateY(50px) rotate(3deg); }
-      to { opacity: 1; transform: translateY(0) rotate(0deg); }
+
+    @keyframes statusBlink {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+
+    @keyframes stickerEntrance {
+      from { opacity: 0; transform: translateY(40px) rotate(-1.5deg); }
+      to { opacity: 1; transform: translateY(0) rotate(-0.5deg); }
+    }
+
+    @keyframes fadeInRight {
+      from { opacity: 0; transform: translateX(30px); }
+      to { opacity: 1; transform: translateX(0); }
     }
   </style>
 </head>
 <body>
-  <div class="bg-glow-1"></div>
-  <div class="bg-glow-2"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-gradient-glow"></div>
 
   <div class="main-wrapper">
-    <!-- Left column: App Download Card -->
-    <div class="container">
-      <div style="display: flex; justify-content: center;">
-        <div class="logo-container">
-          <div class="logo-glow"></div>
-          <img src="logo-brand.jpg" alt="GO! Logo" class="logo" onerror="this.src='/logo-brand.jpg'">
+    <!-- Left: The Physical Sticker representation -->
+    <div class="sticker">
+      <!-- Top info -->
+      <div>
+        <div class="header-logo">
+          <div class="logo-badge">GO</div>
+          <div>
+            <div class="brand-title">GO! Delivery</div>
+            <div style="font-size:10px; color:#78716c; font-weight:700;">Magdalena, BA</div>
+          </div>
+        </div>
+
+        <h1>¡Escaneá & Pedí!</h1>
+        <p class="description">Estás a un paso de descargar la app local de envíos. Rápido, simple y al precio justo.</p>
+
+        <div class="checklist">
+          <div class="check-item">
+            <span class="check-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </span>
+            <span>Comercios locales adheridos</span>
+          </div>
+          <div class="check-item">
+            <span class="check-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </span>
+            <span>Repartidores en tiempo real</span>
+          </div>
+          <div class="check-item">
+            <span class="check-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </span>
+            <span>$3000 de regalo en tu primer pedido</span>
+          </div>
         </div>
       </div>
 
-      <h1>¡Pedí desde la App!</h1>
-      <p class="tagline">Disfrutá la app oficial de GO! Delivery con los mejores comercios, envíos súper veloces y beneficios exclusivos.</p>
+      <!-- Center Perforation separator -->
+      <div class="ticket-separator"></div>
 
-      <!-- Advantages Checklist -->
-      <div class="features-list">
-        <div class="feature-item">
-          <span class="feature-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
+      <!-- Bottom action buttons -->
+      <div>
+        <div class="status-badge">
+          <span class="status-dot"></span>
+          <span id="status-label">Detectando dispositivo...</span>
+        </div>
+
+        <div class="store-buttons">
+          <!-- Android Button -->
+          <a href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3,5.27V18.73L16.5,12L3,5.27M17.87,11.33L21,12.9L17.87,14.47L16.5,12L17.87,11.33M3,3C2.8,3 2.6,3.05 2.43,3.15L15.35,11L18.84,7.5L3,3M3,21L18.84,16.5L15.35,13L2.43,20.85C2.6,20.95 2.8,21 3,21Z"/>
             </svg>
-          </span>
-          <span>⚡ Pedidos en el acto y sin demoras</span>
-        </div>
-        <div class="feature-item">
-          <span class="feature-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
+            Descargar para Android
+          </a>
+
+          <!-- iOS Button -->
+          <a id="ios-link" href="#" class="btn btn-ios" onclick="return false;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.48C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.1 16.67C20.08 16.74 19.67 18.11 18.71 19.5M15.97 4.17C16.63 3.37 17.07 2.28 16.95 1C16 1.04 14.9 1.6 14.24 2.38C13.68 3.04 13.19 4.14 13.34 5.4C14.39 5.48 15.4 4.88 15.97 4.17Z"/>
             </svg>
-          </span>
-          <span>📍 Cobertura total en Magdalena y zona</span>
+            iPhone (iOS) — Próximamente
+          </a>
         </div>
-        <div class="feature-item">
-          <span class="feature-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-          </span>
-          <span>🎁 Cupón de Bienvenida automático</span>
+
+        <div class="barcode-container">
+          <div class="barcode-lines"></div>
+          <div class="barcode-number">GODELIVERY-MAGDALENA</div>
         </div>
       </div>
-
-      <div class="loading-status">
-        <div class="spinner"></div>
-        <span id="status-label">Detectando dispositivo...</span>
-      </div>
-
-      <div class="store-buttons">
-        <!-- Android Button -->
-        <a href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3,5.27V18.73L16.5,12L3,5.27M17.87,11.33L21,12.9L17.87,14.47L16.5,12L17.87,11.33M3,3C2.8,3 2.6,3.05 2.43,3.15L15.35,11L18.84,7.5L3,3M3,21L18.84,16.5L15.35,13L2.43,20.85C2.6,20.95 2.8,21 3,21Z"/>
-          </svg>
-          Descargar para Android
-        </a>
-
-        <!-- iOS Button -->
-        <a id="ios-link" href="#" class="btn btn-ios" onclick="return false;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.48C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.1 16.67C20.08 16.74 19.67 18.11 18.71 19.5M15.97 4.17C16.63 3.37 17.07 2.28 16.95 1C16 1.04 14.9 1.6 14.24 2.38C13.68 3.04 13.19 4.14 13.34 5.4C14.39 5.48 15.4 4.88 15.97 4.17Z"/>
-          </svg>
-          iPhone (iOS) — Próximamente
-        </a>
-      </div>
-
-      <div class="footer-text">GO! Delivery — Magdalena, Buenos Aires</div>
     </div>
 
-    <!-- Right column: Premium Phone Mockup Silhouette -->
-    <div class="phone-mockup-wrapper">
-      <div class="phone-body">
-        <div class="phone-notch"></div>
-        <div class="phone-screen">
-          <!-- Mock Phone UI -->
-          <div class="phone-header">
-            <span class="phone-logo">GO!</span>
-            <div style="width: 20px; height: 20px; border-radius: 50%; background: rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center;">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-            </div>
-          </div>
+    <!-- Right: Editorial design introduction -->
+    <div class="side-info">
+      <span class="side-eyebrow">LA APP DE LA CIUDAD</span>
+      <h2 class="side-title">Todo lo que querés, a tu puerta.</h2>
+      <p class="side-desc">
+        Pedí helados, burgers, artículos de kiosco y realizá tus favores diarios desde una sola app pensada para simplificar tu día en Magdalena.
+      </p>
 
-          <div style="display:flex; flex-direction:column; gap:12px; margin-top:20px;">
-            <div class="phone-card">
-              <div class="phone-card-icon">🍔</div>
-              <div class="phone-card-text">
-                <div class="phone-card-title">Comida & Burgers</div>
-                <div class="phone-card-subtitle">Pedí de los mejores locales</div>
-              </div>
-            </div>
-            
-            <div class="phone-card">
-              <div class="phone-card-icon">🍦</div>
-              <div class="phone-card-text">
-                <div class="phone-card-title">Heladerías Artesanales</div>
-                <div class="phone-card-subtitle">Tu helado en casa rápido</div>
-              </div>
-            </div>
-
-            <div class="phone-card">
-              <div class="phone-card-icon">🛍️</div>
-              <div class="phone-card-text">
-                <div class="phone-card-title">Kioscos & Almacén</div>
-                <div class="phone-card-subtitle">Lo que te falte, te lo llevamos</div>
-              </div>
-            </div>
-          </div>
-
-          <div style="flex: 1; display: flex; align-items: flex-end; margin-bottom: 10px;">
-            <div class="phone-footer" style="width: 100%; text-align: center;">
-              Pedí fácil, Pedí GO!
-            </div>
-          </div>
-        </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span class="side-pill">
+          ⚡ Envíos rápidos en moto o auto
+        </span>
+        <span class="side-pill" style="background: rgba(225, 29, 72, 0.15); color: #fda4af;">
+          🎉 BIENVENIDA: $3000 de descuento inicial
+        </span>
       </div>
     </div>
   </div>
@@ -508,19 +479,16 @@
     // Detect OS and redirect
     const userAgent = navigator.userAgent || navigator.vendor || window.opera;
     const statusLabel = document.getElementById('status-label');
-    
     const playStoreUrl = "https://play.google.com/store/apps/details?id=com.godelivery.magdalena";
 
     setTimeout(() => {
       if (/android/i.test(userAgent)) {
-        statusLabel.textContent = "Redireccionando a Google Play...";
+        statusLabel.textContent = "Redireccionando...";
         window.location.href = playStoreUrl;
       } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-        statusLabel.textContent = "Próximamente para iPhone";
-        document.querySelector('.spinner').style.display = 'none';
+        statusLabel.textContent = "iOS Próximamente";
       } else {
-        statusLabel.textContent = "Selecciona tu dispositivo";
-        document.querySelector('.spinner').style.display = 'none';
+        statusLabel.textContent = "Dispositivos listos";
       }
     }, 1500);
   </script>
