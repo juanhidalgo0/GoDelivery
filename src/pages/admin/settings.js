@@ -1325,24 +1325,33 @@ export async function renderAdminLogisticsSettings(container) {
       }
 
       containerEl.innerHTML = localRules.map((rule, index) => `
-        <div class="rule-row" data-index="${index}" style="display:flex; align-items:center; gap:10px; background:var(--color-bg-card); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; box-shadow:var(--shadow-sm); margin-bottom:8px;">
-          <div style="flex:1;">
-            <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Distancia Mínima</div>
-            <div style="display:flex; align-items:center; gap:4px;">
-              <input type="number" step="0.1" class="rule-limit-input" value="${rule.limitKm}" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:14px; font-weight:700; background:var(--color-bg); color:var(--color-text);" />
-              <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">Km</span>
+        <div class="rule-row" data-index="${index}" style="display:flex; flex-direction:column; gap:10px; background:var(--color-bg-card); border:1px solid var(--color-border-light); border-radius:16px; padding:14px; box-shadow:var(--shadow-sm); margin-bottom:12px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Regla de Envío</div>
+            <button class="rule-delete-btn" style="width:28px; height:28px; border-radius:8px; background:rgba(239, 68, 68, 0.08); border:none; display:flex; align-items:center; justify-content:center; color:var(--color-danger); cursor:pointer;">
+              ${icon('trash', 12)}
+            </button>
+          </div>
+          <div>
+            <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Nombre de la Regla</div>
+            <input type="text" class="rule-name-input" value="${rule.name || ''}" placeholder="Ej. Tarifa Atalaya" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:13px; font-weight:700; background:var(--color-bg); color:var(--color-text); box-sizing:border-box;" />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div>
+              <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Distancia Mínima</div>
+              <div style="display:flex; align-items:center; gap:4px;">
+                <input type="number" step="0.1" class="rule-limit-input" value="${rule.limitKm}" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:14px; font-weight:700; background:var(--color-bg); color:var(--color-text); box-sizing:border-box;" />
+                <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">Km</span>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Precio Fijo</div>
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">$</span>
+                <input type="number" class="rule-price-input" value="${rule.price}" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:14px; font-weight:700; background:var(--color-bg); color:var(--color-text); box-sizing:border-box;" />
+              </div>
             </div>
           </div>
-          <div style="flex:1;">
-            <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Precio Fijo</div>
-            <div style="display:flex; align-items:center; gap:4px;">
-              <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">$</span>
-              <input type="number" class="rule-price-input" value="${rule.price}" style="width:100%; height:38px; border-radius:10px; border:1px solid var(--color-border); padding:0 8px; font-size:14px; font-weight:700; background:var(--color-bg); color:var(--color-text);" />
-            </div>
-          </div>
-          <button class="rule-delete-btn" style="width:36px; height:36px; border-radius:10px; background:rgba(239, 68, 68, 0.08); border:none; display:flex; align-items:center; justify-content:center; color:var(--color-danger); cursor:pointer; margin-top:14px;">
-            ${icon('trash', 14)}
-          </button>
         </div>
       `).join('');
 
@@ -1357,9 +1366,13 @@ export async function renderAdminLogisticsSettings(container) {
       // Bind input changes to keep state synced
       containerEl.querySelectorAll('.rule-row').forEach(row => {
         const i = parseInt(row.dataset.index);
+        const nameInput = row.querySelector('.rule-name-input');
         const limitInput = row.querySelector('.rule-limit-input');
         const priceInput = row.querySelector('.rule-price-input');
         
+        nameInput.oninput = () => {
+          localRules[i].name = nameInput.value;
+        };
         limitInput.oninput = () => {
           localRules[i].limitKm = parseFloat(limitInput.value) || 0;
         };
@@ -1372,7 +1385,7 @@ export async function renderAdminLogisticsSettings(container) {
     modalContent.innerHTML = `
       <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Precio Fijo por KM</h3>
       <p style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 10px 0; font-weight:600; line-height:1.4;">
-        Define tarifas planas para rangos de distancia. Ej: Pasados los 5km cobrar $3000, pasados los 7km cobrar $4000.
+        Define tarifas planas para rangos de distancia. Escribe un nombre identificador para cada regla.
       </p>
 
       <div id="rules-list-container" style="display:flex; flex-direction:column; gap:10px; margin-top:8px;">
@@ -1397,7 +1410,7 @@ export async function renderAdminLogisticsSettings(container) {
         renderRulesList();
 
         modalContent.querySelector('#btn-add-rule').onclick = () => {
-          localRules.push({ limitKm: 0, price: 0 });
+          localRules.push({ name: '', limitKm: 0, price: 0 });
           renderRulesList();
         };
 
@@ -1409,7 +1422,11 @@ export async function renderAdminLogisticsSettings(container) {
           // Clean rules: remove empty/invalid rules
           const cleanRules = localRules
             .filter(r => r.limitKm > 0 && r.price > 0)
-            .map(r => ({ limitKm: Number(r.limitKm), price: Number(r.price) }));
+            .map(r => ({
+              name: (r.name || '').trim(),
+              limitKm: Number(r.limitKm),
+              price: Number(r.price)
+            }));
 
           try {
             await setDoc(doc(db, 'settings', 'global'), { deliveryDistanceRules: cleanRules }, { merge: true });
