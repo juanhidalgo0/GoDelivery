@@ -662,9 +662,17 @@ async function init() {
                 </svg>
                 <span style="font-weight:700; color:#374151; font-size:15px;">Continuar con Google</span>
               </button>
+
+              <button id="apple-login-btn" style="width:100%; height:56px; background:black; border:none; border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
+                <svg width="18" height="22" viewBox="0 0 18 22" fill="white">
+                  <path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/>
+                </svg>
+                <span style="font-weight:700; color:white; font-size:15px;">Continuar con Apple</span>
+              </button>
+
               <div style="margin-top: 24px; text-align: center;">
                 <button id="reviewer-login-btn" style="background: none; border: none; color: #6B7280; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; opacity: 0.8;">
-                  Acceso para revisores (Google Play)
+                  Acceso de prueba (Revisores)
                 </button>
               </div>
             </div>
@@ -673,10 +681,11 @@ async function init() {
             @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
             @keyframes gd-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
             #google-login-btn:active { transform: scale(0.98); background: #F9FAFB; }
+            #apple-login-btn:active { transform: scale(0.98); opacity: 0.9; }
           </style>
         `;
 
-        const { signInWithGoogle } = await import('./auth.js');
+        const { signInWithGoogle, signInWithApple } = await import('./auth.js');
         
         const reviewerBtn = document.getElementById('reviewer-login-btn');
         reviewerBtn?.addEventListener('click', () => {
@@ -753,6 +762,35 @@ async function init() {
                   <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                 </svg>
                 <span style="font-weight:700; color:#374151; font-size:15px;">Continuar con Google</span>
+              `;
+            }
+          });
+        });
+
+        const appleLoginBtn = document.getElementById('apple-login-btn');
+        appleLoginBtn?.addEventListener('click', () => {
+          appleLoginBtn.disabled = true;
+          appleLoginBtn.style.opacity = '0.7';
+          appleLoginBtn.style.cursor = 'not-allowed';
+          appleLoginBtn.innerHTML = `
+            <div style="border: 3px solid #E5E7EB; border-top: 3px solid #111827; border-radius: 50%; width: 20px; height: 20px; animation: gd-spin 1s linear infinite;"></div>
+            <span style="font-weight:700; color:white; font-size:15px;">Iniciando sesión...</span>
+          `;
+          
+          signInWithApple().then((user) => {
+            if (user) {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('ref');
+              window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+            } else {
+              appleLoginBtn.disabled = false;
+              appleLoginBtn.style.opacity = '1';
+              appleLoginBtn.style.cursor = 'pointer';
+              appleLoginBtn.innerHTML = `
+                <svg width="18" height="22" viewBox="0 0 18 22" fill="white">
+                  <path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/>
+                </svg>
+                <span style="font-weight:700; color:white; font-size:15px;">Continuar con Apple</span>
               `;
             }
           });

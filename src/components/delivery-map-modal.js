@@ -9,6 +9,19 @@ let routeLine = null;
 let watchId = null;
 let resolvedStores = []; // Cache to avoid multiple Firestore fetches
 
+export function isOrderGeolocalizablePickup(o) {
+  if (!o) return false;
+  if (!o.isFavor) return true; // Standard orders are always geolocalizable
+  
+  // GoFavores (using favorType or type field from Firestore):
+  const fType = o.favorType || o.type;
+  if (fType === 'gocash') return false; // Go Cash has no pickup point
+  if (fType === 'compra') return false; // Mandado / Compra has no pickup point
+  if (fType === 'pagodeservicios' && o.receiptDeliveryType === 'digital') return false; // Digital bill payment
+  
+  return true; // Encomienda (favorType: 'mandado') and physical bill payments are geolocalizable
+}
+
 export function showDeliveryMapModal(order, batch = null) {
   if (order.status === 'completed' || order.status === 'cancelled') {
     import('./toast.js').then(m => m.showToast('Este pedido ya ha finalizado.', 'info'));
@@ -79,9 +92,28 @@ function updateBottomPanel(order, batch) {
   if (!panel) return;
 
   const isPickedUp = !!order.pickedUpAt || order.status === 'picked_up' || order.status === 'delivered';
+  const hasGeolocPickup = isOrderGeolocalizablePickup(order);
   const label = isPickedUp ? 'Punto de entrega' : `Retirar en: ${order.comercioName || 'Comercio'}`;
   const iconName = isPickedUp ? 'mapPin' : 'store';
-  const address = isPickedUp ? order.deliveryAddress : (order.pickupAddress || order.comercioAddress || 'Cargando dirección...');
+  
+  let address = '';
+  if (isPickedUp) {
+    address = order.deliveryAddress;
+  } else {
+    if (hasGeolocPickup) {
+      address = order.pickupAddress || order.comercioAddress || 'Cargando dirección...';
+    } else {
+      const fType = order.favorType || order.type;
+      if (fType === 'gocash') {
+        address = 'Intercambio de Efectivo (Go Cash) — Sin retiro físico';
+      } else if (fType === 'pagodeservicios' && order.receiptDeliveryType === 'digital') {
+        address = 'Pago de Servicio Digital — Sin retiro físico';
+      } else {
+        address = `${order.pickupAddress || 'Mandado'} (Dirección no geolocalizable)`;
+      }
+    }
+  }
+
   const userName = order.userName || 'Cliente';
   
   const formatPrice = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val || 0);
@@ -90,8 +122,18 @@ function updateBottomPanel(order, batch) {
   const finalTotal = (order.subtotal || 0) + (order.deliveryCost || 0) + serviceFee + pFee;
 
   panel.innerHTML = `
+    ${!isPickedUp && !hasGeolocPickup ? `
+      <div style="background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.3); color:#d97706; padding:12px 16px; border-radius:16px; font-size:12.5px; font-weight:800; display:flex; align-items:center; gap:10px; line-height:1.4; margin-bottom:4px;">
+        <span style="font-size:18px;">⚠️</span>
+        <div style="text-align:left;">
+          <strong>Trámite sin punto en mapa:</strong>
+          <span style="font-weight:600; display:block; font-size:11.5px; margin-top:2px;">Este pedido se gestiona digitalmente o no tiene ubicación de retiro exacta. Revisa los detalles.</span>
+        </div>
+      </div>
+    ` : ''}
+
     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-      <div style="flex:1; min-width:0; padding-right:12px;">
+      <div style="flex:1; min-width:0; padding-right:12px; text-align:left;">
         <div style="font-size:11px; font-weight:800; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${label}</div>
         <h3 style="font-size:22px; font-weight:950; color:var(--color-text); margin:0; letter-spacing:-0.5px; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${isPickedUp ? userName : (order.comercioName || 'Comercio')}</h3>
       </div>
@@ -107,7 +149,7 @@ function updateBottomPanel(order, batch) {
       <div style="width:42px; height:42px; border-radius:12px; background:var(--color-surface); display:flex; align-items:center; justify-content:center; color:var(--color-primary); border:1px solid var(--color-border); flex-shrink:0;">
         ${icon(iconName, 22)}
       </div>
-      <div style="flex:1; min-width:0;">
+      <div style="flex:1; min-width:0; text-align:left;">
         <p style="margin:0; font-size:14px; font-weight:700; color:var(--color-text-secondary); line-height:1.4; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${address}</p>
       </div>
       <button onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}', '_blank')" style="width:40px; height:40px; border-radius:12px; border:none; background:var(--color-primary-light); color:var(--color-primary); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;">
@@ -168,22 +210,34 @@ async function initDeliveryMap(order, orders) {
     gestureHandling: 'greedy'
   });
 
-  // 1. Pickup Markers (Stores) - Robust fallback to Firestore
+  // 1. Build unified stops sequence to assign sequential step numbers
+  const stopsSequence = [];
   const storeSet = new Set();
+  const deliverySet = new Set();
   resolvedStores = [];
   const { doc, getDoc } = await import('firebase/firestore');
   const { db } = await import('../firebase.js');
 
   for (const o of orders) {
-    // 1.1 Support GoFavor Pickup Coords
-    if (o.isFavor && o.pickupCoords) {
-      const isPickedUp = !!o.pickedUpAt || o.status === 'picked_up' || o.status === 'delivered';
-      addOverlayMarker(o.pickupCoords, o.favorType === 'mandado' ? 'mapPin' : 'store', isPickedUp ? '#94a3b8' : '#f59e0b', isPickedUp);
-      resolvedStores.push({ ...o.pickupCoords, id: `favor-${o.id}`, isPickedUp });
-      continue;
-    }
+    const geoloc = isOrderGeolocalizablePickup(o);
+    if (!geoloc) continue;
 
-    if (o.comercioId && !storeSet.has(o.comercioId)) {
+    if (o.isFavor) {
+      const coords = o.pickupCoords || { lat: -35.0811, lng: -57.5146 };
+      const isPickedUp = !!o.pickedUpAt || o.status === 'picked_up' || o.status === 'delivered';
+      const key = `favor-${o.id}`;
+      if (!storeSet.has(key)) {
+        storeSet.add(key);
+        stopsSequence.push({
+          type: 'PICKUP',
+          coords: coords,
+          iconName: o.favorType === 'mandado' ? 'mapPin' : 'store',
+          isPickedUp,
+          orderRef: o
+        });
+        resolvedStores.push({ ...coords, id: key, isPickedUp });
+      }
+    } else if (o.comercioId) {
       let coords = o.comercioCoords;
       if (!coords || !o.comercioAddress) {
         try {
@@ -196,27 +250,65 @@ async function initDeliveryMap(order, orders) {
           }
         } catch (err) { console.warn('Commerce fetch error:', err); }
       }
-
-      if (coords) {
+      if (coords && !storeSet.has(o.comercioId)) {
         const isPickedUp = !!o.pickedUpAt || o.status === 'picked_up' || o.status === 'delivered';
-        addOverlayMarker(coords, isPickedUp ? 'check' : 'store', isPickedUp ? '#94a3b8' : '#f59e0b', isPickedUp);
         storeSet.add(o.comercioId);
+        stopsSequence.push({
+          type: 'PICKUP',
+          coords,
+          iconName: isPickedUp ? 'check' : 'store',
+          isPickedUp,
+          orderRef: o
+        });
         resolvedStores.push({ ...coords, id: o.comercioId, isPickedUp });
       }
     }
   }
 
-  // 2. Destination Marker (Home)
-  addOverlayMarker(destCoords, 'home', '#10b981');
+  for (const o of orders) {
+    const deliveryCoords = o.deliveryCoords || destCoords;
+    const key = `${deliveryCoords.lat},${deliveryCoords.lng}`;
+    if (!deliverySet.has(key)) {
+      deliverySet.add(key);
+      const isPickedUp = !!o.pickedUpAt || o.status === 'picked_up' || o.status === 'delivered';
+      stopsSequence.push({
+        type: 'DROP_OFF',
+        coords: deliveryCoords,
+        iconName: 'home',
+        isPickedUp,
+        orderRef: o
+      });
+    }
+  }
+
+  stopsSequence.forEach((stop, index) => {
+    const stopNumber = index + 1;
+    let color = '';
+    if (stop.type === 'PICKUP') {
+      color = stop.isPickedUp ? '#94a3b8' : '#f59e0b';
+    } else {
+      color = stop.isPickedUp ? '#10b981' : '#94a3b8';
+    }
+
+    const stopOrders = orders.filter(x => {
+      if (stop.type === 'PICKUP') {
+        return stop.orderRef.isFavor ? (x.id === stop.orderRef.id) : (x.comercioId === stop.orderRef.comercioId);
+      } else {
+        const deliveryCoords = x.deliveryCoords || destCoords;
+        return (deliveryCoords.lat === stop.coords.lat && deliveryCoords.lng === stop.coords.lng);
+      }
+    });
+    const clientName = stopOrders.map(x => (x.userName || 'Cliente').split(' ')[0]).join(' + ');
+
+    addOverlayMarker(stop.coords, stop.iconName, color, stop.type === 'PICKUP' ? stop.isPickedUp : false, stopNumber, clientName);
+  });
   
-  // 3. Instant Initial State
   if (window.lastRiderPos) {
     updateRiderLocation(window.lastRiderPos.lat, window.lastRiderPos.lng, destCoords, orders, true);
   } else {
     updateRiderLocation(null, null, destCoords, orders);
   }
 
-  // 4. Geolocation Tracking
   if (navigator.geolocation) {
     const geoOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
     const onGeoSuccess = (pos) => {
@@ -250,7 +342,7 @@ async function initDeliveryMap(order, orders) {
   }
 }
 
-function addOverlayMarker(pos, iconName, color, isCompleted = false) {
+function addOverlayMarker(pos, iconName, color, isCompleted = false, labelText = '', clientName = '') {
   const marker = new google.maps.OverlayView();
   marker.onAdd = function() {
     const div = document.createElement('div');
@@ -258,10 +350,20 @@ function addOverlayMarker(pos, iconName, color, isCompleted = false) {
     div.style.position = 'absolute';
     div.style.zIndex = isCompleted ? '1' : '10';
     div.innerHTML = `
-      <div style="display:flex; flex-direction:column; align-items:center; opacity:${isCompleted ? '0.7' : '1'};">
+      <div style="position:relative; display:flex; flex-direction:column; align-items:center; opacity:${isCompleted ? '0.7' : '1'};">
+        ${labelText ? `
+          <div style="position:absolute; top:-10px; right:-10px; background:#0f172a; color:#ffffff; width:20px; height:20px; border-radius:50%; border:2px solid white; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:900; z-index:12; box-shadow:0 2px 6px rgba(0,0,0,0.25);">
+            ${labelText}
+          </div>
+        ` : ''}
         <div style="background:${color}; width:42px; height:42px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
           <div style="transform:rotate(45deg); color:white; display:flex;">${icon(iconName, 20)}</div>
         </div>
+        ${clientName ? `
+          <div style="margin-top:6px; background:rgba(15, 23, 42, 0.85); backdrop-filter:blur(4px); color:white; padding:3px 8px; border-radius:8px; font-size:9.5px; font-weight:900; white-space:nowrap; border:1px solid rgba(255,255,255,0.15); box-shadow:0 4px 10px rgba(0,0,0,0.15); z-index:11;">
+            ${clientName}
+          </div>
+        ` : ''}
       </div>`;
     this.getPanes().overlayMouseTarget.appendChild(div);
     this.div = div;

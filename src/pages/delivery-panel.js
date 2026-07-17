@@ -81,7 +81,7 @@ function getFavorTypeMeta(favorType) {
         color: '#6366f1',
         textColor: '#6366f1'
       };
-    case 'encomienda':
+    case 'mandado': // In DB, Encomiendas are favorType: 'mandado'
       return {
         title: 'GoFavor: Encomienda',
         label: 'ENCOMIENDA',
@@ -97,13 +97,12 @@ function getFavorTypeMeta(favorType) {
         color: '#d97706',
         textColor: '#d97706'
       };
-    case 'mandado':
-    case 'compra':
+    case 'compra': // In DB, Mandados/Compras are favorType: 'compra'
     default:
       return {
         title: 'GoFavor: Mandado',
-        label: 'GO FAVOR',
-        headerText: 'Detalles del Favor',
+        label: 'MANDADO',
+        headerText: 'Detalles del Mandado',
         color: '#ef4444',
         textColor: '#ef4444'
       };
@@ -1480,9 +1479,15 @@ function loadTabContent(tab, container, user) {
                   const isExpanded = container._expandedStops.has(stopKey);
 
                   const firstOrder = stop.orders?.[0];
-                  const stopColor = stop.type === 'PICKUP' 
-                    ? (firstOrder?.isFavor ? getFavorTypeMeta(firstOrder.favorType).color : '#ef4444') 
-                    : '#10b981';
+                  const isTrip = stop.orders?.some(o => o.isTrip);
+                  let stopColor = '#10b981'; // Green default for standard order delivery
+                  if (isTrip) {
+                    stopColor = '#3b82f6'; // Blue for trips
+                  } else if (firstOrder?.isFavor) {
+                    stopColor = getFavorTypeMeta(firstOrder.favorType).color;
+                  } else if (stop.type === 'PICKUP') {
+                    stopColor = '#7c3aed'; // Purple default for standard commerce pickup
+                  }
                   const stopRgb = getRgbString(stopColor);
 
                   return `
@@ -1517,8 +1522,9 @@ function loadTabContent(tab, container, user) {
                               if (o.isFavor) {
                                 if (o.favorType === 'gocash') return 'go cash';
                                 if (o.favorType === 'pagodeservicios') return 'pago de servicios';
-                                if (o.favorType === 'encomienda') return 'encomienda';
-                                return 'mandado';
+                                if (o.favorType === 'mandado') return 'encomienda';
+                                if (o.favorType === 'compra') return 'mandado';
+                                return 'encomienda';
                               }
                               return 'comercio';
                             })));
@@ -1791,70 +1797,76 @@ function loadTabContent(tab, container, user) {
                         </div>
                       `}
 
-                      <!-- Actions -->
-                      <div style="display:flex; gap:8px; align-items:center; height:48px; width:100%;">
-                        ${stop.type === 'PICKUP' ? (() => {
-                          const isDigitalReceipt = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.details?.includes('Foto Digital por Chat'));
-                          return `
-                            <button class="btn mark-picked-up-btn" 
-                                    data-id="${stop.docId}" 
-                                    data-istrip="${stop.isFavor ? 'false' : stop.orders.some(o => o.isTrip)}"
-                                    data-isdigitalreceipt="${isDigitalReceipt}"
-                                    ${stop.pickedUp ? 'disabled' : ''}
-                                    style="height:100%; font-size:13.5px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; letter-spacing:0.02em;">
-                              ${stop.pickedUp ? icon('check', 16) : (stop.orders.some(o => o.isTrip) ? icon('user', 16) : (isDigitalReceipt ? icon('checkCircle', 16) : icon('package', 16)))} 
-                              ${stop.pickedUp ? (stop.orders.some(o => o.isTrip) ? 'EN VIAJE' : 'RETIRADO') : (stop.orders.some(o => o.isTrip) ? 'PASAJERO A BORDO' : (isDigitalReceipt ? 'PAGADO' : 'RETIRAR'))}
-                            </button>
-                          `;
-                        })() : ''}
-                        
-                        ${stop.type === 'DROP_OFF' ? `
-                          ${(() => {
-                            const hasNotifiedAtDoor = stop.orders.every(o => o.isAtDoor);
-                            const allPickedUp = stop.orders.every(o => !!o.pickedUpAt);
-                            const isTrip = stop.orders.some(o => o.isTrip);
-                            const isPagoServiciosDigital = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.receiptDeliveryType === 'digital');
+                      <!-- Actions: Two rows -->
+                      <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
+                        <!-- Row 1: Utility Buttons (Equal size) -->
+                        <div style="display:flex; gap:8px; align-items:center; height:48px; width:100%;">
+                          <button class="btn view-active-map-btn" 
+                                  data-id="${stop.type === 'PICKUP' ? stop.docId : stop.orders[0].id}" 
+                                  ${stop.type === 'PICKUP' && stop.pickedUp ? 'disabled' : ''}
+                                  style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:none; background:rgba(var(--color-primary-rgb), 0.15); color:var(--color-primary); transition:all 0.3s; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.1); ${stop.type === 'PICKUP' && stop.pickedUp ? 'opacity:0.45; cursor:not-allowed; box-shadow:none;' : ''}">
+                            ${icon('navigationArrow', 26)} 
+                          </button>
 
-                            if (!isTrip && !hasNotifiedAtDoor && !isPagoServiciosDigital) {
-                              return `
-                                <button class="btn notify-at-door-btn" 
-                                        data-ids="${stop.orders.map(o => o.id).join(',')}" 
-                                        ${!allPickedUp ? 'disabled' : ''}
-                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:#f59e0b; box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(245, 158, 11, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
-                                  ${icon('bell', 14)} AVISAR AFUERA
-                                </button>
-                              `;
-                            } else {
-                              return `
-                                <button class="btn mark-delivered-btn" 
-                                        data-ids="${stop.orders.map(o => o.id).join(',')}" 
-                                        data-codes="${stop.orders.map(o => o.verificationCode).join(',')}"
-                                        data-istrip="${isTrip}"
-                                        ${!allPickedUp ? 'disabled' : ''}
-                                        style="height:100%; font-size:11px; font-weight:900; flex:1; border-radius:16px; border:none; color:white; background:var(--color-success); box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; padding:0 8px; text-align:center; line-height:1.2; letter-spacing:0.02em; white-space:normal !important;">
-                                  ${icon('checkCircle', 14)} ${isTrip ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
-                                </button>
-                              `;
-                            }
-                          })()}
-                        ` : ''}
+                          ${stop.type === 'DROP_OFF' ? `
+                             <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.userName}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
+                             <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.userName}" data-order-num="${stop.orders[0].orderId}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
+                             <button class="btn delivery-support-order-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Soporte Técnico">${icon('headset', 20)}</button>
+                            ` : `
+                             <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.orders[0].userName || 'Cliente'}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
+                             <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.orders[0].userName || 'Cliente'}" data-order-num="${stop.orders[0].orderId}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
+                             <button class="btn delivery-support-order-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Soporte Técnico">${icon('headset', 20)}</button>
+                            `}
+                        </div>
 
-                        <button class="btn view-active-map-btn" 
-                                data-id="${stop.type === 'PICKUP' ? stop.docId : stop.orders[0].id}" 
-                                ${stop.type === 'PICKUP' && stop.pickedUp ? 'disabled' : ''}
-                                style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:none; background:rgba(var(--color-primary-rgb), 0.15); color:var(--color-primary); transition:all 0.3s; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.1); ${stop.type === 'PICKUP' && stop.pickedUp ? 'opacity:0.45; cursor:not-allowed; box-shadow:none;' : ''}">
-                          ${icon('navigationArrow', 26)} 
-                        </button>
+                        <!-- Row 2: Main Action Button (Spans full width) -->
+                        <div style="width:100%;">
+                          ${stop.type === 'PICKUP' ? (() => {
+                            const isDigitalReceipt = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.details?.includes('Foto Digital por Chat'));
+                            return `
+                              <button class="btn mark-picked-up-btn" 
+                                      data-id="${stop.docId}" 
+                                      data-istrip="${stop.isFavor ? 'false' : stop.orders.some(o => o.isTrip)}"
+                                      data-isdigitalreceipt="${isDigitalReceipt}"
+                                      ${stop.pickedUp ? 'disabled' : ''}
+                                      style="width:100%; height:48px; font-size:13.5px; font-weight:900; border-radius:16px; border:none; color:white; background:${stop.pickedUp ? 'var(--color-success)' : 'var(--color-primary)'}; box-shadow: ${stop.pickedUp ? 'none' : '0 8px 20px rgba(var(--color-primary-rgb), 0.2)'}; transition:all 0.3s; ${stop.pickedUp ? 'opacity:0.6;' : ''} display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; letter-spacing:0.02em;">
+                                ${stop.pickedUp ? icon('check', 16) : (stop.orders.some(o => o.isTrip) ? icon('user', 16) : (isDigitalReceipt ? icon('checkCircle', 16) : icon('package', 16)))} 
+                                ${stop.pickedUp ? (stop.orders.some(o => o.isTrip) ? 'EN VIAJE' : 'RETIRADO') : (stop.orders.some(o => o.isTrip) ? 'PASAJERO A BORDO' : (isDigitalReceipt ? 'PAGADO' : 'RETIRAR'))}
+                              </button>
+                            `;
+                          })() : ''}
+                          
+                          ${stop.type === 'DROP_OFF' ? `
+                            ${(() => {
+                              const hasNotifiedAtDoor = stop.orders.every(o => o.isAtDoor);
+                              const allPickedUp = stop.orders.every(o => !!o.pickedUpAt);
+                              const isTrip = stop.orders.some(o => o.isTrip);
+                              const isPagoServiciosDigital = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.receiptDeliveryType === 'digital');
 
-                        ${stop.type === 'DROP_OFF' ? `
-                           <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.userName}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
-                           <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.userName}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
-                           <button class="btn delivery-support-order-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Soporte Técnico">${icon('helpCircle', 20)}</button>
-                         ` : `
-                           <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.orders[0].userName || 'Cliente'}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
-                           <button class="btn whatsapp-client-btn" data-phone="${stop.orders[0].userPhone || ''}" data-client-name="${stop.orders[0].userName || 'Cliente'}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:#25d366; transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('whatsapp', 20)}</button>
-                           <button class="btn delivery-support-order-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" style="width:48px; height:48px; min-width:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Soporte Técnico">${icon('helpCircle', 20)}</button>
-                         `}
+                              if (!isTrip && !hasNotifiedAtDoor && !isPagoServiciosDigital) {
+                                return `
+                                  <button class="btn notify-at-door-btn" 
+                                          data-ids="${stop.orders.map(o => o.id).join(',')}" 
+                                          ${!allPickedUp ? 'disabled' : ''}
+                                          style="width:100%; height:48px; font-size:13px; font-weight:900; border-radius:16px; border:none; color:white; background:#f59e0b; box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(245, 158, 11, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; letter-spacing:0.02em;">
+                                    ${icon('bell', 14)} AVISAR AFUERA
+                                  </button>
+                                `;
+                              } else {
+                                return `
+                                  <button class="btn mark-delivered-btn" 
+                                          data-ids="${stop.orders.map(o => o.id).join(',')}" 
+                                          data-codes="${stop.orders.map(o => o.verificationCode).join(',')}"
+                                          data-istrip="${isTrip}"
+                                          ${!allPickedUp ? 'disabled' : ''}
+                                          style="width:100%; height:48px; font-size:13px; font-weight:900; border-radius:16px; border:none; color:white; background:var(--color-success); box-shadow: ${!allPickedUp ? 'none' : '0 8px 20px rgba(34, 197, 94, 0.25)'}; transition:all 0.3s; ${!allPickedUp ? 'opacity:0.4;' : ''} display:flex; align-items:center; justify-content:center; gap:6px; letter-spacing:0.02em;">
+                                    ${icon('checkCircle', 14)} ${isTrip ? 'FINALIZAR VIAJE' : (stop.orders.some(o => o.favorType === 'gocash') ? 'FINALIZAR GO CASH' : 'ENTREGAR')}
+                                  </button>
+                                `;
+                              }
+                            })()}
+                          ` : ''}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2334,44 +2346,12 @@ function loadTabContent(tab, container, user) {
             const orderId = btn.dataset.orderId;
             const orderNum = btn.dataset.orderNum;
 
-            const fab = document.getElementById('support-bot-fab-btn');
-            const openSupport = async () => {
-              if (fab) {
-                try {
-                  const { doc, getDoc, updateDoc } = await import('firebase/firestore');
-                  const chatRef = doc(db, 'support_chats', user.uid);
-                  const chatSnap = await getDoc(chatRef);
-                  if (chatSnap.exists()) {
-                    await updateDoc(chatRef, {
-                      activeOrderId: orderId,
-                      activeOrderNum: orderNum
-                    });
-                  }
-                } catch (e) {
-                  console.warn('Could not set active order context in support chat:', e);
-                }
-                
-                fab.click();
-
-                setTimeout(() => {
-                  const input = document.getElementById('support-bot-input');
-                  if (input) {
-                    input.value = `⚠️ Hola Soporte, tengo un problema con el Pedido #${orderNum}: `;
-                    input.focus();
-                  }
-                }, 200);
-              }
-            };
-
-            if (fab) {
-              await openSupport();
-            } else {
-              import('../components/support-bot.js').then(async (m) => {
-                m.initSupportBot();
-                setTimeout(async () => {
-                  await openSupport();
-                }, 200);
-              });
+            try {
+              const { openSupportTicketModal } = await import('../components/support-bot.js');
+              await openSupportTicketModal(orderId, orderNum);
+            } catch (err) {
+              console.error('Error opening support ticket chat:', err);
+              import('../components/toast.js').then(t => t.showToast('Error al abrir chat de soporte', 'danger'));
             }
           });
         });

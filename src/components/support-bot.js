@@ -1053,3 +1053,200 @@ export function initSupportBot() {
     startRealtimeChat(user.uid);
   }
 }
+
+export async function openSupportTicketModal(orderId, orderNum) {
+  const { showModal, closeModal } = await import('./modal.js');
+  const { doc, getDoc, setDoc, updateDoc, onSnapshot, arrayUnion, serverTimestamp } = await import('firebase/firestore');
+  const { db } = await import('../firebase.js');
+  const user = getState().user;
+  if (!user) {
+    import('./toast.js').then(t => t.showToast('Iniciá sesión para acceder a soporte', 'warning'));
+    return;
+  }
+
+  const ticketDocId = `ticket_${orderId}`;
+  const chatRef = doc(db, 'support_chats', ticketDocId);
+  
+  // 1. Ensure ticket document exists in Firebase
+  const chatSnap = await getDoc(chatRef);
+  if (!chatSnap.exists()) {
+    await setDoc(chatRef, {
+      userId: user.uid,
+      userRole: 'driver',
+      userName: `${user.displayName || 'Repartidor'} (Pedido #${orderNum})`,
+      email: user.email || '',
+      ticketId: `#TK-${orderNum}`,
+      status: 'pending_approval',
+      lastMessageText: `⚠️ Consulta de Soporte por Pedido #${orderNum}`,
+      lastMessageTime: serverTimestamp(),
+      unreadByAdmin: true,
+      unreadByUser: false,
+      activeOrderId: orderId,
+      activeOrderNum: orderNum,
+      messages: []
+    });
+  }
+
+  // 2. Create the HTML layout for the fullscreen modal
+  const contentEl = document.createElement('div');
+  contentEl.className = 'ticket-chat-viewport';
+  contentEl.innerHTML = `
+    <!-- Header -->
+    <div class="ticket-chat-header" style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:12px; color:white; flex-shrink:0; position:relative; box-shadow:var(--shadow-md);">
+      <button id="ticket-chat-back-btn" style="background:none; border:none; color:white; cursor:pointer; padding:6px; display:flex; align-items:center; justify-content:center;">
+        ${icon('chevronLeft', 24)}
+      </button>
+      <div style="text-align:left;">
+        <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Soporte Técnico</div>
+        <div style="font-size:11px; opacity:0.85; font-weight:700;">Ticket #TK-${orderNum} • Pedido #${orderNum}</div>
+      </div>
+      <div style="margin-left:auto; font-size:10px; font-weight:900; background:rgba(255,255,255,0.2); padding:4px 8px; border-radius:6px; color:white;">
+        ACTIVO
+      </div>
+    </div>
+
+    <!-- Messages Container -->
+    <div id="ticket-messages-container" style="flex:1; padding:20px; overflow-y:auto; display:flex; flex-direction:column; gap:14px; background:var(--color-bg); min-height: 250px;">
+      <div style="text-align:center; padding:30px; color:var(--color-text-tertiary); font-size:13px; font-weight:600;">
+        Cargando conversación con soporte...
+      </div>
+    </div>
+
+    <!-- Footer Input Area -->
+    <div id="ticket-chat-footer" style="padding:12px 16px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:8px; align-items:center; flex-shrink:0;">
+      <input type="text" id="ticket-chat-input" placeholder="Escribí tu mensaje aquí..." style="flex:1; min-width:0; border:1.5px solid var(--color-border); border-radius:16px; padding:12px 16px; font-size:13.5px; font-weight:700; outline:none; background:var(--color-bg); color:var(--color-text); transition:border-color 0.2s;" />
+      <button id="ticket-chat-send-btn" style="background:var(--color-primary); color:white; border:none; border-radius:16px; width:48px; height:48px; display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; box-shadow:0 4px 12px rgba(var(--color-primary-rgb), 0.2);">
+        ${icon('send', 20)}
+      </button>
+    </div>
+
+    <style>
+      .ticket-chat-viewport {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        background: var(--color-bg);
+        overflow: hidden;
+      }
+      .ticket-chat-msg {
+        padding: 12px 16px;
+        border-radius: 18px;
+        max-width: 80%;
+        font-size: 13.5px;
+        font-weight: 600;
+        line-height: 1.5;
+        word-break: break-word;
+      }
+      .ticket-chat-msg.bot {
+        background: var(--color-bg-secondary);
+        color: var(--color-text);
+        border-bottom-left-radius: 4px;
+        align-self: flex-start;
+      }
+      .ticket-chat-msg.user {
+        background: var(--color-primary);
+        color: white;
+        border-bottom-right-radius: 4px;
+        align-self: flex-end;
+      }
+      .ticket-chat-msg.admin {
+        background: #3b82f6;
+        color: white;
+        border-bottom-left-radius: 4px;
+        align-self: flex-start;
+      }
+    </style>
+  `;
+
+  // 3. Show fullscreen modal
+  showModal({
+    title: '',
+    content: contentEl,
+    hideHeader: true,
+    fullscreen: true,
+    onOpen: () => {
+      const messagesBox = document.getElementById('ticket-messages-container');
+      const input = document.getElementById('ticket-chat-input');
+      const sendBtn = document.getElementById('ticket-chat-send-btn');
+      const backBtn = document.getElementById('ticket-chat-back-btn');
+
+      backBtn.onclick = () => {
+        unsub();
+        closeModal();
+      };
+
+      // Realtime listener for chat messages
+      const unsub = onSnapshot(chatRef, (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const messages = data.messages || [];
+
+        if (messages.length === 0) {
+          messagesBox.innerHTML = `
+            <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6; display:flex; flex-direction:column; align-items:center; gap:10px;">
+              <span style="font-size:24px;">💬</span>
+              <span>Ticket de soporte iniciado por el Pedido #${orderNum}. Escribí tu problema a continuación y soporte te responderá de inmediato.</span>
+            </div>
+          `;
+          return;
+        }
+
+        // Render messages
+        messagesBox.innerHTML = messages.map(msg => {
+          let typeClass = 'bot';
+          if (msg.sender === 'user') typeClass = 'user';
+          else if (msg.sender === 'admin') typeClass = 'admin';
+
+          return `
+            <div class="ticket-chat-msg ${typeClass}" style="margin-bottom: 8px;">
+              ${msg.text}
+            </div>
+          `;
+        }).join('');
+
+        // Auto scroll to bottom
+        setTimeout(() => {
+          messagesBox.scrollTop = messagesBox.scrollHeight;
+        }, 100);
+      });
+
+      // Send handler
+      const sendMessage = async () => {
+        const text = input.value.trim();
+        if (!text) return;
+
+        input.value = '';
+        input.disabled = true;
+        sendBtn.disabled = true;
+
+        try {
+          const newMessage = {
+            sender: 'user',
+            text: text,
+            timestamp: Date.now()
+          };
+
+          await updateDoc(chatRef, {
+            status: 'pending_approval',
+            lastMessageText: text,
+            lastMessageTime: serverTimestamp(),
+            unreadByAdmin: true,
+            unreadByUser: false,
+            messages: arrayUnion(newMessage)
+          });
+        } catch (err) {
+          console.error('Error sending support message:', err);
+        } finally {
+          input.disabled = false;
+          input.focus();
+          sendBtn.disabled = false;
+        }
+      };
+
+      sendBtn.onclick = sendMessage;
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') sendMessage();
+      };
+    }
+  });
+}

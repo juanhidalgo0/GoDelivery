@@ -1,6 +1,6 @@
 // GoDelivery — Auth Module
 import { auth, googleProvider, db } from './firebase.js';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword, signInWithCredential, GoogleAuthProvider, OAuthProvider, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc, getDocs, collection, query, where, serverTimestamp, runTransaction, onSnapshot } from 'firebase/firestore';
 import { setState, getState, clearUserState, setDeliveryAddress } from './state.js';
 import { showToast } from './components/toast.js';
@@ -8,14 +8,30 @@ import { showToast } from './components/toast.js';
 // Sign in with Email/Password (for testing)
 export async function signInWithTestAccount(email, password) {
   try {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    const user = result.user;
+    let user;
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      user = result.user;
+    } catch (err) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        // Try creating the account automatically if it's the official reviewer email
+        if (email === 'testgodeliveryios@gmail.com') {
+          console.log('[Auth] Reviewer account not found or invalid, creating it...');
+          const result = await createUserWithEmailAndPassword(auth, email, password);
+          user = result.user;
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
     await ensureUserDoc(user);
     showToast(`¡Sesión de prueba iniciada como ${user.email}!`, 'success');
     return user;
   } catch (error) {
     console.error('Test Auth error:', error);
-    showToast('Error al iniciar sesión de prueba. ¿Existen las credenciales?', 'error');
+    showToast('Error al iniciar sesión de prueba: ' + (error.message || 'Desconocido'), 'error');
     return null;
   }
 }
@@ -84,6 +100,49 @@ export async function signInWithGoogle() {
     } else {
       showToast('Error al iniciar sesión: ' + (error.message || 'Desconocido'), 'error');
     }
+    return null;
+  }
+}
+
+// Sign in with Apple
+export async function signInWithApple() {
+  try {
+    const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
+    if (isNativeApp) {
+      console.log('[Auth] Attempting Native Apple Sign-In...');
+      const { AppleSignIn } = await import('@capawesome/capacitor-apple-sign-in');
+      
+      const appleUser = await AppleSignIn.signIn({
+        scopes: ['EMAIL', 'FULL_NAME']
+      });
+      
+      const provider = new OAuthProvider('apple.com');
+      const credential = provider.credential({
+        idToken: appleUser.idToken
+      });
+      const result = await signInWithCredential(auth, credential);
+      const user = result.user;
+      
+      // If the user's name is returned on first login, customize it
+      if (appleUser.givenName || appleUser.familyName) {
+        user.displayName = `${appleUser.givenName || ''} ${appleUser.familyName || ''}`.trim();
+      }
+      
+      await ensureUserDoc(user);
+      showToast(`¡Bienvenido!`, 'success');
+      return user;
+    }
+
+    console.log('[Auth] Attempting Apple Sign-In with Popup...');
+    const provider = new OAuthProvider('apple.com');
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
+    await ensureUserDoc(user);
+    showToast(`¡Bienvenido!`, 'success');
+    return user;
+  } catch (error) {
+    console.error('Apple Auth error:', error);
+    showToast('Error al iniciar sesión con Apple: ' + (error.message || 'Desconocido'), 'error');
     return null;
   }
 }

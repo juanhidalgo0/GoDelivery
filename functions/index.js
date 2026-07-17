@@ -2597,7 +2597,8 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
   if (isNewlyUnreadByUser) {
     try {
       const targetTokens = [];
-      const tSnap = await db.collection("users").doc(event.params.userId).collection("fcmTokens").get();
+      const targetUserId = data.userId || event.params.userId;
+      const tSnap = await db.collection("users").doc(targetUserId).collection("fcmTokens").get();
       tSnap.docs.forEach(d => {
         if (d.data().token) {
           targetTokens.push(d.data().token);
