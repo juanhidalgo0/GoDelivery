@@ -614,7 +614,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     document.getElementById('help-terms-btn')?.addEventListener('click', () => showHelpAndTermsModal());
     document.getElementById('delete-account-row')?.addEventListener('click', () => {
       AudioManager.hapticLight();
-      window.open('https://godelivery-magdalena.web.app/delete-account.html', '_blank');
+      showDeleteAccountConfirmModal();
     });
 
     document.getElementById('profile-avatar-container')?.addEventListener('click', () => {
@@ -2142,27 +2142,44 @@ async function showDeleteAccountConfirmModal() {
       <div style="padding: 16px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 14px; text-align: center;">
         <div style="font-size: 40px;">🗑️</div>
         <p style="font-size: 14px; font-weight: 800; line-height: 1.4; color: var(--color-text-primary); margin: 0;">
-          ¿Estás seguro de que deseas solicitar la eliminación de tu cuenta?
+          ¿Estás seguro de que deseas eliminar tu cuenta?
         </p>
         <p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0; text-align: left;">
-          Se eliminarán permanentemente tu perfil, historial de pedidos, puntos de fidelidad y cualquier dato de ubicación asociado a tu usuario en <strong>GO!</strong> en un plazo máximo de 72 horas.
+          Esta acción es irreversible. Se eliminarán permanentemente tu perfil, historial de pedidos, puntos de fidelidad y cualquier dato de ubicación asociado a tu usuario en <strong>GO!</strong> en un plazo máximo de 72 horas.
         </p>
-        <div style="font-size: 11px; color: var(--color-text-tertiary); line-height: 1.4; padding: 10px; background: var(--color-bg-secondary); border-radius: 8px;">
-          Esta solicitud se enviará a <strong>goenvios2023@gmail.com</strong> desde tu correo electrónico.
-        </div>
       </div>
     `,
     footer: `
       <div style="padding: 0 4px 12px 4px; display: flex; gap: 12px; width: 100%;">
         <button id="del-acc-cancel-btn" class="btn btn-ghost" style="flex: 1; height: 48px; border-radius: 12px; font-weight: 800; cursor: pointer; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); color: var(--color-text-primary);">Cancelar</button>
-        <a id="del-acc-confirm-link" href="mailto:goenvios2023@gmail.com?subject=Solicitud%20de%20eliminacion%20de%20cuenta%20-%20GO!&body=Hola%2C%20solicito%20la%20eliminacion%20de%20mi%20cuenta%20de%20usuario%20con%20el%20correo%3A%20${encodeURIComponent(user.email || '')}%20y%20el%20ID%3A%20${encodeURIComponent(user.uid || '')}." class="btn btn-primary" style="flex: 1.5; height: 48px; border-radius: 12px; font-weight: 900; background: var(--color-danger); border: none; color: white; display: flex; align-items: center; justify-content: center; text-decoration: none; cursor: pointer;">Solicitar Eliminación</a>
+        <button id="del-acc-confirm-btn" class="btn btn-primary" style="flex: 1.5; height: 48px; border-radius: 12px; font-weight: 900; background: var(--color-danger); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer;">Eliminar Cuenta</button>
       </div>
     `,
     onOpen: () => {
       document.getElementById('del-acc-cancel-btn').onclick = () => closeModal();
-      document.getElementById('del-acc-confirm-link').onclick = () => {
-        closeModal();
-        showToast('Solicitud enviada. Procesaremos la eliminación en un plazo de 72 horas.', 'success');
+      document.getElementById('del-acc-confirm-btn').onclick = async () => {
+        try {
+          const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+          const { db } = await import('../firebase.js');
+          const { showToast } = await import('../components/toast.js');
+          
+          if (user.uid) {
+            const userRef = doc(db, 'users', user.uid);
+            await updateDoc(userRef, {
+              deletionRequested: true,
+              deletionRequestedAt: serverTimestamp()
+            });
+          }
+          
+          closeModal();
+          showToast('Tu solicitud ha sido procesada de forma automática.', 'success');
+          
+          // Sign out immediately
+          signOut();
+        } catch (err) {
+          console.error('Error requesting account deletion:', err);
+          showToast('Error al solicitar la eliminación de cuenta.', 'error');
+        }
       };
     }
   });
