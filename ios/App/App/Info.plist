@@ -59,6 +59,11 @@
 	<string>Esta aplicación requiere acceso a tu ubicación cuando está en uso para mostrarte los comercios cercanos, calcular costos de envío y permitir el rastreo del pedido.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Esta aplicación requiere acceso a tu ubicación en segundo plano para rastrear el progreso de la entrega en tiempo real del repartidor.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
