@@ -868,6 +868,8 @@ async function init() {
               `;
             }
           });
+        });
+
         const guestLoginBtn = document.getElementById('guest-login-btn');
         guestLoginBtn?.addEventListener('click', () => {
           sessionStorage.setItem('gd_guest_mode', 'true');
