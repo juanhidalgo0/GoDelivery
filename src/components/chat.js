@@ -10,7 +10,7 @@ let isChatOpening = false;
 /**
  * Opens a chat modal for a given order.
  */
-export async function openChat({ orderId, type, otherName, orderNum, senderDisplayName }) {
+export async function openChat({ orderId, type, otherName, orderNum, senderDisplayName, isAudit = false }) {
   if (isChatOpening) return;
   isChatOpening = true;
 
@@ -93,14 +93,14 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     }
     isInitialLoad = false;
 
-    renderMessages(messagesContainer, messages, user.uid, { chatId, orderId, chatType: type });
+    renderMessages(messagesContainer, messages, user.uid, { chatId, orderId, chatType: type, isAudit });
 
     // Mark unread messages as read
     let markedAny = false;
     snap.docs.forEach(d => {
       const msg = d.data();
       if (msg.senderId !== user.uid && !msg.read) {
-        updateDoc(doc(messagesRef, d.id), { read: true });
+        updateDoc(doc(messagesRef, d.id), { read: true, readAt: new Date().toISOString() });
         markedAny = true;
       }
     });
@@ -115,32 +115,34 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   orderUnsub = () => { };
   chatDocUnsub = () => { };
   (async () => {
-    let isReadOnly = false;
+    let isReadOnly = isAudit;
     try {
       // 1. Get current order status
       const orderSnap = await getDoc(doc(db, 'orders', orderId));
       if (orderSnap.exists()) {
         const orderStatus = orderSnap.data().status;
-        isReadOnly = orderStatus === 'completed' || orderStatus === 'cancelled';
+        isReadOnly = isAudit || orderStatus === 'completed' || orderStatus === 'cancelled';
       }
 
-      // 2. Ensure chat document exists
-      await setDoc(chatRef, {
-        orderId,
-        type,
-        participants: arrayUnion(user.uid),
-        lastActivityAt: serverTimestamp(),
-      }, { merge: true });
+      // 2. Ensure chat document exists (only if not auditing)
+      if (!isAudit) {
+        await setDoc(chatRef, {
+          orderId,
+          type,
+          participants: arrayUnion(user.uid),
+          lastActivityAt: serverTimestamp(),
+        }, { merge: true });
 
-      // Clear unread flag for this user
-      await updateDoc(chatRef, {
-        [`unread.${user.uid}`]: false
-      }).catch(() => {});
+        // Clear unread flag for this user
+        await updateDoc(chatRef, {
+          [`unread.${user.uid}`]: false
+        }).catch(() => {});
+      }
 
       // Update UI with footer and status
       const statusIndicator = document.getElementById(`chat-status-indicator-${chatId}`);
       if (statusIndicator && isReadOnly) {
-        statusIndicator.innerHTML = `<div class="chat-status-badge">${icon('lock', 12)} Finalizado</div>`;
+        statusIndicator.innerHTML = `<div class="chat-status-badge">${icon('lock', 12)} ${isAudit ? 'Auditoría' : 'Finalizado'}</div>`;
       }
 
       const footerArea = document.getElementById(`chat-footer-area-${chatId}`);
@@ -149,7 +151,7 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
           footerArea.innerHTML = `
             <div class="chat-closed-bar">
               ${icon('lock', 16)}
-              <span>Este chat ha finalizado</span>
+              <span>${isAudit ? 'Modo Auditoría (Solo Lectura)' : 'Este chat ha finalizado'}</span>
             </div>
           `;
         } else {
@@ -176,20 +178,25 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
                 `).join('')}
               </div>
             </div>
-            <div class="chat-input-bar">
+            <div class="chat-input-bar" style="position:relative; width:100%; box-sizing:border-box;">
               <button class="chat-emoji-btn" id="emoji-btn-${chatId}">${icon('smile', 22)}</button>
               <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen" style="color:var(--color-text-secondary);">${icon('camera', 22)}</button>
               <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" />
               <input type="file" id="chat-file-camera-${chatId}" style="display:none" accept="image/*" capture="environment" />
               <input type="text" id="chat-input-${chatId}" class="chat-input" placeholder="Escribí un mensaje..." autocomplete="off" />
-              <button class="chat-mic-btn" id="chat-mic-${chatId}" title="Grabar audio" style="color:var(--color-primary);">${icon('mic', 22)}</button>
-              <button class="chat-send-btn" id="chat-send-${chatId}">${icon('send', 20)}</button>
-            </div>
-            <!-- Audio recording indicator -->
-            <div id="chat-audio-indicator-${chatId}" style="display:none; position:absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--color-bg-secondary); padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); align-items: center; gap: 10px; z-index: 100;">
-              <div class="recording-dot" style="width: 10px; height: 10px; background: red; border-radius: 50%; animation: pulse 1s infinite;"></div>
-              <span id="chat-audio-timer-${chatId}" style="font-weight: 700; font-size: 14px;">0:00</span>
-              <span style="font-size: 11px; color: var(--color-text-tertiary); margin-left: 8px;">(Deslizá para cancelar)</span>
+              
+              <div id="chat-audio-indicator-${chatId}" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 16px; border-radius:18px; z-index:50; border:1.5px solid var(--color-border);">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
+                  <span id="chat-audio-timer-${chatId}" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px; animation: slideHint 1.5s infinite; color: var(--color-text-tertiary); font-size: 12px; font-weight: 700;">
+                  <span style="font-size:14px; margin-right:4px;">‹</span> Desliza para cancelar
+                </div>
+              </div>
+
+              <button class="chat-mic-btn" id="chat-mic-${chatId}" title="Grabar audio" style="color:var(--color-primary); z-index:60; position:relative;">${icon('mic', 22)}</button>
+              <button class="chat-send-btn" id="chat-send-${chatId}" style="z-index:60; position:relative;">${icon('send', 20)}</button>
             </div>
           `;
           setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName);
@@ -721,7 +728,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   });
 }
 
-function renderMessages(container, messages, currentUserId, { chatId, orderId, chatType } = {}) {
+function renderMessages(container, messages, currentUserId, { chatId, orderId, chatType, isAudit = false } = {}) {
   if (messages.length === 0) {
     container.innerHTML = `
       <div class="chat-empty">
@@ -739,8 +746,62 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
   messages.forEach((msg, index) => {
     const isMine = msg.senderId === currentUserId;
     const time = msg.timestamp?.toDate?.();
-    const timeStr = time ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const timeStr = time ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).toLowerCase() : '';
     const dateStr = time ? time.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '';
+
+    let ticksHtml = '';
+    // Show ticks if it's my message OR if we are in audit mode (to audit both sides)
+    if (isMine || isAudit) {
+      const now = Date.now();
+      const msgTime = msg.timestamp ? (msg.timestamp.toDate ? msg.timestamp.toDate().getTime() : new Date(msg.timestamp).getTime()) : now;
+      const diffSeconds = (now - msgTime) / 1000;
+
+      if (msg.status === 'sending' || !msg.timestamp) {
+        ticksHtml = `
+          <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+            <svg width="11" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        `;
+      } else if (msg.read) {
+        // Render double ticks (dark grey when visto)
+        ticksHtml = `
+          <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+            <svg width="16" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5.5 5.5L8.5 8.5L14.5 2.5" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        `;
+      } else {
+        // Render double ticks (white when delivered but unread)
+        ticksHtml = `
+          <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+            <svg width="16" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5.5 5.5L8.5 8.5L14.5 2.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        `;
+      }
+    }
+
+    let seenTimeHtml = '';
+    if ((isMine || isAudit) && msg.read) {
+      let seenTimeStr = '';
+      if (msg.readAt) {
+        const readDate = new Date(msg.readAt);
+        seenTimeStr = readDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).toLowerCase();
+      } else {
+        seenTimeStr = timeStr; // fallback
+      }
+      seenTimeHtml = `
+        <div style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-align: ${isMine ? 'right' : 'left'}; margin-top:3px; margin-left: ${isMine ? '0' : '10px'}; margin-right: ${isMine ? '10px' : '0'}; opacity:0.95; width:100%;">
+          Visto ${seenTimeStr}
+        </div>
+      `;
+    }
 
     if (dateStr && dateStr !== lastDate) {
       html += `<div class="chat-date-separator"><span>${dateStr}</span></div>`;
@@ -757,7 +818,7 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
     }
 
     html += `
-      <div class="chat-bubble-row ${isMine ? 'is-mine' : 'is-other'} ${isConsecutive ? 'consecutive' : ''}">
+      <div class="chat-bubble-row ${isMine ? 'is-mine' : 'is-other'} ${isConsecutive ? 'consecutive' : ''}" style="display: flex; flex-direction: column;">
         ${!isMine && !isConsecutive ? `<div class="chat-bubble-name">${msg.senderName}</div>` : ''}
         <div class="chat-bubble ${isMine ? 'bubble-mine' : 'bubble-other'} ${msg.type === 'image' ? 'bubble-image' : ''}">
           ${msg.type === 'image' ? `
@@ -785,9 +846,10 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
           ` : `
             <span class="bubble-text">${escapeHtml(msg.text)}</span>
           `}
-          <span class="bubble-time">${timeStr}${isMine ? ` ${msg.read ? '✓✓' : '✓'}` : ''}</span>
+          <span class="bubble-time" style="display:inline-flex; align-items:center; gap:2px;">${timeStr}${ticksHtml}</span>
         </div>
-        
+        ${seenTimeHtml}
+      </div>
         <!-- Action: Mark as Paid (Only for Commerce) -->
         ${!isMine && msg.type === 'image' && msg.status !== 'uploading' && chatType === 'client-commerce' && !msg.paidChecked ? `
           <div class="chat-bubble-actions">

@@ -159,6 +159,7 @@ export function initSupportBot() {
   let activeUnsub = null;
   let isOpen = false;
   let commerceCommissionRate = null;
+  let currentActiveTicketId = null;
 
   const fetchCommerceCommission = async (user) => {
     if (!user) return;
@@ -192,8 +193,12 @@ export function initSupportBot() {
     const user = getState().user;
     await fetchCommerceCommission(user);
 
-    const { doc, onSnapshot } = await import('firebase/firestore');
-    activeUnsub = onSnapshot(doc(db, 'support_chats', userId), (snap) => {
+    const { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc } = await import('firebase/firestore');
+    
+    // Listen to ALL support chats for this user
+    const q = query(collection(db, 'support_chats'), where('userId', '==', userId));
+    
+    activeUnsub = onSnapshot(q, (snap) => {
       const renderFAQsAndForm = () => {
         headerTitle.textContent = 'Soporte GoDelivery';
         headerSubtitle.textContent = 'Preguntas Frecuentes y Soporte';
@@ -232,12 +237,11 @@ export function initSupportBot() {
             textarea.disabled = true;
 
             try {
-              const { doc: docRef, setDoc, serverTimestamp } = await import('firebase/firestore');
-              const chatRef = docRef(db, 'support_chats', userId);
               const ticketNum = Math.floor(100000 + Math.random() * 900000);
               const ticketIdStr = `#TK-${ticketNum}`;
 
-              await setDoc(chatRef, {
+              // Create unique ticket document instead of user.uid
+              const newTicketRef = await addDoc(collection(db, 'support_chats'), {
                 userId: userId,
                 userName: user.displayName || 'Usuario',
                 email: user.email || '',
@@ -254,6 +258,8 @@ export function initSupportBot() {
                   timestamp: Date.now()
                 }]
               });
+
+              currentActiveTicketId = newTicketRef.id;
 
               import('../components/toast.js').then(m => m.showToast('¡Ticket de soporte enviado con éxito!', 'success'));
               textarea.value = '';
@@ -304,13 +310,19 @@ export function initSupportBot() {
         });
       };
 
-      if (!snap.exists() || snap.data().status === 'pending') {
+      // Find an active support chat (not closed and not the user.uid legacy doc)
+      const activeDoc = snap.docs.find(d => d.data().status !== 'closed' && d.id !== userId);
+
+      if (!activeDoc) {
         renderFAQsAndForm();
         unreadBadge.style.display = 'none';
+        currentActiveTicketId = null;
         return;
       }
 
-      const data = snap.data();
+      const activeTicketId = activeDoc.id;
+      currentActiveTicketId = activeTicketId;
+      const data = activeDoc.data();
       const messages = data.messages || [];
 
       // Update Header with Ticket ID
@@ -323,8 +335,9 @@ export function initSupportBot() {
       const isClosed = data.status === 'closed';
       if (isClosed) {
         import('firebase/firestore').then(({ doc: docRef, deleteDoc }) => {
-          deleteDoc(docRef(db, 'support_chats', userId)).catch(() => {});
+          deleteDoc(docRef(db, 'support_chats', activeTicketId)).catch(() => {});
         });
+        currentActiveTicketId = null;
         return;
       }
       
@@ -360,19 +373,53 @@ export function initSupportBot() {
           </button>
         `;
 
-        messagesBox.innerHTML = backToPresetButtonHTML + messages.map(msg => `
-          <div class="support-bot-message ${msg.sender === 'user' ? 'user' : 'bot'}" style="${msg.image ? 'padding: 8px;' : ''}">
-            ${msg.audio ? `
-              <div style="display:flex;align-items:center;gap:10px;padding:4px 8px;">
-                <div style="background:rgba(255,255,255,0.2);border-radius:50%;padding:8px;display:flex;align-items:center;justify-content:center;color:${msg.sender === 'user' ? 'white' : 'var(--color-primary)'};">${icon('mic', 16)}</div>
-                <audio controls src="${msg.audio}" style="height:32px;max-width:180px;"></audio>
+        messagesBox.innerHTML = backToPresetButtonHTML + messages.map(msg => {
+          const isUser = msg.sender === 'user';
+          const dateObj = msg.timestamp ? new Date(msg.timestamp) : new Date();
+          const timeStr = dateObj.toLocaleTimeString('es-AR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+          }).toLowerCase();
+
+          const isMine = isUser;
+          const ticksHtml = isMine ? (
+            !data.unreadByAdmin ? `
+              <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+                <svg width="15" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 5L5 9L15 1.5" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 5L9 9L19 1.5" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-4, 0)"/>
+                </svg>
+              </span>
+            ` : `
+              <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+                <svg width="15" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 5L5 9L15 1.5" stroke="rgba(255,255,255,0.45)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 5L9 9L19 1.5" stroke="rgba(255,255,255,0.45)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-4, 0)"/>
+                </svg>
+              </span>
+            `
+          ) : '';
+
+          return `
+            <div class="support-bot-message ${msg.sender === 'user' ? 'user' : 'bot'}" style="${msg.image ? 'padding: 8px 8px 18px 8px;' : 'padding: 10px 14px 18px 14px;'} position:relative; min-width:70px;">
+              ${msg.audio ? `
+                <div style="display:flex;align-items:center;gap:10px;padding:4px 8px;padding-bottom:10px;">
+                  <div style="background:rgba(255,255,255,0.2);border-radius:50%;padding:8px;display:flex;align-items:center;justify-content:center;color:${msg.sender === 'user' ? 'white' : 'var(--color-primary)'};">${icon('mic', 16)}</div>
+                  <audio controls src="${msg.audio}" style="height:32px;max-width:180px;"></audio>
+                </div>
+              ` : msg.image ? `
+                <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
+                ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px; font-weight:600; margin-bottom:10px;">${msg.text}</div>` : ''}
+              ` : `<div style="margin-bottom:2px; word-break:break-word; padding-right:16px;">${msg.text}</div>`}
+              
+              <div style="position:absolute; bottom:4px; right:10px; display:flex; align-items:center; gap:2px; font-size:9.5px; opacity:0.8; font-weight:700; color:${msg.sender === 'user' ? 'rgba(255,255,255,0.75)' : 'var(--color-text-tertiary)'}; font-family:var(--font-display);">
+                <span>${timeStr}</span>
+                ${ticksHtml}
               </div>
-            ` : msg.image ? `
-              <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
-              ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px; font-weight:600;">${msg.text}</div>` : ''}
-            ` : msg.text}
-          </div>
-        `).join('');
+            </div>
+          `;
+        }).join('');
 
         // Bind top questions button
         const topBtn = messagesBox.querySelector('#ai-top-questions-btn');
@@ -389,10 +436,18 @@ export function initSupportBot() {
       renderInputArea(!isClosed, data.ticketId);
       toggleInputAreaVisibility(!isClosed);
 
-      // If user has the window open, automatically clear unreadByUser flag
+      // If user has the window open, automatically clear unreadByUser flag and save read timestamp
       if (isOpen && data.unreadByUser) {
-        import('firebase/firestore').then(({ doc: docRef, updateDoc }) => {
-          updateDoc(docRef(db, 'support_chats', userId), { unreadByUser: false }).catch(() => {});
+        import('firebase/firestore').then(({ serverTimestamp }) => {
+          updateDoc(doc(db, 'support_chats', activeTicketId), { 
+            unreadByUser: false, 
+            userReadAt: serverTimestamp() 
+          }).catch(() => {});
+        }).catch(() => {
+          updateDoc(doc(db, 'support_chats', activeTicketId), { 
+            unreadByUser: false, 
+            userReadAt: new Date().toISOString() 
+          }).catch(() => {});
         });
       }
     }, (err) => console.error('Error in realtime chat support listener:', err));
@@ -669,15 +724,15 @@ export function initSupportBot() {
 
   const handleSendImage = async (file) => {
     const user = getState().user;
-    if (!user) return;
+    if (!user || !currentActiveTicketId) return;
 
     try {
       import('../components/toast.js').then(t => t.showToast('Enviando imagen...', 'info'));
       const { compressImageToBase64 } = await import('../utils/image.js');
       const base64Data = await compressImageToBase64(file, 800, 0.6);
 
-      const { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
-      const chatRef = doc(db, 'support_chats', user.uid);
+      const { doc, getDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
+      const chatRef = doc(db, 'support_chats', currentActiveTicketId);
       const chatSnap = await getDoc(chatRef);
 
       const newMessage = {
@@ -687,32 +742,15 @@ export function initSupportBot() {
         timestamp: Date.now()
       };
 
-      if (!chatSnap.exists()) {
-        const ticketNum = Math.floor(100000 + Math.random() * 900000);
-        await setDoc(chatRef, {
-          userId: user.uid,
-          userName: user.displayName || 'Usuario',
-          email: user.email || '',
-          goId: user.goId || '',
-          ticketId: `#TK-${ticketNum}`,
-          status: 'pending_approval',
-          lastMessageText: '📷 Foto',
-          lastMessageTime: serverTimestamp(),
-          unreadByAdmin: true,
-          unreadByUser: false,
-          messages: [newMessage]
-        });
-      } else {
-        await updateDoc(chatRef, {
-          status: 'pending_approval',
-          goId: user.goId || chatSnap.data().goId || '',
-          lastMessageText: '📷 Foto',
-          lastMessageTime: serverTimestamp(),
-          unreadByAdmin: true,
-          unreadByUser: false,
-          messages: arrayUnion(newMessage)
-        });
-      }
+      await updateDoc(chatRef, {
+        status: 'pending_approval',
+        goId: user.goId || chatSnap.data().goId || '',
+        lastMessageText: '📷 Foto',
+        lastMessageTime: serverTimestamp(),
+        unreadByAdmin: true,
+        unreadByUser: false,
+        messages: arrayUnion(newMessage)
+      });
     } catch (err) {
       console.error('Error sending support image:', err);
     }
@@ -720,12 +758,12 @@ export function initSupportBot() {
 
   const handleSendAudio = async (base64Audio) => {
     const user = getState().user;
-    if (!user) return;
+    if (!user || !currentActiveTicketId) return;
 
     try {
       import('../components/toast.js').then(t => t.showToast('Enviando audio...', 'info'));
-      const { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
-      const chatRef = doc(db, 'support_chats', user.uid);
+      const { doc, getDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
+      const chatRef = doc(db, 'support_chats', currentActiveTicketId);
       const chatSnap = await getDoc(chatRef);
 
       const newMessage = {
@@ -735,32 +773,15 @@ export function initSupportBot() {
         timestamp: Date.now()
       };
 
-      if (!chatSnap.exists()) {
-        const ticketNum = Math.floor(100000 + Math.random() * 900000);
-        await setDoc(chatRef, {
-          userId: user.uid,
-          userName: user.displayName || 'Usuario',
-          email: user.email || '',
-          goId: user.goId || '',
-          ticketId: `#TK-${ticketNum}`,
-          status: 'pending_approval',
-          lastMessageText: '🎙 Mensaje de voz',
-          lastMessageTime: serverTimestamp(),
-          unreadByAdmin: true,
-          unreadByUser: false,
-          messages: [newMessage]
-        });
-      } else {
-        await updateDoc(chatRef, {
-          status: 'pending_approval',
-          goId: user.goId || chatSnap.data().goId || '',
-          lastMessageText: '🎙 Mensaje de voz',
-          lastMessageTime: serverTimestamp(),
-          unreadByAdmin: true,
-          unreadByUser: false,
-          messages: arrayUnion(newMessage)
-        });
-      }
+      await updateDoc(chatRef, {
+        status: 'pending_approval',
+        goId: user.goId || chatSnap.data().goId || '',
+        lastMessageText: '🎙 Mensaje de voz',
+        lastMessageTime: serverTimestamp(),
+        unreadByAdmin: true,
+        unreadByUser: false,
+        messages: arrayUnion(newMessage)
+      });
     } catch (err) {
       console.error('Error sending support audio:', err);
     }
@@ -774,16 +795,21 @@ export function initSupportBot() {
           <input type="file" id="support-file-gallery" style="display:none" accept="image/*" />
           <input type="file" id="support-file-camera" style="display:none" accept="image/*" capture="environment" />
           <input type="text" id="support-bot-input" class="chat-input" placeholder="Escribí tu mensaje..." autocomplete="off" />
-          <button class="chat-mic-btn" id="support-mic-btn" title="Grabar audio" style="color:var(--color-primary);">${icon('mic', 20)}</button>
-          <button class="chat-send-btn" id="support-bot-send">
+          
+          <div id="support-audio-recording-overlay" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 110px 0 16px; border-radius:18px; z-index:50; border:1.5px solid var(--color-border);">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
+              <span id="support-audio-timer" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:4px; animation: slideHint 1.5s infinite; color: var(--color-text-tertiary); font-size: 12px; font-weight: 700;">
+              <span style="font-size:14px; margin-right:4px;">‹</span> Desliza para cancelar
+            </div>
+          </div>
+
+          <button class="chat-mic-btn" id="support-mic-btn" title="Grabar audio" style="color:var(--color-primary); z-index:60; position:relative; touch-action:none;">${icon('mic', 20)}</button>
+          <button class="chat-send-btn" id="support-bot-send" style="z-index:60; position:relative;">
             ${icon('send', 18)}
           </button>
-        </div>
-        <!-- Audio recording indicator -->
-        <div id="support-audio-indicator" style="display:none; position:absolute; bottom: 85px; left: 50%; transform: translateX(-50%); background: var(--color-surface); border: 1.5px solid var(--color-border); padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); align-items: center; gap: 10px; z-index: 1000;">
-          <div class="recording-dot" style="width: 10px; height: 10px; background: red; border-radius: 50%; animation: pulse 1s infinite;"></div>
-          <span id="support-audio-timer" style="font-weight: 700; font-size: 14px; color:var(--color-text);">0:00</span>
-          <span style="font-size: 11px; color: var(--color-text-tertiary); margin-left: 8px;">(Soltá para enviar)</span>
         </div>
       `;
 
@@ -794,7 +820,7 @@ export function initSupportBot() {
       const fileInputGallery = footerArea.querySelector('#support-file-gallery');
       const fileInputCamera = footerArea.querySelector('#support-file-camera');
       const micBtn = footerArea.querySelector('#support-mic-btn');
-      const audioIndicator = footerArea.querySelector('#support-audio-indicator');
+      const audioIndicator = footerArea.querySelector('#support-audio-recording-overlay');
       const audioTimer = footerArea.querySelector('#support-audio-timer');
 
       sendBtn.onclick = handleSendMessage;
@@ -842,13 +868,45 @@ export function initSupportBot() {
       let startX = 0;
       let isCancelled = false;
 
+      const stopRecording = () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      };
+
+      micBtn.addEventListener('dragstart', (e) => e.preventDefault());
+
+      const preventSelect = (e) => e.preventDefault();
+
+      const handlePointerMove = (e) => {
+        if (isRecording) {
+          const diffX = startX - e.clientX;
+          if (diffX > 0) {
+            micBtn.style.transform = `scale(1.4) translateX(${-diffX}px)`;
+          } else {
+            micBtn.style.transform = 'scale(1.4) translateX(0px)';
+          }
+
+          if (diffX > 150) {
+            isCancelled = true;
+            stopRecording();
+            import('../components/toast.js').then(m => m.showToast('Grabación cancelada', 'warning'));
+          }
+        }
+      };
+
+      const handlePointerUp = (e) => {
+        if (isRecording) {
+          stopRecording();
+        }
+      };
+
+      micBtn.addEventListener('dragstart', (e) => e.preventDefault());
+
       micBtn.addEventListener('pointerdown', async (e) => {
         e.preventDefault();
         startX = e.clientX;
         isCancelled = false;
-        try {
-          micBtn.setPointerCapture(e.pointerId);
-        } catch (err) {}
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           try {
@@ -866,9 +924,10 @@ export function initSupportBot() {
               audioIndicator.style.display = 'flex';
               micBtn.style.backgroundColor = 'var(--color-primary)';
               micBtn.style.color = 'white';
-              micBtn.style.transform = 'scale(1.4)';
+              micBtn.style.transform = 'scale(1.4) translateX(0px)';
               micBtn.style.boxShadow = '0 0 15px rgba(225, 29, 72, 0.5)';
               micBtn.style.borderRadius = '50%';
+              micBtn.innerHTML = icon('arrowLeft', 20);
 
               recordTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
@@ -876,6 +935,11 @@ export function initSupportBot() {
                 const s = (elapsed % 60).toString().padStart(2, '0');
                 audioTimer.textContent = `${m}:${s} (Deslizá < para cancelar)`;
               }, 1000);
+
+              window.addEventListener('pointermove', handlePointerMove);
+              window.addEventListener('pointerup', handlePointerUp);
+              window.addEventListener('pointercancel', handlePointerUp);
+              window.addEventListener('selectstart', preventSelect);
             };
 
             mediaRecorder.onstop = async () => {
@@ -887,6 +951,12 @@ export function initSupportBot() {
               micBtn.style.transform = '';
               micBtn.style.boxShadow = '';
               micBtn.style.borderRadius = '';
+              micBtn.innerHTML = icon('mic', 20);
+              
+              window.removeEventListener('pointermove', handlePointerMove);
+              window.removeEventListener('pointerup', handlePointerUp);
+              window.removeEventListener('pointercancel', handlePointerUp);
+              window.removeEventListener('selectstart', preventSelect);
               
               stream.getTracks().forEach(track => track.stop());
 
@@ -907,26 +977,6 @@ export function initSupportBot() {
           }
         }
       });
-
-      micBtn.addEventListener('pointermove', (e) => {
-        if (isRecording) {
-          const diffX = startX - e.clientX;
-          if (diffX > 60) {
-            isCancelled = true;
-            stopRecording();
-            import('../components/toast.js').then(m => m.showToast('Grabación cancelada', 'warning'));
-          }
-        }
-      });
-
-      const stopRecording = () => {
-        if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      };
-
-      micBtn.addEventListener('pointerup', stopRecording);
-      micBtn.addEventListener('pointerleave', stopRecording);
     } else {
       footerArea.innerHTML = `
         <div style="background:var(--color-bg-secondary); border-top:1px solid var(--color-border); padding:16px 20px; text-align:center; font-size:12.5px; font-weight:800; color:var(--color-text-secondary); display:flex; flex-direction:column; gap:6px; align-items:center; justify-content:center; width:100%;">
@@ -958,8 +1008,9 @@ export function initSupportBot() {
     sendBtn.disabled = true;
 
     try {
-      const { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
-      const chatRef = doc(db, 'support_chats', user.uid);
+      if (!currentActiveTicketId) return;
+      const { doc, getDoc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
+      const chatRef = doc(db, 'support_chats', currentActiveTicketId);
       const chatSnap = await getDoc(chatRef);
 
       const newMessage = {
@@ -968,32 +1019,15 @@ export function initSupportBot() {
         timestamp: Date.now()
       };
 
-      if (!chatSnap.exists()) {
-        const ticketNum = Math.floor(100000 + Math.random() * 900000);
-        await setDoc(chatRef, {
-          userId: user.uid,
-          userName: user.displayName || 'Usuario',
-          email: user.email || '',
-          goId: user.goId || '',
-          ticketId: `#TK-${ticketNum}`,
-          status: 'pending_approval',
-          lastMessageText: text,
-          lastMessageTime: serverTimestamp(),
-          unreadByAdmin: true,
-          unreadByUser: false,
-          messages: [newMessage]
-        });
-      } else {
-        await updateDoc(chatRef, {
-          status: 'pending_approval',
-          goId: user.goId || chatSnap.data().goId || '',
-          lastMessageText: text,
-          lastMessageTime: serverTimestamp(),
-          unreadByAdmin: true,
-          unreadByUser: false,
-          messages: arrayUnion(newMessage)
-        });
-      }
+      await updateDoc(chatRef, {
+        status: 'pending_approval',
+        goId: user.goId || chatSnap.data().goId || '',
+        lastMessageText: text,
+        lastMessageTime: serverTimestamp(),
+        unreadByAdmin: true,
+        unreadByUser: false,
+        messages: arrayUnion(newMessage)
+      });
     } catch (err) {
       console.error('Error sending message:', err);
     } finally {
@@ -1021,9 +1055,11 @@ export function initSupportBot() {
       unreadBadge.style.display = 'none';
 
       // Clear unread flag
-      import('firebase/firestore').then(({ doc, updateDoc }) => {
-        updateDoc(doc(db, 'support_chats', user.uid), { unreadByUser: false }).catch(() => {});
-      });
+      if (currentActiveTicketId) {
+        import('firebase/firestore').then(({ doc, updateDoc }) => {
+          updateDoc(doc(db, 'support_chats', currentActiveTicketId), { unreadByUser: false }).catch(() => {});
+        });
+      }
     } else {
       fab.classList.remove('open');
       if (iconContainer) iconContainer.innerHTML = icon('chatBubble', 26);
@@ -1090,28 +1126,12 @@ export async function openSupportTicketModal(orderId, orderNum) {
     return;
   }
 
-  const ticketDocId = `ticket_${orderId}`;
+  const isFullTicketId = orderId && (orderId.toString().startsWith('ticket_') || orderId.toString().length >= 20);
+  const ticketDocId = isFullTicketId ? orderId : `ticket_${orderId}`;
+  const displayTicketNum = orderNum || (isFullTicketId ? (orderId.toString().includes('_') ? orderId.split('_')[1] : orderId.slice(0, 6).toUpperCase()) : orderId);
   const chatRef = doc(db, 'support_chats', ticketDocId);
   
-  // 1. Ensure ticket document exists in Firebase
-  const chatSnap = await getDoc(chatRef);
-  if (!chatSnap.exists()) {
-    await setDoc(chatRef, {
-      userId: user.uid,
-      userRole: 'driver',
-      userName: `${user.displayName || 'Repartidor'} (Pedido #${orderNum})`,
-      email: user.email || '',
-      ticketId: `#TK-${orderNum}`,
-      status: 'pending_approval',
-      lastMessageText: `⚠️ Consulta de Soporte por Pedido #${orderNum}`,
-      lastMessageTime: serverTimestamp(),
-      unreadByAdmin: false,
-      unreadByUser: false,
-      activeOrderId: orderId,
-      activeOrderNum: orderNum,
-      messages: []
-    });
-  }
+  // Chat document creation is deferred until the first message is sent to prevent empty tickets.
 
   // 2. Create the HTML layout for the fullscreen modal
   const contentEl = document.createElement('div');
@@ -1124,7 +1144,7 @@ export async function openSupportTicketModal(orderId, orderNum) {
       </button>
       <div style="text-align:left;">
         <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Soporte Técnico</div>
-        <div style="font-size:11px; opacity:0.85; font-weight:700;">Ticket #TK-${orderNum} • Pedido #${orderNum}</div>
+        <div style="font-size:11px; opacity:0.85; font-weight:700;" id="ticket-chat-header-num">Cargando ticket...</div>
       </div>
       <div style="margin-left:auto; font-size:10px; font-weight:900; background:rgba(255,255,255,0.2); padding:4px 8px; border-radius:6px; color:white;">
         ACTIVO
@@ -1203,15 +1223,33 @@ export async function openSupportTicketModal(orderId, orderNum) {
 
       // Realtime listener for chat messages
       const unsub = onSnapshot(chatRef, (snap) => {
-        if (!snap.exists()) return;
+        if (!snap.exists()) {
+          const headerNumEl = document.getElementById('ticket-chat-header-num');
+          if (headerNumEl) {
+            headerNumEl.textContent = `Ticket #TK-${displayTicketNum}`;
+          }
+          messagesBox.innerHTML = `
+            <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6; display:flex; flex-direction:column; align-items:center; gap:10px;">
+              <span style="font-size:24px;">💬</span>
+              <span>Escribí tu consulta a continuación para iniciar el chat con soporte técnico.</span>
+            </div>
+          `;
+          return;
+        }
         const data = snap.data();
         const messages = data.messages || [];
+
+        const headerNumEl = document.getElementById('ticket-chat-header-num');
+        if (headerNumEl) {
+          const tId = data.ticketId || (data.activeOrderNum ? `#TK-${data.activeOrderNum}` : `#TK-${displayTicketNum}`);
+          headerNumEl.textContent = tId.startsWith('#') ? `Ticket ${tId}` : `Ticket #${tId}`;
+        }
 
         if (messages.length === 0) {
           messagesBox.innerHTML = `
             <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6; display:flex; flex-direction:column; align-items:center; gap:10px;">
               <span style="font-size:24px;">💬</span>
-              <span>Ticket de soporte iniciado por el Pedido #${orderNum}. Escribí tu problema a continuación y soporte te responderá de inmediato.</span>
+              <span>Ticket de soporte iniciado. Escribí tu consulta a continuación y te responderemos a la brevedad.</span>
             </div>
           `;
           return;
@@ -1223,9 +1261,48 @@ export async function openSupportTicketModal(orderId, orderNum) {
           if (msg.sender === 'user') typeClass = 'user';
           else if (msg.sender === 'admin') typeClass = 'admin';
 
+          const dateObj = msg.timestamp ? new Date(msg.timestamp) : new Date();
+          const timeStr = dateObj.toLocaleTimeString('es-AR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+          }).toLowerCase();
+
+          const isMine = typeClass === 'user';
+          const ticksHtml = isMine ? (
+            !data.unreadByAdmin ? `
+              <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+                <svg width="15" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 5L5 9L15 1.5" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 5L9 9L19 1.5" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-4, 0)"/>
+                </svg>
+              </span>
+            ` : `
+              <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+                <svg width="15" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 5L5 9L15 1.5" stroke="rgba(255,255,255,0.45)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 5L9 9L19 1.5" stroke="rgba(255,255,255,0.45)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-4, 0)"/>
+                </svg>
+              </span>
+            `
+          ) : '';
+
           return `
-            <div class="ticket-chat-msg ${typeClass}" style="margin-bottom: 8px;">
-              ${msg.text}
+            <div class="ticket-chat-msg ${typeClass}" style="margin-bottom: 8px; position:relative; padding-bottom:18px; min-width:70px;">
+              ${msg.audio ? `
+                <div style="display:flex;align-items:center;gap:10px;padding:4px 8px;padding-bottom:10px;">
+                  <div style="background:rgba(255,255,255,0.2);border-radius:50%;padding:8px;display:flex;align-items:center;justify-content:center;color:${typeClass === 'user' ? 'white' : 'var(--color-primary)'};">${icon('mic', 16)}</div>
+                  <audio controls src="${msg.audio}" style="height:32px;max-width:180px;"></audio>
+                </div>
+              ` : msg.image ? `
+                <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
+                ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px; font-weight:600; margin-bottom:10px;">${msg.text}</div>` : ''}
+              ` : `<div style="margin-bottom:2px; word-break:break-word; padding-right:16px;">${msg.text}</div>`}
+              
+              <div style="position:absolute; bottom:4px; right:10px; display:flex; align-items:center; gap:2px; font-size:9.5px; opacity:0.8; font-weight:700; color:${typeClass === 'user' ? 'rgba(255,255,255,0.75)' : 'var(--color-text-tertiary)'};">
+                <span>${timeStr}</span>
+                ${ticksHtml}
+              </div>
             </div>
           `;
         }).join('');
@@ -1246,20 +1323,69 @@ export async function openSupportTicketModal(orderId, orderNum) {
         sendBtn.disabled = true;
 
         try {
+          const docSnap = await getDoc(chatRef);
           const newMessage = {
             sender: 'user',
             text: text,
             timestamp: Date.now()
           };
 
-          await updateDoc(chatRef, {
-            status: 'pending_approval',
-            lastMessageText: text,
-            lastMessageTime: serverTimestamp(),
-            unreadByAdmin: true,
-            unreadByUser: false,
-            messages: arrayUnion(newMessage)
-          });
+          if (!docSnap.exists()) {
+            // First message! Create support chat document.
+            await setDoc(chatRef, {
+              userId: user.uid,
+              userRole: 'driver',
+              userName: `${user.displayName || 'Repartidor'} (Pedido #${displayTicketNum})`,
+              email: user.email || '',
+              ticketId: `#TK-${displayTicketNum}`,
+              status: 'pending_approval',
+              lastMessageText: text,
+              lastMessageTime: serverTimestamp(),
+              unreadByAdmin: true,
+              unreadByUser: false,
+              activeOrderId: orderId,
+              activeOrderNum: displayTicketNum,
+              messages: [newMessage]
+            });
+
+            // Write notifications to all admin users
+            try {
+              const { getDocs, query, collection, where, addDoc } = await import('firebase/firestore');
+              const adminsSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'admin')));
+              
+              const notifPromises = [];
+              adminsSnap.forEach(adminDoc => {
+                notifPromises.push(
+                  addDoc(collection(db, 'users', adminDoc.id, 'notifications'), {
+                    title: 'Nuevo Ticket de Soporte',
+                    body: `El repartidor ${user.displayName || 'Repartidor'} inició un chat por el Pedido #${displayTicketNum}: "${text.slice(0, 60)}"`,
+                    createdAt: serverTimestamp(),
+                    type: 'support_ticket',
+                    status: 'unread',
+                    clickable: true,
+                    url: `#/admin/support-chats?ticketId=${ticketDocId}`,
+                    data: {
+                      chatId: ticketDocId,
+                      orderId: orderId
+                    }
+                  })
+                );
+              });
+              await Promise.all(notifPromises);
+            } catch (errNotif) {
+              console.error('[SupportBot] Failed to dispatch admin notifications:', errNotif);
+            }
+          } else {
+            // Existing chat, append message.
+            await updateDoc(chatRef, {
+              status: 'pending_approval',
+              lastMessageText: text,
+              lastMessageTime: serverTimestamp(),
+              unreadByAdmin: true,
+              unreadByUser: false,
+              messages: arrayUnion(newMessage)
+            });
+          }
         } catch (err) {
           console.error('Error sending support message:', err);
         } finally {

@@ -121,25 +121,65 @@ export async function renderMarketplaceChat(chatId, content) {
         const msg = docSnap.data();
         const isMe = msg.senderId === currentUser.uid;
 
+        const dateObj = msg.timestamp ? msg.timestamp.toDate() : new Date();
+        const timeStr = dateObj.toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }).toLowerCase();
+
+        const isMine = isMe;
+        const ticksHtml = isMine ? (
+          (!msg.timestamp) ? `
+            <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+              <svg width="11" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 5L5 9L15 1.5" stroke="currentColor" opacity="0.6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          ` : (
+            msg.read ? `
+              <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+                <svg width="15" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 5L5 9L15 1.5" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 5L9 9L19 1.5" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-4, 0)"/>
+                </svg>
+              </span>
+            ` : `
+              <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
+                <svg width="15" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 5L5 9L15 1.5" stroke="currentColor" opacity="0.6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 5L9 9L19 1.5" stroke="currentColor" opacity="0.6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-4, 0)"/>
+                </svg>
+              </span>
+            `
+          )
+        ) : '';
+
         let contentHtml = '';
         if (msg.type === 'image') {
-          contentHtml = `<img src="${msg.imageUrl}" style="max-width:200px; max-height:200px; border-radius:12px; display:block; cursor:pointer;" onclick="window.openLightbox('${msg.imageUrl}')" />`;
+          contentHtml = `<img src="${msg.imageUrl}" style="max-width:200px; max-height:200px; border-radius:12px; display:block; cursor:pointer; margin-bottom:10px;" onclick="window.openLightbox('${msg.imageUrl}')" />`;
         } else if (msg.type === 'audio') {
-          contentHtml = `<audio src="${msg.audioUrl}" controls style="max-width:220px;"></audio>`;
+          contentHtml = `<audio src="${msg.audioUrl}" controls style="max-width:220px; margin-bottom:10px;"></audio>`;
         } else {
-          contentHtml = `<span>${msg.text}</span>`;
+          contentHtml = `<span style="display:block; margin-bottom:10px; padding-right:16px;">${msg.text}</span>`;
         }
 
         return `
           <div style="display:flex; justify-content:${isMe ? 'flex-end' : 'flex-start'}; width:100%;">
-            <div style="max-width:75%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.4; word-break:break-word;
+            <div style="max-width:75%; padding:10px 14px 18px 14px; border-radius:16px; font-size:14px; line-height:1.4; word-break:break-word;
               background:${isMe ? 'var(--color-primary)' : 'var(--color-bg-secondary)'};
               color:${isMe ? 'white' : 'var(--color-text)'};
               border-bottom-right-radius:${isMe ? '4px' : '16px'};
               border-bottom-left-radius:${isMe ? '16px' : '4px'};
               box-shadow:var(--shadow-sm);
+              position:relative;
+              min-width:70px;
             ">
               ${contentHtml}
+              <div style="position:absolute; bottom:4px; right:10px; display:flex; align-items:center; gap:2px; font-size:9.5px; opacity:0.8; font-weight:700; color:${isMe ? 'rgba(255,255,255,0.75)' : 'var(--color-text-tertiary)'};">
+                <span>${timeStr}</span>
+                ${ticksHtml}
+              </div>
             </div>
           </div>
         `;
@@ -341,7 +381,7 @@ export async function renderMarketplaceChat(chatId, content) {
     micBtn.addEventListener('pointermove', (e) => {
       if (isRecording) {
         const diffX = startX - e.clientX;
-        if (diffX > 60) {
+        if (diffX > 80) {
           isCancelled = true;
           stopRec();
           import('../components/toast.js').then(m => m.showToast('Grabación cancelada', 'warning'));
@@ -356,7 +396,6 @@ export async function renderMarketplaceChat(chatId, content) {
     };
 
     micBtn.addEventListener('pointerup', stopRec);
-    micBtn.addEventListener('pointerleave', stopRec);
 
     // Confirm / Mark Sold Bindings
     const markSoldBtn = content.querySelector('#btn-mark-sold');

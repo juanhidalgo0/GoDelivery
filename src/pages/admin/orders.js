@@ -4,6 +4,75 @@ import { formatPrice, formatDate } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal } from '../../components/modal.js';
+import { getState, subscribe } from '../../state.js';
+
+const userCache = {};
+let knownOrderIds = null;
+const newOrderAlerts = {};
+let currentLimit = 50;
+let infiniteObserver = null;
+let pageLoadTime = 0;
+
+async function getOrFetchUserProfile(userId) {
+  if (!userId) return null;
+  if (userCache[userId] !== undefined) return userCache[userId];
+  
+  userCache[userId] = null;
+  try {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const { db } = await import('../../firebase.js');
+    const userSnap = await getDoc(doc(db, 'users', userId));
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      let photo = data.photoURL || data.profilePhoto || null;
+      const role = data.role;
+      let displayId = data.dlId || data.goId || '---';
+
+      if (role === 'comercio' || role === 'commerce') {
+        const comSnap = await getDoc(doc(db, 'comercios', userId));
+        if (comSnap.exists()) {
+          const comData = comSnap.data();
+          photo = comData.logo || comData.image || photo;
+        }
+      }
+      
+      const profile = {
+        photo,
+        role,
+        displayId,
+        displayName: data.displayName || 'Usuario'
+      };
+      userCache[userId] = profile;
+      return profile;
+    }
+  } catch (e) {
+    console.error('[Orders] Error fetching user profile:', userId, e);
+  }
+  return null;
+}
+
+const commerceLogoCache = {};
+
+async function getOrFetchCommerceLogo(comercioId) {
+  if (!comercioId) return null;
+  if (commerceLogoCache[comercioId] !== undefined) return commerceLogoCache[comercioId];
+  
+  commerceLogoCache[comercioId] = null;
+  try {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const { db } = await import('../../firebase.js');
+    const comSnap = await getDoc(doc(db, 'comercios', comercioId));
+    if (comSnap.exists()) {
+      const data = comSnap.data();
+      const logo = data.logo || data.image || null;
+      commerceLogoCache[comercioId] = logo;
+      return logo;
+    }
+  } catch (e) {
+    console.error('[Orders] Error fetching commerce logo:', comercioId, e);
+  }
+  return null;
+}
 
 let allOrders = [];
 let ordersUnsubscribe = null;
@@ -20,8 +89,8 @@ function getComercioDisplayName(o) {
   if (o.isTrip) return 'Go Viaje';
   if (o.isFavor) {
     if (o.favorType === 'gocash') return 'Go Cash';
-    if (o.favorType === 'encomienda') return 'Encomienda';
-    if (o.favorType === 'mandado' || o.favorType === 'compra') return 'Mandado';
+    if (o.favorType === 'encomienda' || o.favorType === 'mandado') return 'Encomienda';
+    if (o.favorType === 'compra') return 'Mandado';
     if (o.favorType === 'pagodeservicios') return 'Pago de Servicios';
     return 'Mandado';
   }
@@ -58,6 +127,8 @@ function parseFavorDetails(details) {
 export async function renderAdminOrders() {
   const content = document.getElementById('app-content');
   allOrders = [];
+  currentLimit = 50;
+  pageLoadTime = Date.now();
   
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
@@ -84,42 +155,78 @@ export async function renderAdminOrders() {
         </button>
       </div>
 
-      <!-- Advanced Search & Filter -->
-      <div style="padding:20px; flex-shrink:0; background:linear-gradient(to bottom, var(--color-surface), var(--color-bg));">
-        <div class="search-box-v4" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:6px; display:flex; align-items:center; box-shadow:var(--shadow-md);">
-          <div style="padding:0 15px; color:var(--color-text-tertiary);">${icon('search', 20)}</div>
-          <input type="text" id="order-search" placeholder="Cliente, Comercio, ID o Monto..." 
-            style="flex:1; padding:12px 0; background:transparent; border:none; color:var(--color-text); font-weight:700; font-size:15px; outline:none;" />
+      <!-- Advanced Search -->
+      <div style="padding:16px 20px; flex-shrink:0; background:linear-gradient(to bottom, var(--color-surface), var(--color-bg));">
+        <div class="search-box-v4" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:4px 6px; display:flex; align-items:center; box-shadow:var(--shadow-sm); margin-bottom:14px;">
+          <div style="padding:0 12px; color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('search', 18)}</div>
+          <input type="text" id="order-search" placeholder="Buscar cliente, comercio, ID o monto..." 
+            style="flex:1; padding:10px 0; background:transparent; border:none; color:var(--color-text); font-weight:700; font-size:14.5px; outline:none;" />
         </div>
         
-        <div class="filter-bar-v4" style="display:flex; gap:10px; margin-top:16px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none;">
-          <button class="f-chip-v4 active" data-status="all">Todos</button>
-          <button class="f-chip-v4" data-status="pending" style="--c:#FFA500;">Pendientes</button>
-          <button class="f-chip-v4" data-status="confirmed" style="--c:#3498DB;">Preparando</button>
-          <button class="f-chip-v4" data-status="delivering" style="--c:#9B59B6;">En Camino</button>
-          <button class="f-chip-v4" data-status="completed" style="--c:#27AE60;">Éxito</button>
-          <button class="f-chip-v4" data-status="cancelled" style="--c:#E74C3C;">Bajas</button>
-        </div>
-
-        <!-- Order Type Filter Bar -->
-        <div class="type-filter-bar" style="display:flex; gap:8px; margin-top:12px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none;">
-          <button class="t-chip active" data-type="all">Todos los Tipos</button>
-          <button class="t-chip" data-type="comercio">Comercio</button>
-          <button class="t-chip" data-type="mandado">Mandado</button>
-          <button class="t-chip" data-type="encomienda">Encomienda</button>
-          <button class="t-chip" data-type="gocash">Go Cash</button>
-          <button class="t-chip" data-type="trip">Go Viaje</button>
-        </div>
-
-        <!-- Date Range Filter -->
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;">
-          <div>
-            <label style="font-size:9px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; display:block; margin-bottom:4px; letter-spacing:0.02em;">Desde (Fecha/Hora)</label>
-            <input type="datetime-local" id="filter-date-start" style="width:100%; height:38px; border-radius:10px; padding:0 8px; font-size:12px; font-weight:700; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); outline:none;" />
+        <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:16px; box-shadow:var(--shadow-sm);">
+          <div id="toggle-filters-btn" style="font-size:10px; font-weight:900; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              ${icon('filter', 12)} Filtros de Auditoría
+            </div>
+            <span id="filters-chevron-icon" style="transition:transform 0.2s; display:flex; align-items:center; color:var(--color-text-secondary);">${icon('chevronDown', 14)}</span>
           </div>
-          <div>
-            <label style="font-size:9px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; display:block; margin-bottom:4px; letter-spacing:0.02em;">Hasta (Fecha/Hora)</label>
-            <input type="datetime-local" id="filter-date-end" style="width:100%; height:38px; border-radius:10px; padding:0 8px; font-size:12px; font-weight:700; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); outline:none;" />
+          
+          <div id="filters-collapsible-content" style="display:none; margin-top:14px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div>
+                <label style="font-size:9.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; display:block; margin-bottom:6px; letter-spacing:0.02em;">Estado</label>
+                <div style="position:relative; width:100%;">
+                  <div style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--color-primary); pointer-events:none; display:flex; align-items:center; z-index:10;">
+                    ${icon('activity', 16)}
+                  </div>
+                  <select id="filter-status-select" class="premium-select">
+                    <option value="all">🟢 Todos los Estados</option>
+                    <option value="pending">⏳ Pendientes</option>
+                    <option value="confirmed">👨‍🍳 Preparando</option>
+                    <option value="delivering">🚴 En Camino</option>
+                    <option value="completed">✅ Entregados</option>
+                    <option value="cancelled">❌ Cancelados</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style="font-size:9.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; display:block; margin-bottom:6px; letter-spacing:0.02em;">Servicio</label>
+                <div style="position:relative; width:100%;">
+                  <div style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--color-primary); pointer-events:none; display:flex; align-items:center; z-index:10;">
+                    ${icon('grid', 16)}
+                  </div>
+                  <select id="filter-type-select" class="premium-select">
+                    <option value="all">⚡ Todos los Servicios</option>
+                    <option value="comercio">🏪 Comercios</option>
+                    <option value="mandado">🛵 Mandados</option>
+                    <option value="encomienda">📦 Encomiendas</option>
+                    <option value="gocash">💵 Go Cash</option>
+                    <option value="trip">🚴 Go Viaje</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div class="premium-date-grid">
+              <div>
+                <label style="font-size:9.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; display:block; margin-bottom:6px; letter-spacing:0.02em;">Desde</label>
+                <div style="position:relative; width:100%;">
+                  <div style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); pointer-events:none; display:flex; align-items:center; z-index:10;">
+                    ${icon('calendar', 14)}
+                  </div>
+                  <input type="date" id="filter-date-start" class="premium-input-date" />
+                </div>
+              </div>
+              <div>
+                <label style="font-size:9.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; display:block; margin-bottom:6px; letter-spacing:0.02em;">Hasta</label>
+                <div style="position:relative; width:100%;">
+                  <div style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); pointer-events:none; display:flex; align-items:center; z-index:10;">
+                    ${icon('calendar', 14)}
+                  </div>
+                  <input type="date" id="filter-date-end" class="premium-input-date" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -139,6 +246,75 @@ export async function renderAdminOrders() {
       .t-chip { padding:10px 18px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; font-size:11px; font-weight:900; color:var(--color-text-tertiary); cursor:pointer; white-space:nowrap; transition:all 0.2s; }
       .t-chip.active { background:var(--color-primary); color:white; border-color:transparent; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.3); }
 
+      .premium-select, .premium-input-date {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 46px !important;
+        min-height: 46px !important;
+        line-height: 46px !important;
+        border-radius: 16px !important;
+        padding: 0 12px 0 36px !important;
+        font-size: 12px !important;
+        font-weight: 800 !important;
+        font-family: inherit !important;
+        border: 1.5px solid var(--color-border-light) !important;
+        background-color: var(--color-surface) !important;
+        color: var(--color-text) !important;
+        outline: none !important;
+        cursor: pointer !important;
+        box-sizing: border-box !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.02) !important;
+        display: block !important;
+        margin: 0 !important;
+      }
+      .premium-select {
+        appearance: none !important;
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23e11d48' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 12px center !important;
+        background-size: 14px !important;
+        padding-right: 30px !important;
+      }
+      .premium-input-date::-webkit-calendar-picker-indicator {
+        cursor: pointer !important;
+        opacity: 0.6 !important;
+        filter: invert(15%) sepia(95%) saturate(6932%) hue-rotate(354deg) brightness(91%) contrast(92%);
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .premium-select:focus, .premium-input-date:focus {
+        border-color: var(--color-primary) !important;
+        box-shadow: 0 4px 12px rgba(225, 29, 72, 0.08), 0 0 0 3px rgba(225, 29, 72, 0.15) !important;
+        transform: translateY(-1px);
+      }
+
+      .premium-date-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      @media (max-width: 480px) {
+        .premium-date-grid {
+          grid-template-columns: 1fr !important;
+        }
+      }
+
+      @keyframes vibrate-shake {
+        0%, 100% { transform: scale(1) translateX(0); }
+        2%, 6%, 10%, 14%, 18%, 22%, 26%, 30%, 34%, 38%, 42%, 46% { transform: scale(1.02) translateX(-3px) rotate(-0.5deg); }
+        4%, 8%, 12%, 16%, 20%, 24%, 28%, 32%, 36%, 40%, 44%, 48% { transform: scale(1.02) translateX(3px) rotate(0.5deg); }
+        50% { transform: scale(1) translateX(0); }
+      }
+      .vibrate-new-order {
+        animation: vibrate-shake 5s cubic-bezier(.36,.07,.19,.97) both !important;
+        border: 2px solid var(--color-primary) !important;
+        box-shadow: 0 0 20px rgba(225, 29, 72, 0.35) !important;
+      }
+
       .order-card-v4 { 
         background:var(--color-surface); 
         border:1px solid var(--color-border); 
@@ -151,7 +327,7 @@ export async function renderAdminOrders() {
         overflow:hidden;
       }
       .order-card-v4:hover { transform: translateY(-3px); box-shadow:var(--shadow-lg); border-color:var(--color-primary); }
-      .order-card-v4::before { content:''; position:absolute; left:0; top:0; width:6px; height:100%; background:var(--st-color); }
+      .order-card-v4::before { content:''; position:absolute; left:0; top:0; width:6px; height:100%; background:var(--srv-color, var(--st-color)); }
       
       .s-pill-v4 { font-size:10px; font-weight:900; padding:5px 12px; border-radius:10px; background:var(--st-bg); color:var(--st-color); letter-spacing:0.05em; }
     </style>
@@ -159,27 +335,68 @@ export async function renderAdminOrders() {
 
   setupEventListeners();
   loadAllOrders();
+
+  try {
+    const { getRouteParams } = await import('../../router.js');
+    const params = getRouteParams();
+    if (params && params.orderId) {
+      setTimeout(() => {
+        window.showOrderDetail(params.orderId);
+      }, 350);
+    }
+  } catch (err) {
+    console.error('Error auto-opening order detail:', err);
+  }
 }
 
 function setupEventListeners() {
   document.getElementById('order-search')?.addEventListener('input', () => renderOrdersList());
-  document.querySelectorAll('.f-chip-v4').forEach(chip => {
-    chip.onclick = () => {
-      document.querySelectorAll('.f-chip-v4').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      renderOrdersList();
-    };
-  });
-  document.querySelectorAll('.t-chip').forEach(chip => {
-    chip.onclick = () => {
-      document.querySelectorAll('.t-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      renderOrdersList();
-    };
-  });
+  document.getElementById('filter-status-select')?.addEventListener('change', () => renderOrdersList());
+  document.getElementById('filter-type-select')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('filter-date-start')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('filter-date-end')?.addEventListener('change', () => renderOrdersList());
-  document.getElementById('refresh-orders-btn').onclick = () => loadAllOrders();
+  const refreshBtn = document.getElementById('refresh-orders-btn');
+  if (refreshBtn) refreshBtn.onclick = () => loadAllOrders();
+
+  // Collapsible Filters Toggle
+  const toggleBtn = document.getElementById('toggle-filters-btn');
+  const filtersContent = document.getElementById('filters-collapsible-content');
+  const chevron = document.getElementById('filters-chevron-icon');
+  if (toggleBtn && filtersContent) {
+    toggleBtn.onclick = () => {
+      const isHidden = filtersContent.style.display === 'none';
+      if (isHidden) {
+        filtersContent.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+      } else {
+        filtersContent.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+      }
+    };
+  }
+
+  // Real-time support chat unread bubble badge
+  const updateChatBadge = (count) => {
+    const btn = document.getElementById('btn-go-to-chats');
+    if (!btn) return;
+    let badge = btn.querySelector('.chat-badge-bubble');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'chat-badge-bubble';
+        badge.style.cssText = 'position:absolute; top:-4px; right:-4px; background:#E11D48; color:white; font-size:9px; font-weight:900; height:18px; min-width:18px; border-radius:9px; padding:0 5px; display:flex; align-items:center; justify-content:center; border:2px solid var(--color-primary); box-shadow:0 2px 5px rgba(0,0,0,0.2); box-sizing:border-box; z-index:10;';
+        btn.appendChild(badge);
+      }
+      badge.textContent = count;
+      badge.style.display = 'flex';
+    } else {
+      if (badge) badge.style.display = 'none';
+    }
+  };
+
+  const initialCount = getState().unreadSupportCount || 0;
+  updateChatBadge(initialCount);
+  subscribe('unreadSupportCount', (count) => updateChatBadge(count || 0));
 }
 
 function loadAllOrders() {
@@ -188,7 +405,7 @@ function loadAllOrders() {
   
   if (ordersUnsubscribe) ordersUnsubscribe();
 
-  const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100));
+  const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(currentLimit));
   
   ordersUnsubscribe = onSnapshot(q, (snap) => {
     if (dot) {
@@ -197,9 +414,38 @@ function loadAllOrders() {
     }
     if (diag) diag.textContent = `• ONLINE (${snap.size})`;
 
+    const isFirstLoad = (knownOrderIds === null);
+    if (isFirstLoad) {
+      knownOrderIds = new Set();
+    }
+
     allOrders = [];
     snap.forEach(doc => {
-      try { allOrders.push({ id: doc.id, ...doc.data() }); } catch(e) {}
+      try {
+        const data = doc.data();
+        allOrders.push({ id: doc.id, ...data });
+        
+        if (isFirstLoad) {
+          knownOrderIds.add(doc.id);
+        } else {
+          if (!knownOrderIds.has(doc.id)) {
+            knownOrderIds.add(doc.id);
+            
+            const orderMs = data.createdAt?.toMillis ? data.createdAt.toMillis() : (data.createdAt ? new Date(data.createdAt).getTime() : 0);
+            const isCreatedAfterLoad = orderMs > (pageLoadTime - 2000);
+            
+            if (isCreatedAfterLoad) {
+              newOrderAlerts[doc.id] = Date.now();
+              // Try to play notification sound
+              try {
+                import('../../utils/audio-manager.js').then(({ AudioManager }) => {
+                  AudioManager.play('new_order');
+                }).catch(() => {});
+              } catch(e) {}
+            }
+          }
+        }
+      } catch(e) {}
     });
 
     // Sort scheduled orders to the top
@@ -223,8 +469,8 @@ function renderOrdersList() {
   if (!container) return;
 
   const searchText = (document.getElementById('order-search')?.value || '').toLowerCase();
-  const filter = document.querySelector('.f-chip-v4.active')?.dataset.status || 'all';
-  const typeFilter = document.querySelector('.t-chip.active')?.dataset.type || 'all';
+  const filter = document.getElementById('filter-status-select')?.value || 'all';
+  const typeFilter = document.getElementById('filter-type-select')?.value || 'all';
   const dateStartVal = document.getElementById('filter-date-start')?.value;
   const dateEndVal = document.getElementById('filter-date-end')?.value;
 
@@ -261,7 +507,8 @@ function renderOrdersList() {
   }
 
   if (dateStartVal) {
-    const startMs = new Date(dateStartVal).getTime();
+    const parts = dateStartVal.split('-');
+    const startMs = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 0, 0, 0, 0).getTime();
     filtered = filtered.filter(o => {
       const orderMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
       return orderMs >= startMs;
@@ -269,7 +516,8 @@ function renderOrdersList() {
   }
 
   if (dateEndVal) {
-    const endMs = new Date(dateEndVal).getTime();
+    const parts = dateEndVal.split('-');
+    const endMs = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999).getTime();
     filtered = filtered.filter(o => {
       const orderMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
       return orderMs <= endMs;
@@ -287,7 +535,7 @@ function renderOrdersList() {
     return;
   }
 
-  container.innerHTML = filtered.map(o => {
+  const htmlContent = filtered.map(o => {
     const sKey = getStatusKey(o.status);
     const config = STATUS_CONFIG[sKey] || STATUS_CONFIG.pending;
     
@@ -300,47 +548,200 @@ function renderOrdersList() {
       </div>
     ` : '';
 
+    const clientProfile = userCache[o.userId];
+    if (clientProfile === undefined && o.userId) {
+      getOrFetchUserProfile(o.userId).then(() => renderOrdersList());
+    }
+    const driverProfile = userCache[o.driverId];
+    if (driverProfile === undefined && o.driverId) {
+      getOrFetchUserProfile(o.driverId).then(() => renderOrdersList());
+    }
+
+    const clientPhoto = clientProfile?.photo || null;
+    const driverPhoto = driverProfile?.photo || null;
+    const driverDlId = o.driverDlId || driverProfile?.displayId || '---';
+
+    // Calculate service-specific parameters
+    let serviceLabel = 'Comercio';
+    let serviceColor = '#D946EF'; // Magenta
+    let serviceIconHtml = icon('store', 20);
+
+    if (o.isTrip) {
+      serviceLabel = 'Go Viaje';
+      serviceColor = '#3B82F6'; // Blue
+      if (o.driverId && driverPhoto) {
+        serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
+      } else {
+        serviceIconHtml = icon('bike', 20);
+      }
+    } else if (o.isFavor) {
+      if (o.favorType === 'gocash') {
+        serviceLabel = 'Go Cash';
+        serviceColor = '#6366F1'; // Indigo
+        if (o.driverId && driverPhoto) {
+          serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
+        } else {
+          serviceIconHtml = icon('wallet', 20);
+        }
+      } else if (o.favorType === 'encomienda' || o.favorType === 'mandado') {
+        serviceLabel = 'Encomienda';
+        serviceColor = '#10B981'; // Green
+        if (o.driverId && driverPhoto) {
+          serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
+        } else {
+          serviceIconHtml = icon('package', 20);
+        }
+      } else if (o.favorType === 'pagodeservicios') {
+        serviceLabel = 'Pago de Servicios';
+        serviceColor = '#F59E0B'; // Gold
+        if (o.driverId && driverPhoto) {
+          serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
+        } else {
+          serviceIconHtml = icon('bank', 20);
+        }
+      } else { // compra / mandado
+        serviceLabel = 'Mandado';
+        serviceColor = '#E11D48'; // Red
+        if (o.driverId && driverPhoto) {
+          serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
+        } else {
+          serviceIconHtml = icon('truck', 20);
+        }
+      }
+    } else {
+      // Regular commerce order
+      serviceLabel = o.comercioName || 'Comercio';
+      serviceColor = '#D946EF'; // Magenta
+      
+      const logoUrl = getState().comerciosData?.[o.comercioId] || commerceLogoCache[o.comercioId];
+      if (!logoUrl && o.comercioId) {
+        if (commerceLogoCache[o.comercioId] === undefined) {
+          getOrFetchCommerceLogo(o.comercioId).then(() => renderOrdersList());
+        }
+      }
+
+      if (logoUrl) {
+        serviceIconHtml = `<img src="${logoUrl}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" />`;
+      } else {
+        serviceIconHtml = icon('store', 20);
+      }
+    }
+
+    let serviceHeaderText = 'COMERCIO';
+    if (o.isTrip) {
+      serviceHeaderText = 'GO VIAJE';
+    } else if (o.isFavor) {
+      if (o.favorType === 'gocash') {
+        serviceHeaderText = 'GO CASH';
+      } else if (o.favorType === 'encomienda' || o.favorType === 'mandado') {
+        serviceHeaderText = 'ENCOMIENDA';
+      } else if (o.favorType === 'pagodeservicios') {
+        serviceHeaderText = 'PAGO DE SERVICIOS';
+      } else {
+        serviceHeaderText = 'MANDADO';
+      }
+    }
+
+    let animationClass = '';
+    if (newOrderAlerts[o.id]) {
+      const elapsed = Date.now() - newOrderAlerts[o.id];
+      if (elapsed < 5000) {
+        animationClass = ' vibrate-new-order';
+        // Automatically schedule a re-render after it stops vibrating
+        setTimeout(() => {
+          if (newOrderAlerts[o.id]) {
+            delete newOrderAlerts[o.id];
+            renderOrdersList();
+          }
+        }, 5100 - elapsed);
+      } else {
+        delete newOrderAlerts[o.id];
+      }
+    }
+
     return `
-      <div class="order-card-v4" onclick="window.showOrderDetail('${o.id}')" style="--st-color:${config.color}; --st-bg:${config.bg};">
+      <div class="order-card-v4${animationClass}" onclick="window.showOrderDetail('${o.id}')" style="--st-color:${config.color}; --st-bg:${config.bg}; --srv-color:${serviceColor}; padding-top: 0px;">
+        <!-- Header -->
+        <div style="background:var(--srv-color); color:white; padding:10px 20px; margin:0 -20px 16px -20px; border-radius:23px 23px 0 0; font-weight:900; font-size:12px; font-family:var(--font-display); text-transform:uppercase; letter-spacing:0.06em; display:flex; justify-content:space-between; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,0.04);">
+          <span>${serviceHeaderText}</span>
+          <span style="opacity:0.9;">#${o.orderId || '---'}</span>
+        </div>
+
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
           <div style="display:flex; align-items:center; gap:12px;">
-            <div style="width:40px; height:40px; border-radius:12px; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:var(--color-primary);">
-              ${icon('package', 20)}
+            <div style="width:40px; height:40px; border-radius:12px; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:${serviceColor}; flex-shrink:0; overflow:hidden; border:1px solid var(--color-border-light);">
+              ${serviceIconHtml}
             </div>
             <div>
-              <div style="font-weight:900; font-size:16px; color:var(--color-text);">#${o.orderId || '---'}</div>
+              <div style="font-weight:850; font-size:15px; color:var(--color-text-primary);">${serviceLabel}</div>
               <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">${dateStr}</div>
               ${scheduledBadge}
             </div>
           </div>
-          <div class="s-pill-v4">${config.label}</div>
-        </div>
-
-        <div style="display:grid; grid-template-columns:1.2fr 0.8fr; gap:15px; margin-bottom:16px;">
-          <div>
-            <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.05em;">Vendedor</div>
-            <div style="font-weight:800; font-size:14px; color:var(--color-text);">${getComercioDisplayName(o)}</div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.05em;">Total</div>
+          <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+            <div class="s-pill-v4" style="margin-bottom:2px;">${config.label}</div>
             <div style="font-weight:900; font-size:18px; color:var(--color-primary);">${formatPrice(o.total || 0)}</div>
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:14px; border-top:1px solid var(--color-border-light);">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:24px; height:24px; border-radius:50%; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:var(--color-text-tertiary);">
-              ${icon('user', 14)}
+        <div style="display:flex; flex-direction:column; gap:8px; width:100%; padding-top:14px; border-top:1px solid var(--color-border-light);">
+          <!-- Repartidor -->
+          ${o.driverId ? `
+            <div style="display:flex; align-items:center; gap:8px;">
+              ${driverPhoto ? `
+                <img src="${driverPhoto}" style="width:22px; height:22px; border-radius:50%; object-fit:cover; border:1px solid var(--color-border-light);" referrerpolicy="no-referrer" />
+              ` : `
+                <div style="width:22px; height:22px; border-radius:50%; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:var(--color-text-tertiary); font-size:10px; font-weight:800; border:1px solid var(--color-border-light);">R</div>
+              `}
+              <span style="font-size:12px; font-weight:800; color:var(--color-text-secondary);"><span style="color:var(--color-text-tertiary); font-weight:700;">Repartidor:</span> ${o.driverName || 'Repartidor'} (ID: ${driverDlId})</span>
             </div>
-            <span style="font-size:12px; font-weight:800; color:var(--color-text-secondary);">${o.userName || 'Cliente'}</span>
-          </div>
-          <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">
-            ${o.paymentMethod === 'mercadopago' ? 'Transferencia' : 'Efectivo'}
+          ` : ''}
+
+          <!-- Cliente -->
+          <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              ${clientPhoto ? `
+                <img src="${clientPhoto}" style="width:22px; height:22px; border-radius:50%; object-fit:cover; border:1px solid var(--color-border-light);" referrerpolicy="no-referrer" />
+              ` : `
+                <div style="width:22px; height:22px; border-radius:50%; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:var(--color-text-tertiary); font-size:10px; font-weight:800; border:1px solid var(--color-border-light);">C</div>
+              `}
+              <span style="font-size:12px; font-weight:800; color:var(--color-text-secondary);"><span style="color:var(--color-text-tertiary); font-weight:700;">Cliente:</span> ${o.userName || 'Cliente'} (ID: ${o.goId || clientProfile?.displayId || '---'})</span>
+            </div>
+            <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">
+              ${o.paymentMethod === 'mercadopago' ? 'Transferencia' : 'Efectivo'}
+            </div>
           </div>
         </div>
       </div>
     `;
   }).join('');
+
+  container.innerHTML = htmlContent + `
+    <div id="orders-scroll-sentinel" style="height: 50px; display: flex; align-items: center; justify-content: center; width: 100%; color: var(--color-text-tertiary); font-size: 12px; font-weight: 800; padding: 10px 0;">
+      ${filtered.length >= currentLimit ? '<div class="loader-dots" style="margin: 5px auto;"><span></span><span></span><span></span></div>' : '— Fin del registro de ventas —'}
+    </div>
+  `;
+
+  // Setup infinite scroll IntersectionObserver
+  if (infiniteObserver) {
+    infiniteObserver.disconnect();
+    infiniteObserver = null;
+  }
+
+  if (filtered.length >= currentLimit) {
+    const sentinel = document.getElementById('orders-scroll-sentinel');
+    if (sentinel) {
+      infiniteObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+          infiniteObserver.disconnect();
+          infiniteObserver = null;
+          currentLimit += 50;
+          loadAllOrders();
+        }
+      }, { threshold: 0.1 });
+      infiniteObserver.observe(sentinel);
+    }
+  }
 }
 
 function getStatusKey(status) {
@@ -367,6 +768,69 @@ window.showOrderDetail = async (idOrObject) => {
   const parsedStores = o.isFavor ? parseFavorDetails(o.details || o.description) : [];
   const hasCommerce = !o.isTrip && (!o.isFavor || (o.isFavor && o.favorType !== 'gocash' && o.favorType !== 'encomienda' && o.comercioName));
 
+  const formatTime = (ts) => {
+    if (!ts) return null;
+    const date = ts.toDate ? ts.toDate() : new Date(ts);
+    return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const steps = [
+    { label: 'Pedido Creado', time: formatTime(o.createdAt), icon: 'clock', color: '#3498DB', bg: 'rgba(52, 152, 219, 0.1)' }
+  ];
+
+  if (!o.isTrip && !o.isFavor) {
+    steps.push({ label: 'Confirmado por Comercio', time: formatTime(o.confirmedAt), icon: 'checkCircle', color: '#10B981', bg: 'rgba(16, 185, 129, 0.1)' });
+  }
+
+  steps.push({
+    label: 'Asignado a Repartidor',
+    time: formatTime(o.acceptedAt),
+    icon: 'user',
+    color: '#a855f7',
+    bg: 'rgba(168, 85, 247, 0.1)'
+  });
+
+  steps.push({ label: 'Retirado (En Camino)', time: formatTime(o.pickedUpAt), icon: 'truck', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)' });
+  steps.push({ label: 'Entregado con Éxito', time: formatTime(o.deliveredAt || o.completedAt), icon: 'check', color: '#10B981', bg: 'rgba(16, 185, 129, 0.1)' });
+
+  if (o.status === 'cancelled' || o.cancelledAt) {
+    steps.push({ label: 'Pedido Cancelado', time: formatTime(o.cancelledAt), icon: 'xCircle', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.1)' });
+  }
+
+  const timelineHtml = `
+    <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border); border-radius:24px; padding:20px; margin-bottom:20px; box-shadow:var(--shadow-sm);">
+      <h3 style="font-size:11px; font-weight:900; text-transform:uppercase; color:var(--color-text-tertiary); margin-bottom:18px; letter-spacing:0.05em;">Cronología de Estados</h3>
+      <div style="display:flex; flex-direction:column; gap:16px; position:relative; padding-left:14px;">
+        <!-- Vertical Line -->
+        <div style="position:absolute; left:23px; top:10px; bottom:10px; width:2px; background:var(--color-border-light); z-index:1;"></div>
+        
+        ${steps.map((step, idx) => {
+          let timeDisplay = step.time;
+          let isDone = !!timeDisplay;
+          
+          // If a later step is completed, this step must have happened
+          const subsequentDone = steps.slice(idx + 1).some(s => !!s.time);
+          if (subsequentDone && !isDone) {
+            isDone = true;
+            timeDisplay = 'Confirmado';
+          }
+          
+          return `
+            <div style="display:flex; align-items:center; justify-content:space-between; position:relative; z-index:2;">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width:22px; height:22px; border-radius:50%; background:${isDone ? step.bg : 'var(--color-bg-secondary)'}; border:2px solid ${isDone ? step.color : 'var(--color-border)'}; display:flex; align-items:center; justify-content:center; color:${isDone ? step.color : 'var(--color-text-tertiary)'}; flex-shrink:0;">
+                  ${icon(step.icon, 10)}
+                </div>
+                <span style="font-size:13px; font-weight:700; color:${isDone ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)'};">${step.label}</span>
+              </div>
+              <span style="font-size:12px; font-weight:800; color:${isDone ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)'}; font-family:var(--font-display);">${timeDisplay || 'Pendiente'}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
   const detailHtml = document.createElement('div');
   detailHtml.style.cssText = 'flex:1; overflow-y:auto; padding:20px; scrollbar-width:none;';
   detailHtml.innerHTML = `
@@ -374,6 +838,8 @@ window.showOrderDetail = async (idOrObject) => {
        <div style="display:inline-block; padding:4px 12px; background:var(--color-bg-secondary); border-radius:10px; font-size:10px; font-weight:900; color:var(--color-text-tertiary); margin-bottom:8px;">AUDITORÍA #${o.orderId}</div>
        <h2 style="font-size:26px; font-weight:900; margin:0; letter-spacing:-0.03em;">Desglose Comercial</h2>
     </div>
+
+    ${timelineHtml}
 
     <!-- Product List -->
     <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border); border-radius:24px; padding:20px; margin-bottom:20px;">
@@ -484,10 +950,18 @@ window.showOrderDetail = async (idOrObject) => {
     <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
        <!-- Cliente Card -->
        <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
-         <div style="min-width:0; flex:1;">
-           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Cliente</div>
-           <div style="font-weight:900; font-size:15px; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.userName}</div>
-           <div id="audit-client-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.goId || 'Cargando...'}</div>
+         <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+           <div style="width:40px; height:40px; border-radius:50%; background:var(--color-bg-secondary); overflow:hidden; border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+             <img id="audit-client-img" style="width:100%; height:100%; object-fit:cover; display:none;" />
+             <div id="audit-client-placeholder" style="font-weight:900; font-size:16px; color:var(--color-text-tertiary); display:block;">
+               ${(o.userName || 'U')[0].toUpperCase()}
+             </div>
+           </div>
+           <div style="min-width:0; flex:1;">
+             <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Cliente</div>
+             <div style="font-weight:900; font-size:15px; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.userName}</div>
+             <div id="audit-client-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.goId || 'Cargando...'}</div>
+           </div>
          </div>
          <div id="audit-client-wa-container" style="flex-shrink:0;">
            ${o.userPhone ? `
@@ -500,15 +974,23 @@ window.showOrderDetail = async (idOrObject) => {
 
        <!-- Repartidor Card -->
        <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
-         <div style="min-width:0; flex:1;">
-           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Repartidor</div>
-           <div style="font-weight:900; font-size:15px; color:var(--color-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.driverName || 'Sin asignar'}</div>
-           <div id="audit-driver-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
+         <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+           <div style="width:40px; height:40px; border-radius:50%; background:var(--color-bg-secondary); overflow:hidden; border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+             <img id="audit-driver-img" style="width:100%; height:100%; object-fit:cover; display:none;" />
+             <div id="audit-driver-placeholder" style="font-weight:900; font-size:16px; color:var(--color-text-tertiary); display:block;">
+               ${o.driverId ? (o.driverName || 'R')[0].toUpperCase() : '?'}
+             </div>
+           </div>
+           <div style="min-width:0; flex:1;">
+             <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Repartidor</div>
+             <div style="font-weight:900; font-size:15px; color:var(--color-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.driverName || 'Sin asignar'}</div>
+             <div id="audit-driver-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
+           </div>
          </div>
          <div style="flex-shrink:0;">
            ${o.driverId ? `
              <button id="btn-msg-support-driver" style="display:flex; align-items:center; gap:6px; padding:8px 16px; border-radius:12px; background:rgba(225,29,72,0.08); color:var(--color-primary); border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; box-shadow:0 4px 12px rgba(225,29,72,0.15);" onmouseover="this.style.transform='translateY(-1px)';" onmouseout="this.style.transform='none';">
-               ${icon('send', 14)} Soporte
+               ${icon('send', 14)} Chat
              </button>
            ` : ''}
          </div>
@@ -563,7 +1045,42 @@ window.showOrderDetail = async (idOrObject) => {
           CERRAR AUDITORÍA
         </button>
       </div>
-    `
+    `,
+    onOpen: () => {
+      // Load client profile
+      if (o.userId) {
+        getOrFetchUserProfile(o.userId).then((profile) => {
+          const clientImg = document.getElementById('audit-client-img');
+          if (clientImg && profile?.photo) {
+            clientImg.src = profile.photo;
+            clientImg.style.display = 'block';
+            const clientPlaceholder = document.getElementById('audit-client-placeholder');
+            if (clientPlaceholder) clientPlaceholder.style.display = 'none';
+          }
+          const clientGoId = document.getElementById('audit-client-goid');
+          if (clientGoId && profile?.displayId) {
+            clientGoId.textContent = `ID: ${profile.displayId}`;
+          }
+        });
+      }
+
+      // Load driver profile
+      if (o.driverId) {
+        getOrFetchUserProfile(o.driverId).then((profile) => {
+          const driverImg = document.getElementById('audit-driver-img');
+          if (driverImg && profile?.photo) {
+            driverImg.src = profile.photo;
+            driverImg.style.display = 'block';
+            const driverPlaceholder = document.getElementById('audit-driver-placeholder');
+            if (driverPlaceholder) driverPlaceholder.style.display = 'none';
+          }
+          const driverGoId = document.getElementById('audit-driver-goid');
+          if (driverGoId && (profile?.displayId || o.driverDlId)) {
+            driverGoId.textContent = `ID: ${o.driverDlId || profile.displayId}`;
+          }
+        });
+      }
+    }
   });
 
   document.getElementById('close-audit-modal').onclick = () => closeModal();
@@ -662,7 +1179,8 @@ window.showOrderDetail = async (idOrObject) => {
         orderNum: o.orderId,
         type: btn.dataset.type,
         otherName: btn.dataset.other,
-        senderDisplayName: 'Admin (Audit)'
+        senderDisplayName: 'Admin (Audit)',
+        isAudit: true
       });
     };
   });
@@ -673,7 +1191,8 @@ async function openAdminToDriverSupportChatModal(driverId, driverName, orderId, 
   const { showModal, closeModal } = await import('../../components/modal.js');
   const { showToast } = await import('../../components/toast.js');
   
-  const chatRef = doc(db, 'support_chats', driverId);
+  const ticketDocId = `ticket_${orderId}`;
+  const chatRef = doc(db, 'support_chats', ticketDocId);
   
   // Render structure inside modal
   const chatContainer = document.createElement('div');

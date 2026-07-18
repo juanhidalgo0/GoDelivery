@@ -461,6 +461,9 @@ export async function renderHome(content) {
   // Show welcome beta modal if not shown before
   checkAndShowWelcomeModal();
 
+  // Show welcome coupon modal for new users with 0 purchases
+  checkAndShowWelcomeCouponModal();
+
   // Show app-only product promotion modal if not shown in this session
   checkAndShowAppOnlyPromo();
 
@@ -586,6 +589,119 @@ function checkAndShowWelcomeModal() {
       }, 200);
     };
   }
+}
+
+function checkAndShowWelcomeCouponModal() {
+  const user = getState().user;
+  if (!user) return;
+
+  // Only show if user has no completed purchases
+  if ((user.completedOrdersCount || 0) > 0) return;
+
+  // Show once per account
+  const modalShown = localStorage.getItem('welcome_coupon_modal_shown_v1');
+  if (modalShown === 'true') return;
+
+  // Poll until no blocking modal (location picker, push prompt, beta info, onboarding, app guide) is active in DOM
+  const checkInterval = setInterval(async () => {
+    const isLocationActive = document.getElementById('location-picker-modal') || document.querySelector('.location-modal-container') || document.getElementById('address-modal');
+    const isPushActive = document.getElementById('push-permission-lock-screen');
+    const isBetaActive = document.getElementById('welcome-beta-modal-overlay');
+    const isOnboardingActive = document.getElementById('onboarding-container');
+    const isAppGuideActive = document.getElementById('app-guide-overlay');
+
+    if (!isLocationActive && !isPushActive && !isBetaActive && !isOnboardingActive && !isAppGuideActive) {
+      clearInterval(checkInterval);
+      
+      if (document.getElementById('welcome-coupon-modal-overlay')) return;
+
+      // Auto-apply the BIENVENIDA coupon in global state immediately
+      try {
+        const { setState: appSetState } = await import('../state.js');
+        appSetState('appliedCoupon', {
+          id: 'BIENVENIDA',
+          code: 'BIENVENIDA',
+          value: 3000,
+          type: 'fixed',
+          discountType: 'fixed',
+          scope: 'products',
+          active: true
+        });
+      } catch (e) {
+        console.warn('Auto-applying welcome coupon failed:', e);
+      }
+
+      const modalEl = document.createElement('div');
+      modalEl.id = 'welcome-coupon-modal-overlay';
+      modalEl.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.5);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100001;
+        padding: 20px;
+        box-sizing: border-box;
+        animation: fadeInWelcome 0.25s ease-out forwards;
+      `;
+
+        modalEl.innerHTML = `
+          <div style="background: var(--color-surface, #ffffff); max-width: 400px; width: 100%; border-radius: 28px; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.2); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; position: relative;">
+            
+            <!-- Gift Header visual box -->
+            <div style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); padding: 36px 24px 24px; text-align: center; color: white; position: relative;">
+              <div style="font-size: 56px; line-height: 1; margin-bottom: 12px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15)); display: inline-block;">🎁</div>
+              <h2 style="font-family: var(--font-display, inherit); font-size: 24px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.03em;">¡Tu Regalo de Bienvenida!</h2>
+              <div style="font-size: 13px; font-weight: 800; color: rgba(255,255,255,0.9); margin-top: 6px;">Te regalamos $3000 para tu primer pedido</div>
+            </div>
+            
+            <!-- Body details -->
+            <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;">
+              <p style="font-size: 14.5px; line-height: 1.55; color: var(--color-text-secondary, #475569); margin: 0; font-weight: 650;">
+                Queremos darte una cálida bienvenida a la app. Por eso, tenés disponible un cupón de descuento por <strong>$3000</strong>.
+              </p>
+
+              <!-- Coupon Banner without buttons -->
+              <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px dashed rgba(168, 85, 247, 0.35); border-radius: 16px; padding: 14px 18px; text-align: center; margin: 4px 0;">
+                <div style="font-size: 11px; font-weight: 900; color: #a855f7; letter-spacing: 0.8px; text-transform: uppercase;">CUPÓN DE BIENVENIDA APLICADO</div>
+                <div style="font-size: 24px; font-weight: 950; color: var(--color-text-primary); margin-top: 2px; letter-spacing: 1px;">$3000 OFF</div>
+              </div>
+
+              <div style="font-size: 12.5px; color: var(--color-text-secondary, #475569); font-weight: 750; background: var(--color-bg-secondary, #f8fafc); border-radius: 12px; padding: 12px 14px; line-height: 1.45; border: 1px solid var(--color-border-light, #f1f5f9); text-align: left; display: flex; flex-direction: column; gap: 8px;">
+                <span>✨ <strong>¡Uso Automático!</strong> El descuento se aplicará solo al hacer tu primer pedido a un comercio (no tenés que copiar nada).</span>
+                <span style="font-size: 11px; color: var(--color-text-tertiary);">* No válido para el servicio de mandados ni viajes.</span>
+              </div>
+            </div>
+            
+            <!-- Footer Button -->
+            <div style="padding: 0 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff);">
+              <button id="welcome-coupon-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
+                ¡Buenísimo, comprar!
+              </button>
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(modalEl);
+
+        const acceptBtn = modalEl.querySelector('#welcome-coupon-accept-btn');
+        if (acceptBtn) {
+          acceptBtn.onclick = () => {
+            localStorage.setItem('welcome_coupon_modal_shown_v1', 'true');
+            modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
+            setTimeout(() => {
+              modalEl.remove();
+            }, 200);
+          };
+        }
+    }
+  }, 150);
 }
 
 function renderBrandsSlider(comercios) {
@@ -961,6 +1077,8 @@ const CATEGORY_IMAGE_MAP = {
   'Fiambreria': '/images/categories/fiambreria.png',
   'Comida': '/images/categories/restaurants.png',
   'Bazar': '/images/categories/bazar.png',
+  'Tecnología': '/assets/categories/technology.png',
+  'Tecnologia': '/assets/categories/technology.png',
 };
 
 function renderCategories(categories, active) {
@@ -968,7 +1086,7 @@ function renderCategories(categories, active) {
   if (!container) return;
 
   // Filter out Todos, Comida, Restaurante, Restaurantes, and GoMarket from small categories
-  const smallCats = categories.filter(c => 
+  const filteredCats = categories.filter(c => 
     c.name !== 'Todos' &&
     c.name !== 'Comida' &&
     c.name !== 'Restaurante' &&
@@ -977,6 +1095,9 @@ function renderCategories(categories, active) {
     c.name !== 'Pizzería' &&
     c.name !== 'Pizzeria'
   );
+
+  // Shuffle categories randomly every hour
+  const smallCats = seededShuffle(filteredCats, getHourSeed());
 
   container.innerHTML = smallCats.map(cat => {
     const cleanName = cat.name.replace('🎁', '').trim();
@@ -2617,6 +2738,7 @@ async function checkAndShowAppOnlyPromo() {
   const welcomeActive = document.getElementById('welcome-beta-modal-overlay') 
     || document.getElementById('onboarding-container') 
     || document.getElementById('app-guide-overlay')
+    || document.getElementById('welcome-coupon-modal-overlay')
     || document.querySelector('.delivery-map-modal-v4');
 
   if (!welcomeBetaDone || !onboardingDone || !appGuideDone || welcomeActive) {

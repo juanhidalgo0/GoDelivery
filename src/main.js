@@ -494,6 +494,7 @@ async function init() {
     '/admin/reviews': (c) => import('./pages/admin/reviews.js').then(m => m.renderAdminReviews(c)),
     '/admin/support-chats': (c) => import('./pages/admin/support-chats.js').then(m => m.renderAdminSupportChats(c)),
     '/admin/orders': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
+    '/admin/orders/:orderId': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
     '/admin/commissions': (c) => import('./pages/admin/commissions.js').then(m => m.renderAdminCommissions(c)),
     '/admin/settings': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminSettings(c)),
     '/admin/settings/logistics': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminLogisticsSettings(c)),
@@ -515,8 +516,24 @@ async function init() {
     '/mi-comercio': async () => {
       const user = getState().user;
       if (!user) { location.hash = '#/profile'; return; }
-      
+
+      // Check cached commerce ID for the user
+      const cachedCommerceId = localStorage.getItem(`gd_my_commerce_id_${user.uid}`);
+      if (cachedCommerceId) {
+        location.hash = `#/mi-comercio/${cachedCommerceId}/orders`;
+        return;
+      }
+
+      // Check cached Go! Market ID if user is admin
       const { isAdmin } = await import('./auth.js');
+      if (isAdmin()) {
+        const cachedGoMarketId = localStorage.getItem('gd_gomarket_id');
+        if (cachedGoMarketId) {
+          location.hash = `#/mi-comercio/${cachedGoMarketId}/orders`;
+          return;
+        }
+      }
+      
       const { collection, query, where, getDocs } = await import('firebase/firestore');
 
       try {
@@ -524,7 +541,9 @@ async function init() {
         const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
         const snap = await getDocs(q);
         if (!snap.empty) {
-          location.hash = `#/mi-comercio/${snap.docs[0].id}/orders`;
+          const commerceId = snap.docs[0].id;
+          localStorage.setItem(`gd_my_commerce_id_${user.uid}`, commerceId);
+          location.hash = `#/mi-comercio/${commerceId}/orders`;
           return;
         }
 
@@ -536,6 +555,7 @@ async function init() {
             return name.includes('go!') && name.includes('market');
           });
           if (goMarket) {
+            localStorage.setItem('gd_gomarket_id', goMarket.id);
             location.hash = `#/mi-comercio/${goMarket.id}/orders`;
             return;
           }
@@ -654,7 +674,29 @@ async function init() {
   // Init auth
   initAuth(async (user) => {
     try {
+      if (user) {
+        sessionStorage.removeItem('gd_guest_mode');
+      }
+
       if (!user) {
+        const isGuestMode = sessionStorage.getItem('gd_guest_mode') === 'true';
+        if (isGuestMode) {
+          const loginWall = document.getElementById('login-wall');
+          if (loginWall) loginWall.remove();
+          
+          const header = document.getElementById('app-header');
+          const navbar = document.getElementById('app-navbar');
+          if (header) {
+            header.style.display = 'flex';
+            header.style.opacity = '1';
+          }
+          if (navbar) {
+            navbar.style.display = 'flex';
+            navbar.style.opacity = '1';
+          }
+          return;
+        }
+
         // AUTH WALL
         const header = document.getElementById('app-header');
         const navbar = document.getElementById('app-navbar');
@@ -693,9 +735,13 @@ async function init() {
 
               <button id="apple-login-btn" style="width:100%; height:56px; background:black; border:none; border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
                 <svg width="18" height="22" viewBox="0 0 18 22" fill="white">
-                  <path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/>
+                  <path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89(3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/>
                 </svg>
                 <span style="font-weight:700; color:white; font-size:15px;">Continuar con Apple</span>
+              </button>
+
+              <button id="guest-login-btn" style="width:100%; height:56px; background:transparent; border:2.5px solid var(--color-primary); border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
+                <span style="font-weight:700; color:var(--color-primary); font-size:15px;">Explorar como Invitado</span>
               </button>
 
               <div style="margin-top: 24px; text-align: center;">
@@ -822,7 +868,27 @@ async function init() {
               `;
             }
           });
+        const guestLoginBtn = document.getElementById('guest-login-btn');
+        guestLoginBtn?.addEventListener('click', () => {
+          sessionStorage.setItem('gd_guest_mode', 'true');
+          const loginWall = document.getElementById('login-wall');
+          if (loginWall) loginWall.remove();
+          
+          const header = document.getElementById('app-header');
+          const navbar = document.getElementById('app-navbar');
+          if (header) {
+            header.style.display = 'flex';
+            header.style.opacity = '1';
+          }
+          if (navbar) {
+            navbar.style.display = 'flex';
+            navbar.style.opacity = '1';
+          }
+          
+          // Re-trigger routing to render correct state
+          routerReady();
         });
+
         return;
       }
 
@@ -837,14 +903,31 @@ async function init() {
           splash.classList.remove('fade-out');
           document.getElementById('app')?.classList.remove('ready');
           
+          // Reset progress values
+          const txtEl = document.getElementById('splash-progress-text');
+          const barEl = document.getElementById('splash-progress-bar');
+          if (txtEl) txtEl.textContent = '0%';
+          if (barEl) barEl.style.width = '0%';
+          
           // Force CSS animations to replay by cloning and replacing the element
           const newSplash = splash.cloneNode(true);
           splash.parentNode.replaceChild(newSplash, splash);
           
-          setTimeout(() => {
-            newSplash.classList.add('fade-out');
-            document.getElementById('app')?.classList.add('ready');
-          }, 2400);
+          if (window.setSplashProgress) {
+            window.setSplashProgress(0);
+            window.setSplashProgress(100);
+          }
+          
+          const checkEnd = setInterval(() => {
+            const currentTxt = document.getElementById('splash-progress-text');
+            if (currentTxt && currentTxt.textContent.trim() === '100%') {
+              clearInterval(checkEnd);
+              setTimeout(() => {
+                newSplash.classList.add('fade-out');
+                document.getElementById('app')?.classList.add('ready');
+              }, 50);
+            }
+          }, 30);
         }
       }
 
@@ -1216,13 +1299,20 @@ async function init() {
       routerReady();
       const splash = document.getElementById('splash-screen');
       if (splash) {
-        const elapsedTime = Date.now() - startTime;
-        const minDuration = 250; // Minimal display time for smooth fading animation
-        const remainingTime = Math.max(0, minDuration - elapsedTime);
-        setTimeout(() => {
-          splash.classList.add('fade-out');
-          document.getElementById('app')?.classList.add('ready');
-        }, remainingTime);
+        if (window.setSplashProgress) {
+          window.setSplashProgress(100);
+        }
+        
+        const checkEnd = setInterval(() => {
+          const txtEl = document.getElementById('splash-progress-text');
+          if (txtEl && txtEl.textContent.trim() === '100%') {
+            clearInterval(checkEnd);
+            setTimeout(() => {
+              splash.classList.add('fade-out');
+              document.getElementById('app')?.classList.add('ready');
+            }, 50); // Snappy exit after 100% reached
+          }
+        }, 30);
       }
     }
   });

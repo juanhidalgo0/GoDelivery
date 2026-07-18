@@ -68,15 +68,13 @@
       left: 50%;
       transform: translate(-50%, -50%) scale(0);
       transform-origin: center;
-      animation: expandWhiteCircle 2.2s cubic-bezier(0.85, 0, 0.15, 1) forwards;
-      animation-delay: 0.1s;
       z-index: 1;
       pointer-events: none;
       transition: opacity 0.3s ease;
     }
 
     #app.ready .splash-circle-grow {
-      opacity: 0;
+      animation: expandWhiteCircle 1.6s cubic-bezier(0.85, 0, 0.15, 1) forwards;
     }
 
     @keyframes expandWhiteCircle {
@@ -121,6 +119,11 @@
       visibility: hidden;
       pointer-events: none;
       transition: opacity 0.4s ease 1.2s, visibility 0.4s ease 1.2s;
+    }
+
+    #app.ready #splash-progress-container {
+      opacity: 0 !important;
+      pointer-events: none !important;
     }
 
     /* Expanding Ripple Shockwaves */
@@ -200,7 +203,22 @@
       align-items: center;
       justify-content: center;
       filter: drop-shadow(0 15px 35px rgba(225, 29, 72, 0.25));
-      animation: logoEntrance 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      animation: logoEntrance 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards, logoFloat 3s ease-in-out infinite 0.8s;
+    }
+
+    .splash-logo-container::before {
+      content: '';
+      position: absolute;
+      width: 185px;
+      height: 185px;
+      border-radius: 50%;
+      padding: 3px;
+      background: linear-gradient(135deg, #E11D48, #FF6B81, #FF4757, #E11D48);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      animation: rotateBorder 3s linear infinite;
+      z-index: 1;
     }
 
     .splash-logo-img {
@@ -209,7 +227,7 @@
       border-radius: 50%;
       object-fit: cover;
       z-index: 2;
-      animation: logoBreathe 3s ease-in-out infinite 0.8s;
+      animation: logoWobble 6s ease-in-out infinite 0.8s;
     }
 
     @keyframes logoEntrance {
@@ -223,15 +241,19 @@
       }
     }
 
-    @keyframes logoBreathe {
-      0%, 100% {
-        transform: scale(1);
-        box-shadow: 0 15px 35px rgba(225, 29, 72, 0.15);
-      }
-      50% {
-        transform: scale(1.04);
-        box-shadow: 0 25px 50px rgba(225, 29, 72, 0.3);
-      }
+    @keyframes rotateBorder {
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes logoFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    @keyframes logoWobble {
+      0%, 100% { border-radius: 50% 50% 50% 50% / 50% 50% 50% 50%; }
+      33% { border-radius: 54% 46% 52% 48% / 48% 52% 46% 54%; }
+      66% { border-radius: 46% 54% 48% 52% / 52% 48% 54% 46%; }
     }
 
     /* Spinner & Progress - Brand Red Spinner on White */
@@ -436,6 +458,53 @@
           <div class="splash-circle-red-collapse"></div>
           <img src="/logo-brand.jpg?v=2" alt="GoDelivery" class="splash-logo-img" />
         </div>
+        <div id="splash-progress-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 28px; gap: 8px; transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
+          <div style="width: 140px; height: 3px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; overflow: hidden; position: relative;">
+            <div id="splash-progress-bar" style="width: 0%; height: 100%; background: #FFFFFF; border-radius: 10px; transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+          </div>
+          <div id="splash-progress-text" style="font-weight: 900; font-size: 14px; color: rgba(255, 255, 255, 0.9); font-family: 'Outfit', sans-serif; letter-spacing: -0.01em;">
+            0%
+          </div>
+        </div>
+        <script>
+          (function() {
+            let currentPct = 0;
+            let targetPct = 0;
+            
+            window.setSplashProgress = function(pct) {
+              if (pct === 0) {
+                currentPct = 0;
+                targetPct = 0;
+                const bar = document.getElementById('splash-progress-bar');
+                const txt = document.getElementById('splash-progress-text');
+                if (bar) bar.style.width = '0%';
+                if (txt) txt.textContent = '0%';
+                return;
+              }
+              targetPct = Math.min(100, Math.max(currentPct, pct));
+            };
+
+            const interval = setInterval(function() {
+              const activeBar = document.getElementById('splash-progress-bar');
+              const activeTxt = document.getElementById('splash-progress-text');
+              
+              if (currentPct < targetPct) {
+                currentPct += 1;
+                if (activeBar) activeBar.style.width = currentPct + '%';
+                if (activeTxt) activeTxt.textContent = currentPct + '%';
+              }
+            }, 12);
+
+            // Simulate quick loader up to 85%
+            let simInterval = setInterval(function() {
+              if (targetPct < 85) {
+                window.setSplashProgress(targetPct + Math.floor(Math.random() * 20 + 8));
+              } else {
+                clearInterval(simInterval);
+              }
+            }, 180);
+          })();
+        </script>
       </div>
     </div>
 

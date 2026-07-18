@@ -159,13 +159,9 @@ export async function renderComercioOrders(manualId = null) {
             </div>
           </div>
 
-          <div class="orders-header-actions" style="position: relative; z-index: 2; display: flex; gap: 8px;">
             <a href="#/comercio/${comercioId}" class="hdr-icon-btn" title="Ver Tienda Online" style="display: flex; align-items: center; justify-content: center; text-decoration: none;">
               ${icon('eye', 18)}
             </a>
-            <button class="hdr-icon-btn" id="new-manual-order-btn" title="Nuevo Pedido">
-              ${icon('plus', 18)}
-            </button>
             <button class="hdr-icon-btn" id="go-to-history" title="Historial">
               ${icon('history', 18)}
             </button>
@@ -217,9 +213,7 @@ export async function renderComercioOrders(manualId = null) {
       `;
     }
 
-    document.getElementById('new-manual-order-btn')?.addEventListener('click', () => {
-      showNewManualOrderModal(comercioId);
-    });
+    
     
     document.getElementById('go-to-history')?.addEventListener('click', () => {
       viewMode = 'history';

@@ -1517,6 +1517,7 @@ function loadTabContent(tab, container, user) {
                             ${stop.type === 'PICKUP' ? stop.comercioName : stop.userName}
                           </h4>
                           ${(() => {
+                            if (stop.type === 'DROP_OFF') return '';
                             const orderTypes = Array.from(new Set((stop.orders || []).map(o => {
                               if (o.isTrip) return 'viaje';
                               if (o.isFavor) {
@@ -1631,37 +1632,44 @@ function loadTabContent(tab, container, user) {
                         </button>
 
                         <div class="collapsible-stop-details ${isExpanded ? 'expanded' : ''}" id="details-${stopKey}" style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
-                          ${stop.orders.length > 1 ? `
-                            <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3); display:flex; flex-direction:column; gap:8px;">
-                              <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:2px;">Detalle del Lote (${stop.orders.length} pedidos)</div>
+                          ${!stop.isFavor ? `
+                            <!-- Commerce Order Details (Single or Batch) -->
+                            <div style="display:flex; flex-direction:column; gap:8px; text-align:left; width:100%;">
+                              <div style="font-size:9.5px; font-weight:900; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">Detalle del Pedido de Comercio</div>
                               ${stop.orders.map(o => `
-                                <div style="border-bottom: 1px solid rgba(var(--color-border-light-rgb),0.2); padding-bottom:6px; margin-bottom:2px;">
-                                  <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:900; color:var(--color-text-primary);">
-                                    <span>Pedido #${o.orderId}</span>
+                                <div style="background:rgba(var(--color-primary-rgb, 225,29,72),0.02); border:1px solid var(--color-border-light); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:6px;">
+                                  <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:800; color:var(--color-text-primary);">
+                                    <span>Pedido #${o.orderId || '---'}</span>
                                     <span>${formatPrice(o.subtotal || 0)}</span>
                                   </div>
                                   ${o.items && o.items.length > 0 ? `
-                                    <div style="font-size:11.5px; color:var(--color-text-secondary); margin-top:4px; font-weight:600; padding-left:8px; border-left:2px solid var(--color-primary); opacity:0.85; display:flex; flex-direction:column; gap:2px;">
-                                      ${o.items.map(item => `<span>${item.qty || 1}x ${item.name}</span>`).join('')}
-                                    </div>
-                                  ` : (o.details && o.details !== 'Ver detalles en el chat' ? `
-                                    <div style="font-size:11.5px; color:var(--color-text-secondary); margin-top:4px; font-weight:600; padding-left:8px; border-left:2px solid var(--color-primary); opacity:0.85;">
-                                      ${o.details}
+                                    <div style="font-size:12px; color:var(--color-text-secondary); margin-top:2px; font-weight:600; padding-left:8px; border-left:2px solid var(--color-primary); display:flex; flex-direction:column; gap:4px;">
+                                      ${o.items.map(item => `
+                                        <div style="display:flex; flex-direction:column; gap:1px; text-align:left;">
+                                          <div style="color:var(--color-text-primary);"><span style="color:var(--color-primary); font-weight:800;">${item.qty || 1}x</span> ${item.name}</div>
+                                          ${item.options && item.options.length > 0 ? `
+                                            <div style="font-size:10.5px; color:var(--color-primary); font-weight:700; padding-left:8px; margin-top:1px; text-align:left;">
+                                              Sabores: ${item.options.map(opt => `${opt.qty > 1 ? `${opt.qty}x ` : ''}${opt.name}`).join(', ')}
+                                            </div>
+                                          ` : ''}
+                                        </div>
+                                      `).join('')}
                                     </div>
                                   ` : `
-                                    <div style="font-size:11.5px; color:var(--color-text-tertiary); margin-top:4px; font-weight:600; padding-left:8px; border-left:2px solid var(--color-primary); opacity:0.85;">
-                                      Pedido en ${o.comercioName || stop.comercioName || 'Comercio'}
+                                    <div style="font-size:11.5px; color:var(--color-text-tertiary); font-style:italic;">
+                                      Pedido en ${o.comercioName || 'Comercio'}
                                     </div>
-                                  `)}
+                                  `}
                                 </div>
                               `).join('')}
                             </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-                              <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Total a abonar en local:</span>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed var(--color-border-light); width:100%;">
+                              <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">A abonar al comercio:</span>
                               <span style="font-size:18px; color:var(--color-primary); font-weight:950; letter-spacing:-0.02em;">${formatPrice(stop.amountToPay)}</span>
                             </div>
                           ` : `
-                            <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3); display:flex; flex-direction:column; gap:8px; text-align:left;">
+                            <!-- GoFavor (Single or Batch) -->
+                            <div style="background:rgba(var(--color-primary-rgb),0.05); border-radius:14px; padding:12px; border:1px dashed rgba(var(--color-primary-rgb),0.3); display:flex; flex-direction:column; gap:8px; text-align:left; width:100%;">
                               <div style="font-size:9px; font-weight:850; color:${getFavorTypeMeta(stop.orders[0].favorType).textColor}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px; text-align:left;">${getFavorTypeMeta(stop.orders[0].favorType).headerText}</div>
                               ${(() => {
                                 const order = stop.orders[0];

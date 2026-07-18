@@ -31,7 +31,6 @@ export async function renderCart(content) {
 
   currentCartStep = 1; // Reset to step 1 when page loads
   selectedPaymentMethod = null; // Reset to null on page load
-  setDeliveryAddress('', '', null, ''); // Clear default address to force user choice
 
   // Start calculating dynamic fees in background
   calculateAllFees();
@@ -94,26 +93,197 @@ export async function renderCart(content) {
     }
   }
 
-  renderCartContent(content);
+  function updateCartDOMInPlace(content) {
+    const state = getState();
+    const cart = state.cart;
+    const activeOffers = state.activeOffers || [];
+    
+    cart.forEach(item => {
+      const itemEl = content.querySelector(`[data-cart-item-id="${item.cartItemId}"]`);
+      if (!itemEl) return;
+      
+      const qtyValEl = itemEl.querySelector('.qty-value');
+      if (qtyValEl) qtyValEl.textContent = item.qty;
+      
+      const minusBtn = itemEl.querySelector('[data-action="minus"]');
+      if (minusBtn) {
+        if (item.qty === 1) {
+          if (!minusBtn.querySelector('svg')) {
+            minusBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+          }
+          minusBtn.style.color = 'var(--color-danger)';
+        } else {
+          minusBtn.textContent = '−';
+          minusBtn.style.color = 'var(--color-text-primary)';
+        }
+      }
+      
+      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const originalTotal = basePrice * item.qty;
+      let finalTotal = originalTotal;
+      
+      const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+      if (offer) {
+        if (offer.type === '2x1') {
+          const paidQty = Math.ceil(item.qty / 2);
+          finalTotal = basePrice * paidQty;
+        } else if (offer.type === 'percentage') {
+          finalTotal = originalTotal * ((100 - offer.value) / 100);
+        }
+      }
+      
+      const totalEl = itemEl.querySelector('.cart-item-total-price');
+      if (totalEl) totalEl.textContent = formatPrice(finalTotal);
+      
+      const origPriceEl = itemEl.querySelector('.cart-item-original-price');
+      if (origPriceEl) origPriceEl.textContent = formatPrice(originalTotal);
+      
+      const multEl = itemEl.querySelector('.cart-item-qty-multiplier');
+      if (multEl) {
+        if (item.qty > 1) {
+          multEl.textContent = `(${item.qty} x ${formatPrice(basePrice)})`;
+          multEl.style.display = '';
+        } else {
+          multEl.style.display = 'none';
+        }
+      }
+    });
+    
+    const totalProducts = cart.reduce((sum, item) => {
+      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const originalTotal = basePrice * item.qty;
+      let finalTotal = originalTotal;
+      const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+      if (offer) {
+        if (offer.type === '2x1') {
+          finalTotal = basePrice * Math.ceil(item.qty / 2);
+        } else if (offer.type === 'percentage') {
+          finalTotal = originalTotal * ((100 - offer.value) / 100);
+        }
+      }
+      return sum + finalTotal;
+    }, 0);
+    
+    const dynamicFees = state.dynamicDeliveryFees || {};
+    const commerceEntries = [...new Set(cart.map(i => i.comercioId))];
+    const allFeesReady = commerceEntries.every(cid => dynamicFees[cid] !== undefined);
+    
+    const selectedTip = state.selectedTip || 0;
+    const individualFees = commerceEntries.map(cid => dynamicFees[cid]);
+    const maxIndividualFee = allFeesReady ? Math.max(...individualFees, 0) : null;
+    const extraStopsFee = (allFeesReady && individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+    const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
+    
+    let baseDeliveryFeeCalc = null;
+    let nightSurcharge = null;
+    let totalDelivery = null;
+
+    if (allFeesReady) {
+      baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+      nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
+      totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
+    }
+    
+    const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
+    const discount = state.appliedDiscount || 0;
+    let couponDiscount = 0;
+    if (state.appliedCoupon && allFeesReady) {
+      const coupon = state.appliedCoupon;
+      const scope = coupon.scope || 'products';
+      const discountType = coupon.discountType || (coupon.type === 'free_delivery' ? 'percentage' : 'percentage');
+      const couponVal = Number(coupon.value || 0);
+
+      if (scope === 'shipping' || coupon.type === 'free_delivery') {
+        const feeForCoupon = baseDeliveryFeeCalc + (nightSurcharge || 0);
+        if (coupon.type === 'free_delivery') {
+          couponDiscount = feeForCoupon || 0;
+        } else if (discountType === 'percentage') {
+          couponDiscount = feeForCoupon * (couponVal / 100);
+        } else if (discountType === 'fixed') {
+          couponDiscount = Math.min(couponVal, feeForCoupon);
+        }
+      } else { // products
+        const targetProductsTotal = cart
+          .filter(item => !coupon.comercioId || item.comercioId === coupon.comercioId)
+          .reduce((sum, item) => {
+            const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+            const originalTotal = basePrice * item.qty;
+            let finalTotal = originalTotal;
+            const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+            if (offer) {
+              if (offer.type === '2x1') {
+                finalTotal = basePrice * Math.ceil(item.qty / 2);
+              } else if (offer.type === 'percentage') {
+                finalTotal = originalTotal * ((100 - offer.value) / 100);
+              }
+            }
+            return sum + finalTotal;
+          }, 0);
+        
+        if (discountType === 'percentage') {
+          couponDiscount = targetProductsTotal * (couponVal / 100);
+        } else if (discountType === 'fixed') {
+          couponDiscount = Math.min(couponVal, targetProductsTotal);
+        }
+      }
+    }
+    
+    const grandTotal = allFeesReady ? Math.max(totalProducts + totalDelivery + appUsageFee - discount - couponDiscount, 0) : null;
+    
+    const subtotalEl = content.querySelector('#cart-summary-subtotal');
+    if (subtotalEl) subtotalEl.textContent = formatPrice(totalProducts);
+    
+    const deliveryEl = content.querySelector('#cart-summary-delivery');
+    if (deliveryEl) {
+      deliveryEl.textContent = allFeesReady ? ((totalDelivery + appUsageFee) > 0 ? formatPrice(totalDelivery + appUsageFee) : '¡Gratis!') : 'Calculando...';
+    }
+    
+    const grandTotalEl = content.querySelector('#cart-summary-grandtotal');
+    if (grandTotalEl) {
+      grandTotalEl.textContent = allFeesReady ? formatPrice(grandTotal) : '---';
+    }
+  }
+
+  let renderTimeout = null;
+  const triggerRender = () => {
+    if (renderTimeout) return;
+    renderTimeout = requestAnimationFrame(() => {
+      const scrollArea = content.querySelector('.cart-scroll-area');
+      const cart = getState().cart;
+      if (scrollArea && currentCartStep === 1 && cart.length > 0) {
+        const itemEls = scrollArea.querySelectorAll('.cart-item');
+        if (itemEls.length === cart.length) {
+          updateCartDOMInPlace(content);
+          renderTimeout = null;
+          return;
+        }
+      }
+      renderCartContent(content);
+      renderTimeout = null;
+    });
+  };
+
+  triggerRender();
 
   const unsubCart = subscribe('cart', () => {
     calculateAllFees();
-    renderCartContent(content);
+    triggerRender();
     renderNavbar();
   });
-  const unsubUser = subscribe('user', () => renderCartContent(content));
-  const unsubDollarPerPoint = subscribe('dollarPerPoint', () => renderCartContent(content));
-  const unsubPointsPerDollar = subscribe('pointsPerDollar', () => renderCartContent(content));
-  const unsubTip = subscribe('selectedTip', () => renderCartContent(content));
-  const unsubAppliedDiscount = subscribe('appliedDiscount', () => renderCartContent(content));
-  const unsubRedeemedPoints = subscribe('redeemedPoints', () => renderCartContent(content));
-  const unsubAppliedCoupon = subscribe('appliedCoupon', () => renderCartContent(content));
-  const unsubDistances = subscribe('dynamicDistances', () => renderCartContent(content));
-  const unsubFees = subscribe('dynamicDeliveryFees', () => renderCartContent(content));
+  const unsubUser = subscribe('user', triggerRender);
+  const unsubDollarPerPoint = subscribe('dollarPerPoint', triggerRender);
+  const unsubPointsPerDollar = subscribe('pointsPerDollar', triggerRender);
+  const unsubTip = subscribe('selectedTip', triggerRender);
+  const unsubAppliedDiscount = subscribe('appliedDiscount', triggerRender);
+  const unsubRedeemedPoints = subscribe('redeemedPoints', triggerRender);
+  const unsubAppliedCoupon = subscribe('appliedCoupon', triggerRender);
+  const unsubDistances = subscribe('dynamicDistances', triggerRender);
+  const unsubFees = subscribe('dynamicDeliveryFees', triggerRender);
+  const unsubComerciosData = subscribe('comerciosData', triggerRender);
   const unsubAddress = subscribe('deliveryAddress', async () => {
     setState({ dynamicDeliveryFees: {}, dynamicDistances: {} });
     await calculateAllFees();
-    renderCartContent(content);
+    triggerRender();
   });
 
   content.addEventListener('click', handleCartClick);
@@ -131,6 +301,7 @@ export async function renderCart(content) {
       unsubAppliedCoupon();
       unsubDistances();
       unsubFees();
+      unsubComerciosData();
       unsubAddress();
     }
   };
@@ -146,17 +317,46 @@ export async function calculateAllFees(proactiveCommerceId = null) {
 
   if (comercioIds.length === 0) return;
 
-  const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const { doc, getDoc } = await import('firebase/firestore');
   const { db } = await import('../firebase.js');
   const { setState } = await import('../state.js');
 
-  // 1. Ensure user coords
+  const newComerciosData = { ...(state.comerciosData || {}) };
+  let comerciosDataChanged = false;
+
+  for (const cid of comercioIds) {
+    if (newComerciosData[cid] === undefined) {
+      try {
+        const cSnap = await getDoc(doc(db, 'comercios', cid));
+        if (cSnap.exists()) {
+          const cData = cSnap.data();
+          const logoUrl = cData.logo || cData.image || null;
+          newComerciosData[cid] = logoUrl;
+          comerciosDataChanged = true;
+        } else {
+          newComerciosData[cid] = null;
+          comerciosDataChanged = true;
+        }
+      } catch (err) {
+        console.error('Error fetching logo for', cid, err);
+      }
+    }
+  }
+
+  if (comerciosDataChanged) {
+    setState('comerciosData', newComerciosData);
+  }
+
+  const dynamicFees = state.dynamicDeliveryFees || {};
+  const needsFeeCalculation = comercioIds.some(cid => dynamicFees[cid] === undefined);
+  if (!needsFeeCalculation) return;
+
+  const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
+
   let userCoords = state.deliveryCoords;
   if (!userCoords && state.deliveryAddress) {
     userCoords = await geocodeAddress(state.deliveryAddress);
     if (userCoords) {
-      // Save for future use (optimistic)
       localStorage.setItem('gd-coords', JSON.stringify(userCoords));
       state.deliveryCoords = userCoords;
     }
@@ -166,11 +366,9 @@ export async function calculateAllFees(proactiveCommerceId = null) {
 
   const newFees = {};
   const newDistances = {};
-
   let changed = false;
 
   for (const cid of comercioIds) {
-
     try {
       const cSnap = await getDoc(doc(db, 'comercios', cid));
       if (cSnap.exists()) {
@@ -203,7 +401,6 @@ export async function calculateAllFees(proactiveCommerceId = null) {
       const mergedDistances = { ...state.dynamicDistances, ...newDistances };
       setState('dynamicDistances', mergedDistances);
 
-      // Persist across reloads to avoid $0 flicker
       localStorage.setItem('gd-cached-fees', JSON.stringify(newFees));
       localStorage.setItem('gd-cached-distances', JSON.stringify(mergedDistances));
     }
@@ -258,23 +455,14 @@ function renderCartContent(content) {
         <!-- Zona de Productos (Scrollable) -->
         <div class="cart-scroll-area">
           
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-4); margin-top:var(--space-2);">
-            <h1 class="cart-page-title" style="margin:0; display:flex; align-items:center; gap:var(--space-2); font-size:22px;">
-              ${icon('cart', 22)} Mi Carrito 
-              <span style="font-size:12px;color:var(--color-text-secondary);font-weight:normal;opacity:0.7;margin-left:4px;">(${count} items)</span>
-            </h1>
-            
-            <button class="btn btn-ghost" style="color:var(--color-danger); opacity:0.8; font-size:10px; padding:var(--space-2); height:auto; display:flex; align-items:center; gap:4px; font-weight:700; background:rgba(239, 68, 68, 0.05); border-radius:8px;" id="clear-cart-btn">
-              ${icon('trash', 12)} VACIAR
-            </button>
-          </div>
-          
-          ${Object.entries(grouped).map(([comercioId, group]) => `
-            <div class="comercio-group" style="margin-bottom:var(--space-5); background:var(--color-bg-card); border-radius:var(--radius-xl); border:1px solid var(--color-border-light); overflow:hidden; box-shadow:var(--shadow-md);">
-              <div style="padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--color-border-light); background:var(--color-bg-secondary); display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="font-family:var(--font-display);font-size:14px;font-weight:800;margin:0;display:flex;align-items:center;gap:var(--space-2); color:var(--color-text-primary);">
-                  ${icon('store', 18)} ${group.comercioName}
-                </h3>
+          ${Object.entries(grouped).map(([comercioId, group]) => {
+            const logoUrl = getState().comerciosData?.[comercioId];
+            return `
+              <div class="comercio-group" style="margin-bottom:var(--space-5); background:var(--color-bg-card); border-radius:var(--radius-xl); border:1px solid var(--color-border-light); overflow:hidden; box-shadow:var(--shadow-md);">
+                <div style="padding:14px 16px; border-bottom:1px solid var(--color-border-light); background:var(--color-bg-secondary); display:flex; justify-content:space-between; align-items:center;">
+                  <h3 style="font-family:var(--font-display);font-size:14.5px;font-weight:800;margin:0;display:flex;align-items:center;gap:10px; color:var(--color-text-primary);">
+                    ${logoUrl ? `<img src="${logoUrl}" style="width:24px; height:24px; border-radius:50%; object-fit:cover; border:1.5px solid var(--color-border-light);" />` : icon('store', 18)} ${group.comercioName}
+                  </h3>
                 <div style="display:flex; align-items:center; gap:8px;">
                   ${getState().dynamicDeliveryFees[comercioId] !== undefined ? `
                     <span style="font-size:10px; color:var(--color-text-tertiary); font-weight:600; background:var(--color-bg-secondary); padding:2px 8px; border-radius:6px; border:1px solid var(--color-border-light);">
@@ -298,47 +486,54 @@ function renderCartContent(content) {
                   if (offer.type === '2x1') {
                     const paidQty = Math.ceil(item.qty / 2);
                     finalTotal = basePrice * paidQty;
-                    offerBadge = `<span style="background:var(--color-secondary-light); color:var(--color-secondary); font-size:9px; font-weight:800; padding:2px 6px; border-radius:6px; margin-left:6px;">2x1</span>`;
+                    offerBadge = `<span style="position:absolute; bottom:3px; left:3px; background:#EF4444; color:white; font-size:8px; font-weight:900; padding:2px 5px; border-radius:6px; text-transform:uppercase; letter-spacing:0.02em; box-shadow:0 2px 6px rgba(239,68,68,0.45); z-index:2; pointer-events:none; border:1px solid var(--color-bg-card); line-height:1;">2x1</span>`;
                   } else if (offer.type === 'percentage') {
                     finalTotal = originalTotal * ((100 - offer.value) / 100);
-                    offerBadge = `<span style="background:var(--color-secondary-light); color:var(--color-secondary); font-size:9px; font-weight:800; padding:2px 6px; border-radius:6px; margin-left:6px;">${offer.value}% OFF</span>`;
+                    offerBadge = `<span style="position:absolute; bottom:3px; left:3px; background:#EF4444; color:white; font-size:8px; font-weight:900; padding:2px 5px; border-radius:6px; text-transform:uppercase; letter-spacing:0.02em; box-shadow:0 2px 6px rgba(239,68,68,0.45); z-index:2; pointer-events:none; border:1px solid var(--color-bg-card); line-height:1;">${offer.value}% OFF</span>`;
                   }
                 }
 
                 return `
-                  <div class="cart-item" data-cart-item-id="${escapeHtmlAttr(item.cartItemId)}" data-comercio-id="${comercioId}" style="display:flex; align-items:center; gap:var(--space-3); position:relative; padding-bottom:var(--space-3); border-bottom:1px solid var(--color-border-light);">
-                    <img src="${item.product.image || '/logo.png'}" alt="${item.product.name}" style="width:50px; height:50px; border-radius:var(--radius-md); object-fit:cover; flex-shrink:0; background:var(--color-bg-secondary);" />
-                    <div style="flex:1; min-width:0;">
-                      <div style="font-weight:700; font-size:14px; color:var(--color-text-primary); display:flex; align-items:center; gap:4px;">
-                        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${item.product.name}</span>
-                        ${offerBadge}
+                  <div class="cart-item" data-cart-item-id="${escapeHtmlAttr(item.cartItemId)}" data-comercio-id="${comercioId}" style="display:flex; align-items:flex-start; gap:12px; position:relative; padding:12px 14px; border-bottom:1px solid var(--color-border-light);">
+                    <div style="position:relative; width:60px; height:60px; flex-shrink:0;">
+                      <img src="${item.product.image || '/logo.png'}" alt="${item.product.name}" style="width:100%; height:100%; border-radius:12px; object-fit:cover; background:var(--color-bg-secondary); border:1px solid var(--color-border-light);" />
+                      ${offerBadge}
+                    </div>
+                    <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-top:2px;">
+                      <div style="font-weight:800; font-size:14px; color:var(--color-text-primary); display:flex; align-items:center; gap:6px; flex-wrap:wrap; line-height:1.35;">
+                        <span style="word-break:break-word;">${item.product.name}</span>
                       </div>
-                      <div style="display:flex; align-items:center; gap:var(--space-2);">
-                        <span style="color:var(--color-primary); font-weight:800; font-size:13px;">${formatPrice(finalTotal)}</span>
-                        ${finalTotal !== originalTotal ? `<span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; text-decoration:line-through;">${formatPrice(originalTotal)}</span>` : ''}
-                        ${item.qty > 1 ? `<span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500;">(${item.qty} x ${formatPrice(basePrice)})</span>` : ''}
+                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                        <span class="cart-item-total-price" style="color:var(--color-primary); font-weight:900; font-size:14px;">${formatPrice(finalTotal)}</span>
+                        ${finalTotal !== originalTotal ? `<span class="cart-item-original-price" style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; text-decoration:line-through;">${formatPrice(originalTotal)}</span>` : ''}
+                        ${item.qty > 1 ? `<span class="cart-item-qty-multiplier" style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:500; opacity:0.85;">(${item.qty} x ${formatPrice(basePrice)})</span>` : ''}
                       </div>
                       ${item.options && item.options.length > 0 ? `
-                        <div style="font-size:10px; color:var(--color-text-secondary); margin-top:4px; opacity:0.8; line-height:1.2;">
+                        <div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; opacity:0.8; line-height:1.3;">
                           ${item.options.map(o => `${o.qty > 1 ? `${o.qty}x ` : ''}${o.name}`).join(', ')}
                         </div>
                       ` : ''}
                     </div>
-                    <div style="display:flex; align-items:center; gap:8px;">
-                      <div class="qty-controls" style="background:var(--color-bg-secondary); border-radius:var(--radius-md); border:1px solid var(--color-border-light); padding:2px; display:flex; align-items:center;">
-                        <button class="qty-btn cart-qty-btn" data-action="minus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px;">−</button>
-                        <span class="qty-value" style="font-size:13px; min-width:24px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
-                        <button class="qty-btn cart-qty-btn" data-action="plus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px;">+</button>
+                    <div style="display:flex; align-items:center; gap:8px; flex-shrink:0; align-self:center; margin-left:4px;">
+                      <div class="qty-controls" style="background:var(--color-bg-secondary); border-radius:10px; border:1px solid var(--color-border-light); padding:2px; display:flex; align-items:center;">
+                        <button class="qty-btn cart-qty-btn" data-action="minus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px; font-weight:800; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:${item.qty === 1 ? 'var(--color-danger)' : 'var(--color-text-primary)'};">
+                          ${item.qty === 1 ? icon('trash', 12) : '−'}
+                        </button>
+                        <span class="qty-value" style="font-size:13px; font-weight:800; min-width:24px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
+                        <button class="qty-btn cart-qty-btn" data-action="plus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px; font-weight:800; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--color-text-primary);">+</button>
                       </div>
-                      <button class="cart-item-remove" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="background:rgba(239,68,68,0.08); border:none; color:var(--color-danger); width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Eliminar producto">
-                        ${icon('trash', 14)}
-                      </button>
                     </div>
                   </div>
                 `;
               }).join('')}
             </div>
-          `).join('')}
+          `;
+          }).join('')}
+          <div style="display:flex; justify-content:center; align-items:center; margin: 24px 0 16px;">
+            <button class="btn btn-ghost" style="color:var(--color-danger); opacity:0.85; font-size:11px; padding:8px 16px; height:auto; display:flex; align-items:center; gap:6px; font-weight:800; background:rgba(239, 68, 68, 0.05); border-radius:12px; border:1px solid rgba(239, 68, 68, 0.1); cursor:pointer;" id="clear-cart-btn">
+              ${icon('trash', 12)} VACIAR TODO EL CARRITO
+            </button>
+          </div>
         </div>
   ` : `
         <!-- Paso 2 Header y Botones de Beneficios (Scrollable) -->
@@ -366,7 +561,7 @@ function renderCartContent(content) {
                 <!-- Tip Pill -->
                 <button id="cart-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? '#10b981' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
                   <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'var(--color-surface-hover)'}; color:${selectedTip > 0 ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(16, 185, 129, 0.08)'}; color:${selectedTip > 0 ? 'white' : '#10b981'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon('dollarSign', 18)}
                     </div>
                     <div style="min-width:0;">
@@ -384,7 +579,7 @@ function renderCartContent(content) {
                 <!-- GoPoints Pill -->
                 <button id="cart-open-gopoints-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedDiscount > 0 ? '#f59e0b' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
                   <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <div style="width:36px; height:36px; background:${appliedDiscount > 0 ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : 'var(--color-surface-hover)'}; color:${appliedDiscount > 0 ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <div style="width:36px; height:36px; background:${appliedDiscount > 0 ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : 'rgba(245, 158, 11, 0.08)'}; color:${appliedDiscount > 0 ? 'white' : '#f59e0b'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon('goPointsLogo', 20)}
                     </div>
                     <div style="min-width:0;">
@@ -402,7 +597,7 @@ function renderCartContent(content) {
                 <!-- Coupon Pill -->
                 <button id="cart-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? '#a855f7' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
                   <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <div style="width:36px; height:36px; background:${appliedCoupon ? 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)' : 'var(--color-surface-hover)'}; color:${appliedCoupon ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <div style="width:36px; height:36px; background:${appliedCoupon ? 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)' : 'rgba(168, 85, 247, 0.08)'}; color:${appliedCoupon ? 'white' : '#a855f7'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon('tag', 18)}
                     </div>
                     <div style="min-width:0;">
@@ -531,10 +726,11 @@ function renderCartContent(content) {
               
               ${currentCartStep === 2 ? `
               <!-- Payment Method Selection Card -->
-              <div style="display: flex; gap: 10px; margin-bottom: 12px; width: 100%;">
+              <div style="display: flex; gap: 10px; margin-bottom: 16px; width: 100%;">
                 <label class="payment-option" style="flex: 1; margin: 0;">
                   <input type="radio" name="payment-method" value="efectivo" ${selectedPaymentMethod === 'efectivo' ? 'checked' : ''} style="display:none;">
-                  <div class="pm-card-v4 pm-cash" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 13px;">
+                  <div class="pm-card-v4 pm-cash" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 13px; padding: 14px 10px;">
+                    ${icon('dollarSign', 15, 'pm-icon')}
                     <span class="pm-label">EFECTIVO</span>
                     <div class="pm-dot"></div>
                   </div>
@@ -542,7 +738,8 @@ function renderCartContent(content) {
                 
                 <label class="payment-option" style="flex: 1; margin: 0;">
                   <input type="radio" name="payment-method" value="mercadopago" ${selectedPaymentMethod === 'mercadopago' ? 'checked' : ''} style="display:none;">
-                  <div class="pm-card-v4 pm-mp" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 13px;">
+                  <div class="pm-card-v4 pm-mp" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 13px; padding: 14px 10px;">
+                    ${icon('bank', 15, 'pm-icon')}
                     <span class="pm-label">TRANSFERENCIA</span>
                     <div class="pm-dot"></div>
                   </div>
@@ -553,33 +750,19 @@ function renderCartContent(content) {
               <div style="background:var(--color-bg-secondary); padding:var(--space-3); border-radius:var(--radius-lg); margin-bottom:var(--space-4); border:1px solid var(--color-border-light);">
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--color-text-secondary); font-size:12px;">
                   <span>Subtotal ${isMulti ? `(${commerceEntries.length} comercios)` : ''}</span>
-                  <span style="color:var(--color-text-primary); font-weight:600;">${formatPrice(totalProducts)}</span>
+                  <span id="cart-summary-subtotal" style="color:var(--color-text-primary); font-weight:600;">${formatPrice(totalProducts)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--color-text-secondary); font-size:12px; align-items:center;">
                   <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                     <span>Envío ${isMulti ? '(Múltiple)' : ''}</span>
                     <button id="show-fee-details" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-right:4px;">${icon('info', 14)}</button>
-                    ${getState().isRaining ? `
-                      <span class="rain-badge-pulsing" style="background:rgba(0,158,227,0.08); color:#009EE3; font-size:10px; font-weight:900; padding:2px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; border:1px solid rgba(0,158,227,0.15); animation: pulse 2s infinite;">
-                        ${icon('cloudRain', 11)} +${formatPrice(getState().deliveryRainSurcharge || 300)} Lluvia
-                      </span>
-                    ` : ''}
-                    ${nightSurcharge > 0 ? `
-                      <span class="night-badge-pulsing" style="background:rgba(163,11,17,0.08); color:#a30b11; font-size:10px; font-weight:900; padding:2px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; border:1px solid rgba(163,11,17,0.15); animation: pulse 2s infinite;">
-                        ${icon('moon', 11)} +${formatPrice(nightSurcharge)} Nocturno
-                      </span>
-                    ` : ''}
                   </div>
                   <div style="display:flex; align-items:center; gap:6px;">
-                    ${!isMulti && Object.values(getState().dynamicDistances || {})[0] ? `
-                      <span style="font-size:10px; opacity:0.6; font-weight:600;">(${Object.values(getState().dynamicDistances)[0].toFixed(1)} km)</span>
+                    ${!isMulti && commerceIds[0] && getState().dynamicDistances?.[commerceIds[0]] ? `
+                      <span style="font-size:10px; opacity:0.6; font-weight:600;">(${getState().dynamicDistances[commerceIds[0]].toFixed(1)} km)</span>
                     ` : ''}
-                    <span style="color:var(--color-success); font-weight:700;">${allFeesReady ? (totalDelivery > 0 ? `${formatPrice(totalDelivery)}${selectedTip > 0 ? ` (incluye ${formatPrice(selectedTip)} propina)` : ''}` : '¡Gratis!') : 'Calculando...'}</span>
+                    <span id="cart-summary-delivery" style="color:var(--color-success); font-weight:700;">${allFeesReady ? ((totalDelivery + appUsageFee) > 0 ? `${formatPrice(totalDelivery + appUsageFee)}` : '¡Gratis!') : 'Calculando...'}</span>
                   </div>
-                </div>
-                <div style="display:flex; justify-content:space-between; color:var(--color-text-tertiary); font-size:11px; opacity:0.8; margin-bottom:4px;">
-                  <span>Tarifa de servicio</span>
-                  <span>${formatPrice(appUsageFee)}</span>
                 </div>
                 ${getState().appliedDiscount ? `
                   <div style="display:flex; justify-content:space-between; color:var(--color-success); font-size:12px; font-weight:700; margin-top:4px; padding-top:4px; border-top:1px dashed var(--color-border-light);">
@@ -599,7 +782,7 @@ function renderCartContent(content) {
 
                 <div style="display:flex; flex-direction:column;">
                   <span style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Total a pagar</span>
-                  <span style="font-size:24px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.03em;">${allFeesReady ? formatPrice(grandTotal) : '---'}</span>
+                  <span id="cart-summary-grandtotal" style="font-size:24px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.03em;">${allFeesReady ? formatPrice(grandTotal) : '---'}</span>
                 </div>
                 
                 <button class="btn btn-primary checkout-btn" 
@@ -633,6 +816,13 @@ function renderCartContent(content) {
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           position: relative;
           cursor: pointer;
+          color: var(--color-text-secondary);
+        }
+
+        .pm-icon {
+          color: var(--color-text-secondary);
+          transition: all 0.3s;
+          flex-shrink: 0;
         }
 
         .pm-label {
@@ -664,6 +854,7 @@ function renderCartContent(content) {
           box-shadow: 0 10px 25px rgba(34, 197, 94, 0.3);
         }
         .payment-option input:checked + .pm-cash .pm-label { color: white; }
+        .payment-option input:checked + .pm-cash .pm-icon { color: white; }
         .payment-option input:checked + .pm-cash .pm-dot { 
           opacity: 1; 
           transform: translateY(0); 
@@ -677,6 +868,7 @@ function renderCartContent(content) {
           box-shadow: 0 10px 25px rgba(0, 158, 227, 0.3);
         }
         .payment-option input:checked + .pm-mp .pm-label { color: white; }
+        .payment-option input:checked + .pm-mp .pm-icon { color: white; }
         .payment-option input:checked + .pm-mp .pm-dot { 
           opacity: 1; 
           transform: translateY(0); 
@@ -830,30 +1022,50 @@ function showFeeDetails() {
     const roundingAdjustment = rounded - beforeRound;
 
     html += `
-      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
-        <span>Costo Base</span>
-        <span style="font-weight:600;">${formatPrice(state.deliveryBasePrice)}</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(0,158,227,0.08); color:#009EE3; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('truck', 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Costo Base</span>
+        </div>
+        <span style="font-weight:800; color:var(--color-text-primary);">${formatPrice(state.deliveryBasePrice)}</span>
       </div>
-      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
-        <span>Distancia (${dist.toFixed(1)} km x ${formatPrice(state.deliveryPricePerKm)})</span>
-        <span style="font-weight:600;">+ ${formatPrice(kmPrice)}</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(245,158,11,0.08); color:#f59e0b; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('mapPin', 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Distancia (${dist.toFixed(1)} km)</span>
+        </div>
+        <span style="font-weight:800; color:var(--color-text-primary);">+ ${formatPrice(kmPrice)}</span>
       </div>
     `;
 
     if (minAdjustment > 0) {
       html += `
-        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px; color:var(--color-success); font-weight:600;">
-          <span>Ajuste Costo Mínimo</span>
-          <span>+ ${formatPrice(minAdjustment)}</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('info', 14)}
+            </div>
+            <span style="color:var(--color-text-secondary); font-weight:600;">Ajuste Costo Mínimo</span>
+          </div>
+          <span style="font-weight:800; color:#10b981;">+ ${formatPrice(minAdjustment)}</span>
         </div>
       `;
     }
 
     if (roundingAdjustment > 0) {
       html += `
-        <div style="display:flex; justify-content:space-between; margin-bottom:12px; font-size:13px; color:var(--color-text-tertiary);">
-          <span>Ajuste de Redondeo</span>
-          <span>+ ${formatPrice(roundingAdjustment)}</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:28px; height:28px; border-radius:8px; background:rgba(107,114,128,0.08); color:var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon('tag', 14)}
+            </div>
+            <span style="color:var(--color-text-secondary); font-weight:600;">Ajuste de Redondeo</span>
+          </div>
+          <span style="font-weight:800; color:var(--color-text-tertiary);">+ ${formatPrice(roundingAdjustment)}</span>
         </div>
       `;
     }
@@ -875,9 +1087,14 @@ function showFeeDetails() {
   const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
   if (nightSurcharge > 0) {
     html += `
-      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
-        <span style="display:flex; align-items:center; gap:6px;">${icon('moon', 14)} Recargo Nocturno</span>
-        <span style="font-weight:700; color:#a30b11;">+ ${formatPrice(nightSurcharge)}</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(163,11,17,0.08); color:#a30b11; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('moon', 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Recargo Nocturno</span>
+        </div>
+        <span style="font-weight:800; color:#a30b11;">+ ${formatPrice(nightSurcharge)}</span>
       </div>
     `;
   }
@@ -885,18 +1102,59 @@ function showFeeDetails() {
   if (state.isRaining) {
     const rainSurcharge = state.deliveryRainSurcharge || 300;
     html += `
-      <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px; padding-top:${nightSurcharge > 0 ? '0' : '12px'}; border-top:${nightSurcharge > 0 ? 'none' : '1px dashed var(--color-border-light)'};">
-        <span style="display:flex; align-items:center; gap:6px;">${icon('cloudRain', 14)} Recargo por Lluvia</span>
-        <span style="font-weight:700; color:#009EE3;">+ ${formatPrice(rainSurcharge)}</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; padding-top:${nightSurcharge > 0 ? '0' : '12px'}; border-top:${nightSurcharge > 0 ? 'none' : '1px dashed var(--color-border-light)'}; font-size:13px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(0,158,227,0.08); color:#009EE3; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('cloudRain', 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Recargo por Lluvia</span>
+        </div>
+        <span style="font-weight:800; color:#009EE3;">+ ${formatPrice(rainSurcharge)}</span>
       </div>
     `;
   }
 
-  const finalBreakdownTotal = baseDeliveryFeeCalc + nightSurcharge + (state.isRaining ? (state.deliveryRainSurcharge || 300) : 0);
+  const selectedTip = state.selectedTip || 0;
+  if (selectedTip > 0) {
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('heart', 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Propina al Repartidor</span>
+        </div>
+        <span style="font-weight:800; color:#10b981;">+ ${formatPrice(selectedTip)}</span>
+      </div>
+    `;
+  }
+
+  const totalProducts = getCartTotal();
+  const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
+  if (appUsageFee > 0) {
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(168,85,247,0.08); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('info', 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Tarifa de servicio</span>
+        </div>
+        <span style="font-weight:800; color:var(--color-text-secondary);">+ ${formatPrice(appUsageFee)}</span>
+      </div>
+    `;
+  }
+
+  const finalBreakdownTotal = baseDeliveryFeeCalc + nightSurcharge + (state.isRaining ? (state.deliveryRainSurcharge || 300) : 0) + selectedTip + appUsageFee;
   html += `
-      <div style="display:flex; justify-content:space-between; margin-top:12px; padding-top:12px; font-size:15px; font-weight:900; color:var(--color-text-primary); border-top:2px solid var(--color-border-light);">
-        <span>Total del Envío</span>
-        <span>${formatPrice(finalBreakdownTotal)}</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; font-size:16px; font-weight:900; color:var(--color-text-primary); border-top:2px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:32px; height:32px; border-radius:10px; background:rgba(34,197,94,0.1); color:#22C55E; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('creditCard', 16)}
+          </div>
+          <span style="font-family:var(--font-display); font-weight:900; color:var(--color-text-primary);">Total del Envío</span>
+        </div>
+        <span style="font-size:18px; font-weight:900; color:#22C55E;">${formatPrice(finalBreakdownTotal)}</span>
       </div>
   `;
 
@@ -912,6 +1170,7 @@ function showFeeDetails() {
   import('../components/modal.js').then(m => {
     m.showModal({
       title: 'Detalle del Envío',
+      height: 'auto',
       content: html
     });
   });
@@ -1887,26 +2146,12 @@ async function openCheckoutConfirmationModal() {
 
       <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary); align-items: center;">
         <span style="display: flex; align-items: center; gap: 3px;">
-          Costo de Envío
-          ${state.isRaining ? `
-            <span style="background: rgba(0, 158, 227, 0.08); color: #009EE3; font-size: 8px; font-weight: 800; padding: 1px 3px; border-radius: 4px; border: 1px solid rgba(0, 158, 227, 0.15);">
-              ${icon('cloudRain', 8)} Lluvia
-            </span>
-          ` : ''}
-          ${nightSurcharge > 0 ? `
-            <span style="background: rgba(163, 11, 17, 0.08); color: #a30b11; font-size: 8px; font-weight: 800; padding: 1px 3px; border-radius: 4px; border: 1px solid rgba(163, 11, 17, 0.15);">
-              ${icon('moon', 8)} Nocturno
-            </span>
-          ` : ''}
+          Envío
+          <button id="show-fee-details-confirm" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-left:2px;">${icon('info', 12)}</button>
         </span>
         <span style="font-weight: 600; color: var(--color-text-primary); text-align: right;">
-          ${totalDelivery > 0 ? `${formatPrice(totalDelivery)}${selectedTip > 0 ? ` (${formatPrice(selectedTip)} prop.)` : ''}` : '¡Gratis!'}
+          ${(totalDelivery + appUsageFee) > 0 ? formatPrice(totalDelivery + appUsageFee) : '¡Gratis!'}
         </span>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary);">
-        <span>Tarifa de servicio</span>
-        <span style="font-weight: 600; color: var(--color-text-primary);">${formatPrice(appUsageFee)}</span>
       </div>
 
       ${discount > 0 ? `
@@ -1963,6 +2208,10 @@ async function openCheckoutConfirmationModal() {
     close();
     isSubmitting = false;
   };
+
+  modalContent.querySelector('#show-fee-details-confirm')?.addEventListener('click', () => {
+    showFeeDetails();
+  });
 
   // Scheduling Listeners
   const nowBtn = modalContent.querySelector('#sched-now-btn');

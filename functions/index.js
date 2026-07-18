@@ -381,6 +381,50 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
   const orderNum = order.orderId || orderId.slice(0, 6);
 
   try {
+    // 0. Notify ALL admins of ANY new order
+    try {
+      const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+      let orderTypeLabel = 'Pedido general';
+      if (order.isFavor) {
+        const favorTypes = {
+          compra: 'Favor de Compra 🛒',
+          pagodeservicios: 'Pago de Servicios ⚡',
+          gocash: 'Go Cash 💵',
+          encomienda: 'Encomienda 📦'
+        };
+        orderTypeLabel = favorTypes[order.favorType] || 'Favor especial 🌟';
+      } else if (order.isTrip) {
+        orderTypeLabel = 'Viaje solicitado 🚴';
+      } else {
+        orderTypeLabel = `Compra en ${order.comercioName || 'Tienda'} 🏪`;
+      }
+
+      const adminTokens = await getAdminTokens();
+      if (adminTokens.length > 0) {
+        await sendPush(adminTokens, {
+          title: `🔔 Nuevo Pedido #${orderNum}`,
+          body: `Se ha registrado una nueva orden: ${orderTypeLabel}`
+        }, {
+          tag: `new-order-admin-${orderId}`,
+          url: `#/admin/orders/${orderId}`,
+          type: 'new_order_alert'
+        });
+      }
+
+      for (const adminDoc of adminsSnap.docs) {
+        await db.collection("users").doc(adminDoc.id).collection("notifications").add({
+          title: `🔔 Nuevo Pedido #${orderNum}`,
+          body: `Se ha registrado una nueva orden de tipo: ${orderTypeLabel}`,
+          type: 'system',
+          status: 'unread',
+          url: `#/admin/orders/${orderId}`,
+          createdAt: new Date()
+        });
+      }
+    } catch (err) {
+      logger.error("Error notifying admins of new order:", err);
+    }
+
     // 1. If it's a GoFavor order, notify all online drivers immediately
     if (order.isFavor) {
       const driverTokens = await getOnlineDeliveryTokens();
@@ -601,6 +645,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   if (before.status === after.status && 
       before.paymentStatus === after.paymentStatus &&
       before.driverId === after.driverId &&
+      before.isAtDoor === after.isAtDoor &&
       JSON.stringify(before.items) === JSON.stringify(after.items) &&
       before.total === after.total) {
     return;
@@ -635,6 +680,21 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
          }
        }
     }
+    
+    // Notification for delivery driver at door
+    if (before.isAtDoor !== after.isAtDoor && after.isAtDoor === true) {
+      if (after.userId) {
+        const clientTokens = await getUserTokens(after.userId);
+        const codeStr = after.verificationCode ? ` Tené listo tu código de entrega: ${after.verificationCode}` : "";
+        await sendPush(clientTokens, {
+          title: "¡Tu repartidor está en la puerta!",
+          body: after.isFavor 
+            ? `El repartidor llegó con tu favor. ¡Salí a recibirlo!${codeStr}` 
+            : `Prepárate para recibir tu pedido. ¡Ya llegó!${codeStr}`
+        }, { tag: `order-at-door-${orderId}`, url: `#/pedido/${orderId}` });
+      }
+    }
+
     // Status change notifications
     if (before.status !== after.status) {
       switch (after.status) {
@@ -1916,14 +1976,16 @@ exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/
   const userId = event.params.userId;
   if (!notification) return;
 
-  // Protect from loop: Only trigger push notifications for direct P2P points transfer, weekly challenge completions, driver/delivery approvals, or scheduled trip events
+  // Protect from loop: Only trigger push notifications for direct P2P points transfer, weekly challenge completions, driver/delivery approvals, scheduled trip events, or commerce approvals
   if (
     notification.type !== 'points_received' && 
     notification.type !== 'challenge_completion' && 
     notification.type !== 'driver_approved' && 
     notification.type !== 'delivery_approved' &&
     notification.type !== 'scheduled_trip_accepted' &&
-    notification.type !== 'scheduled_trip_cancelled'
+    notification.type !== 'scheduled_trip_cancelled' &&
+    notification.type !== 'commerce_approved' &&
+    notification.type !== 'commerce_rejected'
   ) {
     return;
   }

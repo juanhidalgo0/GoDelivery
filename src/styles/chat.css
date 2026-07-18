@@ -162,6 +162,7 @@
   word-break: break-word;
   position: relative;
   line-height: 1.45;
+  min-width: 110px;
 }
 
 .bubble-mine {

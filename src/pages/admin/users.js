@@ -472,30 +472,37 @@ export async function renderAdminUsers() {
       const uid = openChatBtn.dataset.openChat;
       const targetUser = users.find(u => u.uid === uid);
       if (targetUser) {
-        // Initialize support chat with the target user
-        const { doc: fDoc, getDoc: fGetDoc, setDoc: fSetDoc, serverTimestamp: fServerTimestamp } = await import('firebase/firestore');
-        const chatRef = fDoc(db, 'support_chats', uid);
+        const { collection, query, where, getDocs, addDoc, serverTimestamp: fServerTimestamp } = await import('firebase/firestore');
         try {
-          const chatSnap = await fGetDoc(chatRef);
-          if (!chatSnap.exists()) {
+          const q = query(collection(db, 'support_chats'), where('userId', '==', uid));
+          const snap = await getDocs(q);
+          const activeDoc = snap.docs.find(d => d.data().status !== 'closed' && d.id !== uid);
+
+          let docId;
+          if (activeDoc) {
+            docId = activeDoc.id;
+          } else {
             const isComercio = targetUser.isComercio || targetUser.role === 'comercio';
             const commerceName = isComercio ? (comerciosMap[uid]?.name || 'Tienda sin nombre') : null;
+            const ticketNum = Math.floor(100000 + Math.random() * 900000);
             
-            await fSetDoc(chatRef, {
+            const newDocRef = await addDoc(collection(db, 'support_chats'), {
               userName: commerceName || targetUser.displayName || 'Usuario',
               userPhoto: targetUser.photoURL || '/logo.png',
               userId: uid,
               status: 'open',
-              ticketId: `#TK-${Math.floor(1000 + Math.random() * 9000)}`,
+              ticketId: `#TK-${ticketNum}`,
               createdAt: fServerTimestamp(),
               lastMessageText: 'Conversación iniciada por el administrador',
               lastMessageTime: fServerTimestamp(),
               unreadByAdmin: false,
-              unreadByUser: true
+              unreadByUser: true,
+              messages: []
             });
+            docId = newDocRef.id;
           }
           // Set in sessionStorage so the support chats page knows which chat to open
-          sessionStorage.setItem('admin-support-chat-target', uid);
+          sessionStorage.setItem('admin-support-chat-target', docId);
           // Redirect to support chats
           location.hash = '#/admin/support-chats';
         } catch (err) {

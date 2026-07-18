@@ -5,40 +5,83 @@ import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
 
+const userCache = {};
+
+async function enrichChatUserData(chat) {
+  if (!chat.userId) return;
+  if (userCache[chat.userId]) {
+    const cached = userCache[chat.userId];
+    chat.userRole = cached.role;
+    chat.userPhoto = cached.photo;
+    if (cached.name) chat.userName = cached.name;
+    return;
+  }
+
+  try {
+    const userDoc = await getDoc(doc(db, 'users', chat.userId));
+    if (userDoc.exists()) {
+      const uData = userDoc.data();
+      let role = uData.role || 'client';
+      let photo = uData.photoURL || uData.profilePhoto || null;
+      let name = uData.displayName || chat.userName;
+
+      if (role === 'comercio' || role === 'commerce') {
+        role = 'comercio';
+        const comDoc = await getDoc(doc(db, 'comercios', chat.userId));
+        if (comDoc.exists()) {
+          const comData = comDoc.data();
+          photo = comData.logo || comData.image || photo;
+          name = comData.name || name;
+        }
+      }
+
+      userCache[chat.userId] = { role, photo, name };
+      chat.userRole = role;
+      chat.userPhoto = photo;
+      chat.userName = name;
+    } else {
+      userCache[chat.userId] = { role: chat.userRole || 'client', photo: null, name: chat.userName };
+    }
+  } catch (err) {
+    console.error('Error enriching chat user data:', err);
+  }
+}
+
 export async function renderAdminSupportChats() {
   const content = document.getElementById('app-content');
   if (!content) return;
 
   // Render main structural framework
   content.innerHTML = `
-    <div class="panel-page" style="position:relative; display:flex; flex-direction:column; height:100%; background:var(--color-bg); overflow:hidden;">
+    <div class="panel-page" style="position:relative; display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       
       <!-- Main Layout -->
       <div style="flex:1; display:flex; overflow:hidden; background:var(--color-bg-secondary);">
         
         <!-- Left Side: Chat Sessions List -->
         <div id="chats-list-sidebar" style="width:100%; max-width:360px; border-right:1px solid var(--color-border); display:flex; flex-direction:column; background:var(--color-surface); flex-shrink:0;">
-          <div style="padding:16px; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+          <div style="padding:calc(16px + env(safe-area-inset-top, 0px)) 16px 16px 16px; background:var(--color-primary); color:white; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
             <div style="display:flex; align-items:center; gap:8px;">
-              <a href="#/admin/orders" style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:10px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); color:var(--color-text); text-decoration:none;" title="Volver a Registro de Ventas">
+              <a href="#/admin/orders" style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:10px; background:rgba(255,255,255,0.15); border:1.5px solid rgba(255,255,255,0.3); color:white; text-decoration:none;" title="Volver a Registro de Ventas">
                 ${icon('chevronLeft', 20)}
               </a>
-              <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; display:flex; gap:6px; align-items:center;">
+              <div style="font-size:12px; font-weight:800; color:white; text-transform:uppercase; letter-spacing:0.05em; display:flex; gap:6px; align-items:center;">
                 <span>Chats</span>
-                <span id="unread-count-badge" style="background:var(--color-primary); color:white; padding:2px 8px; border-radius:100px; font-size:10px; font-weight:900; display:none;">0</span>
+                <span id="unread-count-badge" style="background:white; color:var(--color-primary); padding:2px 8px; border-radius:100px; font-size:10px; font-weight:900; display:none;">0</span>
               </div>
             </div>
             
             <!-- Bulk Delete Action -->
-            <button id="delete-all-chats-btn" style="border:none; background:transparent; color:var(--color-danger); cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; transition: opacity 0.2s;">
+            <button id="delete-all-chats-btn" style="border:none; background:transparent; color:rgba(255,255,255,0.9); cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
               ${icon('trash', 14)} Eliminar Todo
             </button>
           </div>
           <!-- Role Selector Filter Tabs -->
-          <div id="support-role-filter-container" style="padding:8px 16px 12px; border-bottom:1px solid var(--color-border); display:flex; gap:8px; flex-shrink:0; background:var(--color-surface);">
-            <button class="support-filter-btn active" data-role="all" style="flex:1; height:32px; border-radius:10px; border:none; font-weight:800; font-size:11px; cursor:pointer; background:var(--color-primary); color:white; transition:all 0.2s;">Todos</button>
-            <button class="support-filter-btn" data-role="user" style="flex:1; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s;">Clientes</button>
-            <button class="support-filter-btn" data-role="driver" style="flex:1; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s;">Repartidores</button>
+          <div id="support-role-filter-container" style="padding:8px 16px 12px; border-bottom:1px solid var(--color-border); display:flex; gap:6px; flex-shrink:0; background:var(--color-surface); overflow-x:auto;">
+            <button class="support-filter-btn active" data-role="all" style="padding:0 12px; height:32px; border-radius:10px; border:none; font-weight:800; font-size:11px; cursor:pointer; background:var(--color-primary); color:white; transition:all 0.2s; flex-shrink:0;">Todos</button>
+            <button class="support-filter-btn" data-role="user" style="padding:0 12px; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s; flex-shrink:0;">Clientes</button>
+            <button class="support-filter-btn" data-role="driver" style="padding:0 12px; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s; flex-shrink:0;">Repartidores</button>
+            <button class="support-filter-btn" data-role="comercio" style="padding:0 12px; height:32px; border-radius:10px; border:1px solid var(--color-border); font-weight:800; font-size:11px; cursor:pointer; background:var(--color-surface); color:var(--color-text-secondary); transition:all 0.2s; flex-shrink:0;">Comercios</button>
           </div>
           <div id="support-chats-list" style="flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:8px;">
             <div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>
@@ -48,26 +91,26 @@ export async function renderAdminSupportChats() {
         <!-- Right Side: Chat Conversation Details -->
         <div id="chat-conversation-area" style="flex:1; display:none; flex-direction:column; background:var(--color-bg);">
           <!-- Active User Header -->
-          <div style="background:var(--color-surface); border-bottom:1px solid var(--color-border); padding:calc(14px + env(safe-area-inset-top, 0px)) 20px 14px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden;">
+          <div style="background:var(--color-primary); color:white; padding:calc(14px + env(safe-area-inset-top, 0px)) 20px 14px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
             <!-- Mobile Back Button to list -->
-            <button id="chat-back-to-list-btn" style="background:none; border:none; color:var(--color-text); cursor:pointer; padding:0; display:none; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background:var(--color-bg-secondary); margin-right:4px;">
+            <button id="chat-back-to-list-btn" style="background:none; border:none; color:white; cursor:pointer; padding:0; display:none; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,0.15); margin-right:4px;">
               ${icon('chevronLeft', 24)}
             </button>
 
-            <div style="width:40px; height:40px; border-radius:50%; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:16px;" id="active-user-avatar">
+            <div style="width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.2); color:white; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:16px; border:1px solid rgba(255,255,255,0.3);" id="active-user-avatar">
               U
             </div>
-            <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:4px;">
+            <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; text-align:left;">
               <div style="display:flex; align-items:center; gap:6px; flex-wrap:nowrap; width:100%; overflow:hidden;">
-                <span id="active-user-name" style="font-weight:900; font-size:14.5px; color:var(--color-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">Selecciona un chat</span>
-                <span id="active-user-goid" style="font-size:9.5px; font-weight:900; background:var(--color-primary-lighter); border:1px solid var(--color-primary-light); padding:1px 6px; border-radius:6px; color:var(--color-primary); display:none; flex-shrink:0;">GO-1002</span>
-                <span id="active-ticket-badge" style="font-size:9.5px; font-weight:900; background:var(--color-bg-secondary); border:1px solid var(--color-border); padding:1px 6px; border-radius:6px; color:var(--color-text-secondary); flex-shrink:0;">#TK-0000</span>
+                <span id="active-user-name" style="font-weight:900; font-size:14.5px; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">Selecciona un chat</span>
+                <span id="active-user-goid" style="font-size:9.5px; font-weight:900; background:rgba(255,255,255,0.25); border:1px solid rgba(255,255,255,0.35); padding:1px 6px; border-radius:6px; color:white; display:none; flex-shrink:0;">GO-1002</span>
+                <span id="active-ticket-badge" style="font-size:9.5px; font-weight:900; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25); padding:1px 6px; border-radius:6px; color:white; flex-shrink:0;">#TK-0000</span>
               </div>
-              <div style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="active-user-meta">Para empezar a responder</div>
+              <div style="font-size:11px; font-weight:700; color:rgba(255,255,255,0.8); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="active-user-meta">Para empezar a responder</div>
             </div>
 
             <!-- Finish / Finalize Ticket Action -->
-            <button id="finalize-ticket-btn" style="border:none; height:38px; border-radius:10px; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; gap:6px; font-weight:800; font-size:12px; cursor:pointer; padding:0 12px; transition: all 0.2s;">
+            <button id="finalize-ticket-btn" style="border:none; height:38px; border-radius:10px; background:rgba(255,255,255,0.2); color:white; display:flex; align-items:center; gap:6px; font-weight:800; font-size:12px; cursor:pointer; padding:0 12px; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
               ${icon('check', 14)} <span class="hide-mobile">Finalizar Consulta</span>
             </button>
           </div>
@@ -81,7 +124,7 @@ export async function renderAdminSupportChats() {
 
           <!-- Bottom Reply Input -->
           <div id="admin-chat-footer" style="flex-shrink:0;">
-            <div style="padding:12px 20px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:10px; align-items:center;">
+            <div style="padding:12px 20px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:10px; align-items:center; padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px));">
               <!-- Camera Button -->
               <button id="admin-chat-image-btn" style="background:none; border:none; color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; transition:background 0.2s;">
                 ${icon('camera', 20)}
@@ -106,13 +149,20 @@ export async function renderAdminSupportChats() {
 
     <!-- Responsive Layout Style -->
     <style>
-      /* Force outer overlay and container to be non-scrollable for strict native app layout */
-      #app-overlay {
+      #app-overlay, .slide-overlay, .slide-overlay.active {
+        bottom: 0 !important;
+        height: 100dvh !important;
+        min-height: 100dvh !important;
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
         overflow: hidden !important;
       }
       .panel-page {
-        height: 100% !important;
+        height: 100dvh !important;
         overflow: hidden !important;
+      }
+      .panel-page > div:first-child {
+        padding-top: 0 !important;
       }
 
       /* Fix mobile height collapsing */
@@ -129,9 +179,8 @@ export async function renderAdminSupportChats() {
         #chat-placeholder-area { display: none !important; }
         #chat-back-to-list-btn { display: flex !important; }
         
-        /* Ensure the active user header is properly padded and aligned on mobile */
         #chat-conversation-area > div:first-child {
-          padding: 12px 16px !important;
+          padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px 16px !important;
           min-height: 64px !important;
           display: flex !important;
           align-items: center !important;
@@ -171,6 +220,12 @@ export async function renderAdminSupportChats() {
   let allChats = [];
   let selectedChatId = sessionStorage.getItem('admin-support-chat-target') || null;
   sessionStorage.removeItem('admin-support-chat-target');
+  
+  const hashVal = window.location.hash || '';
+  const hashMatch = hashVal.match(/[?&]ticketId=([^&]+)/);
+  if (hashMatch && hashMatch[1]) {
+    selectedChatId = hashMatch[1];
+  }
   let activeChatsListener = null;
 
   // Clean up on unmount
@@ -197,7 +252,15 @@ export async function renderAdminSupportChats() {
 
     // Populate active user header
     activeUserName.textContent = chat.userName || 'Usuario';
-    activeUserAvatar.textContent = (chat.userName || 'U')[0].toUpperCase();
+    if (chat.userPhoto) {
+      activeUserAvatar.innerHTML = `<img src="${chat.userPhoto}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;" />`;
+      activeUserAvatar.style.background = 'transparent';
+      activeUserAvatar.style.border = 'none';
+    } else {
+      activeUserAvatar.textContent = (chat.userName || 'U')[0].toUpperCase();
+      activeUserAvatar.style.background = 'rgba(255,255,255,0.2)';
+      activeUserAvatar.style.border = '1px solid rgba(255,255,255,0.3)';
+    }
     
     let metaText = `${chat.email || ''} | Rol: ${chat.userRole || 'Cliente'}`;
     if (chat.activeOrderNum && chat.activeOrderId) {
@@ -250,10 +313,78 @@ export async function renderAdminSupportChats() {
     } else {
       messagesBox.innerHTML = messages.map(msg => {
         const isUser = msg.sender === 'user';
+        const dateObj = msg.timestamp ? new Date(msg.timestamp) : new Date();
+        const timeStr = dateObj.toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }).toLowerCase();
+
+        const isMine = !isUser;
+        let ticksHtml = '';
+        if (isMine) {
+          const now = Date.now();
+          const msgTime = msg.timestamp ? new Date(msg.timestamp).getTime() : now;
+          const diffSeconds = (now - msgTime) / 1000;
+
+          if (chat.unreadByUser) {
+            if (diffSeconds < 2.5) {
+              // Sent but not received: single tick (white)
+              ticksHtml = `
+                <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;" title="Enviado">
+                  <svg width="11" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              `;
+            } else {
+              // Sent and received: double tick (white)
+              ticksHtml = `
+                <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;" title="Entregado">
+                  <svg width="16" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M5.5 5.5L8.5 8.5L14.5 2.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              `;
+            }
+          } else {
+            // Received and read (Visto): double tick (dark grey)
+            ticksHtml = `
+              <span class="chat-tick" style="margin-left:4px; display:inline-flex; align-items:center; vertical-align:middle; line-height:1;" title="Leído">
+                <svg width="16" height="11" viewBox="0 0 16 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5.5 5.5L8.5 8.5L14.5 2.5" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+            `;
+          }
+        }
+
+        let seenTimeHtml = '';
+        if (isMine && !chat.unreadByUser) {
+          let seenTimeStr = '';
+          if (chat.userReadAt) {
+            const readDate = chat.userReadAt.toDate ? chat.userReadAt.toDate() : new Date(chat.userReadAt);
+            seenTimeStr = readDate.toLocaleTimeString('es-AR', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            }).toLowerCase();
+          } else {
+            seenTimeStr = timeStr;
+          }
+          seenTimeHtml = `
+            <div style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-align:right; margin-top:3px; margin-right:6px; opacity:0.95;">
+              Visto ${seenTimeStr}
+            </div>
+          `;
+        }
+
         return `
-          <div style="display:flex; flex-direction:column; align-self: ${isUser ? 'flex-start' : 'flex-end'}; max-width:80%; margin-bottom:4px;">
+          <div style="display:flex; flex-direction:column; align-self: ${isUser ? 'flex-start' : 'flex-end'}; max-width:80%; margin-bottom:8px;">
             <div style="
-              padding:${(msg.image && !msg.audio) ? '8px' : '12px 16px'}; 
+              padding:${(msg.image && !msg.audio) ? '8px 8px 18px 8px' : '10px 14px 18px 14px'}; 
               border-radius:18px; 
               font-size:13px; 
               font-weight:600; 
@@ -261,17 +392,25 @@ export async function renderAdminSupportChats() {
               background:${isUser ? 'var(--color-bg-secondary)' : 'var(--color-primary)'}; 
               color:${isUser ? 'var(--color-text)' : 'white'};
               border-bottom-${isUser ? 'left' : 'right'}-radius:4px;
+              position:relative;
+              min-width:110px;
             ">
               ${msg.audio ? `
-                <div style="display:flex;align-items:center;gap:10px;padding:4px 8px;">
+                <div style="display:flex;align-items:center;gap:10px;padding:4px 8px;padding-bottom:12px;">
                   <div style="background:rgba(255,255,255,0.2);border-radius:50%;padding:8px;display:flex;align-items:center;justify-content:center;color:${isUser ? 'var(--color-text)' : 'white'};">${icon('mic', 16)}</div>
                   <audio controls src="${msg.audio}" style="height:32px;max-width:180px;"></audio>
                 </div>
               ` : msg.image ? `
                 <img src="${msg.image}" style="max-width:100%; border-radius:12px; display:block; cursor:pointer; box-shadow:var(--shadow-sm);" onclick="window.open('${msg.image}')" />
-                ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px;">${msg.text}</div>` : ''}
-              ` : msg.text}
+                ${msg.text && msg.text !== '📷 Foto enviada' ? `<div style="margin-top:6px; margin-bottom:10px;">${msg.text}</div>` : ''}
+              ` : `<div style="margin-bottom:2px; word-break:break-word; padding-right:16px;">${msg.text}</div>`}
+              
+              <div style="position:absolute; bottom:4px; right:10px; display:flex; align-items:center; gap:2px; font-size:9.5px; opacity:0.8; font-weight:700; color:${isUser ? 'var(--color-text-tertiary)' : 'rgba(255,255,255,0.75)'};">
+                <span>${timeStr}</span>
+                ${ticksHtml}
+              </div>
             </div>
+            ${seenTimeHtml}
           </div>
         `;
       }).join('');
@@ -292,16 +431,21 @@ export async function renderAdminSupportChats() {
           <input type="file" id="admin-chat-file-gallery" style="display:none;" accept="image/*" />
           <input type="file" id="admin-chat-file-camera" style="display:none;" accept="image/*" capture="environment" />
           <input type="text" id="admin-chat-input" class="chat-input" placeholder="Escribí tu respuesta..." autocomplete="off" />
-          <button class="chat-mic-btn" id="admin-chat-mic-btn" title="Grabar audio" style="color:var(--color-primary);">${icon('mic', 20)}</button>
-          <button class="chat-send-btn" id="admin-chat-send">
+          
+          <div id="admin-audio-recording-overlay" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 110px 0 16px; border-radius:14px; z-index:50; border:1.5px solid var(--color-border);">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
+              <span id="admin-audio-timer" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:4px; animation: slideHint 1.5s infinite; color: var(--color-text-tertiary); font-size: 12px; font-weight: 700;">
+              <span style="font-size:14px; margin-right:4px;">‹</span> Desliza para cancelar
+            </div>
+          </div>
+
+          <button class="chat-mic-btn" id="admin-chat-mic-btn" title="Grabar audio" style="color:var(--color-primary); z-index:60; position:relative; touch-action:none;">${icon('mic', 20)}</button>
+          <button class="chat-send-btn" id="admin-chat-send" style="z-index:60; position:relative;">
             ${icon('send', 20)}
           </button>
-        </div>
-        <!-- Audio recording indicator -->
-        <div id="admin-audio-indicator" style="display:none; position:absolute; bottom: 85px; left: 50%; transform: translateX(-50%); background: var(--color-surface); border: 1.5px solid var(--color-border); padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); align-items: center; gap: 10px; z-index: 1000;">
-          <div class="recording-dot" style="width: 10px; height: 10px; background: red; border-radius: 50%; animation: pulse 1s infinite;"></div>
-          <span id="admin-audio-timer" style="font-weight: 700; font-size: 14px; color:var(--color-text);">0:00</span>
-          <span style="font-size: 11px; color: var(--color-text-tertiary); margin-left: 8px;">(Soltá para enviar)</span>
         </div>
       `;
 
@@ -312,7 +456,7 @@ export async function renderAdminSupportChats() {
       const fileInputGallery = chatFooter.querySelector('#admin-chat-file-gallery');
       const fileInputCamera = chatFooter.querySelector('#admin-chat-file-camera');
       const micBtn = chatFooter.querySelector('#admin-chat-mic-btn');
-      const audioIndicator = chatFooter.querySelector('#admin-audio-indicator');
+      const audioIndicator = chatFooter.querySelector('#admin-audio-recording-overlay');
       const audioTimer = chatFooter.querySelector('#admin-audio-timer');
 
       send.onclick = handleSendResponse;
@@ -352,7 +496,6 @@ export async function renderAdminSupportChats() {
       if (fileInputCamera) fileInputCamera.onchange = (e) => handleSendAdminImage(e.target.files[0]);
 
       // Audio recording handling
-      // Audio recording handling
       let mediaRecorder;
       let audioChunks = [];
       let recordStartTime;
@@ -361,13 +504,43 @@ export async function renderAdminSupportChats() {
       let startX = 0;
       let isCancelled = false;
 
+      const stopRecording = () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      };
+
+      const preventSelect = (e) => e.preventDefault();
+
+      const handlePointerMove = (e) => {
+        if (isRecording) {
+          const diffX = startX - e.clientX;
+          if (diffX > 0) {
+            micBtn.style.transform = `scale(1.3) translateX(${-diffX}px)`;
+          } else {
+            micBtn.style.transform = 'scale(1.3) translateX(0px)';
+          }
+
+          if (diffX > 150) {
+            isCancelled = true;
+            stopRecording();
+            showToast('Grabación cancelada', 'warning');
+          }
+        }
+      };
+
+      const handlePointerUp = (e) => {
+        if (isRecording) {
+          stopRecording();
+        }
+      };
+
+      micBtn.addEventListener('dragstart', (e) => e.preventDefault());
+
       micBtn.addEventListener('pointerdown', async (e) => {
         e.preventDefault();
         startX = e.clientX;
         isCancelled = false;
-        try {
-          micBtn.setPointerCapture(e.pointerId);
-        } catch (err) {}
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           try {
@@ -385,16 +558,22 @@ export async function renderAdminSupportChats() {
               audioIndicator.style.display = 'flex';
               micBtn.style.backgroundColor = 'var(--color-primary)';
               micBtn.style.color = 'white';
-              micBtn.style.transform = 'scale(1.4)';
+              micBtn.style.transform = 'scale(1.3) translateX(0px)';
               micBtn.style.boxShadow = '0 0 15px rgba(225, 29, 72, 0.5)';
               micBtn.style.borderRadius = '50%';
+              micBtn.innerHTML = icon('arrowLeft', 20);
 
               recordTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
                 const m = Math.floor(elapsed / 60);
                 const s = (elapsed % 60).toString().padStart(2, '0');
-                audioTimer.textContent = `${m}:${s} (Deslizá < para cancelar)`;
+                audioTimer.textContent = `${m}:${s}`;
               }, 1000);
+
+              window.addEventListener('pointermove', handlePointerMove);
+              window.addEventListener('pointerup', handlePointerUp);
+              window.addEventListener('pointercancel', handlePointerUp);
+              window.addEventListener('selectstart', preventSelect);
             };
 
             mediaRecorder.onstop = async () => {
@@ -406,6 +585,12 @@ export async function renderAdminSupportChats() {
               micBtn.style.transform = '';
               micBtn.style.boxShadow = '';
               micBtn.style.borderRadius = '';
+              micBtn.innerHTML = icon('mic', 20);
+              
+              window.removeEventListener('pointermove', handlePointerMove);
+              window.removeEventListener('pointerup', handlePointerUp);
+              window.removeEventListener('pointercancel', handlePointerUp);
+              window.removeEventListener('selectstart', preventSelect);
               
               stream.getTracks().forEach(track => track.stop());
 
@@ -427,25 +612,6 @@ export async function renderAdminSupportChats() {
         }
       });
 
-      micBtn.addEventListener('pointermove', (e) => {
-        if (isRecording) {
-          const diffX = startX - e.clientX;
-          if (diffX > 60) {
-            isCancelled = true;
-            stopRecording();
-            showToast('Grabación cancelada', 'warning');
-          }
-        }
-      });
-
-      const stopRecording = () => {
-        if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      };
-
-      micBtn.addEventListener('pointerup', stopRecording);
-      micBtn.addEventListener('pointerleave', stopRecording);
       input.focus();
     }
 
@@ -629,9 +795,15 @@ export async function renderAdminSupportChats() {
   const renderFilteredChatsList = () => {
     let filteredChats = allChats;
     if (currentRoleFilter === 'user') {
-      filteredChats = allChats.filter(c => c.userRole === 'user' || c.userRole === 'client' || !c.userRole);
+      filteredChats = allChats.filter(c => {
+        const role = c.userRole;
+        const isExcluded = role === 'driver' || role === 'delivery' || role === 'comercio' || role === 'commerce';
+        return !isExcluded;
+      });
     } else if (currentRoleFilter === 'driver') {
       filteredChats = allChats.filter(c => c.userRole === 'driver' || c.userRole === 'delivery');
+    } else if (currentRoleFilter === 'comercio') {
+      filteredChats = allChats.filter(c => c.userRole === 'comercio' || c.userRole === 'commerce');
     }
 
     if (filteredChats.length === 0) {
@@ -639,7 +811,6 @@ export async function renderAdminSupportChats() {
       return;
     }
 
-    // Render sessions sidebar
     chatsList.innerHTML = filteredChats.map(c => {
       const activeText = c.unreadByAdmin ? 'font-weight:900;' : 'font-weight:600;';
       const indicatorColor = c.unreadByAdmin ? 'var(--color-primary)' : 'transparent';
@@ -649,7 +820,16 @@ export async function renderAdminSupportChats() {
       }) : 'Hoy';
 
       const isClosed = c.status === 'closed';
-      const isPendingApproval = c.status === 'pending_approval';
+      // Only show PENDIENTE if the chat is not closed and is unread by admin (needs reply)
+      const isPending = !isClosed && c.unreadByAdmin === true;
+
+      const avatarHtml = c.userPhoto ? `
+        <img src="${c.userPhoto}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:1px solid var(--color-border-light); flex-shrink:0;" />
+      ` : `
+        <div style="width:40px; height:40px; border-radius:50%; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:16px; flex-shrink:0;">
+          ${(c.userName || 'U')[0].toUpperCase()}
+        </div>
+      `;
 
       return `
         <div class="admin-chat-item-card" data-id="${c.id}" style="
@@ -668,12 +848,14 @@ export async function renderAdminSupportChats() {
           <!-- Unread indicator bar -->
           <div style="position:absolute; left:0; top:12px; bottom:12px; width:4px; border-radius:0 4px 4px 0; background:${indicatorColor};"></div>
           
-          <div style="flex:1; min-width:0;">
+          ${avatarHtml}
+          
+          <div style="flex:1; min-width:0; text-align:left;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <span style="font-weight:800; font-size:14px; color:var(--color-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:6px;">
                 ${c.userName || 'Usuario'}
                 ${isClosed ? `<span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('lock', 11)}</span>` : ''}
-                ${isPendingApproval ? '<span style="font-size:10px; font-weight:900; background:#fef3c7; color:#d97706; border:1px solid rgba(217,119,6,0.2); padding:1px 6px; border-radius:6px; letter-spacing:0.02em;">PENDIENTE</span>' : ''}
+                ${isPending ? '<span style="font-size:10px; font-weight:900; background:#fef3c7; color:#d97706; border:1px solid rgba(217,119,6,0.2); padding:1px 6px; border-radius:6px; letter-spacing:0.02em;">PENDIENTE</span>' : ''}
               </span>
               <span style="font-size:10px; font-weight:700; color:var(--color-text-tertiary); flex-shrink:0;">${timeStr}</span>
             </div>
@@ -695,8 +877,13 @@ export async function renderAdminSupportChats() {
   };
 
   // Real-time listener for support chats collection
-  activeChatsListener = onSnapshot(collection(db, 'support_chats'), (snap) => {
-    allChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  activeChatsListener = onSnapshot(collection(db, 'support_chats'), async (snap) => {
+    const rawChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Enrich all chats with database roles and commerce logos
+    await Promise.all(rawChats.map(c => enrichChatUserData(c)));
+
+    allChats = rawChats;
 
     // Sort by last message time descending
     allChats.sort((a, b) => {

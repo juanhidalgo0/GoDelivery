@@ -710,18 +710,21 @@ body.platform-capacitor #app-navbar {
 body.platform-capacitor #app-content {
   padding-bottom: calc(var(--navbar-height) + var(--space-4) + var(--bottom-safe-area)) !important;
 }
+body.platform-capacitor #app-content:has(.panel-page) {
+  padding-bottom: 0 !important;
+}
 
 /* Adjust panel screens (height 100% or 100dvh) to not go under navigation buttons */
 body.platform-capacitor .panel-page {
-  height: calc(100% - var(--bottom-safe-area)) !important;
+  height: 100dvh !important;
 }
 body.platform-capacitor .panel-page[style*="height:100dvh"],
 body.platform-capacitor .panel-page[style*="height: 100dvh"] {
-  height: calc(100dvh - var(--bottom-safe-area)) !important;
+  height: 100dvh !important;
 }
 body.platform-capacitor .panel-page[style*="height:100%"],
 body.platform-capacitor .panel-page[style*="height: 100%"] {
-  height: calc(100% - var(--bottom-safe-area)) !important;
+  height: 100dvh !important;
 }
 
 /* Add padding-bottom to scroll containers inside panel-page to prevent last element overlap */

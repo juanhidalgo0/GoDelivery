@@ -59,5 +59,18 @@
 	<string>Esta aplicación requiere acceso a tu ubicación cuando está en uso para mostrarte los comercios cercanos, calcular costos de envío y permitir el rastreo del pedido.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Esta aplicación requiere acceso a tu ubicación en segundo plano para rastrear el progreso de la entrega en tiempo real del repartidor.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>Google Sign-In</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

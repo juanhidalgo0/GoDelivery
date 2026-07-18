@@ -121,23 +121,26 @@ export function initNavbar() {
     }
   });
 
-  // Real-time unread chats listener for all users (order chats + support chat)
+  // Real-time unread chats listener for all users (order chats + support chat + marketplace chats)
   let unreadUserChatsUnsub = null;
   let unreadUserSupportUnsub = null;
+  let unreadMarketplaceChatsUnsub = null;
   subscribe('user', async (user) => {
     if (unreadUserChatsUnsub) { unreadUserChatsUnsub(); unreadUserChatsUnsub = null; }
     if (unreadUserSupportUnsub) { unreadUserSupportUnsub(); unreadUserSupportUnsub = null; }
+    if (unreadMarketplaceChatsUnsub) { unreadMarketplaceChatsUnsub(); unreadMarketplaceChatsUnsub = null; }
 
     if (user) {
-      const { collection, doc, query, where, onSnapshot } = await import('firebase/firestore');
+      const { collection, doc, query, where, onSnapshot, or } = await import('firebase/firestore');
       const { db } = await import('../firebase.js');
       const { setState: stateSetState } = await import('../state.js');
 
       let unreadSupport = 0;
       let unreadChats = 0;
+      let unreadMarketplace = 0;
 
       const updateCount = () => {
-        stateSetState('totalUnreadChats', unreadSupport + unreadChats);
+        stateSetState('totalUnreadChats', unreadSupport + unreadChats + unreadMarketplace);
       };
 
       // 1. Support chat unread
@@ -159,6 +162,23 @@ export function initNavbar() {
         unreadChats = count;
         updateCount();
       }, (err) => console.warn('User chats unread listener failed:', err));
+
+      // 3. Marketplace chats unread
+      const qMarket = query(
+        collection(db, 'marketplace_chats'),
+        or(where('buyerId', '==', user.uid), where('sellerId', '==', user.uid))
+      );
+      unreadMarketplaceChatsUnsub = onSnapshot(qMarket, (snap) => {
+        let count = 0;
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.unreadBy && data.unreadBy.includes(user.uid)) {
+            count++;
+          }
+        });
+        unreadMarketplace = count;
+        updateCount();
+      }, (err) => console.warn('Marketplace chats unread listener failed:', err));
     }
   });
 }

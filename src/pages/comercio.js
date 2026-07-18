@@ -225,7 +225,7 @@ export async function renderComercio(content) {
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
       if (catId === 'all') {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(10000));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(150));
       } else if (catId === 'discounts') {
         const productIds = [];
         activeOffers.forEach(o => {

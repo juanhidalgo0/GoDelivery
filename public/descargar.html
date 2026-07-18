@@ -4,14 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Llegó GO! Delivery</title>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     :root {
       --color-dark: #0d0d0e;
       --color-sticker-bg: #fafaf9;
       --color-sticker-text: #1c1917;
       --color-primary: #e11d48;
-      --color-primary-hover: #be123c;
       --color-border: #e7e5e4;
       --font-family: 'Outfit', sans-serif;
     }
@@ -26,35 +25,25 @@
       background-color: var(--color-dark);
       color: #fafaf9;
       font-family: var(--font-family);
-      min-height: 100vh;
+      height: 100vh;
+      max-height: 100vh;
+      width: 100vw;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow-x: hidden;
+      overflow: hidden; /* No scroll on page */
       position: relative;
       padding: 24px;
     }
 
-    /* Tactile grid background pattern */
+    /* Fine dark grid background pattern */
     .bg-grid {
       position: absolute;
       inset: 0;
       background-size: 24px 24px;
       background-image: 
-        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-      pointer-events: none;
-      z-index: 1;
-    }
-
-    .bg-gradient-glow {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, rgba(225, 29, 72, 0.08) 0%, rgba(0,0,0,0) 70%);
+        linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
       pointer-events: none;
       z-index: 1;
     }
@@ -63,31 +52,26 @@
       position: relative;
       z-index: 2;
       display: flex;
-      align-items: stretch;
-      gap: 40px;
-      max-width: 820px;
-      width: 100%;
+      align-items: center;
       justify-content: center;
+      width: 100%;
+      max-width: 420px;
     }
 
     /* Sticker (Central Ticket Card) */
     .sticker {
-      flex: 1;
-      max-width: 410px;
+      width: 100%;
       background: var(--color-sticker-bg);
       color: var(--color-sticker-text);
       border-radius: 28px;
       padding: 40px 32px 32px 32px;
-      box-shadow: 
-        0 30px 60px -15px rgba(0, 0, 0, 0.8),
-        0 0 0 1px rgba(255, 255, 255, 0.05),
-        offset-x offset-y rgba(225, 29, 72, 0.1);
+      box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.8);
       position: relative;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
       animation: stickerEntrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-      transform-origin: center top;
+      transform-origin: center center;
     }
 
     /* Dashed ticket separator line */
@@ -117,32 +101,6 @@
       right: -41px;
     }
 
-    /* Side app presentation (Hidden on mobile) */
-    .side-info {
-      flex: 1;
-      max-width: 350px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      text-align: left;
-      padding: 20px;
-      animation: fadeInRight 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    @media (max-width: 768px) {
-      .side-info {
-        display: none;
-      }
-      .main-wrapper {
-        gap: 0;
-      }
-      .sticker {
-        padding: 32px 24px 24px 24px;
-      }
-      .ticket-separator::before { left: -33px; }
-      .ticket-separator::after { right: -33px; }
-    }
-
     .header-logo {
       display: flex;
       align-items: center;
@@ -150,18 +108,20 @@
       margin-bottom: 24px;
     }
 
+    /* Black badge for logo with text "GO" matching image */
     .logo-badge {
       width: 48px;
       height: 48px;
       border-radius: 12px;
-      background: var(--color-dark);
-      color: #fafaf9;
+      background: #000000;
+      color: #ffffff;
       font-weight: 900;
       font-size: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
       box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+      letter-spacing: -0.5px;
     }
 
     .brand-title {
@@ -173,7 +133,7 @@
     }
 
     h1 {
-      font-size: 1.95rem;
+      font-size: 2rem;
       font-weight: 900;
       line-height: 1.2;
       letter-spacing: -1px;
@@ -277,6 +237,9 @@
       height: 6px;
       background-color: var(--color-primary);
       border-radius: 50%;
+    }
+
+    .status-dot.active {
       animation: statusBlink 1.5s infinite;
     }
 
@@ -304,6 +267,7 @@
       background: var(--color-dark);
       color: #fafaf9;
       border: none;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
     }
 
     .btn-android:hover {
@@ -316,45 +280,17 @@
       color: #a8a29e;
       border: 1.5px dashed #d6d3d1;
       cursor: not-allowed;
-      pointer-events: none;
     }
 
-    /* Side info details */
-    .side-eyebrow {
-      font-size: 12px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      color: var(--color-primary);
-      margin-bottom: 12px;
+    /* Soft pulse indicating device detected */
+    .btn.highlighted-pulse {
+      background: linear-gradient(135deg, var(--color-primary), #be123c);
+      color: #ffffff;
+      box-shadow: 0 10px 25px -5px rgba(225, 29, 72, 0.4);
     }
 
-    .side-title {
-      font-size: 2rem;
-      font-weight: 900;
-      line-height: 1.15;
-      letter-spacing: -1px;
-      margin-bottom: 16px;
-    }
-
-    .side-desc {
-      font-size: 14px;
-      color: #a8a29e;
-      line-height: 1.6;
-      margin-bottom: 24px;
-    }
-
-    .side-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      font-weight: 800;
-      color: #fafaf9;
-      background: rgba(255, 255, 255, 0.08);
-      padding: 6px 12px;
-      border-radius: 30px;
-      margin-top: 10px;
+    .btn.highlighted-pulse:hover {
+      background: #be123c;
     }
 
     @keyframes statusBlink {
@@ -363,26 +299,28 @@
     }
 
     @keyframes stickerEntrance {
-      from { opacity: 0; transform: translateY(40px) rotate(-1.5deg); }
+      from { opacity: 0; transform: translateY(30px) rotate(-0.5deg); }
       to { opacity: 1; transform: translateY(0) rotate(-0.5deg); }
     }
 
-    @keyframes fadeInRight {
-      from { opacity: 0; transform: translateX(30px); }
-      to { opacity: 1; transform: translateX(0); }
+    @media (prefers-reduced-motion: reduce) {
+      .sticker, .status-dot {
+        animation: none !important;
+        transform: none !important;
+      }
     }
   </style>
 </head>
 <body>
   <div class="bg-grid"></div>
-  <div class="bg-gradient-glow"></div>
 
   <div class="main-wrapper">
-    <!-- Left: The Physical Sticker representation -->
+    <!-- Center: The Physical Sticker representation -->
     <div class="sticker">
       <!-- Top info -->
       <div>
         <div class="header-logo">
+          <!-- Black badge with white GO text as shown in user image -->
           <div class="logo-badge">GO</div>
           <div>
             <div class="brand-title">GO! Delivery</div>
@@ -427,13 +365,13 @@
       <!-- Bottom action buttons -->
       <div>
         <div class="status-badge">
-          <span class="status-dot"></span>
+          <span class="status-dot active"></span>
           <span id="status-label">Detectando dispositivo...</span>
         </div>
 
         <div class="store-buttons">
           <!-- Android Button -->
-          <a href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android">
+          <a id="android-link" href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3,5.27V18.73L16.5,12L3,5.27M17.87,11.33L21,12.9L17.87,14.47L16.5,12L17.87,11.33M3,3C2.8,3 2.6,3.05 2.43,3.15L15.35,11L18.84,7.5L3,3M3,21L18.84,16.5L15.35,13L2.43,20.85C2.6,20.95 2.8,21 3,21Z"/>
             </svg>
@@ -455,42 +393,27 @@
         </div>
       </div>
     </div>
-
-    <!-- Right: Editorial design introduction -->
-    <div class="side-info">
-      <span class="side-eyebrow">LA APP DE LA CIUDAD</span>
-      <h2 class="side-title">Todo lo que querés, a tu puerta.</h2>
-      <p class="side-desc">
-        Pedí helados, burgers, artículos de kiosco y realizá tus favores diarios desde una sola app pensada para simplificar tu día en Magdalena.
-      </p>
-
-      <div style="display: flex; flex-direction: column; gap: 8px;">
-        <span class="side-pill">
-          ⚡ Envíos rápidos en moto o auto
-        </span>
-        <span class="side-pill" style="background: rgba(225, 29, 72, 0.15); color: #fda4af;">
-          🎉 BIENVENIDA: $3000 de descuento inicial
-        </span>
-      </div>
-    </div>
   </div>
 
   <script>
-    // Detect OS and redirect
-    const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-    const statusLabel = document.getElementById('status-label');
-    const playStoreUrl = "https://play.google.com/store/apps/details?id=com.godelivery.magdalena";
+    // OS Detection and highlight (no auto-redirect)
+    document.addEventListener("DOMContentLoaded", () => {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const statusLabel = document.getElementById('status-label');
+      const androidLink = document.getElementById('android-link');
 
-    setTimeout(() => {
-      if (/android/i.test(userAgent)) {
-        statusLabel.textContent = "Redireccionando...";
-        window.location.href = playStoreUrl;
-      } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-        statusLabel.textContent = "iOS Próximamente";
-      } else {
-        statusLabel.textContent = "Dispositivos listos";
-      }
-    }, 1500);
+      setTimeout(() => {
+        if (/android/i.test(userAgent)) {
+          statusLabel.textContent = "Dispositivo Android detectado";
+          androidLink.classList.add('highlighted-pulse');
+        } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+          statusLabel.textContent = "iOS Próximamente";
+        } else {
+          statusLabel.textContent = "Dispositivos listos";
+          androidLink.classList.add('highlighted-pulse');
+        }
+      }, 800);
+    });
   </script>
 </body>
 </html>

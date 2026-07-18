@@ -44,26 +44,30 @@ export async function signInWithGoogle() {
     const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
     if (isNativeApp) {
       console.log('[Auth] Attempting Native Google Sign-In...');
-      const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-      
-      // Initialize first to ensure it's loaded
       try {
-        await GoogleAuth.initialize({
-          clientId: '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com',
-          scopes: ['profile', 'email'],
-          grantOfflineAccess: true
-        });
-      } catch (initErr) {
-        console.warn('[Auth] GoogleAuth already initialized or failed to init:', initErr);
+        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+        
+        // Initialize first to ensure it's loaded
+        try {
+          await GoogleAuth.initialize({
+            clientId: '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com',
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: true
+          });
+        } catch (initErr) {
+          console.warn('[Auth] GoogleAuth already initialized or failed to init:', initErr);
+        }
+        
+        const googleUser = await GoogleAuth.signIn();
+        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        const result = await signInWithCredential(auth, credential);
+        const user = result.user;
+        await ensureUserDoc(user);
+        showToast(`¡Bienvenido, ${user.displayName}!`, 'success');
+        return user;
+      } catch (nativeErr) {
+        console.warn('[Auth] Native Google Sign-In failed, falling back to Web Popup...', nativeErr);
       }
-      
-      const googleUser = await GoogleAuth.signIn();
-      const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
-      const result = await signInWithCredential(auth, credential);
-      const user = result.user;
-      await ensureUserDoc(user);
-      showToast(`¡Bienvenido, ${user.displayName}!`, 'success');
-      return user;
     }
 
     console.log('[Auth] Attempting Google Sign-In with Popup...');
@@ -74,12 +78,6 @@ export async function signInWithGoogle() {
     return user;
   } catch (error) {
     console.error('Auth error:', error);
-    
-    const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
-    if (isNativeApp) {
-      showToast('Error al iniciar sesión con Google nativo: ' + (error.message || 'Desconocido'), 'error');
-      return null;
-    }
     
     const isRedirectFallback = 
       error.code === 'auth/popup-blocked' || 
@@ -110,27 +108,31 @@ export async function signInWithApple() {
     const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
     if (isNativeApp) {
       console.log('[Auth] Attempting Native Apple Sign-In...');
-      const { AppleSignIn } = await import('@capawesome/capacitor-apple-sign-in');
-      
-      const appleUser = await AppleSignIn.signIn({
-        scopes: ['EMAIL', 'FULL_NAME']
-      });
-      
-      const provider = new OAuthProvider('apple.com');
-      const credential = provider.credential({
-        idToken: appleUser.idToken
-      });
-      const result = await signInWithCredential(auth, credential);
-      const user = result.user;
-      
-      // If the user's name is returned on first login, customize it
-      if (appleUser.givenName || appleUser.familyName) {
-        user.displayName = `${appleUser.givenName || ''} ${appleUser.familyName || ''}`.trim();
+      try {
+        const { AppleSignIn } = await import('@capawesome/capacitor-apple-sign-in');
+        
+        const appleUser = await AppleSignIn.signIn({
+          scopes: ['EMAIL', 'FULL_NAME']
+        });
+        
+        const provider = new OAuthProvider('apple.com');
+        const credential = provider.credential({
+          idToken: appleUser.idToken
+        });
+        const result = await signInWithCredential(auth, credential);
+        const user = result.user;
+        
+        // If the user's name is returned on first login, customize it
+        if (appleUser.givenName || appleUser.familyName) {
+          user.displayName = `${appleUser.givenName || ''} ${appleUser.familyName || ''}`.trim();
+        }
+        
+        await ensureUserDoc(user);
+        showToast(`¡Bienvenido!`, 'success');
+        return user;
+      } catch (nativeErr) {
+        console.warn('[Auth] Native Apple Sign-In failed, falling back to Web Popup...', nativeErr);
       }
-      
-      await ensureUserDoc(user);
-      showToast(`¡Bienvenido!`, 'success');
-      return user;
     }
 
     console.log('[Auth] Attempting Apple Sign-In with Popup...');

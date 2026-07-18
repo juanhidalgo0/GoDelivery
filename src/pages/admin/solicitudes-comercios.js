@@ -176,7 +176,7 @@ export async function renderAdminCommerceRequests() {
               title: '🎉 ¡Comercio Aprobado!',
               body: `Tu comercio "${name}" fue aprobado y ya está disponible en la app para todos.`,
               status: 'unread',
-              url: '#/mi-comercio',
+              url: '/#/mi-comercio',
               createdAt: new Date()
             });
           }
@@ -210,6 +210,17 @@ export async function renderAdminCommerceRequests() {
           if (docSnap && docSnap.ownerId) {
             await updateDoc(doc(db, 'users', docSnap.ownerId), {
               commerceStatus: 'rejected'
+            });
+
+            // Notify owner via push that their application was rejected
+            const { collection: col2, addDoc: addDoc2 } = await import('firebase/firestore');
+            await addDoc2(col2(db, 'users', docSnap.ownerId, 'notifications'), {
+              type: 'commerce_rejected',
+              title: '❌ Solicitud de Comercio Rechazada',
+              body: `Tu solicitud para "${name}" fue revisada y no pudo ser aprobada en este momento. Podés volver a postular más adelante.`,
+              status: 'unread',
+              url: '/#/',
+              createdAt: new Date()
             });
           }
           await deleteDoc(doc(db, 'comercios', comId));

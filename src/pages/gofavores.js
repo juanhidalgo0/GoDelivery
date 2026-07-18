@@ -1021,23 +1021,18 @@ export async function showCompraForm() {
           <div id="compra-benefits-container"></div>
           
           <!-- Cost Preview -->
-          <div id="compra-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-              <span>Envío (distancia)</span><span id="dist-fee">$ ---</span>
+          <div id="compra-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:10px; border:1px solid var(--color-border-light); margin-top:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:var(--color-text-primary);">
+              <span style="display:flex; align-items:center; gap:6px;">
+                Costo de Envío
+                <button type="button" id="compra-info-btn" style="border:none; background:transparent; padding:4px; cursor:pointer; color:#E11D48; display:flex; align-items:center; justify-content:center; outline:none; transition:transform 0.2s;">
+                  ${icon('info', 16)}
+                </button>
+              </span>
+              <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
             </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-              <span>Gestión Especial</span><span id="purchase-fee">$ ---</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-              <span>Compra de mercadería</span><span>Cobro en mano</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-              <span id="extra-stops-label">Paradas extra</span><span id="extra-stops-fee">$ ---</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); font-weight:600;">
-              <span>Servicio App</span><span id="app-service-fee">$ ---</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:1px dashed var(--color-border-light); padding-top:8px; margin-top:2px;">
+
+            <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:2px dashed var(--color-border-light); padding-top:12px; margin-top:2px;">
               <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
             </div>
             <p style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; line-height:1.3; font-weight:600; text-align:center;">
@@ -1064,13 +1059,7 @@ export async function showCompraForm() {
 
   const deliveryBtn   = modalEl.querySelector('#delivery-addr-btn');
   const deliveryText  = modalEl.querySelector('#delivery-text');
-  const distFeeEl     = modalEl.querySelector('#dist-fee');
-  const purchaseFeeEl = modalEl.querySelector('#purchase-fee');
-  const appFeeEl      = modalEl.querySelector('#app-service-fee');
   const totalFeeEl    = modalEl.querySelector('#final-service-fee');
-  const extraStopsFeeEl = modalEl.querySelector('#extra-stops-fee');
-  const extraStopsLbl   = modalEl.querySelector('#extra-stops-label');
-  const extraStopsRow   = extraStopsFeeEl.parentElement;
   const extraStopNote = modalEl.querySelector('#extra-stop-note');
   const previewBox    = modalEl.querySelector('#compra-cost-preview');
   const subformsContainer = modalEl.querySelector('#stores-subforms-container');
@@ -1084,6 +1073,117 @@ export async function showCompraForm() {
   let selectedPaymentMethod = null;
   let selectedTip = 0;
   let appliedCoupon = null;
+  let couponDiscount = 0;
+  let total = 0;
+
+  const infoBtn = modalEl.querySelector('#compra-info-btn');
+  if (infoBtn) {
+    infoBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const { showModal } = await import('../components/modal.js');
+      
+      let breakdownHtml = `
+        <div style="padding:10px 4px; display:flex; flex-direction:column; text-align:left;">
+          <div style="font-size:12.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:18px; font-weight:600;">
+            A continuación se detalla el desglose del costo de envío para este pedido:
+          </div>
+          
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(225,29,72,0.08); color:#E11D48; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('mapPin', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Envío (distancia)</span>
+            </div>
+            <span style="font-weight:800; color:var(--color-text-primary);">${formatPrice(calculatedDistFee)}</span>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(34,197,94,0.08); color:#22C55E; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('shoppingBag', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Gestión Especial</span>
+            </div>
+            <span style="font-weight:800; color:var(--color-text-primary);">${formatPrice(purchaseFee)}</span>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(168,85,247,0.08); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('info', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Servicio App</span>
+            </div>
+            <span style="font-weight:800; color:var(--color-text-primary);">${formatPrice(appFee)}</span>
+          </div>
+      `;
+
+      if (stopsCount > 1) {
+        const extraStopsTotal = (stopsCount - 1) * extraStopFee;
+        breakdownHtml += `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(59,130,246,0.08); color:#3b82f6; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('route', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Paradas extra (×${stopsCount - 1})</span>
+            </div>
+            <span style="font-weight:800; color:var(--color-text-primary);">+ ${formatPrice(extraStopsTotal)}</span>
+          </div>
+        `;
+      }
+
+      if (appliedCoupon && couponDiscount > 0) {
+        breakdownHtml += `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(168,85,247,0.08); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('tag', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Descuento cupón (${appliedCoupon.code})</span>
+            </div>
+            <span style="font-weight:800; color:#a855f7;">-${formatPrice(couponDiscount)}</span>
+          </div>
+        `;
+      }
+
+      if (selectedTip > 0) {
+        breakdownHtml += `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('heart', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Propina al Repartidor</span>
+            </div>
+            <span style="font-weight:800; color:#10b981;">+ ${formatPrice(selectedTip)}</span>
+          </div>
+        `;
+      }
+
+      breakdownHtml += `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; font-size:16px; font-weight:900; color:var(--color-text-primary); border-top:2px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:32px; height:32px; border-radius:10px; background:rgba(225,29,72,0.1); color:#E11D48; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('truck', 16)}
+              </div>
+              <span style="font-family:var(--font-display); font-weight:900; color:var(--color-text-primary);">Total del Envío</span>
+            </div>
+            <span style="font-size:18px; font-weight:900; color:#E11D48;">${formatPrice(total)}</span>
+          </div>
+        </div>
+      `;
+
+      showModal({
+        title: 'Detalle del Envío',
+        height: 'auto',
+        content: breakdownHtml
+      });
+    };
+  }
+
+
 
   const payEfectivoBtn = modalEl.querySelector('#compra-pay-efectivo');
   const payTransferBtn = modalEl.querySelector('#compra-pay-transfer');
@@ -1172,7 +1272,7 @@ export async function showCompraForm() {
         appFee = Math.ceil((subtotal * (config.value / 100)) / 10) * 10;
       }
 
-      let couponDiscount = 0;
+      couponDiscount = 0;
       if (appliedCoupon) {
         if (appliedCoupon.type === 'free_delivery') {
           couponDiscount = calculatedDistFee;
@@ -1183,50 +1283,13 @@ export async function showCompraForm() {
         }
       }
 
-      const total = Math.max(subtotal + appFee - couponDiscount + selectedTip, 0);
+      total = Math.max(subtotal + appFee - couponDiscount + selectedTip, 0);
 
-      distFeeEl.textContent = formatPrice(calculatedDistFee);
-      purchaseFeeEl.textContent = formatPrice(purchaseFee);
-      appFeeEl.textContent  = formatPrice(appFee);
-
-      let couponRow = previewBox.querySelector('.coupon-preview-row');
-      const finalFeeRow = totalFeeEl.parentElement;
-      if (couponDiscount > 0) {
-        if (!couponRow) {
-          couponRow = document.createElement('div');
-          couponRow.className = 'coupon-preview-row';
-          couponRow.style.cssText = 'display:flex; justify-content:space-between; font-size:12px; color:#a855f7; font-weight:700;';
-          previewBox.insertBefore(couponRow, finalFeeRow);
-        }
-        couponRow.innerHTML = `<span>Descuento cupón (${appliedCoupon.code})</span><span>-${formatPrice(couponDiscount)}</span>`;
-        couponRow.style.display = 'flex';
-      } else if (couponRow) {
-        couponRow.style.display = 'none';
+      const summaryTotalEl = modalEl.querySelector('#compra-summary-total');
+      if (summaryTotalEl) {
+        summaryTotalEl.textContent = formatPrice(total);
       }
-
-      let tipRow = previewBox.querySelector('.tip-preview-row');
-      if (selectedTip > 0) {
-        if (!tipRow) {
-          tipRow = document.createElement('div');
-          tipRow.className = 'tip-preview-row';
-          tipRow.style.cssText = 'display:flex; justify-content:space-between; font-size:12px; color:#10b981; font-weight:700;';
-          previewBox.insertBefore(tipRow, finalFeeRow);
-        }
-        tipRow.innerHTML = `<span>Propina</span><span>+ ${formatPrice(selectedTip)}</span>`;
-        tipRow.style.display = 'flex';
-      } else if (tipRow) {
-        tipRow.style.display = 'none';
-      }
-
       totalFeeEl.textContent = formatPrice(total);
-
-      if (stopsCount > 1) {
-        extraStopsRow.style.display = 'flex';
-        extraStopsLbl.textContent   = `Paradas extra (×${stopsCount - 1})`;
-        extraStopsFeeEl.textContent = `+ ${formatPrice(extraStopsTotal)}`;
-      } else {
-        extraStopsRow.style.display = 'none';
-      }
       previewBox.style.display = 'flex';
     } catch (e) { console.error(e); }
   };
@@ -2007,6 +2070,10 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
       if (input) input.disabled = true;
 
       try {
+        if (valStr === 'BIENVENIDA') {
+          throw new Error('Este cupón es exclusivo para tu primer pedido a un comercio (no aplica en mandados).');
+        }
+
         const couponRef = doc(db, 'coupons', valStr);
         const couponSnap = await getDoc(couponRef);
 

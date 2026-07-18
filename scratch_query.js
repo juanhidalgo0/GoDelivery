@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { initializeFirestore, collection, getDocs, query, where, collectionGroup } from 'firebase/firestore';
+import { initializeFirestore, collection, getDocs } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",
@@ -14,24 +14,10 @@ const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {});
 
 async function run() {
-  const pSnap = await getDocs(collectionGroup(db, 'products'));
-  const onlyInAppProds = pSnap.docs
-    .map(d => ({ id: d.id, name: d.data().name, price: d.data().price }))
-    .filter(p => p.price === 32000 || (p.name && (p.name.includes("30.400") || p.name.includes("32.000"))));
-
-  console.log('Matching Products:');
-  console.log(onlyInAppProds);
-
-  const oSnap = await getDocs(query(collection(db, 'offers'), where('active', '==', true)));
-  console.log('\nMatching Active Offers:');
-  oSnap.docs.forEach(d => {
-    const data = d.data();
-    console.log(d.id, '=>', {
-      type: data.type,
-      value: data.value,
-      productIds: data.productIds,
-      comercioId: data.comercioId
-    });
+  const couponsSnap = await getDocs(collection(db, 'coupons'));
+  console.log("=== COUPONS ===");
+  couponsSnap.docs.forEach(d => {
+    console.log(d.id, "=>", JSON.stringify(d.data()));
   });
 
   process.exit(0);
