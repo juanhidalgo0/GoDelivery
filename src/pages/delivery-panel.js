@@ -259,11 +259,41 @@ export async function renderDeliveryPanel() {
         
         <!-- Scrollable content area -->
         <div id="delivery-scroll-area" style="flex:1; overflow-y:auto; padding:20px 20px 100px 20px; -webkit-overflow-scrolling:touch;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
-            <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--color-text-primary);">
-              <input type="checkbox" id="auto-accept-toggle" onchange="window.autoAcceptEnabled = this.checked;" /> Auto-Aceptar
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-4); background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.05); padding: var(--space-3) var(--space-4); border-radius: 16px; border: 1px dashed rgba(var(--color-primary-rgb, 225, 29, 72), 0.15);">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                🤖 Auto-Aceptar Pedidos
+              </span>
+              <button id="auto-accept-info-btn" style="border:none; background:none; color:var(--color-text-secondary); cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">
+                ${icon('helpCircle', 16)}
+              </button>
+            </div>
+            <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
+              <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0;" onchange="window.autoAcceptEnabled = this.checked;" ${window.autoAcceptEnabled ? 'checked' : ''} />
+              <span class="ios-slider" style="position:absolute; inset:0; background-color:#ccc; border-radius:34px; transition:0.3s;"></span>
             </label>
           </div>
+          
+          <style>
+            #auto-accept-toggle:checked + .ios-slider {
+              background-color: var(--color-primary, #e11d48);
+            }
+            #auto-accept-toggle:checked + .ios-slider::before {
+              transform: translateX(20px);
+            }
+            .ios-slider::before {
+              position: absolute;
+              content: "";
+              height: 18px;
+              width: 18px;
+              left: 3px;
+              bottom: 3px;
+              background-color: white;
+              border-radius: 50%;
+              transition: 0.3s;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            }
+          </style>
           <div class="tab-pills" style="margin-bottom: var(--space-6); display: flex; gap: var(--space-2); scrollbar-width: none;">
             <button class="tab-pill" data-tab="available" style="flex: 1; white-space: nowrap; height:44px; border-radius:12px; border:none; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon('package', 18)} Disponibles
@@ -279,6 +309,37 @@ export async function renderDeliveryPanel() {
       </div>
     `;
     setupPersistentBadges();
+
+    // Attach listener for auto-accept info button
+    const infoBtn = document.getElementById('auto-accept-info-btn');
+    if (infoBtn) {
+      infoBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const { showModal, closeModal } = window;
+        if (showModal) {
+          showModal({
+            title: '🤖 Modo Auto-Aceptar',
+            content: `
+              <div style="text-align:left; font-size:14px; line-height:1.6; color:var(--color-text-secondary); padding: 8px 0;">
+                <p style="margin-bottom:12px;"><strong>¿Cómo funciona?</strong></p>
+                <p style="margin-bottom:12px;">Al activar esta opción, cualquier pedido exclusivo que se te asigne en cola será <strong>aceptado automáticamente</strong> por el sistema sin necesidad de que presiones el botón de aceptar.</p>
+                <p style="margin-bottom:12px;">⚠️ <strong>Importante:</strong> Evita que tus pedidos expiren por inactividad y mantiene tu flujo de trabajo constante.</p>
+                <button id="auto-accept-info-close-btn" style="width:100%; height:44px; margin-top:16px; border:none; background:var(--color-primary); color:white; border-radius:12px; font-weight:800; cursor:pointer;">
+                  Entendido
+                </button>
+              </div>
+            `
+          });
+          const modalCloseBtn = document.getElementById('auto-accept-info-close-btn');
+          if (modalCloseBtn) {
+            modalCloseBtn.onclick = () => closeModal();
+          }
+        } else {
+          alert('Al activar esta opción, el sistema aceptará automáticamente los pedidos exclusivos que te asigne la cola en tiempo real.');
+        }
+      };
+    }
   }
 
   // Ensure inactivity check and heartbeat is running if online
@@ -3883,6 +3944,7 @@ function startInactivityCheck(user) {
   if (inactivityTimer) clearInterval(inactivityTimer);
   
   inactivityTimer = setInterval(async () => {
+    return; // Disabled 3-hour auto-disconnection as requested
     const currentUser = getState().user || user;
     if (!currentUser || !currentUser.isOnline) return;
     
