@@ -262,38 +262,24 @@ export async function renderDeliveryPanel() {
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-4); background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.05); padding: var(--space-3) var(--space-4); border-radius: 16px; border: 1px dashed rgba(var(--color-primary-rgb, 225, 29, 72), 0.15);">
             <div style="display:flex; align-items:center; gap:8px;">
               <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
-                🤖 Auto-Aceptar Pedidos
+                Auto-Aceptar Pedidos
               </span>
               <button id="auto-accept-info-btn" style="border:none; background:none; color:var(--color-text-secondary); cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">
                 ${icon('helpCircle', 16)}
               </button>
             </div>
             <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
-              <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0;" onchange="window.autoAcceptEnabled = this.checked;" ${window.autoAcceptEnabled ? 'checked' : ''} />
-              <span class="ios-slider" style="position:absolute; inset:0; background-color:#ccc; border-radius:34px; transition:0.3s;"></span>
+              <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0; position:absolute;" onchange="
+                window.autoAcceptEnabled = this.checked;
+                const slider = this.nextElementSibling;
+                slider.style.backgroundColor = this.checked ? 'var(--color-primary, #e11d48)' : '#ccc';
+                slider.querySelector('span').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';
+              " ${window.autoAcceptEnabled ? 'checked' : ''} />
+              <span class="ios-slider" style="position:absolute; inset:0; background-color:${window.autoAcceptEnabled ? 'var(--color-primary, #e11d48)' : '#ccc'}; border-radius:34px; transition:0.3s; display:flex; align-items:center; padding: 0 3px;">
+                <span style="height:18px; width:18px; background-color:white; border-radius:50%; transition:0.3s; box-shadow:0 2px 4px rgba(0,0,0,0.2); display:block; transform:${window.autoAcceptEnabled ? 'translateX(20px)' : 'translateX(0)'};"></span>
+              </span>
             </label>
           </div>
-          
-          <style>
-            #auto-accept-toggle:checked + .ios-slider {
-              background-color: var(--color-primary, #e11d48);
-            }
-            #auto-accept-toggle:checked + .ios-slider::before {
-              transform: translateX(20px);
-            }
-            .ios-slider::before {
-              position: absolute;
-              content: "";
-              height: 18px;
-              width: 18px;
-              left: 3px;
-              bottom: 3px;
-              background-color: white;
-              border-radius: 50%;
-              transition: 0.3s;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            }
-          </style>
           <div class="tab-pills" style="margin-bottom: var(--space-6); display: flex; gap: var(--space-2); scrollbar-width: none;">
             <button class="tab-pill" data-tab="available" style="flex: 1; white-space: nowrap; height:44px; border-radius:12px; border:none; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon('package', 18)} Disponibles
@@ -310,34 +296,97 @@ export async function renderDeliveryPanel() {
     `;
     setupPersistentBadges();
 
-    // Attach listener for auto-accept info button
+    // Attach listener for auto-accept info button (renders bottom card/sheet)
     const infoBtn = document.getElementById('auto-accept-info-btn');
     if (infoBtn) {
       infoBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const { showModal, closeModal } = window;
-        if (showModal) {
-          showModal({
-            title: '🤖 Modo Auto-Aceptar',
-            content: `
-              <div style="text-align:left; font-size:14px; line-height:1.6; color:var(--color-text-secondary); padding: 8px 0;">
-                <p style="margin-bottom:12px;"><strong>¿Cómo funciona?</strong></p>
-                <p style="margin-bottom:12px;">Al activar esta opción, cualquier pedido exclusivo que se te asigne en cola será <strong>aceptado automáticamente</strong> por el sistema sin necesidad de que presiones el botón de aceptar.</p>
-                <p style="margin-bottom:12px;">⚠️ <strong>Importante:</strong> Evita que tus pedidos expiren por inactividad y mantiene tu flujo de trabajo constante.</p>
-                <button id="auto-accept-info-close-btn" style="width:100%; height:44px; margin-top:16px; border:none; background:var(--color-primary); color:white; border-radius:12px; font-weight:800; cursor:pointer;">
-                  Entendido
-                </button>
-              </div>
-            `
-          });
-          const modalCloseBtn = document.getElementById('auto-accept-info-close-btn');
-          if (modalCloseBtn) {
-            modalCloseBtn.onclick = () => closeModal();
-          }
-        } else {
-          alert('Al activar esta opción, el sistema aceptará automáticamente los pedidos exclusivos que te asigne la cola en tiempo real.');
-        }
+        
+        // Remove existing sheet if any
+        const existing = document.getElementById('info-bottom-sheet');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'info-bottom-sheet';
+        overlay.style.cssText = `
+          position: fixed;
+          inset: 0;
+          z-index: 999999;
+          background: rgba(0,0,0,0.4);
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        `;
+
+        overlay.innerHTML = `
+          <div id="info-bottom-sheet-card" style="
+            background: var(--color-bg);
+            border-top-left-radius: 24px;
+            border-top-right-radius: 24px;
+            padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5);
+            box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-4);
+          ">
+            <!-- Drag indicator handle -->
+            <div style="width: 36px; height: 5px; background: var(--color-border-light, #e5e7eb); border-radius: 3px; align-self: center; margin-bottom: 8px;"></div>
+            
+            <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6);">
+              Modo Auto-Aceptar
+            </h3>
+            
+            <div style="font-size: 14.5px; line-height: 1.6; color: var(--color-text-secondary); font-weight: 550; display:flex; flex-direction:column; gap:12px;">
+              <p style="margin:0;"><strong>¿Cómo funciona?</strong></p>
+              <p style="margin:0;">Al activar esta opción, cualquier pedido exclusivo que se te asigne en cola será <strong>aceptado automáticamente</strong> por el sistema sin necesidad de que presiones el botón de aceptar.</p>
+              <p style="margin:0;">⚠️ <strong>Importante:</strong> Evita que tus pedidos expiren por inactividad y mantiene tu flujo de trabajo constante.</p>
+            </div>
+            
+            <button id="info-bottom-sheet-close-btn" style="
+              width: 100%;
+              height: 54px;
+              border: none;
+              background: var(--color-primary);
+              color: white;
+              border-radius: 16px;
+              font-weight: 900;
+              font-size: 15.5px;
+              cursor: pointer;
+              margin-top: 8px;
+              box-shadow: 0 8px 24px rgba(225,29,72,0.25);
+            ">
+              Entendido
+            </button>
+          </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Animate in
+        setTimeout(() => {
+          overlay.style.opacity = '1';
+          const card = document.getElementById('info-bottom-sheet-card');
+          if (card) card.style.transform = 'translateY(0)';
+        }, 10);
+
+        const closeSheet = () => {
+          const card = document.getElementById('info-bottom-sheet-card');
+          if (card) card.style.transform = 'translateY(100%)';
+          overlay.style.opacity = '0';
+          setTimeout(() => overlay.remove(), 300);
+        };
+
+        overlay.onclick = (e) => {
+          if (e.target === overlay) closeSheet();
+        };
+
+        const closeBtn = document.getElementById('info-bottom-sheet-close-btn');
+        if (closeBtn) closeBtn.onclick = closeSheet;
       };
     }
   }
