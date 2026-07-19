@@ -1088,6 +1088,9 @@ async function showNewManualOrderModal(comercioId) {
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px; max-height:85dvh; overflow-y:auto; scrollbar-width:none;';
 
+  const isRaining = getState().isRaining;
+  const rainSurcharge = getState().deliveryRainSurcharge || 300;
+
   // Tracking state variables for resolved address coordinates and costs
   let selectedCoords = null;
   let selectedAddress = '';
