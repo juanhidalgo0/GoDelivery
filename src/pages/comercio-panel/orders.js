@@ -1172,12 +1172,6 @@ async function showNewManualOrderModal(comercioId) {
       }
     </style>
 
-    ${isRaining ? `
-      <div style="background: rgba(225, 29, 72, 0.08); border: 1.5px solid rgba(225, 29, 72, 0.2); border-radius: 12px; padding: 10px 14px; font-size: 12px; font-weight: 750; color: var(--color-primary); display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-        🌧️ Recargo por lluvia activo (+${formatPrice(rainSurcharge)})
-      </div>
-    ` : ''}
-
     <div style="display:flex; flex-direction:column; gap:14px;">
       <div>
         <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px; display:block;">Cliente / Nombre</label>
@@ -1186,7 +1180,7 @@ async function showNewManualOrderModal(comercioId) {
 
       <div style="display:flex; flex-direction:column; gap:8px;">
         <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; display:block;">Dirección de Entrega</label>
-        <div style="display:flex; gap:8px; width:100%; position:relative;">
+        <div style="display:flex; gap:8px; width:100%; position:relative; align-items:center;">
           <div class="manual-address-wrapper" style="flex:1;">
             <input type="text" id="manual-address" placeholder="Escribí calle y altura (ej: Goenaga 120)" autocomplete="off" style="width:100%; height:48px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text); font-size:14px; padding:0 16px; outline:none;" />
             <div id="suggestions-dropdown" class="suggestions-list" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--color-surface, #ffffff); border: 1.5px solid var(--color-border-light, #e2e8f0); border-radius: 12px; box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,0.1)); z-index: 9999; max-height: 200px; overflow-y: auto; margin-top: 4px; display: none;"></div>
@@ -1195,8 +1189,9 @@ async function showNewManualOrderModal(comercioId) {
             ${icon('mapPin', 20)}
           </button>
         </div>
-        <div id="selected-address-badge" style="display:none; font-size:12px; font-weight:700; color:#0d9488; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); border-radius:8px; padding:8px 12px; align-items:center; gap:6px; word-break:break-all; line-height:1.4;">
-          ${icon('checkCircle', 14)} Ubicación establecida
+        <div id="selected-address-badge" style="display:none; font-size:12px; font-weight:700; color:#0d9488; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); border-radius:10px; padding:10px 14px; align-items:center; gap:8px; line-height:1.4;">
+          <span style="flex-shrink:0; display:flex; align-items:center; gap:6px;">${icon('checkCircle', 16)} Ubicación establecida:</span>
+          <span id="selected-address-text" style="font-weight:800; color:var(--color-text-primary); word-break:break-word;"></span>
         </div>
       </div>
 
@@ -1223,9 +1218,9 @@ async function showNewManualOrderModal(comercioId) {
             <small id="delivery-dist-value" style="font-size:10px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">(0.0 km)</small>
           </div>
         </div>
-        <div class="row" id="manual-rain-row" style="display:none; color:var(--color-primary); font-weight:750;">
+        <div class="row" id="manual-rain-row" style="display:none; color:var(--color-primary);">
           <span>Recargo por lluvia:</span>
-          <span id="manual-rain-value">+$0.00</span>
+          <span id="manual-rain-value" style="font-weight:900;">+$0.00</span>
         </div>
         <div class="row total-row">
           <span>Total Final:</span>
@@ -1256,34 +1251,39 @@ async function showNewManualOrderModal(comercioId) {
 
     // Show verification success badge
     badgeEl.style.display = 'flex';
-    badgeEl.innerHTML = `${icon('checkCircle', 14)} Ubicación establecida: <span style="font-weight:800; margin-left:4px; color:var(--color-text);">${address}</span>`;
+    const textEl = badgeEl.querySelector('#selected-address-text');
+    if (textEl) textEl.textContent = address;
 
     // Compute shipping fee based on distance
     try {
       const { getDistance, calculateDynamicFee } = await import('../../utils/geo.js');
-      const distance = await getDistance(comData.coords.lat, comData.coords.lng, coords.lat, coords.lng);
+      
+      const comLat = comData.coords.lat !== undefined ? comData.coords.lat : comData.coords.latitude;
+      const comLng = comData.coords.lng !== undefined ? comData.coords.lng : comData.coords.longitude;
+      const destLat = coords.lat !== undefined ? coords.lat : coords.latitude;
+      const destLng = coords.lng !== undefined ? coords.lng : coords.longitude;
+
+      const distance = await getDistance(comLat, comLng, destLat, destLng);
       estimatedDistance = distance;
 
-      let fee = calculateDynamicFee(distance);
-      // Support rain surcharge
-      if (getState().isRaining) {
-        const rainAmt = (getState().deliveryRainSurcharge || 300);
-        fee += rainAmt;
-        const rainRow = modalEl.querySelector('#manual-rain-row');
-        const rainVal = modalEl.querySelector('#manual-rain-value');
-        if (rainRow && rainVal) {
-          rainRow.style.display = 'flex';
-          rainVal.textContent = `+${formatPrice(rainAmt)}`;
-        }
-      } else {
-        const rainRow = modalEl.querySelector('#manual-rain-row');
-        if (rainRow) rainRow.style.display = 'none';
-      }
-      deliveryCost = fee;
+      let baseFee = calculateDynamicFee(distance);
+      let rainAmt = isRaining ? rainSurcharge : 0;
+      deliveryCost = baseFee + rainAmt;
 
       // Update summary displays
-      modalEl.querySelector('#delivery-fee-value').textContent = formatPrice(deliveryCost);
+      modalEl.querySelector('#delivery-fee-value').textContent = formatPrice(baseFee);
       modalEl.querySelector('#delivery-dist-value').textContent = `(${distance.toFixed(1)} km)`;
+
+      const rainRow = modalEl.querySelector('#manual-rain-row');
+      const rainVal = modalEl.querySelector('#manual-rain-value');
+      if (rainRow && rainVal) {
+        if (isRaining) {
+          rainRow.style.display = 'flex';
+          rainVal.textContent = `+ ${formatPrice(rainAmt)}`;
+        } else {
+          rainRow.style.display = 'none';
+        }
+      }
 
       updateTotals();
     } catch (err) {
