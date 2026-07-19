@@ -5886,7 +5886,7 @@ export async function updateDispatchQueue(orderId) {
     const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
 
     const rejected = o.queueRejectedDrivers || [];
-    if (o.queueTargetDriverId && !rejected.includes(o.queueTargetDriverId)) {
+    if (o.queueTargetDriverId) {
       rejected.push(o.queueTargetDriverId);
       
       // Auto-pause inactive driver (Ghost driver check)
@@ -5914,46 +5914,78 @@ export async function updateDispatchQueue(orderId) {
     let targetDriverId = null;
     let targetDriverName = null;
 
-    const coPickupDriver = allDrivers.find(d => {
-      if (rejected.includes(d.id)) return false;
-      return activeOrdersSnap.docs.some(docSnap => {
-        const ord = docSnap.data();
-        return ord.driverId === d.id && ord.comercioId === o.comercioId && !ord.pickedUpAt;
-      });
+    // Filter eligible drivers: exclude if they have rejected 3 or more times
+    const eligibleDrivers = allDrivers.filter(d => {
+      const occurrences = rejected.filter(id => id === d.id).length;
+      if (occurrences >= 3) return false;
+      if (busyDriverIds.has(d.id)) return false;
+      
+      if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
+        return false;
+      }
+
+      const mode = d.deliveryMode || 'both';
+      if (mode === 'trip' && !o.isTrip) return false;
+      if (mode === 'delivery' && o.isTrip) return false;
+
+      return true;
     });
 
-    if (coPickupDriver) {
-      targetDriverId = coPickupDriver.id;
-      targetDriverName = coPickupDriver.displayName || coPickupDriver.name || 'Repartidor';
-    } else {
-      const eligibleDrivers = allDrivers.filter(d => {
-        if (rejected.includes(d.id)) return false;
-        if (busyDriverIds.has(d.id)) return false;
-        
-        if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
-          return false;
+    if (eligibleDrivers.length > 0) {
+      // Sort: 
+      // 1. Prioritize drivers with fewer rejection occurrences
+      // 2. Then by completed orders today
+      eligibleDrivers.sort((a, b) => {
+        const occurrencesA = rejected.filter(id => id === a.id).length;
+        const occurrencesB = rejected.filter(id => id === b.id).length;
+        if (occurrencesA !== occurrencesB) {
+          return occurrencesA - occurrencesB;
         }
-
-        const mode = d.deliveryMode || 'both';
-        if (mode === 'trip' && !o.isTrip) return false;
-        if (mode === 'delivery' && o.isTrip) return false;
-
-        return true;
+        return (a.completedOrdersToday || 0) - (b.completedOrdersToday || 0);
       });
 
-      if (eligibleDrivers.length > 0) {
-        eligibleDrivers.sort((a, b) => (a.completedOrdersToday || 0) - (b.completedOrdersToday || 0));
-        targetDriverId = eligibleDrivers[0].id;
-        targetDriverName = eligibleDrivers[0].displayName || eligibleDrivers[0].name || 'Repartidor';
+      // Find co-pickup driver if any among the eligible ones
+      const coPickupDriver = eligibleDrivers.find(d => {
+        return activeOrdersSnap.docs.some(docSnap => {
+          const ord = docSnap.data();
+          return ord.driverId === d.id && ord.comercioId === o.comercioId && !ord.pickedUpAt;
+        });
+      });
+
+      const chosenDriver = coPickupDriver || eligibleDrivers[0];
+      targetDriverId = chosenDriver.id;
+      targetDriverName = chosenDriver.displayName || chosenDriver.name || 'Repartidor';
+
+      await updateDoc(orderRef, {
+        queueTargetDriverId: targetDriverId,
+        queueTargetDriverName: targetDriverName,
+        queueOfferedAt: Date.now(),
+        queueRejectedDrivers: rejected
+      });
+    } else {
+      // Exhausted all online drivers or no drivers online! Cancel the order!
+      await updateDoc(orderRef, {
+        status: 'cancelled',
+        cancelledAt: serverTimestamp(),
+        cancelledBy: 'system',
+        cancelReason: 'No hay repartidores disponibles en la zona',
+        queueTargetDriverId: null,
+        queueTargetDriverName: null,
+        queueRejectedDrivers: rejected
+      });
+
+      // Refund user points if applicable
+      if (o.pointsRedeemed > 0 && o.userId) {
+        try {
+          const userRef = doc(db, 'users', o.userId);
+          await updateDoc(userRef, {
+            points: increment(o.pointsRedeemed)
+          });
+        } catch (pe) {
+          console.error('[Points refund error]', pe);
+        }
       }
     }
-
-    await updateDoc(orderRef, {
-      queueTargetDriverId: targetDriverId || null,
-      queueTargetDriverName: targetDriverName || null,
-      queueOfferedAt: Date.now(),
-      queueRejectedDrivers: rejected
-    });
   } catch (err) {
     console.error('Error in updateDispatchQueue:', err);
   }
