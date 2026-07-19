@@ -543,7 +543,8 @@ function loadTabContent(tab, container, user) {
           const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
           const isTargetMe = o.queueTargetDriverId === user.uid;
           const needsQueueAssign = (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
-                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 30000));
+                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 30000)) ||
+                                   (o.queueTargetDriverId && !isTargetMe && (now - offeredAt >= 33000));
           if (needsQueueAssign) {
             updateDispatchQueue(o.id);
           }
