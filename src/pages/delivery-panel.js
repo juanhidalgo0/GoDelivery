@@ -429,7 +429,11 @@ export async function renderDeliveryPanel() {
       const batches = new Set();
       allOrders.forEach(o => {
         if (o.driverId) return;
-        if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
+        if (!o.isTrip && !o.isFavor) {
+          if (o.queueTargetDriverId !== user.uid) return;
+        } else {
+          if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
+        }
         
         const mode = user.deliveryMode || 'both';
         if (mode === 'trip' && !o.isTrip) return;
@@ -541,14 +545,19 @@ function loadTabContent(tab, container, user) {
 
           const now = Date.now();
           const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
+          const isTargetMe = o.queueTargetDriverId === user.uid;
           const needsQueueAssign = (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
-                                   (o.queueTargetDriverId && offeredAt !== now && (now - offeredAt >= 30000));
+                                   (o.queueTargetDriverId && isTargetMe && offeredAt !== now && (now - offeredAt >= 30000));
           if (needsQueueAssign) {
             updateDispatchQueue(o.id);
           }
 
-          // Filter: only show if offered to me!
-          if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
+          // Filter: only show standard orders if offered to me!
+          if (!o.isTrip && !o.isFavor) {
+            if (o.queueTargetDriverId !== user.uid) return;
+          } else {
+            if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
+          }
 
           // Handle Auto-Accept
           if (o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
