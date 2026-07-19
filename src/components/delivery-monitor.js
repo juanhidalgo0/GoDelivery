@@ -97,11 +97,7 @@ function startMonitoring(user) {
       .filter(o => !o.driverId)
       .filter(o => {
         // Queue target driver check: Only notify/show if offered to me!
-        if (!o.isTrip && !o.isFavor) {
-          if (o.queueTargetDriverId !== user.uid) return false;
-        } else {
-          if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return false;
-        }
+        if (o.queueTargetDriverId !== user.uid) return false;
         
         if (mode === 'trip' && !o.isTrip) return false;
         if (mode === 'delivery' && o.isTrip) return false;

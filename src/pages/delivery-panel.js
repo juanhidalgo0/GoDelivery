@@ -429,11 +429,7 @@ export async function renderDeliveryPanel() {
       const batches = new Set();
       allOrders.forEach(o => {
         if (o.driverId) return;
-        if (!o.isTrip && !o.isFavor) {
-          if (o.queueTargetDriverId !== user.uid) return;
-        } else {
-          if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
-        }
+        if (o.queueTargetDriverId !== user.uid) return;
         
         const mode = user.deliveryMode || 'both';
         if (mode === 'trip' && !o.isTrip) return;
@@ -552,12 +548,8 @@ function loadTabContent(tab, container, user) {
             updateDispatchQueue(o.id);
           }
 
-          // Filter: only show standard orders if offered to me!
-          if (!o.isTrip && !o.isFavor) {
-            if (o.queueTargetDriverId !== user.uid) return;
-          } else {
-            if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
-          }
+          // Filter: only show if offered to me!
+          if (o.queueTargetDriverId !== user.uid) return;
 
           // Handle Auto-Accept
           if (o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
@@ -771,11 +763,7 @@ function loadTabContent(tab, container, user) {
             if (change.type === 'added') {
               const order = { id: change.doc.id, ...change.doc.data() };
               if (!order.driverId && (order.status === 'ready' || order.bundleId)) {
-                if (!order.isTrip && !order.isFavor) {
-                  if (order.queueTargetDriverId !== user.uid) return;
-                } else {
-                  if (order.queueTargetDriverId && order.queueTargetDriverId !== user.uid) return;
-                }
+                if (order.queueTargetDriverId !== user.uid) return;
                 showToast(`¡Nuevo pedido disponible!`, 'info');
               }
             }
@@ -784,13 +772,18 @@ function loadTabContent(tab, container, user) {
         isInitial = false;
 
         // Bypassing DOM updates if the batches fingerprint hasn't changed
-        const availableFingerprint = JSON.stringify(sortedBatches.map(b => ({
-          id: b.id,
-          isBundle: b.isBundle,
-          total: b.total,
-          ordersCount: b.orders?.length || 0,
-          ordersStatus: b.orders ? b.orders.map(o => o.status) : (b.order ? b.order.status : '')
-        })));
+        const availableFingerprint = JSON.stringify(sortedBatches.map(b => {
+          const orderObj = b.isBundle ? b.orders[0] : b.order;
+          return {
+            id: b.id,
+            isBundle: b.isBundle,
+            total: b.total,
+            ordersCount: b.orders?.length || 0,
+            ordersStatus: b.orders ? b.orders.map(o => o.status) : (b.order ? b.order.status : ''),
+            queueTargetDriverId: orderObj?.queueTargetDriverId || null,
+            queueOfferedAt: orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : 0
+          };
+        }));
 
         if (container.dataset.lastAvailableFingerprint === availableFingerprint) {
           return;
