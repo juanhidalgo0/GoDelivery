@@ -5875,11 +5875,7 @@ export async function updateDispatchQueue(orderId) {
     const o = orderSnap.data();
     if (o.driverId) return;
 
-    // Double check expiry
-    const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
-    if (o.queueTargetDriverId && (now - offeredAt < 30000)) {
-      return; 
-    }
+    // Queue rotation is triggered strictly on timer expiration or queue assign necessity.
 
     // Fetch query snapshots OUTSIDE to avoid failed precondition errors
     const driversSnap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
