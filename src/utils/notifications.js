@@ -89,6 +89,8 @@ export async function initPushNotifications() {
           if (title) {
             showToast(`${title}: ${body}`, 'info');
             AudioManager.playSound('/assets/sounds/notification.mp3');
+            
+            // For Capacitor native foreground, the in-app Toast and sound are sufficient.
           }
           await addDoc(collection(db, 'users', user.uid, 'notifications'), {
             title: title || '',
@@ -245,6 +247,9 @@ export async function initPushNotifications() {
             showToast(`${title}: ${body}`, 'info');
             AudioManager.playSound('/assets/sounds/notification.mp3');
             if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+            
+            // Force native browser notification banner in PWA foreground
+            showNativeNotificationBanner(title, body, tag);
           }
         }
       });
@@ -277,6 +282,9 @@ export async function initPushNotifications() {
           showToast(`${title}: ${body}`, 'info');
           AudioManager.playSound('/assets/sounds/notification.mp3');
           if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          
+          // Force native browser notification banner in PWA foreground
+          showNativeNotificationBanner(title, body, tag);
         }
       });
     }
@@ -284,6 +292,25 @@ export async function initPushNotifications() {
     initialized = true;
   } catch (err) {
     console.error('Error initializing push notifications:', err);
+  }
+}
+
+export function showNativeNotificationBanner(title, body, tag = '') {
+  if (window.Notification && Notification.permission === 'granted') {
+    try {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(title, {
+          body,
+          icon: '/assets/img/logo.png',
+          tag: tag || `notif-${Date.now()}`,
+          renotify: true
+        });
+      }).catch(() => {
+        new Notification(title, { body, tag });
+      });
+    } catch (e) {
+      new Notification(title, { body, tag });
+    }
   }
 }
 

@@ -5966,7 +5966,7 @@ export async function updateDispatchQueue(orderId) {
           await addDoc(collection(db, 'notifications'), {
             userId: targetDriverId,
             title: '¡Nueva Oferta Exclusiva!',
-            body: `Tenés un nuevo pedido disponible para aceptar de ${o.comercioName || 'Comercio'}.`,
+            body: `Tenés un nuevo pedido disponible para aceptar de ${o.comercioName || 'Comercio'}. [Ref: ${Date.now().toString().slice(-4)}]`,
             type: 'new_exclusive_offer',
             orderId: orderId,
             createdAt: new Date(),
