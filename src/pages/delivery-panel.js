@@ -538,10 +538,11 @@ function loadTabContent(tab, container, user) {
         allOrders.forEach(o => {
           if (o.driverId) return;
 
-          // Trigger queue rotation check if target is empty or expired (>30s)
           const now = Date.now();
-          const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : 0;
-          if (!o.queueTargetDriverId || (now - offeredAt >= 30000)) {
+          const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
+          const needsQueueAssign = (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
+                                   (o.queueTargetDriverId && offeredAt !== now && (now - offeredAt >= 30000));
+          if (needsQueueAssign) {
             updateDispatchQueue(o.id);
           }
 
@@ -866,9 +867,9 @@ function loadTabContent(tab, container, user) {
               const favorRgb = favorMeta ? getRgbString(favorMeta.color) : '239, 68, 68';
 
               const orderObj = b.isBundle ? b.orders[0] : b.order;
-              const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : 0;
+              const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (orderObj?.queueTargetDriverId ? Date.now() : 0);
               const elapsed = Math.floor((Date.now() - offeredAt) / 1000);
-              const remaining = Math.max(0, 30 - elapsed);
+              const remaining = offeredAt > 0 ? Math.max(0, 30 - elapsed) : 0;
 
               return `
                 <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
@@ -5851,6 +5852,15 @@ async function renderSubPage(tab, title) {
 
 export async function updateDispatchQueue(orderId) {
   try {
+    const now = Date.now();
+    
+    // Fetch query snapshots OUTSIDE transaction to avoid failed precondition errors
+    const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)));
+    const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
+    const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
+
     await runTransaction(db, async (transaction) => {
       const orderRef = doc(db, 'orders', orderId);
       const orderSnap = await transaction.get(orderRef);
@@ -5858,9 +5868,8 @@ export async function updateDispatchQueue(orderId) {
       const o = orderSnap.data();
       if (o.driverId) return;
 
-      const now = Date.now();
-      const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : 0;
-      if (o.queueTargetDriverId && (now - offeredAt < 30000)) {
+      const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
+      if (o.queueTargetDriverId && offeredAt !== now && (now - offeredAt < 30000)) {
         return; 
       }
 
@@ -5868,34 +5877,27 @@ export async function updateDispatchQueue(orderId) {
       if (o.queueTargetDriverId && !rejected.includes(o.queueTargetDriverId)) {
         rejected.push(o.queueTargetDriverId);
         
-        // Auto-pause inactive driver (Ghost driver check)
-        try {
-          const driverRef = doc(db, 'users', o.queueTargetDriverId);
-          const dSnap = await transaction.get(driverRef);
-          if (dSnap.exists()) {
-            const dData = dSnap.data();
-            const missedCount = (dData.missedOffersCount || 0) + 1;
-            if (missedCount >= 2) {
-              transaction.update(driverRef, {
-                isOnline: false,
-                missedOffersCount: 0
-              });
-            } else {
-              transaction.update(driverRef, {
-                missedOffersCount: missedCount
-              });
+        // Auto-pause inactive driver (Ghost driver check) outside transaction
+        const driverIdToPause = o.queueTargetDriverId;
+        setTimeout(async () => {
+          try {
+            const driverRef = doc(db, 'users', driverIdToPause);
+            const dSnap = await getDoc(driverRef);
+            if (dSnap.exists()) {
+              const dData = dSnap.data();
+              const missedCount = (dData.missedOffersCount || 0) + 1;
+              if (missedCount >= 2) {
+                await updateDoc(driverRef, { isOnline: false, missedOffersCount: 0 });
+                showToast(`Repartidor ${dData.displayName || dData.name || ''} desconectado por inactividad.`, 'info');
+              } else {
+                await updateDoc(driverRef, { missedOffersCount: missedCount });
+              }
             }
+          } catch (de) {
+            console.error('[Ghost check error]', de);
           }
-        } catch (de) {
-          console.error('[Ghost check error]', de);
-        }
+        }, 100);
       }
-
-      const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)));
-      const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
-      const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
 
       let targetDriverId = null;
       let targetDriverName = null;
@@ -5942,7 +5944,7 @@ export async function updateDispatchQueue(orderId) {
       });
     });
   } catch (err) {
-    console.error('Error in updateDispatchQueue transaction:', err);
+    console.error('Error in updateDispatchQueue:', err);
   }
 }
 
