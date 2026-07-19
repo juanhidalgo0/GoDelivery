@@ -5870,94 +5870,94 @@ export async function updateDispatchQueue(orderId) {
   try {
     const now = Date.now();
     
-    // Fetch query snapshots OUTSIDE transaction to avoid failed precondition errors
+    // Fetch order doc first to verify state
+    const orderRef = doc(db, 'orders', orderId);
+    const orderSnap = await getDoc(orderRef);
+    if (!orderSnap.exists()) return;
+    const o = orderSnap.data();
+    if (o.driverId) return;
+
+    // Double check expiry
+    const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
+    if (o.queueTargetDriverId && offeredAt !== now && (now - offeredAt < 30000)) {
+      return; 
+    }
+
+    // Fetch query snapshots OUTSIDE to avoid failed precondition errors
     const driversSnap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
     const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.role === 'delivery' || d.isDelivery === true);
 
     const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
     const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
 
-    await runTransaction(db, async (transaction) => {
-      const orderRef = doc(db, 'orders', orderId);
-      const orderSnap = await transaction.get(orderRef);
-      if (!orderSnap.exists()) return;
-      const o = orderSnap.data();
-      if (o.driverId) return;
-
-      const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
-      if (o.queueTargetDriverId && offeredAt !== now && (now - offeredAt < 30000)) {
-        return; 
-      }
-
-      const rejected = o.queueRejectedDrivers || [];
-      if (o.queueTargetDriverId && !rejected.includes(o.queueTargetDriverId)) {
-        rejected.push(o.queueTargetDriverId);
-        
-        // Auto-pause inactive driver (Ghost driver check) outside transaction
-        const driverIdToPause = o.queueTargetDriverId;
-        setTimeout(async () => {
-          try {
-            const driverRef = doc(db, 'users', driverIdToPause);
-            const dSnap = await getDoc(driverRef);
-            if (dSnap.exists()) {
-              const dData = dSnap.data();
-              const missedCount = (dData.missedOffersCount || 0) + 1;
-              if (missedCount >= 2) {
-                await updateDoc(driverRef, { isOnline: false, missedOffersCount: 0 });
-                showToast(`Repartidor ${dData.displayName || dData.name || ''} desconectado por inactividad.`, 'info');
-              } else {
-                await updateDoc(driverRef, { missedOffersCount: missedCount });
-              }
+    const rejected = o.queueRejectedDrivers || [];
+    if (o.queueTargetDriverId && !rejected.includes(o.queueTargetDriverId)) {
+      rejected.push(o.queueTargetDriverId);
+      
+      // Auto-pause inactive driver (Ghost driver check)
+      const driverIdToPause = o.queueTargetDriverId;
+      setTimeout(async () => {
+        try {
+          const driverRef = doc(db, 'users', driverIdToPause);
+          const dSnap = await getDoc(driverRef);
+          if (dSnap.exists()) {
+            const dData = dSnap.data();
+            const missedCount = (dData.missedOffersCount || 0) + 1;
+            if (missedCount >= 2) {
+              await updateDoc(driverRef, { isOnline: false, missedOffersCount: 0 });
+              showToast(`Repartidor ${dData.displayName || dData.name || ''} desconectado por inactividad.`, 'info');
+            } else {
+              await updateDoc(driverRef, { missedOffersCount: missedCount });
             }
-          } catch (de) {
-            console.error('[Ghost check error]', de);
           }
-        }, 100);
-      }
-
-      let targetDriverId = null;
-      let targetDriverName = null;
-
-      const coPickupDriver = allDrivers.find(d => {
-        if (rejected.includes(d.id)) return false;
-        return activeOrdersSnap.docs.some(docSnap => {
-          const ord = docSnap.data();
-          return ord.driverId === d.id && ord.comercioId === o.comercioId && !ord.pickedUpAt;
-        });
-      });
-
-      if (coPickupDriver) {
-        targetDriverId = coPickupDriver.id;
-        targetDriverName = coPickupDriver.displayName || coPickupDriver.name || 'Repartidor';
-      } else {
-        const eligibleDrivers = allDrivers.filter(d => {
-          if (rejected.includes(d.id)) return false;
-          if (busyDriverIds.has(d.id)) return false;
-          
-          if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
-            return false;
-          }
-
-          const mode = d.deliveryMode || 'both';
-          if (mode === 'trip' && !o.isTrip) return false;
-          if (mode === 'delivery' && o.isTrip) return false;
-
-          return true;
-        });
-
-        if (eligibleDrivers.length > 0) {
-          eligibleDrivers.sort((a, b) => (a.completedOrdersToday || 0) - (b.completedOrdersToday || 0));
-          targetDriverId = eligibleDrivers[0].id;
-          targetDriverName = eligibleDrivers[0].displayName || eligibleDrivers[0].name || 'Repartidor';
+        } catch (de) {
+          console.error('[Ghost check error]', de);
         }
-      }
+      }, 100);
+    }
 
-      transaction.update(orderRef, {
-        queueTargetDriverId: targetDriverId || null,
-        queueTargetDriverName: targetDriverName || null,
-        queueOfferedAt: serverTimestamp(),
-        queueRejectedDrivers: rejected
+    let targetDriverId = null;
+    let targetDriverName = null;
+
+    const coPickupDriver = allDrivers.find(d => {
+      if (rejected.includes(d.id)) return false;
+      return activeOrdersSnap.docs.some(docSnap => {
+        const ord = docSnap.data();
+        return ord.driverId === d.id && ord.comercioId === o.comercioId && !ord.pickedUpAt;
       });
+    });
+
+    if (coPickupDriver) {
+      targetDriverId = coPickupDriver.id;
+      targetDriverName = coPickupDriver.displayName || coPickupDriver.name || 'Repartidor';
+    } else {
+      const eligibleDrivers = allDrivers.filter(d => {
+        if (rejected.includes(d.id)) return false;
+        if (busyDriverIds.has(d.id)) return false;
+        
+        if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
+          return false;
+        }
+
+        const mode = d.deliveryMode || 'both';
+        if (mode === 'trip' && !o.isTrip) return false;
+        if (mode === 'delivery' && o.isTrip) return false;
+
+        return true;
+      });
+
+      if (eligibleDrivers.length > 0) {
+        eligibleDrivers.sort((a, b) => (a.completedOrdersToday || 0) - (b.completedOrdersToday || 0));
+        targetDriverId = eligibleDrivers[0].id;
+        targetDriverName = eligibleDrivers[0].displayName || eligibleDrivers[0].name || 'Repartidor';
+      }
+    }
+
+    await updateDoc(orderRef, {
+      queueTargetDriverId: targetDriverId || null,
+      queueTargetDriverName: targetDriverName || null,
+      queueOfferedAt: serverTimestamp(),
+      queueRejectedDrivers: rejected
     });
   } catch (err) {
     console.error('Error in updateDispatchQueue:', err);
