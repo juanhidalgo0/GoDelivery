@@ -95,6 +95,13 @@ function stopListening() {
 }
 
 function updateBannerState(order, allOrders = []) {
+  // Hide customer tracking banner if currently in delivery panel pages to avoid confusion
+  const hash = window.location.hash || '';
+  if (hash.startsWith('#/delivery') || hash.startsWith('#/delivery/')) {
+    clearOrderIndicator();
+    return;
+  }
+
   if (!order) {
     clearOrderIndicator();
     return;
@@ -326,5 +333,14 @@ function clearOrderIndicator() {
 async function showStatusToast(title, order) {
   const { showToast } = await import('./toast.js');
   showToast(title, 'info');
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash || '';
+    if (hash.startsWith('#/delivery') || hash.startsWith('#/delivery/')) {
+      clearOrderIndicator();
+    }
+  });
 }
 
