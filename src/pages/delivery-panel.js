@@ -5878,38 +5878,35 @@ export async function updateDispatchQueue(orderId) {
 
     // Queue rotation is triggered strictly on timer expiration or queue assign necessity.
 
+    const rejected = o.queueRejectedDrivers || [];
+    if (o.queueTargetDriverId) {
+      rejected.push(o.queueTargetDriverId);
+      
+      // Auto-pause inactive driver (Ghost driver check) synchronously
+      try {
+        const driverRef = doc(db, 'users', o.queueTargetDriverId);
+        const dSnap = await getDoc(driverRef);
+        if (dSnap.exists()) {
+          const dData = dSnap.data();
+          const missedCount = (dData.missedOffersCount || 0) + 1;
+          if (missedCount >= 2) {
+            await updateDoc(driverRef, { isOnline: false, missedOffersCount: 0 });
+            showToast(`Repartidor ${dData.displayName || dData.name || ''} desconectado por inactividad.`, 'info');
+          } else {
+            await updateDoc(driverRef, { missedOffersCount: missedCount });
+          }
+        }
+      } catch (de) {
+        console.error('[Ghost check error]', de);
+      }
+    }
+
     // Fetch query snapshots OUTSIDE to avoid failed precondition errors
     const driversSnap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
     const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.role === 'delivery' || d.isDelivery === true);
 
     const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
     const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
-
-    const rejected = o.queueRejectedDrivers || [];
-    if (o.queueTargetDriverId) {
-      rejected.push(o.queueTargetDriverId);
-      
-      // Auto-pause inactive driver (Ghost driver check)
-      const driverIdToPause = o.queueTargetDriverId;
-      setTimeout(async () => {
-        try {
-          const driverRef = doc(db, 'users', driverIdToPause);
-          const dSnap = await getDoc(driverRef);
-          if (dSnap.exists()) {
-            const dData = dSnap.data();
-            const missedCount = (dData.missedOffersCount || 0) + 1;
-            if (missedCount >= 2) {
-              await updateDoc(driverRef, { isOnline: false, missedOffersCount: 0 });
-              showToast(`Repartidor ${dData.displayName || dData.name || ''} desconectado por inactividad.`, 'info');
-            } else {
-              await updateDoc(driverRef, { missedOffersCount: missedCount });
-            }
-          }
-        } catch (de) {
-          console.error('[Ghost check error]', de);
-        }
-      }, 100);
-    }
 
     let targetDriverId = null;
     let targetDriverName = null;
