@@ -646,6 +646,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       before.paymentStatus === after.paymentStatus &&
       before.driverId === after.driverId &&
       before.isAtDoor === after.isAtDoor &&
+      before.queueTargetDriverId === after.queueTargetDriverId &&
       JSON.stringify(before.items) === JSON.stringify(after.items) &&
       before.total === after.total) {
     return;
@@ -654,6 +655,63 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   const orderNum = after.orderId || orderId.slice(0, 6);
 
   try {
+    // Server-side Auto-Accept Logic:
+    // If a target driver is assigned, the driver changed, there is no driver assigned yet, and the driver has auto-accept enabled:
+    if (after.queueTargetDriverId && before.queueTargetDriverId !== after.queueTargetDriverId && !after.driverId) {
+      const driverId = after.queueTargetDriverId;
+      const driverDoc = await db.collection("users").doc(driverId).get();
+      if (driverDoc.exists) {
+        const dData = driverDoc.data();
+        if (dData.autoAcceptEnabled === true) {
+          logger.info(`[Auto-Accept Server-Side] Driver ${driverId} has auto-accept enabled. Automatically assigning order ${orderId}`);
+          
+          const estTime = after.isTrip ? 10 : 35; // Default estimation
+          
+          await db.collection("orders").doc(orderId).update({
+            driverId: driverId,
+            driverName: dData.displayName || dData.name || 'Repartidor',
+            driverPhoto: dData.photoURL || '',
+            driverPhone: dData.phone || '',
+            driverDeliveryId: dData.deliveryId || '',
+            driverAlias: dData.transferAlias || '',
+            driverVehicleModel: dData.vehicleModel || '',
+            driverVehicleColor: dData.vehicleColor || '',
+            driverVehiclePatent: dData.vehicleDetails || dData.patente || '',
+            status: (after.isFavor || after.isTrip) ? 'confirmed' : after.status,
+            acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+            estimatedDeliveryTime: estTime
+          });
+
+          // Reset driver missed offers count to prevent auto-offline disconnect
+          await db.collection("users").doc(driverId).update({
+            missedOffersCount: 0
+          });
+
+          // Notify the driver via Push Notification
+          const driverTokens = await getUserTokens(driverId);
+          await sendPush(driverTokens, {
+            title: "⚡ ¡Pedido auto-aceptado!",
+            body: `Se aceptó automáticamente el pedido de ${after.comercioName || 'Comercio'}. ¡Toca para ver tu ruta!`
+          }, { 
+            tag: `auto-accept-${orderId}`, 
+            url: `#/delivery`,
+            click_action: 'FLUTTER_NOTIFICATION_CLICK'
+          });
+
+          // Create notification document in Firestore for the driver
+          await db.collection("users").doc(driverId).collection("notifications").add({
+            type: "auto_accept",
+            title: "⚡ ¡Pedido auto-aceptado!",
+            body: `Se aceptó automáticamente el pedido de ${after.comercioName || 'Comercio'}.`,
+            status: "unread",
+            url: "#/delivery",
+            createdAt: new Date()
+          });
+
+          return; // Stop execution of the current invocation as document update will trigger a new event
+        }
+      }
+    }
     // Payment Status Change Notification (For Commerce - Now unifies as the single 'Nuevo Pedido Recibido' alert for MP)
     if (before.paymentStatus !== after.paymentStatus && after.paymentStatus === "paid") {
        const comercioDoc = await db.collection("comercios").doc(after.comercioId).get();

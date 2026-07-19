@@ -160,7 +160,26 @@ export async function renderDeliveryPanel() {
   content.style.overflow = 'hidden';
 
   // HOTSPOTS IMPLEMENTATION & ROUND ROBIN QUEUE
-  window.autoAcceptEnabled = false;
+  const user = getState().user;
+  if (!user || !isDelivery()) {
+    content.innerHTML = `<div class="empty-state">Acceso denegado</div>`;
+    return;
+  }
+  window.autoAcceptEnabled = user.autoAcceptEnabled || false;
+
+  window.toggleAutoAccept = async (checked, userId) => {
+    window.autoAcceptEnabled = checked;
+    try {
+      const { doc, updateDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase.js');
+      await updateDoc(doc(db, 'users', userId), {
+        autoAcceptEnabled: checked
+      });
+      console.log('[toggleAutoAccept] Updated Firestore autoAcceptEnabled to', checked);
+    } catch (err) {
+      console.error('Error saving autoAcceptEnabled:', err);
+    }
+  };
 
   // Setup click listener on content for coupon info cards (with cleanup to avoid duplicate listeners)
   if (content._couponListener) {
@@ -239,11 +258,7 @@ export async function renderDeliveryPanel() {
   };
   content.addEventListener('click', content._couponListener);
 
-  const user = getState().user;
-  if (!user || !isDelivery()) {
-    content.innerHTML = `<div class="empty-state">Acceso denegado</div>`;
-    return;
-  }
+
 
   const isNative = !!window.Capacitor;
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -270,7 +285,7 @@ export async function renderDeliveryPanel() {
             </div>
             <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
               <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0; position:absolute;" onchange="
-                window.autoAcceptEnabled = this.checked;
+                window.toggleAutoAccept(this.checked, '${user.uid}');
                 const slider = this.nextElementSibling;
                 slider.style.backgroundColor = this.checked ? 'var(--color-primary, #e11d48)' : '#ccc';
                 slider.querySelector('span').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';
