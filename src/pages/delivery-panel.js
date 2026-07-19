@@ -419,25 +419,123 @@ export async function renderDeliveryPanel() {
           <a href="#/delivery/config" title="Configuración de Perfil" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
             ${icon('settings', 22)}
           </a>
-          <button id="delivery-contact-support-btn" title="Contactar a Soporte" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+          <button id="delivery-contact-support-btn" title="Información del Sistema de Delivery" style="width:40px; height:40px; border-radius:12px; background:#2563eb; color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s; box-shadow: 0 4px 10px rgba(37,99,235,0.3);" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
             ${icon('helpCircle', 22)}
           </button>
         </div>
       </div>
     `;
+ 
+    document.getElementById('delivery-contact-support-btn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    document.getElementById('delivery-contact-support-btn')?.addEventListener('click', () => {
-      const fab = document.getElementById('support-bot-fab-btn');
-      if (fab) {
-        fab.click();
-      } else {
-        import('../components/support-bot.js').then(m => {
-          m.initSupportBot();
-          setTimeout(() => {
-            document.getElementById('support-bot-fab-btn')?.click();
-          }, 150);
-        });
-      }
+      // Remove existing sheet if any
+      const existing = document.getElementById('info-bottom-sheet');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'info-bottom-sheet';
+      overlay.style.cssText = `
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        background: rgba(0,0,0,0.4);
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      `;
+
+      overlay.innerHTML = `
+        <div id="info-bottom-sheet-card" style="
+          background: var(--color-bg);
+          border-top-left-radius: 24px;
+          border-top-right-radius: 24px;
+          padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5);
+          box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
+          transform: translateY(100%);
+          transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-4);
+          max-height: 85vh;
+        ">
+          <!-- Drag indicator handle -->
+          <div style="width: 36px; height: 5px; background: var(--color-border-light, #e5e7eb); border-radius: 3px; align-self: center; margin-bottom: 8px;"></div>
+          
+          <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6); text-align: left;">
+            Funcionamiento del Sistema
+          </h3>
+          
+          <div style="font-size: 14px; line-height: 1.6; color: var(--color-text-secondary); font-weight: 550; display:flex; flex-direction:column; gap:16px; max-height:55vh; overflow-y:auto; padding-right:6px; text-align: left;">
+            <div>
+              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🔄 Asignación en Cola (Round-Robin)</p>
+              <p style="margin: 0;">Los pedidos listos se ofrecen a un repartidor a la vez de forma exclusiva durante 30 segundos. La cola prioriza a quienes no hayan rechazado el pedido y desempata seleccionando a quien tenga menos pedidos completados hoy.</p>
+            </div>
+            
+            <div>
+              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">⏱️ Límite de 3 Intentos</p>
+              <p style="margin: 0;">Si eres el único repartidor conectado, el sistema te ofrecerá el mismo pedido hasta un máximo de 3 veces. Si expira o lo rechazas las 3 veces, el pedido quedará bloqueado permanentemente para ti.</p>
+            </div>
+
+            <div>
+              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🛑 Desconexión Automática por Inactividad</p>
+              <p style="margin: 0;">Si dejas expirar o rechazas 2 pedidos de forma consecutiva, el sistema pausará tu sesión automáticamente cambiándote a desconectado. Esto evita que dejes pedidos trabados si no estás atento al celular.</p>
+            </div>
+
+            <div>
+              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">📦 Co-retiros Simultáneos</p>
+              <p style="margin: 0;">Puedes llevar hasta 2 pedidos activos en curso de comercios diferentes. Si los pedidos pertenecen al mismo comercio, puedes llevar hasta 3 pedidos simultáneos (lote optimizado del local).</p>
+            </div>
+
+            <div>
+              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">❌ Cancelación Automática por Falta de Cobertura</p>
+              <p style="margin: 0;">Si todos los repartidores activos de la zona rechazan el pedido o agotan sus 3 intentos, la orden se cancela de forma automática, notificando al cliente y reembolsándole su saldo y puntos al instante.</p>
+            </div>
+          </div>
+          
+          <button id="info-bottom-sheet-close-btn" style="
+            width: 100%;
+            height: 54px;
+            border: none;
+            background: var(--color-primary);
+            color: white;
+            border-radius: 16px;
+            font-weight: 900;
+            font-size: 15.5px;
+            cursor: pointer;
+            margin-top: 8px;
+            box-shadow: 0 8px 24px rgba(225,29,72,0.25);
+          ">
+            Entendido
+          </button>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      // Animate in
+      setTimeout(() => {
+        overlay.style.opacity = '1';
+        const card = document.getElementById('info-bottom-sheet-card');
+        if (card) card.style.transform = 'translateY(0)';
+      }, 10);
+
+      const closeSheet = () => {
+        const card = document.getElementById('info-bottom-sheet-card');
+        if (card) card.style.transform = 'translateY(100%)';
+        overlay.style.opacity = '0';
+        setTimeout(() => overlay.remove(), 300);
+      };
+
+      overlay.onclick = (e) => {
+        if (e.target === overlay) closeSheet();
+      };
+
+      const closeBtn = document.getElementById('info-bottom-sheet-close-btn');
+      if (closeBtn) closeBtn.onclick = closeSheet;
     });
   }
 
