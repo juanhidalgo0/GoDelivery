@@ -1080,50 +1080,55 @@ window.showOrderDetail = async (idOrObject) => {
           }
         });
       }
-    }
-  });
 
-  document.getElementById('close-audit-modal').onclick = () => closeModal();
+      // Close modal handler inside onOpen
+      const closeBtn = document.getElementById('close-audit-modal');
+      if (closeBtn) closeBtn.onclick = () => closeModal();
 
-  document.getElementById('admin-cancel-order-btn')?.addEventListener('click', async () => {
-    const { showConfirm } = await import('../../components/modal.js');
-    showConfirm({
-      title: '🚨 Cancelar Pedido (Admin)',
-      message: `¿Estás seguro de que deseas cancelar el pedido #${o.orderId || '---'} de forma forzada? Esta acción devolverá los puntos al cliente (si aplica) y marcará el pedido como cancelado globalmente.`,
-      danger: true,
-      onConfirm: async () => {
-        const { showToast } = await import('../../components/toast.js');
-        try {
-          const { runTransaction, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
-          await runTransaction(db, async (transaction) => {
-            const orderRef = fDoc(db, 'orders', o.id);
-            const orderSnap = await transaction.get(orderRef);
-            if (!orderSnap.exists()) throw "El pedido no existe.";
+      // Cancel button handler inside onOpen
+      const cancelBtn = document.getElementById('admin-cancel-order-btn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', async () => {
+          const { showConfirm } = await import('../../components/modal.js');
+          showConfirm({
+            title: '🚨 Cancelar Pedido (Admin)',
+            message: `¿Estás seguro de que deseas cancelar el pedido #${o.orderId || '---'} de forma forzada? Esta acción devolverá los puntos al cliente (si aplica) y marcará el pedido como cancelado globalmente.`,
+            danger: true,
+            onConfirm: async () => {
+              const { showToast } = await import('../../components/toast.js');
+              try {
+                const { getDoc, updateDoc, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
+                
+                const orderRef = fDoc(db, 'orders', o.id);
+                const orderSnap = await getDoc(orderRef);
+                if (!orderSnap.exists()) throw "El pedido no existe.";
 
-            const orderData = orderSnap.data();
+                const orderData = orderSnap.data();
 
-            transaction.update(orderRef, {
-              status: 'cancelled',
-              cancelledAt: serverTimestamp(),
-              cancelledBy: 'admin'
-            });
+                await updateDoc(orderRef, {
+                  status: 'cancelled',
+                  cancelledAt: serverTimestamp(),
+                  cancelledBy: 'admin'
+                });
 
-            if (orderData.pointsRedeemed > 0 && orderData.userId) {
-              const userRef = fDoc(db, 'users', orderData.userId);
-              transaction.update(userRef, {
-                points: increment(orderData.pointsRedeemed)
-              });
+                if (orderData.pointsRedeemed > 0 && orderData.userId) {
+                  const userRef = fDoc(db, 'users', orderData.userId);
+                  await updateDoc(userRef, {
+                    points: increment(orderData.pointsRedeemed)
+                  });
+                }
+
+                closeModal();
+                showToast('Pedido cancelado correctamente por el Administrador', 'success');
+              } catch (err) {
+                console.error('[Admin Cancel] Error:', err);
+                showToast('Error al cancelar el pedido: ' + err, 'danger');
+              }
             }
           });
-
-          closeModal();
-          showToast('Pedido cancelado correctamente por el Administrador', 'success');
-        } catch (err) {
-          console.error('[Admin Cancel] Error:', err);
-          showToast('Error al cancelar el pedido: ' + err, 'danger');
-        }
+        });
       }
-    });
+    }
   });
 
   // Load client GO-ID dynamically
