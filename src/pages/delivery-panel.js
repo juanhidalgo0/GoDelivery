@@ -890,7 +890,7 @@ function loadTabContent(tab, container, user) {
                       <span style="font-size:12px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:6px;">
                         ⚠️ OFERTA EXCLUSIVA:
                       </span>
-                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 30000}">${remaining}s</span>
+                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 30000}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
                     </div>
                   ` : ''}
                   
@@ -1068,11 +1068,11 @@ function loadTabContent(tab, container, user) {
             el.textContent = `${remaining}s`;
              if (remaining <= 0) {
                clearInterval(countdownInterval);
-               const card = el.closest('.admin-card');
-               if (card) {
-                 const orderId = card.dataset.id;
-                 console.log(`[Queue countdown expired] Triggering rotation for order: ${orderId}`);
-                 updateDispatchQueue(orderId);
+               const orderIdsStr = el.dataset.orderIds;
+               if (orderIdsStr) {
+                 const orderIds = orderIdsStr.split(',');
+                 console.log(`[Queue countdown expired] Triggering rotation for orders:`, orderIds);
+                 orderIds.forEach(id => updateDispatchQueue(id));
                }
              }
           });
