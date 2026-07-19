@@ -5050,6 +5050,17 @@ function attachStatusBarListeners(user) {
             btn.disabled = true;
             btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Conectando...';
             await startSession(user);
+            
+            // Auto open functioning info sheet for the first 3 connections
+            const connKey = `gd_delivery_connect_count_${user.uid}`;
+            let connCount = parseInt(localStorage.getItem(connKey) || '0', 10);
+            if (connCount < 3) {
+              connCount += 1;
+              localStorage.setItem(connKey, connCount.toString());
+              setTimeout(() => {
+                document.getElementById('delivery-contact-support-btn')?.click();
+              }, 600);
+            }
           } catch (err) {
             console.error('Login error:', err);
             showToast('Error al conectar', 'error');
