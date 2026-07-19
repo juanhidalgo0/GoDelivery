@@ -96,6 +96,9 @@ function startMonitoring(user) {
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(o => !o.driverId)
       .filter(o => {
+        // Queue target driver check: Only notify/show if offered to me!
+        if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return false;
+        
         if (mode === 'trip' && !o.isTrip) return false;
         if (mode === 'delivery' && o.isTrip) return false;
         
@@ -115,6 +118,7 @@ function startMonitoring(user) {
         if (!order.driverId && !lastKnownConfirmedIds.has(order.id)) {
           lastKnownConfirmedIds.add(order.id);
           
+          if (order.queueTargetDriverId && order.queueTargetDriverId !== user.uid) return;
           if (mode === 'trip' && !order.isTrip) return;
           if (mode === 'delivery' && order.isTrip) return;
           

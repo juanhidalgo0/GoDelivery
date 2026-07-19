@@ -429,6 +429,7 @@ export async function renderDeliveryPanel() {
       const batches = new Set();
       allOrders.forEach(o => {
         if (o.driverId) return;
+        if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
         
         const mode = user.deliveryMode || 'both';
         if (mode === 'trip' && !o.isTrip) return;
@@ -1056,9 +1057,15 @@ function loadTabContent(tab, container, user) {
             const now = Date.now();
             const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
             el.textContent = `${remaining}s`;
-            if (remaining <= 0) {
-              clearInterval(countdownInterval);
-            }
+             if (remaining <= 0) {
+               clearInterval(countdownInterval);
+               const card = el.closest('.admin-card');
+               if (card) {
+                 const orderId = card.dataset.id;
+                 console.log(`[Queue countdown expired] Triggering rotation for order: ${orderId}`);
+                 updateDispatchQueue(orderId);
+               }
+             }
           });
         }, 1000);
         window.queueCountdownInterval = countdownInterval;
