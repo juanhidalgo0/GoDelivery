@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { initializeFirestore, collection, getDocs } from 'firebase/firestore';
+import { initializeFirestore, collection, getDocs, query, where } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",
@@ -14,9 +14,9 @@ const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {});
 
 async function run() {
-  const couponsSnap = await getDocs(collection(db, 'coupons'));
-  console.log("=== COUPONS ===");
-  couponsSnap.docs.forEach(d => {
+  const usersSnap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
+  console.log("=== ONLINE USERS ===");
+  usersSnap.docs.forEach(d => {
     console.log(d.id, "=>", JSON.stringify(d.data()));
   });
 

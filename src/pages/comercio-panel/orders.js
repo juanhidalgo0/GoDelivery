@@ -832,8 +832,8 @@ function showOrderDetailModal(initialOrder) {
         const orderId = btn.dataset.id;
         showToast('Buscando repartidores disponibles...', 'info');
         try {
-          const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)));
-          const drivers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const snap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
+          const drivers = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.role === 'delivery' || d.isDelivery === true);
 
           if (drivers.length === 0) {
             showToast('No hay repartidores conectados en este momento.', 'warning');

@@ -5855,8 +5855,8 @@ export async function updateDispatchQueue(orderId) {
     const now = Date.now();
     
     // Fetch query snapshots OUTSIDE transaction to avoid failed precondition errors
-    const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)));
-    const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const driversSnap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
+    const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.role === 'delivery' || d.isDelivery === true);
 
     const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
     const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
