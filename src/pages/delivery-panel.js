@@ -771,6 +771,11 @@ function loadTabContent(tab, container, user) {
             if (change.type === 'added') {
               const order = { id: change.doc.id, ...change.doc.data() };
               if (!order.driverId && (order.status === 'ready' || order.bundleId)) {
+                if (!order.isTrip && !order.isFavor) {
+                  if (order.queueTargetDriverId !== user.uid) return;
+                } else {
+                  if (order.queueTargetDriverId && order.queueTargetDriverId !== user.uid) return;
+                }
                 showToast(`¡Nuevo pedido disponible!`, 'info');
               }
             }
@@ -5966,26 +5971,11 @@ export async function updateDispatchQueue(orderId) {
 
 export function playExclusiveOfferAlert() {
   if (window.exclusiveAlertInterval) return;
-  const playBeep = () => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.1, ctx.currentTime);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.35);
-    } catch (e) {
-      console.warn('AudioContext error:', e);
-    }
-  };
 
-  playBeep();
+  if (navigator.vibrate) {
+    navigator.vibrate([300, 100, 300]);
+  }
   window.exclusiveAlertInterval = setInterval(() => {
-    playBeep();
     if (navigator.vibrate) {
       navigator.vibrate([300, 100, 300]);
     }

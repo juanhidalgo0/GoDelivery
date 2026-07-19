@@ -122,7 +122,11 @@ function startMonitoring(user) {
         if (!order.driverId && !lastKnownConfirmedIds.has(order.id)) {
           lastKnownConfirmedIds.add(order.id);
           
-          if (order.queueTargetDriverId && order.queueTargetDriverId !== user.uid) return;
+          if (!order.isTrip && !order.isFavor) {
+            if (order.queueTargetDriverId !== user.uid) return;
+          } else {
+            if (order.queueTargetDriverId && order.queueTargetDriverId !== user.uid) return;
+          }
           if (mode === 'trip' && !order.isTrip) return;
           if (mode === 'delivery' && order.isTrip) return;
           
