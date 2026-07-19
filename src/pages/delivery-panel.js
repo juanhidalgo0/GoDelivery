@@ -5908,16 +5908,59 @@ export async function updateDispatchQueue(orderId) {
     const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.role === 'delivery' || d.isDelivery === true);
 
     const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
-    const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
+    
+    // Group active orders by driver ID to validate capping limits
+    const activeOrdersByDriver = {};
+    activeOrdersSnap.docs.forEach(docSnap => {
+      const ord = docSnap.data();
+      if (ord.driverId) {
+        if (!activeOrdersByDriver[ord.driverId]) {
+          activeOrdersByDriver[ord.driverId] = [];
+        }
+        activeOrdersByDriver[ord.driverId].push({ id: docSnap.id, ...ord });
+      }
+    });
+
+    const canDriverTakeOrder = (driverId, orderComercioId) => {
+      const driverActiveOrders = activeOrdersByDriver[driverId] || [];
+      const activeCount = driverActiveOrders.length;
+      
+      // If no active orders, they can always take it
+      if (activeCount === 0) return true;
+      
+      // Check if all active orders belong to the same commerce local
+      const allActiveFromSameCommerce = driverActiveOrders.every(x => x.comercioId && x.comercioId === driverActiveOrders[0].comercioId);
+      const activeCommerceId = driverActiveOrders[0]?.comercioId;
+      
+      // If the new order is from the same commerce
+      const isSameCommerce = activeCommerceId && activeCommerceId === orderComercioId;
+      
+      if (activeCount >= 2) {
+        // Can only take if all are from same commerce AND total <= 3
+        return allActiveFromSameCommerce && isSameCommerce && (activeCount + 1 <= 3);
+      }
+      
+      if (activeCount === 1) {
+        if (isSameCommerce) {
+          return (activeCount + 1 <= 3); // max 3 from same commerce
+        } else {
+          return (activeCount + 1 <= 2); // max 2 from different commerce
+        }
+      }
+      
+      return false;
+    };
 
     let targetDriverId = null;
     let targetDriverName = null;
 
-    // Filter eligible drivers: exclude if they have rejected 3 or more times
+    // Filter eligible drivers: exclude if they have rejected 3 or more times or exceed capping limits
     const eligibleDrivers = allDrivers.filter(d => {
       const occurrences = rejected.filter(id => id === d.id).length;
       if (occurrences >= 3) return false;
-      if (busyDriverIds.has(d.id)) return false;
+      
+      // Enforce smart dynamic caps for simultaneous orders
+      if (!canDriverTakeOrder(d.id, o.comercioId)) return false;
       
       if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
         return false;
