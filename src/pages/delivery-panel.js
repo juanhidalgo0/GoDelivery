@@ -5971,6 +5971,23 @@ export async function updateDispatchQueue(orderId) {
         queueRejectedDrivers: rejected
       });
 
+      // Send push notification to the client
+      if (o.userId) {
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            userId: o.userId,
+            title: 'Pedido Cancelado',
+            body: `Lo sentimos, tu pedido #${o.orderId || ''} ha sido cancelado porque no encontramos repartidores disponibles en tu zona.`,
+            type: 'order_cancelled',
+            orderId: o.id,
+            createdAt: new Date(),
+            read: false
+          });
+        } catch (ne) {
+          console.error('[Notification send error]', ne);
+        }
+      }
+
       // Refund user points if applicable
       if (o.pointsRedeemed > 0 && o.userId) {
         try {
