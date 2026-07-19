@@ -476,11 +476,6 @@ export async function renderDeliveryPanel() {
             </div>
             
             <div>
-              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">⏱️ Límite de 3 Intentos</p>
-              <p style="margin: 0;">Si eres el único repartidor conectado, el sistema te ofrecerá el mismo pedido hasta un máximo de 3 veces. Si expira o lo rechazas las 3 veces, el pedido quedará bloqueado permanentemente para ti.</p>
-            </div>
-
-            <div>
               <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🛑 Desconexión Automática por Inactividad</p>
               <p style="margin: 0;">Si dejas expirar o rechazas 2 pedidos de forma consecutiva, el sistema pausará tu sesión automáticamente cambiándote a desconectado. Esto evita que dejes pedidos trabados si no estás atento al celular.</p>
             </div>
@@ -492,7 +487,7 @@ export async function renderDeliveryPanel() {
 
             <div>
               <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">❌ Cancelación Automática por Falta de Cobertura</p>
-              <p style="margin: 0;">Si todos los repartidores activos de la zona rechazan el pedido o agotan sus 3 intentos, la orden se cancela de forma automática, notificando al cliente y reembolsándole su saldo y puntos al instante.</p>
+              <p style="margin: 0;">Si todos los repartidores activos de la zona rechazan o ignoran el pedido, la orden se cancela de forma automática, notificando al cliente y reembolsándole su saldo y puntos al instante.</p>
             </div>
           </div>
           
