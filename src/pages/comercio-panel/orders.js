@@ -1169,7 +1169,13 @@ async function showNewManualOrderModal(comercioId) {
       }
     </style>
 
-    <div style="display:flex; flex-direction:column; gap:16px;">
+    ${isRaining ? `
+      <div style="background: rgba(225, 29, 72, 0.08); border: 1.5px solid rgba(225, 29, 72, 0.2); border-radius: 12px; padding: 10px 14px; font-size: 12px; font-weight: 750; color: var(--color-primary); display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+        🌧️ Recargo por lluvia activo (+${formatPrice(rainSurcharge)})
+      </div>
+    ` : ''}
+
+    <div style="display:flex; flex-direction:column; gap:14px;">
       <div>
         <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px; display:block;">Cliente / Nombre</label>
         <input type="text" id="manual-name" placeholder="Ej: Juan Perez" style="width:100%; height:48px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text); font-size:14px; padding:0 16px; outline:none;" />
@@ -1214,6 +1220,10 @@ async function showNewManualOrderModal(comercioId) {
             <small id="delivery-dist-value" style="font-size:10px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">(0.0 km)</small>
           </div>
         </div>
+        <div class="row" id="manual-rain-row" style="display:none; color:var(--color-primary); font-weight:750;">
+          <span>Recargo por lluvia:</span>
+          <span id="manual-rain-value">+$0.00</span>
+        </div>
         <div class="row total-row">
           <span>Total Final:</span>
           <span id="total-final-value" class="total-accent">$0.00</span>
@@ -1254,7 +1264,17 @@ async function showNewManualOrderModal(comercioId) {
       let fee = calculateDynamicFee(distance);
       // Support rain surcharge
       if (getState().isRaining) {
-        fee += (getState().deliveryRainSurcharge || 300);
+        const rainAmt = (getState().deliveryRainSurcharge || 300);
+        fee += rainAmt;
+        const rainRow = modalEl.querySelector('#manual-rain-row');
+        const rainVal = modalEl.querySelector('#manual-rain-value');
+        if (rainRow && rainVal) {
+          rainRow.style.display = 'flex';
+          rainVal.textContent = `+${formatPrice(rainAmt)}`;
+        }
+      } else {
+        const rainRow = modalEl.querySelector('#manual-rain-row');
+        if (rainRow) rainRow.style.display = 'none';
       }
       deliveryCost = fee;
 
