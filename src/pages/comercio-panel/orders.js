@@ -873,7 +873,7 @@ function showOrderDetailModal(initialOrder) {
                   acceptedAt: serverTimestamp(),
                   queueTargetDriverId: dId,
                   queueTargetDriverName: dName,
-                  queueOfferedAt: serverTimestamp()
+                  queueOfferedAt: Date.now()
                 });
                 
                 showToast(`Repartidor ${dName} asignado correctamente.`, 'success');

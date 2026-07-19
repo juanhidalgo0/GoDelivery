@@ -5950,7 +5950,7 @@ export async function updateDispatchQueue(orderId) {
     await updateDoc(orderRef, {
       queueTargetDriverId: targetDriverId || null,
       queueTargetDriverName: targetDriverName || null,
-      queueOfferedAt: serverTimestamp(),
+      queueOfferedAt: Date.now(),
       queueRejectedDrivers: rejected
     });
   } catch (err) {
