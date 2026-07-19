@@ -5959,6 +5959,23 @@ export async function updateDispatchQueue(orderId) {
         queueOfferedAt: Date.now(),
         queueRejectedDrivers: rejected
       });
+
+      // Send push notification to the newly targeted driver
+      if (targetDriverId) {
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            userId: targetDriverId,
+            title: '¡Nueva Oferta Exclusiva!',
+            body: `Tenés un nuevo pedido disponible para aceptar de ${o.comercioName || 'Comercio'}.`,
+            type: 'new_exclusive_offer',
+            orderId: orderId,
+            createdAt: new Date(),
+            read: false
+          });
+        } catch (ne) {
+          console.error('[Notification send error for driver]', ne);
+        }
+      }
     } else {
       // Exhausted all online drivers or no drivers online! Cancel the order!
       await updateDoc(orderRef, {
@@ -5979,7 +5996,7 @@ export async function updateDispatchQueue(orderId) {
             title: 'Pedido Cancelado',
             body: `Lo sentimos, tu pedido #${o.orderId || ''} ha sido cancelado porque no encontramos repartidores disponibles en tu zona.`,
             type: 'order_cancelled',
-            orderId: o.id,
+            orderId: orderId,
             createdAt: new Date(),
             read: false
           });
