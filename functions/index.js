@@ -805,13 +805,14 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           if (after.driverId) {
             const appFee = after.appUsageFee || 0;
             const couponDiscount = after.couponDiscount || 0;
-            const netDebtChange = appFee - couponDiscount;
+            const driverIncentiveAmount = after.driverIncentiveAmount || 0;
+            const netDebtChange = appFee - couponDiscount - driverIncentiveAmount;
             if (netDebtChange !== 0) {
               try {
                 await db.collection("users").doc(after.driverId).update({
                   deliveryDebt: admin.firestore.FieldValue.increment(netDebtChange)
                 });
-                logger.info(`Updated driver ${after.driverId} debt by ${netDebtChange} (AppFee: ${appFee}, Coupon: -${couponDiscount}).`);
+                logger.info(`Updated driver ${after.driverId} debt by ${netDebtChange} (AppFee: ${appFee}, Coupon: -${couponDiscount}, Incentive: -${driverIncentiveAmount}).`);
               } catch (err) {
                 logger.error(`Error updating driver ${after.driverId} debt:`, err);
               }
@@ -1086,6 +1087,56 @@ async function checkIfRainingInMagdalena() {
   }
 }
 
+function getArgentinaTime() {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const artOffset = -3;
+  return new Date(utc + (3600000 * artOffset));
+}
+
+function isScheduleActive(config) {
+  if (!config || !config.enabled) return false;
+  
+  const now = getArgentinaTime();
+  const currentTime = now.getHours() * 60 + now.getMinutes();
+
+  try {
+    const [startH, startM] = config.start.split(':').map(Number);
+    const [endH, endM] = config.end.split(':').map(Number);
+    
+    if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return false;
+
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    if (endMinutes < startMinutes) {
+      // Overnight schedule, e.g. 23:00 to 06:00
+      return currentTime >= startMinutes || currentTime <= endMinutes;
+    } else {
+      // Normal schedule, e.g. 12:00 to 15:00
+      return currentTime >= startMinutes && currentTime <= endMinutes;
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+function calculateScheduleSurcharge(config, baseValue) {
+  if (!config || !config.enabled) return 0;
+  
+  try {
+    const isActive = isScheduleActive(config);
+    if (isActive) {
+      if (config.type === 'fixed') return config.value;
+      if (config.type === 'percentage') return baseValue * (config.value / 100);
+    }
+  } catch (e) {
+    logger.error('Error calculating schedule surcharge:', e);
+  }
+  return 0;
+}
+
+
 // ═══════════════════════════════════════════════════
 // BACKEND-DRIVEN CHECKOUT & ORDER CREATION (Pilar 1)
 // ═══════════════════════════════════════════════════
@@ -1161,7 +1212,17 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       } else if (rainMode === "off") {
         isRaining = false;
       } else {
-        isRaining = weatherData.isRaining || false;
+        const lastUpdated = weatherData.updatedAt ? weatherData.updatedAt.toDate().getTime() : 0;
+        const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+        if (!weatherData || !weatherData.updatedAt || lastUpdated < thirtyMinutesAgo) {
+          isRaining = await checkIfRainingInMagdalena();
+          transaction.set(db.collection("settings").doc("weather"), {
+            isRaining,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } else {
+          isRaining = weatherData.isRaining || false;
+        }
       }
 
       const baseRainSurcharge = globalSettings.deliveryRainSurcharge !== undefined ? globalSettings.deliveryRainSurcharge : 300;
@@ -1317,9 +1378,11 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       } else {
         calculatedDeliveryFee = minPriceVal + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
       }
+      const activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, calculatedDeliveryFee);
+      const activeDriverIncentive = calculateScheduleSurcharge(globalSettings.driverIncentiveConfig, calculatedDeliveryFee);
 
       const driverTip = Number(tip || 0);
-      const totalCalculatedDelivery = calculatedDeliveryFee + driverTip;
+      const totalCalculatedDelivery = calculatedDeliveryFee + driverTip + activeNightSurcharge;
 
       let finalDeliveryCost = Number(totalDelivery || 0);
       if (finalDeliveryCost < 0.9 * totalCalculatedDelivery) {
@@ -1462,6 +1525,8 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
           tip: i === 0 ? Number(tip || 0) : 0,
           isRaining: isRaining,
           rainSurcharge: i === 0 ? activeRainSurcharge : 0,
+          nightSurcharge: i === 0 ? activeNightSurcharge : 0,
+          driverIncentiveAmount: i === 0 ? activeDriverIncentive : 0,
           appUsageFee: subAppUsageFee,
           discountAmount: subDiscount,
           pointsRedeemed: i === 0 ? redeemedPoints : 0,
@@ -1590,6 +1655,32 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
       const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
       const globalSettings = globalSettingsSnap.exists ? globalSettingsSnap.data() : {};
 
+      const weatherSnap = await transaction.get(db.collection("settings").doc("weather"));
+      const weatherData = weatherSnap.exists ? weatherSnap.data() : {};
+
+      const rainMode = globalSettings.rainMode || "auto";
+      let isRaining = false;
+      if (rainMode === "on") {
+        isRaining = true;
+      } else if (rainMode === "off") {
+        isRaining = false;
+      } else {
+        const lastUpdated = weatherData.updatedAt ? weatherData.updatedAt.toDate().getTime() : 0;
+        const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+        if (!weatherData || !weatherData.updatedAt || lastUpdated < thirtyMinutesAgo) {
+          isRaining = await checkIfRainingInMagdalena();
+          transaction.set(db.collection("settings").doc("weather"), {
+            isRaining,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } else {
+          isRaining = weatherData.isRaining || false;
+        }
+      }
+
+      const baseRainSurcharge = globalSettings.deliveryRainSurcharge !== undefined ? globalSettings.deliveryRainSurcharge : 300;
+      const activeRainSurcharge = isRaining ? baseRainSurcharge : 0;
+
       // Validate Coupon securely inside transaction
       let couponData = null;
       let couponRef = null;
@@ -1648,6 +1739,10 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
       } else {
          const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
          secureDeliveryCost = minPriceVal;
+      }
+
+      if (secureDeliveryCost > 0) {
+        secureDeliveryCost += activeRainSurcharge;
       }
 
       let finalDeliveryCost = Number(deliveryCost);
@@ -1726,6 +1821,8 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
         addressNotes: addressNotesVal,
         details: details,
         deliveryCost: finalDeliveryCost,
+        isRaining: isRaining,
+        rainSurcharge: activeRainSurcharge,
         purchaseFee: finalPurchaseFee,
         appUsageFee: finalAppUsageFee,
         extraStopsFee: Number(extraStopsFee || 0),

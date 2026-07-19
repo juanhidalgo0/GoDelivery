@@ -244,7 +244,12 @@ export async function renderViajes(content) {
     const multiplier = vehicleType === 'auto' ? 1.6 : 1.0;
 
     const calculated = (basePrice + (distance * pricePerKm)) * multiplier;
-    const final = Math.max(minPrice * multiplier, calculated);
+    let final = Math.max(minPrice * multiplier, calculated);
+
+    // Add rain surcharge if vehicle is moto and it's raining
+    if (vehicleType === 'moto' && getState().isRaining) {
+      final += (getState().deliveryRainSurcharge || 300);
+    }
 
     return Math.ceil(final / 10) * 10; // Round to nearest 10
   };
@@ -466,6 +471,8 @@ export async function renderViajes(content) {
           status: 'scheduled',
           isTrip: true,
           tripType: vehicleType,
+          isRaining: getState().isRaining || false,
+          rainSurcharge: (vehicleType === 'moto' && getState().isRaining) ? (getState().deliveryRainSurcharge || 300) : 0,
           scheduledFor: Timestamp.fromDate(scheduledDate),
           createdAt: serverTimestamp()
         };
@@ -573,6 +580,8 @@ export async function renderViajes(content) {
             status: 'ready',
             isTrip: true,
             tripType: selectedVehicle,
+            isRaining: getState().isRaining || false,
+            rainSurcharge: (selectedVehicle === 'moto' && getState().isRaining) ? (getState().deliveryRainSurcharge || 300) : 0,
             createdAt: serverTimestamp()
           };
 

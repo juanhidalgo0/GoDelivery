@@ -557,6 +557,12 @@ export async function showMandadoForm() {
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío (distancia)</span>
               <span id="dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
             </div>
+            <div id="mandado-rain-row" style="display:none; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: #009EE3; font-size: 12px; display:flex; align-items:center; gap:4px;">
+                ${icon('cloudRain', 14)} Recargo por Lluvia
+              </span>
+              <span id="mandado-rain-cost" style="font-size: 13px; font-weight: 700; color: #009EE3;">$ 0</span>
+            </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa servicio</span>
               <span id="service-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
@@ -704,9 +710,20 @@ export async function showMandadoForm() {
           }
         }
 
-        const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
+        const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+        const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
 
         distCostEl.textContent = formatPrice(calculatedFee);
+        
+        const rainRow = modalEl.querySelector('#mandado-rain-row');
+        const rainCostEl = modalEl.querySelector('#mandado-rain-cost');
+        if (rainSurcharge > 0) {
+          if (rainRow) rainRow.style.display = 'flex';
+          if (rainCostEl) rainCostEl.textContent = `+ ${formatPrice(rainSurcharge)}`;
+        } else {
+          if (rainRow) rainRow.style.display = 'none';
+        }
+
         serviceCostEl.textContent = formatPrice(appFee);
 
         let couponRow = previewBox.querySelector('.coupon-preview-row');
@@ -857,7 +874,8 @@ export async function showMandadoForm() {
       }
     }
 
-    const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
+    const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+    const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
 
     showConfirm({
       title: '¿Confirmar encomienda?',
@@ -871,7 +889,7 @@ export async function showMandadoForm() {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: detailsInput.value.trim(),
-            deliveryCost: calculatedFee,
+            deliveryCost: calculatedFee + rainSurcharge,
             appUsageFee: appFee,
             tip: selectedTip,
             couponCode: appliedCoupon ? appliedCoupon.code : null,
@@ -1031,6 +1049,13 @@ export async function showCompraForm() {
               </span>
               <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
             </div>
+            
+            <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:#009EE3;">
+              <span style="display:flex; align-items:center; gap:6px;">
+                ${icon('cloudRain', 16)} Recargo por Lluvia
+              </span>
+              <span id="compra-rain-cost" style="font-weight:900;">$ 0</span>
+            </div>
 
             <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:2px dashed var(--color-border-light); padding-top:12px; margin-top:2px;">
               <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
@@ -1097,6 +1122,18 @@ export async function showCompraForm() {
             </div>
             <span style="font-weight:800; color:var(--color-text-primary);">${formatPrice(calculatedDistFee)}</span>
           </div>
+
+          ${getState().isRaining ? `
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:28px; height:28px; border-radius:8px; background:rgba(0,158,227,0.08); color:#009EE3; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon('cloudRain', 14)}
+                </div>
+                <span style="color:var(--color-text-secondary); font-weight:600;">Recargo por Lluvia</span>
+              </div>
+              <span style="font-weight:800; color:#009EE3;">+ ${formatPrice(getState().deliveryRainSurcharge || 300)}</span>
+            </div>
+          ` : ''}
 
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
@@ -1283,12 +1320,23 @@ export async function showCompraForm() {
         }
       }
 
-      total = Math.max(subtotal + appFee - couponDiscount + selectedTip, 0);
+      const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+      total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
 
       const summaryTotalEl = modalEl.querySelector('#compra-summary-total');
       if (summaryTotalEl) {
-        summaryTotalEl.textContent = formatPrice(total);
+        summaryTotalEl.textContent = formatPrice(calculatedDistFee + extraStopsTotal);
       }
+
+      const rainRow = modalEl.querySelector('#compra-rain-row');
+      const rainCostEl = modalEl.querySelector('#compra-rain-cost');
+      if (rainSurcharge > 0) {
+        if (rainRow) rainRow.style.display = 'flex';
+        if (rainCostEl) rainCostEl.textContent = `+ ${formatPrice(rainSurcharge)}`;
+      } else {
+        if (rainRow) rainRow.style.display = 'none';
+      }
+
       totalFeeEl.textContent = formatPrice(total);
       previewBox.style.display = 'flex';
     } catch (e) { console.error(e); }
@@ -1386,7 +1434,8 @@ export async function showCompraForm() {
       }
     }
 
-    const total = Math.max(subtotal + appFee - couponDiscount + selectedTip, 0);
+    const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+    const total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
     const stopsLabel = stopsCount === 1 ? '1 comercio' : `${stopsCount} comercios`;
 
     const packagedDetails = stopsList.map((stop, idx) => `🏪 **${idx + 1}. Comercio:** ${stop.store}\n📦 **Pedido:** ${stop.items}`).join('\n\n');
@@ -1403,7 +1452,7 @@ export async function showCompraForm() {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: packagedDetails,
-            deliveryCost: calculatedDistFee,
+            deliveryCost: calculatedDistFee + rainSurcharge,
             purchaseFee: purchaseFee,
             extraStopsFee: extraStopsTotal,
             stopsCount: stopsCount,
@@ -1491,6 +1540,12 @@ export async function showGoCashForm() {
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío estimado (desde centro)</span>
               <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div id="gocash-rain-row" style="display:none; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: #009EE3; font-size: 12px; display:flex; align-items:center; gap:4px;">
+                ${icon('cloudRain', 14)} Recargo por Lluvia
+              </span>
+              <span id="gocash-rain-cost" style="font-size: 13px; font-weight: 700; color: #009EE3;">$ 0</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
@@ -1594,9 +1649,20 @@ export async function showGoCashForm() {
           }
         }
 
-        const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
+        const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+        const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
 
         distCostEl.textContent = formatPrice(calculatedFee);
+        
+        const rainRow = modalEl.querySelector('#gocash-rain-row');
+        const rainCostEl = modalEl.querySelector('#gocash-rain-cost');
+        if (rainSurcharge > 0) {
+          if (rainRow) rainRow.style.display = 'flex';
+          if (rainCostEl) rainCostEl.textContent = `+ ${formatPrice(rainSurcharge)}`;
+        } else {
+          if (rainRow) rainRow.style.display = 'none';
+        }
+
         const appFeeEl = modalEl.querySelector('#gocash-app-fee');
         if (appFeeEl) appFeeEl.textContent = formatPrice(appFee);
 
@@ -1708,7 +1774,8 @@ export async function showGoCashForm() {
       }
     }
 
-    const total = Math.max(calculatedFee + appFee - couponDiscount + selectedTip, 0);
+    const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+    const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
     const typeText = selectedType === 'cash_to_transfer' ? 'Efectivo a Transferencia' : 'Transferencia a Efectivo';
     
     showConfirm({
@@ -1723,7 +1790,7 @@ export async function showGoCashForm() {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: `Go Cash: Cambiar ${typeText} por valor de ${formatPrice(amount)}`,
-            deliveryCost: calculatedFee,
+            deliveryCost: calculatedFee + rainSurcharge,
             appUsageFee: appFee,
             tip: selectedTip,
             couponCode: appliedCoupon ? appliedCoupon.code : null,
@@ -2140,7 +2207,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 export async function showPagoServiciosForm() {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%;';
 
   let currentAddress = '';
   let deliveryData = null;
@@ -2153,29 +2220,128 @@ export async function showPagoServiciosForm() {
   let appliedCoupon = null;
 
   modalEl.innerHTML = `
-    <div style="display: flex; flex-direction: column;">
+    <style>
+      .ps-service-grid-premium {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+      .ps-service-btn-premium {
+        height: 58px;
+        border-radius: 16px;
+        border: 1.5px solid var(--color-border-light);
+        background: var(--color-surface);
+        font-size: 13.5px;
+        font-weight: 800;
+        color: var(--color-text-primary);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--shadow-sm);
+      }
+      .ps-service-btn-premium:hover {
+        transform: translateY(-1.5px);
+        box-shadow: var(--shadow-md);
+        border-color: rgba(217, 119, 6, 0.35);
+      }
+      .ps-service-btn-premium:active {
+        transform: translateY(0) scale(0.97);
+      }
+      .ps-service-btn-premium.active {
+        background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important;
+        border-color: transparent !important;
+        color: white !important;
+        box-shadow: 0 6px 20px rgba(217, 119, 6, 0.38) !important;
+        transform: scale(1.02) translateY(-1px);
+      }
+      .ps-textarea-premium {
+        width:100%;
+        height:94px;
+        border-radius:16px;
+        border:1.5px solid var(--color-border-light);
+        padding:14px;
+        background:var(--color-surface);
+        color:var(--color-text-primary);
+        font-size:13.5px;
+        font-weight:600;
+        outline:none;
+        font-family:inherit;
+        resize:none;
+        transition:all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.015);
+      }
+      .ps-textarea-premium:focus {
+        border-color: #D97706 !important;
+        box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18), inset 0 2px 4px rgba(0,0,0,0.015) !important;
+      }
+      .ps-del-btn-premium {
+        flex: 1;
+        height: 44px;
+        border-radius: 12px;
+        border: none;
+        font-size: 13.5px;
+        font-weight: 900;
+        cursor: pointer;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        background: transparent;
+        color: var(--color-text-tertiary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      .ps-del-btn-premium.active-digital {
+        background: #10B981 !important;
+        color: white !important;
+        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3) !important;
+      }
+      .ps-del-btn-premium.active-physical {
+        background: var(--color-primary) !important;
+        color: white !important;
+        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb), 0.3) !important;
+      }
+      .ps-cost-card-premium {
+        background: var(--color-bg-secondary);
+        padding: 18px;
+        border-radius: 24px;
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        border: 1.5px solid var(--color-border-light);
+        margin-top: auto;
+        box-shadow: var(--shadow-sm);
+      }
+    </style>
+
+    <div style="display: flex; flex-direction: column; height: 100%; flex: 1;">
       <!-- STEP 1 CONTAINER -->
-      <div id="ps-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px;">
+      <div id="ps-step-1-container" style="display: flex; flex-direction: column; flex: 1; height: 100%; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 16px; flex: 1; overflow-y: auto; scrollbar-width: none; padding-bottom: 4px;">
           
           <!-- Service Chooser List -->
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
-            <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:12px;" id="ps-service-grid">
-              <button class="ps-service-btn" data-service="Cyber" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+            <div class="ps-service-grid-premium" id="ps-service-grid">
+              <button class="ps-service-btn-premium" data-service="Cyber">
                 ${icon('monitor', 20)} Cyber
               </button>
-              <button class="ps-service-btn" data-service="ABSA" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+              <button class="ps-service-btn-premium" data-service="ABSA">
                 ${icon('droplet', 20)} ABSA
               </button>
-              <button class="ps-service-btn" data-service="Canal 4" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+              <button class="ps-service-btn-premium" data-service="Canal 4">
                 ${icon('tv', 20)} Canal 4
               </button>
-              <button class="ps-service-btn" data-service="Rapipago" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
+              <button class="ps-service-btn-premium" data-service="Rapipago">
                 ${icon('creditCard', 20)} Rapipago
               </button>
-              <button class="ps-service-btn" data-service="PagoFácil" style="height:64px; border-radius:16px; border:1.5px solid var(--color-border-light); background:var(--color-surface); font-size:13.5px; font-weight:800; color:var(--color-text-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s; grid-column: span 2;">
+              <button class="ps-service-btn-premium" data-service="PagoFácil">
                 ${icon('zap', 20)} PagoFácil
+              </button>
+              <button class="ps-service-btn-premium" data-service="Otro">
+                ${icon('plus', 20)} Otro
               </button>
             </div>
           </div>
@@ -2183,17 +2349,17 @@ export async function showPagoServiciosForm() {
           <!-- Detail Input -->
           <div style="display:flex; flex-direction:column; gap:8px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Servicios y Detalles a Pagar</label>
-            <textarea id="ps-details-input" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares del delivery" style="width:100%; height:90px; border-radius:16px; border:1.5px solid var(--color-border-light); padding:12px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; font-family:inherit; resize:none; transition:all 0.2s;"></textarea>
+            <textarea id="ps-details-input" class="ps-textarea-premium" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares del delivery"></textarea>
           </div>
 
           <!-- Receipt Delivery Selector -->
           <div style="display:flex; flex-direction:column; gap:10px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Forma de Recibir el Comprobante</label>
             <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
-              <button type="button" id="ps-delivery-digital" class="ps-del-btn active" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: #10B981; color: white; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);">
+              <button type="button" id="ps-delivery-digital" class="ps-del-btn-premium active-digital">
                 ${icon('image', 18)} Foto Digital
               </button>
-              <button type="button" id="ps-delivery-physical" class="ps-del-btn" style="flex: 1; height: 44px; border-radius: 12px; border: none; font-size: 13px; font-weight: 900; cursor: pointer; transition: all 0.25s; background: transparent; color: var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              <button type="button" id="ps-delivery-physical" class="ps-del-btn-premium">
                 ${icon('mapPin', 18)} Físico
               </button>
             </div>
@@ -2218,14 +2384,14 @@ export async function showPagoServiciosForm() {
           </div>
         </div>
 
-        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
+        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
 
       <!-- STEP 2 CONTAINER -->
-      <div id="ps-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px;">
+      <div id="ps-step-2-container" style="display: none; flex-direction: column; flex: 1; height: 100%; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 16px; flex: 1; overflow-y: auto; scrollbar-width: none; padding-bottom: 4px;">
           <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content; margin-bottom: 10px;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -2234,7 +2400,7 @@ export async function showPagoServiciosForm() {
           <div id="ps-benefits-container"></div>
 
           <!-- Cost Preview -->
-          <div id="ps-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light); margin-top:auto;">
+          <div id="ps-cost-preview" class="ps-cost-card-premium">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Base Trámite Pago de Servicios</span>
               <span id="ps-base-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
@@ -2242,6 +2408,12 @@ export async function showPagoServiciosForm() {
             <div id="ps-dist-row" style="display:none; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío de Comprobante (Regreso)</span>
               <span id="ps-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
+            </div>
+            <div id="ps-rain-row" style="display:none; justify-content:space-between; align-items:center;">
+              <span style="font-weight: 600; color: #009EE3; font-size: 12px; display:flex; align-items:center; gap:4px;">
+                ${icon('cloudRain', 14)} Recargo por Lluvia
+              </span>
+              <span id="ps-rain-cost" style="font-size: 13px; font-weight: 700; color: #009EE3;">$ 0</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
@@ -2257,7 +2429,7 @@ export async function showPagoServiciosForm() {
           </div>
         </div>
 
-        <button id="confirm-ps-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; margin-top: 8px;">
+        <button id="confirm-ps-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0;">
           ${icon('check', 20)} Solicitar Pago de Servicios
         </button>
       </div>
@@ -2267,7 +2439,7 @@ export async function showPagoServiciosForm() {
   showModal({
     title: 'Solicitar Pago de Servicios',
     content: modalEl,
-    height: 'auto',
+    height: '94dvh',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
     headerTextColor: '#ffffff'
@@ -2292,69 +2464,35 @@ export async function showPagoServiciosForm() {
   const totalCostEl = modalEl.querySelector('#ps-estimated-cost');
 
   // Handle service button selection
-  serviceGrid.querySelectorAll('.ps-service-btn').forEach(btn => {
+  serviceGrid.querySelectorAll('.ps-service-btn-premium').forEach(btn => {
     btn.onclick = () => {
-      serviceGrid.querySelectorAll('.ps-service-btn').forEach(b => {
+      serviceGrid.querySelectorAll('.ps-service-btn-premium').forEach(b => {
         b.classList.remove('active');
-        b.style.background = 'var(--color-surface)';
-        b.style.borderColor = 'var(--color-border-light)';
-        b.style.boxShadow = 'none';
-        b.style.color = 'var(--color-text-primary)';
       });
       btn.classList.add('active');
-      btn.style.background = 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
-      btn.style.borderColor = 'transparent';
-      btn.style.color = 'white';
-      btn.style.boxShadow = '0 4px 12px rgba(217, 119, 6, 0.3)';
       selectedService = btn.dataset.service;
     };
   });
 
-
-
   // Toggle receipt delivery methods
   btnDigital.onclick = () => {
     receiptDeliveryType = 'digital';
-    btnDigital.classList.add('active');
-    btnDigital.style.background = '#10B981';
-    btnDigital.style.color = '#ffffff';
-    btnDigital.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.2)';
-    btnPhysical.classList.remove('active');
-    btnPhysical.style.background = 'transparent';
-    btnPhysical.style.color = 'var(--color-text-tertiary)';
-    btnPhysical.style.boxShadow = 'none';
+    btnDigital.className = 'ps-del-btn-premium active-digital';
+    btnPhysical.className = 'ps-del-btn-premium';
     subtextDigital.style.display = 'block';
     subtextPhysical.style.display = 'none';
     addressSection.style.display = 'none';
-    
-    const dialogEl = modalEl.closest('.modal');
-    if (dialogEl) {
-      dialogEl.style.height = '85dvh';
-      dialogEl.style.marginTop = 'calc(100dvh - 85dvh)';
-    }
     
     updateCost();
   };
 
   btnPhysical.onclick = () => {
     receiptDeliveryType = 'physical';
-    btnPhysical.classList.add('active');
-    btnPhysical.style.background = 'var(--color-primary)';
-    btnPhysical.style.color = '#ffffff';
-    btnPhysical.style.boxShadow = '0 4px 12px rgba(var(--color-primary-rgb), 0.2)';
-    btnDigital.classList.remove('active');
-    btnDigital.style.background = 'transparent';
-    btnDigital.style.color = 'var(--color-text-tertiary)';
-    btnDigital.style.boxShadow = 'none';
+    btnPhysical.className = 'ps-del-btn-premium active-physical';
+    btnDigital.className = 'ps-del-btn-premium';
     subtextDigital.style.display = 'none';
     subtextPhysical.style.display = 'block';
     addressSection.style.display = 'flex';
-    
-    const dialogEl = modalEl.closest('.modal');
-    if (dialogEl) {
-      dialogEl.style.height = '94dvh';
-      dialogEl.style.marginTop = 'calc(100dvh - 94dvh)';
-    }
     
     updateCost();
   };
@@ -2396,7 +2534,17 @@ export async function showPagoServiciosForm() {
         }
       }
 
-      const total = Math.max(logisticsCost + appFee - couponDiscount + selectedTip, 0);
+      const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
+      const total = Math.max(logisticsCost + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+
+      const rainRow = modalEl.querySelector('#ps-rain-row');
+      const rainCostEl = modalEl.querySelector('#ps-rain-cost');
+      if (rainSurcharge > 0) {
+        if (rainRow) rainRow.style.display = 'flex';
+        if (rainCostEl) rainCostEl.textContent = `+ ${formatPrice(rainSurcharge)}`;
+      } else {
+        if (rainRow) rainRow.style.display = 'none';
+      }
 
       appFeeEl.textContent = formatPrice(appFee);
       totalCostEl.textContent = formatPrice(total);
@@ -2495,8 +2643,9 @@ export async function showPagoServiciosForm() {
       }
     }
 
+    const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
     const logisticsCost = baseFee + calculatedDistFee;
-    const total = Math.max(logisticsCost + appFee - couponDiscount + selectedTip, 0);
+    const total = Math.max(logisticsCost + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
 
     const deliveryTypeLabel = receiptDeliveryType === 'physical' ? 'Comprobante Físico a Domicilio' : 'Foto Digital por Chat';
     const detailPayload = `🏢 **Servicio:** ${selectedService}\n📄 **Facturas & Código:** ${detailsText}\n📩 **Entrega Comprobante:** ${deliveryTypeLabel}`;
@@ -2522,7 +2671,7 @@ export async function showPagoServiciosForm() {
             deliveryAddress: deliveryAddressVal,
             deliveryCoords: deliveryCoordsVal,
             details: detailPayload,
-            deliveryCost: calculatedDistFee,
+            deliveryCost: calculatedDistFee + rainSurcharge,
             purchaseFee: baseFee,
             appUsageFee: appFee,
             tip: selectedTip,

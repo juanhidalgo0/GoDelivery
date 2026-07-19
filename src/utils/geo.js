@@ -122,8 +122,8 @@ export function calculateDynamicFee(distanceKm) {
   
   // Logic: Base Price + (Road Distance * PricePerKm)
   const calculated = basePrice + (roadDistance * pricePerKm);
-  const total = Math.max(minPrice, calculated);
-  
+  let total = Math.max(minPrice, calculated);
+
   // Round to nearest 10 for clean prices
   return Math.ceil(total / 10) * 10;
 }

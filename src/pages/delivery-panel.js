@@ -2260,8 +2260,10 @@ function loadTabContent(tab, container, user) {
               return;
             }
 
+            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true);
             openSlideToConfirmModal({
               isTrip,
+              noCodeRequired,
               codes,
               ids,
               orders,
@@ -4943,13 +4945,13 @@ export async function markAsPickedUp(orderIdOrIds) {
   }
 }
 
-export function openSlideToConfirmModal({ isTrip, codes, ids, orders, onConfirm }) {
+export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, orders, onConfirm }) {
   const modalContent = document.createElement('div');
   modalContent.style.cssText = 'padding: 8px 16px 16px;';
 
   modalContent.innerHTML = `
     <div>
-      ${!isTrip ? `
+      ${(!isTrip && !noCodeRequired) ? `
         <p style="font-size:14px; color:var(--color-text-secondary); margin-bottom:16px; line-height:1.5; text-align:center;">
           Pedile al cliente su <strong>código de 4 dígitos</strong> para validar la entrega.
         </p>
@@ -4960,7 +4962,7 @@ export function openSlideToConfirmModal({ isTrip, codes, ids, orders, onConfirm 
         </div>
       ` : `
         <p style="font-size:14px; color:var(--color-text-secondary); margin-bottom:24px; line-height:1.5; text-align:center;">
-          Confirmá que llegaste al destino y que el pasajero descendió del vehículo.
+          ${isTrip ? 'Confirmá que llegaste al destino y que el pasajero descendió del vehículo.' : 'Confirmá la entrega de este pedido manual. No requiere código.'}
         </p>
       `}
 
@@ -4975,12 +4977,12 @@ export function openSlideToConfirmModal({ isTrip, codes, ids, orders, onConfirm 
         overflow: hidden; 
         user-select: none;
         touch-action: none;
-        ${!isTrip ? 'opacity: 0.5; pointer-events: none;' : ''}
+        ${(!isTrip && !noCodeRequired) ? 'opacity: 0.5; pointer-events: none;' : ''}
         transition: opacity 0.3s ease;
       ">
         <div class="slider-bg" style="position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: linear-gradient(90deg, var(--color-primary), #10b981); border-radius: 30px; touch-action: none;"></div>
         <div class="slider-text" style="position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 900; color: var(--color-text-secondary); pointer-events: none; text-transform: uppercase; letter-spacing: 0.05em; touch-action: none;">
-          ${!isTrip ? 'INGRESE EL CÓDIGO' : 'DESLIZÁ PARA CONFIRMAR'}
+          ${(!isTrip && !noCodeRequired) ? 'INGRESE EL CÓDIGO' : 'DESLIZÁ PARA CONFIRMAR'}
         </div>
         <div class="slider-handle" style="position: absolute; top: 4px; left: 4px; width: 48px; height: 48px; background: white; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; cursor: grab; transition: left 0.1s ease; touch-action: none;">
           <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--color-primary); display: flex; align-items: center; justify-content: center; color: white; touch-action: none;">

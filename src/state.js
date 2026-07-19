@@ -107,6 +107,7 @@ export async function initSettings() {
         state.nightSurchargeConfig = data.nightSurchargeConfig || { enabled: false, start: '00:00', end: '06:00', type: 'fixed', value: 0 };
         state.driverIncentiveConfig = data.driverIncentiveConfig || { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 };
         state.rainMode = data.rainMode || 'auto';
+        updateRainStatus();
         state.useDarkBrandTheme = data.useDarkBrandTheme || false;
         state.favorPurchaseFee = data.favorPurchaseFee !== undefined ? data.favorPurchaseFee : 800;
         state.servicePaymentErrandFee = data.servicePaymentErrandFee !== undefined ? data.servicePaymentErrandFee : 2000;

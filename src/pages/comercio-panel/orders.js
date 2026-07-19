@@ -159,6 +159,9 @@ export async function renderComercioOrders(manualId = null) {
             </div>
           </div>
 
+            <button class="hdr-icon-btn" id="create-manual-order-btn" title="Nuevo Pedido Manual">
+              ${icon('plus', 18)}
+            </button>
             <a href="#/comercio/${comercioId}" class="hdr-icon-btn" title="Ver Tienda Online" style="display: flex; align-items: center; justify-content: center; text-decoration: none;">
               ${icon('eye', 18)}
             </a>
@@ -213,7 +216,10 @@ export async function renderComercioOrders(manualId = null) {
       `;
     }
 
-    
+    document.getElementById('create-manual-order-btn')?.addEventListener('click', () => {
+      import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+      showNewManualOrderModal(comercioId);
+    });
     
     document.getElementById('go-to-history')?.addEventListener('click', () => {
       viewMode = 'history';
