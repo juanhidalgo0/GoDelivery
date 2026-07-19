@@ -159,6 +159,9 @@ export async function renderDeliveryPanel() {
   if (!content) return;
   content.style.overflow = 'hidden';
 
+  // HOTSPOTS IMPLEMENTATION & ROUND ROBIN QUEUE
+  window.autoAcceptEnabled = false;
+
   // Setup click listener on content for coupon info cards (with cleanup to avoid duplicate listeners)
   if (content._couponListener) {
     content.removeEventListener('click', content._couponListener);
@@ -256,6 +259,11 @@ export async function renderDeliveryPanel() {
         
         <!-- Scrollable content area -->
         <div id="delivery-scroll-area" style="flex:1; overflow-y:auto; padding:20px 20px 100px 20px; -webkit-overflow-scrolling:touch;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--color-text-primary);">
+              <input type="checkbox" id="auto-accept-toggle" onchange="window.autoAcceptEnabled = this.checked;" /> Auto-Aceptar
+            </label>
+          </div>
           <div class="tab-pills" style="margin-bottom: var(--space-6); display: flex; gap: var(--space-2); scrollbar-width: none;">
             <button class="tab-pill" data-tab="available" style="flex: 1; white-space: nowrap; height:44px; border-radius:12px; border:none; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon('package', 18)} Disponibles
@@ -492,6 +500,7 @@ let tabUnsub = null;
 function loadTabContent(tab, container, user) {
   // Cleanup previous tab listener
   if (tabUnsub) { tabUnsub(); tabUnsub = null; }
+  stopExclusiveOfferAlert();
 
   // Clear cached tab rendering fingerprints to force a fresh render on tab load or switch
   if (container) {
@@ -513,6 +522,13 @@ function loadTabContent(tab, container, user) {
       const listUnsub = onSnapshot(q, (snap) => {
         const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         
+        const hasExclusiveOffer = allOrders.some(o => !o.driverId && o.queueTargetDriverId === user.uid);
+        if (hasExclusiveOffer) {
+          playExclusiveOfferAlert();
+        } else {
+          stopExclusiveOfferAlert();
+        }
+        
         // 1. Separate favors/trips, and group ready orders by commerce
         const favors = [];
         const trips = [];
@@ -521,7 +537,33 @@ function loadTabContent(tab, container, user) {
 
         allOrders.forEach(o => {
           if (o.driverId) return;
-          
+
+          // Trigger queue rotation check if target is empty or expired (>30s)
+          const now = Date.now();
+          const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : 0;
+          if (!o.queueTargetDriverId || (now - offeredAt >= 30000)) {
+            updateDispatchQueue(o.id);
+          }
+
+          // Filter: only show if offered to me!
+          if (o.queueTargetDriverId && o.queueTargetDriverId !== user.uid) return;
+
+          // Handle Auto-Accept
+          if (o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
+            if (!window.activeAutoAccepts) window.activeAutoAccepts = new Set();
+            if (!window.activeAutoAccepts.has(o.id)) {
+              window.activeAutoAccepts.add(o.id);
+              showToast('Auto-Aceptando pedido en 2s...', 'info');
+              setTimeout(async () => {
+                const freshSnap = await getDoc(doc(db, 'orders', o.id));
+                if (freshSnap.exists() && !freshSnap.data().driverId && freshSnap.data().queueTargetDriverId === user.uid) {
+                  takeBatch(o.bundleId || o.id, user);
+                }
+                window.activeAutoAccepts.delete(o.id);
+              }, 2000);
+            }
+          }
+
           const mode = user.deliveryMode || 'both';
           if (mode === 'trip' && !o.isTrip) return;
           if (mode === 'delivery' && o.isTrip) return;
@@ -823,9 +865,23 @@ function loadTabContent(tab, container, user) {
               const favorColor = favorMeta ? favorMeta.color : '#ef4444';
               const favorRgb = favorMeta ? getRgbString(favorMeta.color) : '239, 68, 68';
 
+              const orderObj = b.isBundle ? b.orders[0] : b.order;
+              const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : 0;
+              const elapsed = Math.floor((Date.now() - offeredAt) / 1000);
+              const remaining = Math.max(0, 30 - elapsed);
+
               return `
                 <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
                   <div style="position:absolute; top:0; left:0; width:6px; height:100%; background:${isTrip ? '#3b82f6' : (isFavor ? favorColor : '#00D67F')};"></div>
+                  
+                  ${remaining > 0 ? `
+                    <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.15); border-radius:16px; padding:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; width:100%;">
+                      <span style="font-size:12px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:6px;">
+                        ⚠️ OFERTA EXCLUSIVA:
+                      </span>
+                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 30000}">${remaining}s</span>
+                    </div>
+                  ` : ''}
                   
                   <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
                     <div style="flex:1;">
@@ -955,12 +1011,28 @@ function loadTabContent(tab, container, user) {
                       </div>
                     ` : '')}
  
-                    <button class="btn btn-primary btn-block take-batch-btn" 
-                            data-id="${b.id}" 
-                            ${!allReady ? 'disabled' : ''}
-                            style="height: 54px; border-radius:18px; font-weight:950; font-size:15px; text-transform:uppercase; letter-spacing:0.02em; gap:10px; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.2); ${!allReady ? 'opacity:0.5; filter:grayscale(1); box-shadow:none;' : ''}">
-                      ${!allReady ? 'Esperando locales...' : `${icon('checkCircle', 20)} TOMAR VIAJE / PEDIDO`}
-                    </button>
+                    ${remaining > 0 ? `
+                       <div style="display:flex; gap:12px; width:100%; margin-top:8px;">
+                         <button class="btn take-batch-btn" 
+                                 data-id="${b.id}" 
+                                 ${!allReady ? 'disabled' : ''}
+                                 style="flex:2; height: 50px; border-radius:16px; font-weight:950; font-size:14px; text-transform:uppercase; border:none; background:var(--color-primary); color:white; box-shadow:0 6px 15px rgba(var(--color-primary-rgb),0.2); display:flex; align-items:center; justify-content:center; gap:8px;">
+                           ${icon('checkCircle', 18)} Aceptar
+                         </button>
+                         <button class="btn reject-order-btn" 
+                                 data-id="${b.isBundle ? b.orders[0].id : b.order.id}" 
+                                 style="flex:1; height: 50px; border-radius:16px; font-weight:950; font-size:14px; text-transform:uppercase; border:1.5px solid rgba(239, 68, 68, 0.4); background:rgba(239, 68, 68, 0.05); color:#ef4444; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+                           ${icon('close', 14)} Rechazar
+                         </button>
+                       </div>
+                     ` : `
+                       <button class="btn btn-primary btn-block take-batch-btn" 
+                               data-id="${b.id}" 
+                               ${!allReady ? 'disabled' : ''}
+                               style="height: 54px; border-radius:18px; font-weight:950; font-size:15px; text-transform:uppercase; letter-spacing:0.02em; gap:10px; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.2); ${!allReady ? 'opacity:0.5; filter:grayscale(1); box-shadow:none;' : ''}">
+                         ${!allReady ? 'Esperando locales...' : `${icon('checkCircle', 20)} TOMAR VIAJE / PEDIDO`}
+                       </button>
+                     `}
                   </div>
                 </div>
               `;
@@ -975,6 +1047,21 @@ function loadTabContent(tab, container, user) {
           });
         });
 
+        // Start active countdown intervals
+        if (window.queueCountdownInterval) clearInterval(window.queueCountdownInterval);
+        const countdownInterval = setInterval(() => {
+          container.querySelectorAll('.queue-countdown').forEach(el => {
+            const expiry = parseInt(el.dataset.expiry);
+            const now = Date.now();
+            const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
+            el.textContent = `${remaining}s`;
+            if (remaining <= 0) {
+              clearInterval(countdownInterval);
+            }
+          });
+        }, 1000);
+        window.queueCountdownInterval = countdownInterval;
+
         container.querySelectorAll('.take-batch-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             showConfirm({
@@ -987,6 +1074,66 @@ function loadTabContent(tab, container, user) {
                 takeBatch(btn.dataset.id, user, sortedBatches.find(b => b.id === btn.dataset.id), btn);
               }
             });
+          });
+        });
+
+        container.querySelectorAll('.reject-order-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const rejectModalContent = document.createElement('div');
+            rejectModalContent.style.cssText = 'padding:20px; display:flex; flex-direction:column; gap:16px;';
+            rejectModalContent.innerHTML = `
+              <p style="font-size:13px; color:var(--color-text-secondary); line-height:1.5; text-align:center;">
+                Por favor selecciona el motivo del rechazo. Se aplicará una pausa de 3 minutos.
+              </p>
+              <select id="reject-reason-select" style="width:100%; height:48px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); outline:none;">
+                <option value="distancia">Distancia excesiva</option>
+                <option value="mecanico">Problema mecánico / Pinchadura</option>
+                <option value="inseguro">Zona insegura</option>
+                <option value="emergencia">Emergencia personal</option>
+                <option value="poca_ganancia">Poca ganancia</option>
+              </select>
+              <button id="confirm-reject-btn" style="width:100%; height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:14px; cursor:pointer; box-shadow:0 8px 16px rgba(var(--color-primary-rgb), 0.2);">
+                CONFIRMAR RECHAZO
+              </button>
+            `;
+            showModal({ title: 'Motivo del Rechazo', content: rejectModalContent, height: 'auto' });
+            
+            rejectModalContent.querySelector('#confirm-reject-btn').onclick = async () => {
+              const reason = rejectModalContent.querySelector('#reject-reason-select').value;
+              closeModal();
+              showToast('Procesando rechazo...', 'info');
+              
+              try {
+                // Apply cooldown of 3 minutes in driver users document
+                await updateDoc(doc(db, 'users', user.uid), {
+                  cooldownUntil: new Date(Date.now() + 3 * 60 * 1000)
+                });
+                
+                // Add driver to queueRejectedDrivers of this order
+                await runTransaction(db, async (transaction) => {
+                  const oId = btn.dataset.id;
+                  const orderRef = doc(db, 'orders', oId);
+                  const oSnap = await transaction.get(orderRef);
+                  if (oSnap.exists()) {
+                    const rejected = oSnap.data().queueRejectedDrivers || [];
+                    if (!rejected.includes(user.uid)) {
+                      rejected.push(user.uid);
+                    }
+                    transaction.update(orderRef, {
+                      queueRejectedDrivers: rejected,
+                      queueTargetDriverId: null,
+                      queueTargetDriverName: null,
+                      queueOfferedAt: null
+                    });
+                  }
+                });
+                
+                showToast('Pedido rechazado. Cooldown de 3 minutos activo.', 'warning');
+              } catch (err) {
+                console.error(err);
+                showToast('Error al procesar rechazo', 'error');
+              }
+            };
           });
         });
 
@@ -1398,11 +1545,58 @@ function loadTabContent(tab, container, user) {
           });
         });
 
-        // Sort: Pickups first (not yet picked up), then Drop-offs
-        stops.sort((a, b) => {
-          if (a.type === b.type) return 0;
-          return a.type === 'PICKUP' ? -1 : 1;
-        });
+        // TSP Route Optimization for Active Stops
+        if (window.lastRiderPos) {
+          const startPt = window.lastRiderPos;
+          const pendingPickups = stops.filter(s => s.type === 'PICKUP' && !s.pickedUp);
+          const completedPickups = stops.filter(s => s.type === 'PICKUP' && s.pickedUp);
+          const dropoffs = stops.filter(s => s.type === 'DROP_OFF');
+
+          pendingPickups.sort((a, b) => {
+            const aCoords = a.orders[0]?.comercioCoords || startPt;
+            const bCoords = b.orders[0]?.comercioCoords || startPt;
+            const distA = Math.hypot((aCoords.lat || aCoords.latitude || 0) - startPt.lat, (aCoords.lng || aCoords.longitude || 0) - startPt.lng);
+            const distB = Math.hypot((bCoords.lat || bCoords.latitude || 0) - startPt.lat, (bCoords.lng || bCoords.longitude || 0) - startPt.lng);
+            return distA - distB;
+          });
+
+          let lastPt = startPt;
+          if (pendingPickups.length > 0) {
+            const lastPickup = pendingPickups[pendingPickups.length - 1];
+            lastPt = lastPickup.orders[0]?.comercioCoords || startPt;
+          } else if (completedPickups.length > 0) {
+            const lastPickup = completedPickups[completedPickups.length - 1];
+            lastPt = lastPickup.orders[0]?.comercioCoords || startPt;
+          }
+
+          const sortedDropoffs = [];
+          let currentPt = { lat: lastPt.lat || lastPt.latitude || 0, lng: lastPt.lng || lastPt.longitude || 0 };
+          
+          while (dropoffs.length > 0) {
+            let nearestIdx = 0;
+            let minDist = Infinity;
+            for (let i = 0; i < dropoffs.length; i++) {
+              const dCoords = dropoffs[i].orders[0]?.deliveryCoords || currentPt;
+              const dist = Math.hypot((dCoords.lat || dCoords.latitude || 0) - currentPt.lat, (dCoords.lng || dCoords.longitude || 0) - currentPt.lng);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestIdx = i;
+              }
+            }
+            const nearest = dropoffs.splice(nearestIdx, 1)[0];
+            sortedDropoffs.push(nearest);
+            const nextCoords = nearest.orders[0]?.deliveryCoords || currentPt;
+            currentPt = { lat: nextCoords.lat || nextCoords.latitude || 0, lng: nextCoords.lng || nextCoords.longitude || 0 };
+          }
+
+          stops.length = 0;
+          stops.push(...pendingPickups, ...completedPickups, ...sortedDropoffs);
+        } else {
+          stops.sort((a, b) => {
+            if (a.type === b.type) return 0;
+            return a.type === 'PICKUP' ? -1 : 1;
+          });
+        }
 
         // Suggestion Card HTML
         const suggestedCardHtml = suggestedOrders.length > 0 ? `
@@ -5653,4 +5847,136 @@ async function renderSubPage(tab, title) {
 
   const container = document.getElementById('sub-page-content');
   loadTabContent(tab, container, user);
+}
+
+export async function updateDispatchQueue(orderId) {
+  try {
+    await runTransaction(db, async (transaction) => {
+      const orderRef = doc(db, 'orders', orderId);
+      const orderSnap = await transaction.get(orderRef);
+      if (!orderSnap.exists()) return;
+      const o = orderSnap.data();
+      if (o.driverId) return;
+
+      const now = Date.now();
+      const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : 0;
+      if (o.queueTargetDriverId && (now - offeredAt < 30000)) {
+        return; 
+      }
+
+      const rejected = o.queueRejectedDrivers || [];
+      if (o.queueTargetDriverId && !rejected.includes(o.queueTargetDriverId)) {
+        rejected.push(o.queueTargetDriverId);
+        
+        // Auto-pause inactive driver (Ghost driver check)
+        try {
+          const driverRef = doc(db, 'users', o.queueTargetDriverId);
+          const dSnap = await transaction.get(driverRef);
+          if (dSnap.exists()) {
+            const dData = dSnap.data();
+            const missedCount = (dData.missedOffersCount || 0) + 1;
+            if (missedCount >= 2) {
+              transaction.update(driverRef, {
+                isOnline: false,
+                missedOffersCount: 0
+              });
+            } else {
+              transaction.update(driverRef, {
+                missedOffersCount: missedCount
+              });
+            }
+          }
+        } catch (de) {
+          console.error('[Ghost check error]', de);
+        }
+      }
+
+      const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)));
+      const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
+      const busyDriverIds = new Set(activeOrdersSnap.docs.map(d => d.data().driverId).filter(Boolean));
+
+      let targetDriverId = null;
+      let targetDriverName = null;
+
+      const coPickupDriver = allDrivers.find(d => {
+        if (rejected.includes(d.id)) return false;
+        return activeOrdersSnap.docs.some(docSnap => {
+          const ord = docSnap.data();
+          return ord.driverId === d.id && ord.comercioId === o.comercioId && !ord.pickedUpAt;
+        });
+      });
+
+      if (coPickupDriver) {
+        targetDriverId = coPickupDriver.id;
+        targetDriverName = coPickupDriver.displayName || coPickupDriver.name || 'Repartidor';
+      } else {
+        const eligibleDrivers = allDrivers.filter(d => {
+          if (rejected.includes(d.id)) return false;
+          if (busyDriverIds.has(d.id)) return false;
+          
+          if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
+            return false;
+          }
+
+          const mode = d.deliveryMode || 'both';
+          if (mode === 'trip' && !o.isTrip) return false;
+          if (mode === 'delivery' && o.isTrip) return false;
+
+          return true;
+        });
+
+        if (eligibleDrivers.length > 0) {
+          eligibleDrivers.sort((a, b) => (a.completedOrdersToday || 0) - (b.completedOrdersToday || 0));
+          targetDriverId = eligibleDrivers[0].id;
+          targetDriverName = eligibleDrivers[0].displayName || eligibleDrivers[0].name || 'Repartidor';
+        }
+      }
+
+      transaction.update(orderRef, {
+        queueTargetDriverId: targetDriverId || null,
+        queueTargetDriverName: targetDriverName || null,
+        queueOfferedAt: serverTimestamp(),
+        queueRejectedDrivers: rejected
+      });
+    });
+  } catch (err) {
+    console.error('Error in updateDispatchQueue transaction:', err);
+  }
+}
+
+export function playExclusiveOfferAlert() {
+  if (window.exclusiveAlertInterval) return;
+  const playBeep = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch (e) {
+      console.warn('AudioContext error:', e);
+    }
+  };
+
+  playBeep();
+  window.exclusiveAlertInterval = setInterval(() => {
+    playBeep();
+    if (navigator.vibrate) {
+      navigator.vibrate([300, 100, 300]);
+    }
+  }, 1600);
+}
+
+export function stopExclusiveOfferAlert() {
+  if (window.exclusiveAlertInterval) {
+    clearInterval(window.exclusiveAlertInterval);
+    window.exclusiveAlertInterval = null;
+  }
 }

@@ -608,20 +608,38 @@ function showOrderDetailModal(initialOrder) {
 
         ${!isHistory ? `
         <div class="detail-actions-section-premium">
+          ${o.status === 'ready' ? `
+            <div style="margin-bottom:12px; padding:12px; border-radius:14px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); font-size:12.5px; font-weight:700; width:100%; text-align:left;">
+              <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9.5px; display:block; margin-bottom:4px; font-weight:800;">Estado de asignación:</span>
+              <div style="display:flex; justify-content:space-between; align-items:center; color:var(--color-text-primary);">
+                <span>
+                  ${o.driverName ? `🏍️ Asignado a: <strong>${o.driverName}</strong>` : (o.queueTargetDriverName ? `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong>` : `🔍 Buscando repartidor...`)}
+                </span>
+                ${(!o.driverName && o.queueOfferedAt) ? `
+                  <span style="color:var(--color-warning); font-size:12px;" class="modal-queue-timer" data-expiry="${(o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000}">
+                    ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000 - Date.now()) / 1000))}s
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+          ` : ''}
           ${o.status === 'pending' ? `
             <button class="btn-action-premium confirm confirm-order-btn" data-id="${o.id}">${icon('check', 18)} Confirmar Pedido</button>
+            <button class="btn-action-premium manual-assign-btn" data-id="${o.id}" style="background:var(--color-warning); color:white; border:none; margin-bottom:8px;">Asignar Repartidor Manual</button>
             <div class="action-grid-2">
               <button class="btn-action-premium outline modify-order-btn" data-id="${o.id}">${icon('edit', 16)} Modificar</button>
               <button class="btn-action-premium reject reject-order-btn" data-id="${o.id}">${icon('close', 16)} Rechazar</button>
             </div>
           ` : o.status === 'confirmed' ? `
             <button class="btn-action-premium confirm ready-order-btn" data-id="${o.id}">${icon('readyBox', 18)} Marcar como Listo</button>
+            <button class="btn-action-premium manual-assign-btn" data-id="${o.id}" style="background:var(--color-warning); color:white; border:none; margin-bottom:8px;">Asignar Repartidor Manual</button>
             <div class="action-grid-2">
               <button class="btn-action-premium outline modify-order-btn" data-id="${o.id}">${icon('edit', 16)} Modificar</button>
               <button class="btn-action-premium reject cancel-confirmed-btn" data-id="${o.id}">${icon('close', 16)} Cancelar</button>
             </div>
           ` : o.status === 'ready' ? `
-            <div style="display:flex; align-items:center; gap:8px; justify-content:center; padding:16px; border-radius:16px; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); color:#0d9488; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:0.02em;">
+            <button class="btn-action-premium manual-assign-btn" data-id="${o.id}" style="background:var(--color-warning); color:white; border:none; margin-bottom:12px; width:100%; height:44px; border-radius:12px;">Forzar Asignación Manual</button>
+            <div style="display:flex; align-items:center; gap:8px; justify-content:center; padding:16px; border-radius:16px; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); color:#0d9488; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:0.02em; width:100%;">
               ${icon('bike', 18)} Esperando retiro del repartidor
             </div>
           ` : o.status === 'delivering' ? `
@@ -797,7 +815,85 @@ function showOrderDetailModal(initialOrder) {
       openChat({ orderId: o.id, type: 'client-commerce', otherName: o.userName, orderNum: o.orderId, senderDisplayName: 'Comercio' });
     });
 
+    // Modal Queue Timer Live Countdown
+    const modalTimerInterval = setInterval(() => {
+      const timerEl = modalEl.querySelector('.modal-queue-timer');
+      if (!timerEl) return;
+      const expiry = parseInt(timerEl.dataset.expiry);
+      const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
+      timerEl.textContent = `${remaining}s`;
+      if (remaining <= 0) {
+        clearInterval(modalTimerInterval);
+      }
+    }, 1000);
+
+    modalEl.querySelectorAll('.manual-assign-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const orderId = btn.dataset.id;
+        showToast('Buscando repartidores disponibles...', 'info');
+        try {
+          const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)));
+          const drivers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+          if (drivers.length === 0) {
+            showToast('No hay repartidores conectados en este momento.', 'warning');
+            return;
+          }
+
+          const assignModalContent = document.createElement('div');
+          assignModalContent.style.cssText = 'padding:20px; display:flex; flex-direction:column; gap:12px; max-height:60dvh; overflow-y:auto;';
+          assignModalContent.innerHTML = `
+            <p style="font-size:13px; color:var(--color-text-secondary); margin-bottom:8px;">
+              Selecciona un repartidor para asignarlo directamente (esto saltará la cola automática).
+            </p>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              ${drivers.map(d => `
+                <div class="driver-assign-row" data-driver-id="${d.id}" data-driver-name="${d.displayName || d.name || 'Repartidor'}" style="padding:12px 16px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:all 0.2s;">
+                  <span style="font-weight:800; color:var(--color-text-primary);">${d.displayName || d.name || 'Repartidor'}</span>
+                  <span style="font-size:10px; font-weight:800; padding:2px 8px; border-radius:6px; background:var(--color-primary-light); color:var(--color-primary);">${d.vehicleType || 'Moto'}</span>
+                </div>
+              `).join('')}
+            </div>
+          `;
+
+          showModal({ title: 'Asignación Manual', content: assignModalContent, height: 'auto' });
+
+          assignModalContent.querySelectorAll('.driver-assign-row').forEach(row => {
+            row.onclick = async () => {
+              const dId = row.dataset.driverId;
+              const dName = row.dataset.driverName;
+              closeModal();
+              showToast('Asignando repartidor...', 'info');
+
+              try {
+                await updateDoc(doc(db, 'orders', orderId), {
+                  driverId: dId,
+                  driverName: dName,
+                  status: 'accepted',
+                  acceptedAt: serverTimestamp(),
+                  queueTargetDriverId: dId,
+                  queueTargetDriverName: dName,
+                  queueOfferedAt: serverTimestamp()
+                });
+                
+                showToast(`Repartidor ${dName} asignado correctamente.`, 'success');
+                if (modalUnsub) modalUnsub();
+                closeModal();
+              } catch (err) {
+                console.error(err);
+                showToast('Error al asignar repartidor', 'error');
+              }
+            };
+          });
+        } catch (e) {
+          console.error(e);
+          showToast('Error al buscar repartidores', 'error');
+        }
+      });
+    });
+
     modalEl.querySelector('.modify-order-btn')?.addEventListener('click', () => {
+      clearInterval(modalTimerInterval);
       showModifyOrderModal(o);
     });
 

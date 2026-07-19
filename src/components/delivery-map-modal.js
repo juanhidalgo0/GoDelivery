@@ -210,6 +210,33 @@ async function initDeliveryMap(order, orders) {
     gestureHandling: 'greedy'
   });
 
+  // Hotspots: Draw glowing red overlay circles for active orders
+  (async () => {
+    try {
+      const { collection, query, getDocs, limit } = await import('firebase/firestore');
+      const ordersSnap = await getDocs(query(collection(db, 'orders'), limit(40)));
+      ordersSnap.docs.forEach(docSnap => {
+        const ord = docSnap.data();
+        const lat = ord.comercioCoords?.lat || ord.comercioCoords?.latitude;
+        const lng = ord.comercioCoords?.lng || ord.comercioCoords?.longitude;
+        if (lat && lng) {
+          new google.maps.Circle({
+            strokeColor: '#ef4444',
+            strokeOpacity: 0.25,
+            strokeWeight: 0,
+            fillColor: '#ef4444',
+            fillOpacity: 0.12,
+            map: googleMap,
+            center: { lat, lng },
+            radius: 200
+          });
+        }
+      });
+    } catch (e) {
+      console.error('Error drawing hotspots:', e);
+    }
+  })();
+
   // 1. Build unified stops sequence to assign sequential step numbers
   const stopsSequence = [];
   const storeSet = new Set();
