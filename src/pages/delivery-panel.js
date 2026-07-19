@@ -3761,7 +3761,8 @@ async function startSession(user) {
     isOnline: true,
     currentSessionId: sessionRef.id,
     lastActivityAt: serverTimestamp(),
-    lastTripAcceptedAt: serverTimestamp()
+    lastTripAcceptedAt: serverTimestamp(),
+    missedOffersCount: 0
   });
   
   startInactivityCheck(updatedUser);
@@ -5054,7 +5055,8 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
       // Update driver activity
       transaction.update(doc(db, 'users', user.uid), {
         lastActivityAt: serverTimestamp(),
-        lastTripAcceptedAt: serverTimestamp()
+        lastTripAcceptedAt: serverTimestamp(),
+        missedOffersCount: 0
       });
       user.lastActivityAt = new Date();
       user.lastTripAcceptedAt = new Date();
