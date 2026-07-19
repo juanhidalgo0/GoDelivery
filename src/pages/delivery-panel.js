@@ -419,7 +419,7 @@ export async function renderDeliveryPanel() {
           <a href="#/delivery/config" title="Configuración de Perfil" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
             ${icon('settings', 22)}
           </a>
-          <button id="delivery-contact-support-btn" title="Información del Sistema de Delivery" style="width:40px; height:40px; border-radius:12px; background:#2563eb; color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s; box-shadow: 0 4px 10px rgba(37,99,235,0.3);" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+          <button id="delivery-contact-support-btn" title="Información del Sistema de Delivery" style="width:40px; height:40px; border-radius:12px; background:#0ea5e9; color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s; box-shadow: 0 4px 10px rgba(14,165,233,0.3);" onmouseover="this.style.background='#0284c7'" onmouseout="this.style.background='#0ea5e9'">
             ${icon('helpCircle', 22)}
           </button>
         </div>
