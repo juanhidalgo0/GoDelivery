@@ -1,6 +1,8 @@
 // GoDelivery — Delivery Map Modal Component (Premium Google Maps Route)
 import { showModal, closeModal } from './modal.js';
 import { icon } from '../utils/icons.js';
+import { db } from '../firebase.js';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 let googleMap = null;
 let riderMarker = null;
@@ -8,6 +10,11 @@ let destinationMarkers = [];
 let routeLine = null;
 let watchId = null;
 let resolvedStores = []; // Cache to avoid multiple Firestore fetches
+
+// OSRM throttle state
+let _lastOsrmFetchTime = 0;
+let _lastOsrmStart = null;
+let _riderAngle = 0; // Smooth bearing state for rider marker
 
 export function isOrderGeolocalizablePickup(o) {
   if (!o) return false;
@@ -184,6 +191,11 @@ function updateBottomPanel(order, batch) {
 }
 
 function cleanupMap() {
+  if (window._liveMapUnsubs) {
+    window._liveMapUnsubs.forEach(unsub => { try { unsub(); } catch (e) {} });
+    window._liveMapUnsubs = [];
+  }
+  if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
   if (riderMarker) riderMarker.setMap(null);
   destinationMarkers.forEach(m => { if(m.setMap) m.setMap(null); });
   if (routeLine) routeLine.setMap(null);
@@ -192,6 +204,11 @@ function cleanupMap() {
   destinationMarkers = [];
   routeLine = null;
   resolvedStores = [];
+  window._hasRealGps = false;
+  window._firstFit = false;
+  _lastOsrmFetchTime = 0;
+  _lastOsrmStart = null;
+  _riderAngle = 0;
 }
 
 async function initDeliveryMap(order, orders) {
@@ -199,7 +216,38 @@ async function initDeliveryMap(order, orders) {
   const container = document.getElementById('delivery-map-container');
   if (!container) return;
 
-  const destCoords = order.deliveryCoords || { lat: -35.0833, lng: -57.65 };
+  let destCoords = order.deliveryCoords || null;
+
+  // Fallback Geocoding if deliveryCoords is missing but deliveryAddress text is present
+  if ((!destCoords || (!destCoords.lat && !destCoords.lng)) && order.deliveryAddress && typeof google !== 'undefined' && google.maps.Geocoder) {
+    try {
+      const geocoder = new google.maps.Geocoder();
+      const addressQuery = order.deliveryAddress.toLowerCase().includes('magdalena') 
+        ? order.deliveryAddress 
+        : `${order.deliveryAddress}, Magdalena, Buenos Aires, Argentina`;
+      
+      const geoResult = await new Promise((resolve) => {
+        geocoder.geocode({ address: addressQuery }, (results, status) => {
+          if (status === 'OK' && results[0]) {
+            const loc = results[0].geometry.location;
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+          } else {
+            resolve(null);
+          }
+        });
+      });
+      if (geoResult) {
+        destCoords = geoResult;
+      }
+    } catch (e) {
+      console.warn('Geocoding fallback failed for address:', order.deliveryAddress, e);
+    }
+  }
+
+  if (!destCoords) {
+    destCoords = { lat: -35.0833, lng: -57.65 };
+  }
+
   const theme = document.documentElement.getAttribute('data-theme') || 'light';
 
   googleMap = new google.maps.Map(container, {
@@ -242,8 +290,6 @@ async function initDeliveryMap(order, orders) {
   const storeSet = new Set();
   const deliverySet = new Set();
   resolvedStores = [];
-  const { doc, getDoc } = await import('firebase/firestore');
-  const { db } = await import('../firebase.js');
 
   for (const o of orders) {
     const geoloc = isOrderGeolocalizablePickup(o);
@@ -330,32 +376,42 @@ async function initDeliveryMap(order, orders) {
     addOverlayMarker(stop.coords, stop.iconName, color, stop.type === 'PICKUP' ? stop.isPickedUp : false, stopNumber, clientName);
   });
   
-  if (window.lastRiderPos) {
-    updateRiderLocation(window.lastRiderPos.lat, window.lastRiderPos.lng, destCoords, orders, true);
-  } else {
-    updateRiderLocation(null, null, destCoords, orders);
+  // Initial check of driver location stored on the order document
+  if (order.driverLocation && order.driverLocation.lat && order.driverLocation.lng) {
+    updateRiderLocation(order.driverLocation.lat, order.driverLocation.lng, destCoords, orders);
   }
 
-  if (navigator.geolocation) {
-    const geoOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
-    const onGeoSuccess = (pos) => {
-      const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      updateRiderLocation(p.lat, p.lng, destCoords, orders, true);
-    };
+  // ─── Real-time Firestore listeners (ONLY source of rider position — never viewer GPS) ───
 
-    const onGeoSuccessCurrent = (pos) => {
-      const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      updateRiderLocation(p.lat, p.lng, destCoords, orders, true);
-    };
+  // Primary: driverLocation field on the order document (written by background-tracking.js)
+  const orderUnsub = onSnapshot(doc(db, 'orders', order.id), (snap) => {
+    if (!snap.exists()) return;
+    const liveData = snap.data();
+    const driverLoc = liveData.driverLocation;
+    if (driverLoc && driverLoc.lat && driverLoc.lng) {
+      updateRiderLocation(driverLoc.lat, driverLoc.lng, destCoords, orders);
+    }
+  });
 
-    const onGeoError = (err) => {
-      console.warn('GPS Error:', err);
-      updateRiderLocation(null, null, destCoords, orders);
-    };
-
-    navigator.geolocation.getCurrentPosition(onGeoSuccessCurrent, onGeoError, geoOptions);
-    watchId = navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, geoOptions);
+  // Secondary: currentLocation field on the driver's user document (backup stream)
+  let driverUnsub = null;
+  if (order.driverId) {
+    driverUnsub = onSnapshot(doc(db, 'users', order.driverId), (snap) => {
+      if (!snap.exists()) return;
+      const dData = snap.data();
+      const loc = dData.currentLocation || dData.location;
+      if (loc && loc.lat && loc.lng) {
+        // Only use user doc if order doc hasn't delivered a position yet
+        if (!window._hasRealGps) {
+          updateRiderLocation(loc.lat, loc.lng, destCoords, orders);
+        }
+      }
+    });
   }
+
+  window._liveMapUnsubs = [orderUnsub, ...(driverUnsub ? [driverUnsub] : [])];
+
+  // NOTE: Viewer's own GPS is NEVER used here — the map shows the rider's position, not the admin's.
 
   const centerBtn = document.getElementById('center-on-me-btn');
   if (centerBtn) {
@@ -408,118 +464,145 @@ function addOverlayMarker(pos, iconName, color, isCompleted = false, labelText =
   destinationMarkers.push(marker);
 }
 
-async function updateRiderLocation(lat, lng, dest, orders, isRealGps = false) {
-  if (!googleMap) return;
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+  const dp = (lat2 - lat1) * Math.PI / 180;
+  const dl = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dp/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function updateRiderLocation(lat, lng, dest, orders) {
+  if (!googleMap || lat == null || lng == null) return;
+  window._hasRealGps = true;
+
   const badgeText = document.getElementById('v5-distance-text');
-  
-  if (window._hasRealGps && !isRealGps) return;
-  if (isRealGps) window._hasRealGps = true;
+  const riderPos = { lat, lng };
 
-  const hasGps = lat !== null && lng !== null;
-  if (hasGps) {
-    const riderPos = { lat, lng };
-    if (!riderMarker) {
-      riderMarker = new google.maps.OverlayView();
-      riderMarker.pos = riderPos;
-      riderMarker.onAdd = function() {
-        const div = document.createElement('div');
-        div.className = 'v5-marker-shadow';
-        div.style.position = 'absolute';
-        div.style.zIndex = '1000';
-        div.innerHTML = `
-          <div style="width:48px; height:48px; display:flex; align-items:center; justify-content:center; position:relative;">
-            <div style="position:absolute; width:48px; height:48px; background:rgba(var(--color-primary-rgb),0.25); border-radius:50%; animation: pulse-v5 2s infinite;"></div>
-            <div style="background:var(--color-primary); color:white; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; position:relative; z-index:2; box-shadow: 0 8px 25px rgba(var(--color-primary-rgb),0.4);">
-              ${icon('bike', 20)}
-            </div>
-          </div>`;
-        this.getPanes().overlayMouseTarget.appendChild(div);
-        this.div = div;
-      };
-      riderMarker.draw = function() {
-        const projection = this.getProjection();
-        if (!projection) return;
-        const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-        if (point && this.div) {
-          this.div.style.left = (point.x - 24) + 'px';
-          this.div.style.top = (point.y - 24) + 'px';
-        }
-      };
-      riderMarker.setMap(googleMap);
-    } else {
-      riderMarker.pos = riderPos;
-      if (riderMarker.draw) riderMarker.draw();
-    }
-  }
-
-  const pendingStores = resolvedStores.filter(s => !s.isPickedUp);
-  const waypoints = [];
-  if (hasGps) {
-    waypoints.push(`${lng},${lat}`);
-    
-    if (pendingStores.length > 0) {
-      // Smart Routing: If there are pending pickups, ONLY route to pickups
-      pendingStores.forEach(s => waypoints.push(`${s.lng},${s.lat}`));
-    } else {
-      // If all picked up, route ONLY to destination
-      waypoints.push(`${dest.lng},${dest.lat}`);
-    }
+  // ── 1. Create or smoothly move the rider marker ──────────────────────────────
+  if (!riderMarker) {
+    riderMarker = new google.maps.OverlayView();
+    riderMarker.pos = riderPos;
+    riderMarker.angle = 0;
+    riderMarker.onAdd = function() {
+      const div = document.createElement('div');
+      div.className = 'v5-marker-shadow';
+      // IMPORTANT: NO CSS transitions on left/top to avoid conflicts when panning/zooming Google Maps
+      div.style.cssText = 'position:absolute; z-index:1000; pointer-events:none;';
+      div.innerHTML = `
+        <div style="width:48px; height:48px; display:flex; align-items:center; justify-content:center; position:relative;">
+          <div style="position:absolute; width:48px; height:48px; background:rgba(225,29,72,0.2); border-radius:50%; animation: pulse-v5 2s infinite;"></div>
+          <div class="rider-icon-inner" style="background:#E11D48; color:white; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; position:relative; z-index:2; box-shadow: 0 8px 25px rgba(225,29,72,0.45); transition: transform 0.6s ease;">
+            ${icon('bike', 20)}
+          </div>
+        </div>`;
+      this.getPanes().overlayMouseTarget.appendChild(div);
+      this.div = div;
+    };
+    riderMarker.draw = function() {
+      const proj = this.getProjection();
+      if (!proj || !this.div) return;
+      const pt = proj.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
+      if (pt) {
+        this.div.style.left = (pt.x - 24) + 'px';
+        this.div.style.top  = (pt.y - 24) + 'px';
+        const inner = this.div.querySelector('.rider-icon-inner');
+        if (inner) inner.style.transform = `rotate(${this.angle}deg)`;
+      }
+    };
+    riderMarker.setMap(googleMap);
   } else {
-    if (routeLine) routeLine.setMap(null);
-    if (badgeText) badgeText.textContent = 'Buscando GPS...';
+    // Only calculate bearing/rotation if rider has moved at least 3 meters (prevents spinning on GPS noise)
+    if (riderMarker.pos) {
+      const dist = haversineMeters(riderMarker.pos.lat, riderMarker.pos.lng, lat, lng);
+      if (dist >= 3) {
+        const lat1r = riderMarker.pos.lat * Math.PI / 180;
+        const lat2r = lat * Math.PI / 180;
+        const dLon  = (lng - riderMarker.pos.lng) * Math.PI / 180;
+        const y = Math.sin(dLon) * Math.cos(lat2r);
+        const x = Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon);
+        let bearing = Math.atan2(y, x) * 180 / Math.PI;
+        bearing = (bearing + 360) % 360;
+        let delta = bearing - (riderMarker.angle % 360);
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        riderMarker.angle += delta;
+      }
+    }
+    riderMarker.pos = riderPos;
+    if (riderMarker.draw) riderMarker.draw();
+  }
+
+  // ── 2. OSRM route — fetch every 10s or if moved 15m, otherwise update optimistically ──
+  const pendingStores = resolvedStores.filter(s => !s.isPickedUp);
+  const waypoints = [
+    `${lng},${lat}`,
+    ...(pendingStores.length > 0
+      ? pendingStores.map(s => `${s.lng},${s.lat}`)
+      : [`${dest.lng},${dest.lat}`]
+    )
+  ];
+
+  const now = Date.now();
+  const movedMeters = _lastOsrmStart ? haversineMeters(lat, lng, _lastOsrmStart.lat, _lastOsrmStart.lng) : Infinity;
+  const timeElapsed = now - _lastOsrmFetchTime;
+  const needsFetch = !routeLine || timeElapsed >= 10000 || movedMeters >= 15;
+
+  if (!needsFetch) {
+    // Optimistic: just slide the first point of the existing polyline to current position
+    if (routeLine) {
+      try {
+        const path = routeLine.getPath().getArray().map(p => ({ lat: p.lat(), lng: p.lng() }));
+        if (path.length >= 2) { path[0] = riderPos; routeLine.setPath(path); }
+      } catch (e) {}
+    }
     return;
   }
 
-  if (waypoints.length < 2) {
-    if (badgeText) badgeText.textContent = '¡Llegaste!';
-    if (routeLine) routeLine.setMap(null);
-    return;
-  }
+  _lastOsrmFetchTime = now;
+  _lastOsrmStart = riderPos;
 
   try {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${waypoints.join(';')}?overview=full&geometries=geojson`);
     const data = await res.json();
-    if (data.routes?.[0] && googleMap) {
-      const coords = data.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
-      coords.unshift({ lat, lng });
-      
-      const finalPoint = (pendingStores.length > 0) 
-        ? { lat: pendingStores[pendingStores.length - 1].lat, lng: pendingStores[pendingStores.length - 1].lng }
-        : dest;
-        
-      coords.push(finalPoint);
-      
-      if (!routeLine) {
-        routeLine = new google.maps.Polyline({
-          path: coords,
-          geodesic: true,
-          strokeColor: '#3b82f6',
-          strokeOpacity: 0.85,
-          strokeWeight: 6,
-          map: googleMap,
-          zIndex: 40
-        });
+    if (!data.routes?.[0] || !googleMap) return;
+
+    const coords = data.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+    coords.unshift(riderPos);
+    const finalPoint = pendingStores.length > 0
+      ? { lat: pendingStores[pendingStores.length - 1].lat, lng: pendingStores[pendingStores.length - 1].lng }
+      : dest;
+    coords.push(finalPoint);
+
+    if (!routeLine) {
+      routeLine = new google.maps.Polyline({
+        path: coords,
+        geodesic: true,
+        strokeColor: '#3b82f6',
+        strokeOpacity: 0.85,
+        strokeWeight: 6,
+        map: googleMap,
+        zIndex: 40
+      });
+    } else {
+      routeLine.setPath(coords);
+    }
+
+    const distanceKm = data.routes[0].distance / 1000;
+    if (badgeText) {
+      if (distanceKm < 0.05 && pendingStores.length === 0) {
+        badgeText.textContent = '¡Llegaste!';
       } else {
-        routeLine.setPath(coords);
-        routeLine.setMap(googleMap);
+        badgeText.textContent = `${distanceKm.toFixed(1)} km • ${Math.round(data.routes[0].duration / 60)} min`;
       }
+    }
 
-      const distanceKm = data.routes[0].distance / 1000;
-      if (badgeText) {
-        if (distanceKm < 0.05 && pendingStores.length === 0) {
-          badgeText.textContent = '¡Llegaste!';
-        } else {
-          badgeText.textContent = `${distanceKm.toFixed(1)} km • ${Math.round(data.routes[0].duration / 60)} min`;
-        }
-      }
-
-      // Auto-fit initial load
-      if (!window._firstFit) {
-        const bounds = new google.maps.LatLngBounds();
-        coords.forEach(p => bounds.extend(p));
-        googleMap.fitBounds(bounds, { top: 100, bottom: 250, left: 60, right: 60 });
-        window._firstFit = true;
-      }
+    if (!window._firstFit) {
+      const bounds = new google.maps.LatLngBounds();
+      coords.forEach(p => bounds.extend(p));
+      googleMap.fitBounds(bounds, { top: 100, bottom: 250, left: 60, right: 60 });
+      window._firstFit = true;
     }
   } catch (err) { console.warn('Routing error:', err); }
 }

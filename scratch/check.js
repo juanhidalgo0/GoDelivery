@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { initializeFirestore } from 'firebase/firestore';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",
@@ -14,9 +14,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {});
 
-console.log('Fetching comercios...');
-const snap = await getDocs(collection(db, 'comercios'));
-snap.forEach(doc => {
-  console.log(doc.id, '-> Name:', doc.data().name, '\nLogo:', doc.data().logo ? doc.data().logo.substring(0, 150) : 'no logo', '\n');
-});
-process.exit(0);
+async function run() {
+  console.log('Fetching user kioscopaulos7@gmail.com...');
+  const q = query(collection(db, 'users'), where('email', '==', 'kioscopaulos7@gmail.com'));
+  const snap = await getDocs(q);
+  snap.forEach(doc => {
+    const data = doc.data();
+    console.log(`User ID: ${doc.id}`);
+    console.log(`Email: ${data.email}`);
+    console.log(`DisplayName: ${data.displayName}`);
+    console.log(`role: ${data.role}`);
+    console.log(`isDelivery: ${data.isDelivery}`);
+    console.log(`isOnline: ${data.isOnline}`);
+    console.log('--------------------');
+  });
+}
+
+run().then(() => process.exit(0)).catch(console.error);

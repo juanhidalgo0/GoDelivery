@@ -157,17 +157,7 @@ function startMonitoring(user) {
 }
 
 let currentActiveCount = 0;
-let isDeliveryMutedGlobally = false;
 const DELIVERY_ALARM_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3';
-
-// Register global alarm mute listener for delivery exactly once
-if (typeof window !== 'undefined') {
-  window.addEventListener('mute-delivery-alarm', () => {
-    isDeliveryMutedGlobally = true;
-    AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
-    console.log('🔇 Delivery pending order alarm muted globally.');
-  });
-}
 
 function stopMonitoring() {
   if (availableUnsub) availableUnsub();
@@ -179,8 +169,21 @@ function stopMonitoring() {
   clearBanner('delivery');
   clearDeliveryIndicator();
   AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
-  const pill = document.getElementById('delivery-mute-alarm-pill');
-  if (pill) pill.remove();
+  clearDeliverySystemNotifications();
+}
+
+function clearDeliverySystemNotifications() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.getNotifications().then(notifications => {
+        notifications.forEach(n => {
+          if (n.tag && (n.tag.startsWith('order-') || n.tag.startsWith('delivery-'))) {
+            n.close();
+          }
+        });
+      });
+    }).catch(e => console.warn('Error clearing system notifications:', e));
+  }
 }
 
 function notifyNewOrder(order) {
@@ -193,9 +196,9 @@ function notifyNewOrder(order) {
   AudioManager.playSound('/assets/sounds/notification.mp3');
 
   // Vibration for mobile (professional app feel)
-  AudioManager.vibrate([300, 100, 300, 100, 400]);
+  AudioManager.vibrate([400, 150, 400, 150, 600]);
 
-  // Use swRegistration.showNotification for mobile compatibility
+  // Use swRegistration.showNotification with requireInteraction: true for mobile persistence
   if ('serviceWorker' in navigator && Notification.permission === 'granted') {
     navigator.serviceWorker.ready.then(reg => {
       let body = `¡Nuevo pedido! ${order.comercioName} tiene un pedido listo para retirar.`;
@@ -208,77 +211,19 @@ function notifyNewOrder(order) {
         body: body,
         icon: '/logo-pwa.png',
         badge: '/logo-pwa.png',
-        tag: `order-${order.id}`,
+        tag: `delivery-order-${order.id}`,
         renotify: true,
+        requireInteraction: true, // Permanent notification until order is taken/rotated/cancelled
         data: { url: '#/delivery' },
-        vibrate: [300, 100, 300, 100, 400]
+        vibrate: [400, 150, 400, 150, 600]
       });
     });
   }
 }
 
 function updateMutePill() {
-  const availableCount = currentAvailableOrders.length;
-  let pill = document.getElementById('delivery-mute-alarm-pill');
-
-  if (availableCount > 0 && !isDeliveryMutedGlobally && currentActiveCount === 0) {
-    if (!pill) {
-      pill = document.createElement('div');
-      pill.id = 'delivery-mute-alarm-pill';
-      pill.style.cssText = `
-        position: fixed;
-        bottom: 84px;
-        left: 50%;
-        transform: translateX(-50%) translateY(20px);
-        background: rgba(15, 23, 42, 0.95);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1.5px solid rgba(34, 197, 94, 0.35);
-        border-radius: 30px;
-        padding: 12px 24px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        z-index: 1000;
-        cursor: pointer;
-        color: white;
-        font-family: var(--font-display);
-        font-weight: 900;
-        font-size: 12px;
-        letter-spacing: 0.05em;
-        box-shadow: 0 10px 30px rgba(34, 197, 94, 0.35);
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        opacity: 0;
-      `;
-      document.body.appendChild(pill);
-
-      pill.onclick = () => {
-        AudioManager.hapticLight();
-        isDeliveryMutedGlobally = true;
-        window.dispatchEvent(new CustomEvent('mute-delivery-alarm'));
-        updateMutePill();
-      };
-    }
-
-    pill.innerHTML = `
-      <span class="animate-pulse" style="display:inline-block; width:8px; height:8px; background:#22c55e; border-radius:50%; box-shadow:0 0 10px #22c55e;"></span>
-      ${icon('bell', 16)}
-      <span>SILENCIAR ALARMA PENDIENTE</span>
-    `;
-
-    requestAnimationFrame(() => {
-      pill.style.transform = 'translateX(-50%) translateY(0)';
-      pill.style.opacity = '1';
-    });
-  } else {
-    if (pill) {
-      pill.style.transform = 'translateX(-50%) translateY(20px)';
-      pill.style.opacity = '0';
-      setTimeout(() => {
-        pill.remove();
-      }, 400);
-    }
-  }
+  const pill = document.getElementById('delivery-mute-alarm-pill');
+  if (pill) pill.remove();
 }
 
 function updateBannerState() {
@@ -289,11 +234,12 @@ function updateBannerState() {
   });
   const availableCount = batches.size;
 
-  // Sound loop alarm logic for delivery drivers
-  if (availableCount > 0 && currentActiveCount === 0 && !isDeliveryMutedGlobally) {
+  // Sound loop alarm logic for delivery drivers: ringing continuously until order rotates or is cancelled/taken
+  if (availableCount > 0 && currentActiveCount === 0) {
     AudioManager.startLoop(DELIVERY_ALARM_SOUND_URL, 0.95);
   } else {
     AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
+    clearDeliverySystemNotifications();
   }
 
   updateMutePill();

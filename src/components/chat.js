@@ -1,11 +1,85 @@
 // GoDelivery — In-App Chat Component (Real-Time via Firestore)
 import { db } from '../firebase.js';
-import { collection, doc, setDoc, addDoc, getDoc, onSnapshot, query, orderBy, serverTimestamp, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, doc, setDoc, addDoc, getDoc, onSnapshot, query, orderBy, serverTimestamp, updateDoc, arrayUnion, increment } from 'firebase/firestore';
 import { getState } from '../state.js';
 import { showModal, closeModal } from './modal.js';
 import { icon } from '../utils/icons.js';
 
 let isChatOpening = false;
+
+window.playCustomAudio = function(btnEl) {
+  const container = btnEl.closest('.wa-audio-player');
+  if (!container) return;
+  const audio = container.querySelector('audio');
+  const seekbar = container.querySelector('.wa-audio-seek');
+  const timeDisplay = container.querySelector('.wa-audio-time');
+  const iconSpan = btnEl.querySelector('.wa-play-icon');
+
+  if (!audio) return;
+
+  document.querySelectorAll('audio.wa-chat-audio').forEach(a => {
+    if (a !== audio && !a.paused) {
+      a.pause();
+      const parent = a.closest('.wa-audio-player');
+      if (parent) {
+        const ic = parent.querySelector('.wa-play-icon');
+        if (ic) ic.innerHTML = '▶';
+      }
+    }
+  });
+
+  if (audio.paused) {
+    audio.play().then(() => {
+      if (iconSpan) iconSpan.innerHTML = '❚❚';
+    }).catch(err => console.error("Playback error:", err));
+  } else {
+    audio.pause();
+    if (iconSpan) iconSpan.innerHTML = '▶';
+  }
+
+  if (!audio._boundEvents) {
+    audio._boundEvents = true;
+    audio.addEventListener('timeupdate', () => {
+      if (audio.duration) {
+        const pct = (audio.currentTime / audio.duration) * 100;
+        if (seekbar) seekbar.value = pct;
+        if (timeDisplay) {
+          const curM = Math.floor(audio.currentTime / 60);
+          const curS = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+          const durM = Math.floor(audio.duration / 60) || 0;
+          const durS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+          timeDisplay.textContent = `${curM}:${curS} / ${durM}:${durS}`;
+        }
+      }
+    });
+
+    audio.addEventListener('loadedmetadata', () => {
+      if (timeDisplay && audio.duration) {
+        const durM = Math.floor(audio.duration / 60) || 0;
+        const durS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+        timeDisplay.textContent = `0:00 / ${durM}:${durS}`;
+      }
+    });
+
+    audio.addEventListener('ended', () => {
+      if (iconSpan) iconSpan.innerHTML = '▶';
+      if (seekbar) seekbar.value = 0;
+      if (timeDisplay && audio.duration) {
+        const durM = Math.floor(audio.duration / 60) || 0;
+        const durS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+        timeDisplay.textContent = `0:00 / ${durM}:${durS}`;
+      }
+    });
+
+    if (seekbar) {
+      seekbar.addEventListener('input', (e) => {
+        if (audio.duration) {
+          audio.currentTime = (e.target.value / 100) * audio.duration;
+        }
+      });
+    }
+  }
+};
 
 /**
  * Opens a chat modal for a given order.
@@ -32,13 +106,13 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   const chatContainer = document.createElement('div');
   chatContainer.className = 'chat-container';
   chatContainer.innerHTML = `
-    <div class="chat-header-bar">
-      <div class="chat-avatar">
+    <div class="chat-header-bar" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; border-radius: 24px 24px 0 0; padding: 14px 18px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.15);">
+      <div class="chat-avatar" style="background: rgba(255,255,255,0.2); color: white; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
         ${type === 'client-commerce' ? icon('store', 20) : icon('bike', 20)}
       </div>
-      <div class="chat-header-info">
-        <div class="chat-header-name">${otherName}</div>
-        <div class="chat-header-order">Pedido #${orderNum || '---'}</div>
+      <div class="chat-header-info" style="flex: 1; min-width: 0;">
+        <div class="chat-header-name" style="font-size: 15px; font-weight: 900; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${otherName}</div>
+        <div class="chat-header-order" style="font-size: 11.5px; opacity: 0.9; font-weight: 750; color: rgba(255,255,255,0.9);">Pedido #${orderNum || '---'}</div>
       </div>
       <div id="chat-status-indicator-${chatId}"></div>
     </div>
@@ -49,7 +123,33 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     </div>
     <div id="chat-typing-indicator-${chatId}" class="chat-typing-wrapper" style="display:none;"></div>
     <div id="chat-footer-area-${chatId}">
-       <div class="chat-loading-mini" style="text-align:center; padding:10px; opacity:0.5; font-size:10px;">Conectando...</div>
+      <div id="emoji-picker-${chatId}" class="chat-emoji-picker-v2" style="display:none;">
+        <div class="emoji-scroll-area">
+          <div class="emoji-grid-v2">
+            <span>😊</span><span>😂</span><span>👍</span><span>❤️</span><span>🙌</span><span>🎉</span><span>🛵</span><span>📦</span><span>🔥</span><span>👏</span>
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-bar" style="position:relative; width:100%; box-sizing:border-box;">
+        <button class="chat-emoji-btn" id="emoji-btn-${chatId}">${icon('smile', 22)}</button>
+        <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen" style="color:var(--color-text-secondary);">${icon('camera', 22)}</button>
+        <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" />
+        <input type="file" id="chat-file-camera-${chatId}" style="display:none" accept="image/*" capture="environment" />
+        <input type="text" id="chat-input-${chatId}" class="chat-input" placeholder="Escribí un mensaje..." autocomplete="off" />
+        
+        <div id="chat-audio-indicator-${chatId}" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 16px; border-radius:18px; z-index:50; border:1.5px solid var(--color-border);">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
+            <span id="chat-audio-timer-${chatId}" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:4px; position:absolute; right:125px; color: var(--color-text-primary); font-size: 13px; font-weight: 850; pointer-events:none; animation: slideHint 1.5s infinite; white-space:nowrap;">
+            <span style="font-size:16px; margin-right:2px; font-weight:900;">‹</span> Desliza para cancelar
+          </div>
+        </div>
+
+        <button class="chat-mic-btn" id="chat-mic-${chatId}" title="Grabar audio" style="color:var(--color-primary); z-index:60; position:relative; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;">${icon('mic', 22)}</button>
+        <button class="chat-send-btn" id="chat-send-${chatId}" style="z-index:60; position:relative;">${icon('send', 20)}</button>
+      </div>
     </div>
   `;
 
@@ -106,7 +206,7 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     });
     if (markedAny) {
       updateDoc(chatRef, {
-        [`unread.${user.uid}`]: false
+        [`unread.${user.uid}`]: 0
       }).catch(() => {});
     }
   });
@@ -120,22 +220,95 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
       // 1. Get current order status
       const orderSnap = await getDoc(doc(db, 'orders', orderId));
       if (orderSnap.exists()) {
-        const orderStatus = orderSnap.data().status;
+        const orderData = orderSnap.data();
+        const orderStatus = orderData.status;
         isReadOnly = isAudit || orderStatus === 'completed' || orderStatus === 'cancelled';
-      }
 
-      // 2. Ensure chat document exists (only if not auditing)
-      if (!isAudit) {
-        await setDoc(chatRef, {
-          orderId,
-          type,
-          participants: arrayUnion(user.uid),
-          lastActivityAt: serverTimestamp(),
-        }, { merge: true });
+        // Load profile photo of the other party
+        let otherId = null;
+        let headerTitle = otherName;
+        if (type === 'client-commerce') {
+          const isUserCommerce = (senderDisplayName === 'Comercio') || 
+                                 (user.uid === orderData.comercioId) || 
+                                 (orderData.comercioOwnerId && user.uid === orderData.comercioOwnerId);
+          otherId = isUserCommerce ? orderData.userId : orderData.comercioId;
+          if (isAudit) {
+            headerTitle = `${orderData.userName || 'Cliente'} ↔ ${orderData.comercioName || 'Comercio'}`;
+          } else {
+            headerTitle = isUserCommerce ? (orderData.userName || 'Cliente') : (orderData.comercioName || 'Comercio');
+          }
+        } else if (type === 'client-delivery') {
+          otherId = user.uid === orderData.userId ? orderData.driverId : orderData.userId;
+          const isSearchingDriver = orderData.status === 'ready' || orderData.isFavor || orderData.isTrip;
+          const defaultNoDriverLabel = isSearchingDriver ? 'Buscando repartidor...' : ((orderData.status === 'confirmed' || orderData.status === 'preparing') ? 'En preparación' : 'Sin repartidor asignado');
+          if (isAudit) {
+            headerTitle = `${orderData.userName || 'Cliente'} ↔ ${orderData.driverName || defaultNoDriverLabel}`;
+          } else if (user.uid === orderData.userId) {
+            headerTitle = orderData.driverName || defaultNoDriverLabel;
+          } else {
+            headerTitle = orderData.userName || 'Cliente';
+          }
+        } else if (type === 'commerce-delivery') {
+          const isUserCommerce = (senderDisplayName === 'Comercio') || 
+                                 (user.uid === orderData.comercioId) || 
+                                 (orderData.comercioOwnerId && user.uid === orderData.comercioOwnerId);
+          otherId = isUserCommerce ? orderData.driverId : orderData.comercioId;
+          const isSearchingDriver = orderData.status === 'ready' || orderData.isFavor || orderData.isTrip;
+          const defaultNoDriverLabel = isSearchingDriver ? 'Buscando repartidor...' : ((orderData.status === 'confirmed' || orderData.status === 'preparing') ? 'En preparación' : 'Sin repartidor asignado');
+          if (isAudit) {
+            headerTitle = `${orderData.comercioName || 'Comercio'} ↔ ${orderData.driverName || defaultNoDriverLabel}`;
+          } else {
+            headerTitle = isUserCommerce ? (orderData.driverName || defaultNoDriverLabel) : (orderData.comercioName || 'Comercio');
+          }
+        }
+
+        const nameEl = chatContainer.querySelector('.chat-header-name');
+        if (nameEl && headerTitle) {
+          nameEl.textContent = headerTitle;
+        }
+
+        if (otherId) {
+          getDoc(doc(db, 'users', otherId)).then(async (uSnap) => {
+            if (uSnap.exists()) {
+              const uData = uSnap.data();
+              let photo = uData.photoURL || uData.profilePhoto || null;
+              
+              const isCommerceParty = (type === 'client-commerce' && otherId === orderData.comercioId) ||
+                                      (type === 'commerce-delivery' && otherId === orderData.comercioId);
+                                      
+              if (isCommerceParty || uData.role === 'comercio' || uData.role === 'commerce') {
+                const comSnap = await getDoc(doc(db, 'comercios', orderData.comercioId || otherId));
+                if (comSnap.exists()) {
+                  const comData = comSnap.data();
+                  photo = comData.logoUrl || comData.logo || comData.image || photo;
+                }
+              }
+              if (photo) {
+                const avatarEl = chatContainer.querySelector('.chat-avatar');
+                if (avatarEl) {
+                  avatarEl.innerHTML = `<img src="${photo}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;" />`;
+                  avatarEl.style.background = 'none';
+                }
+              }
+            }
+          }).catch(err => console.warn('Failed to load chat avatar:', err));
+        }
+
+        // 2. Ensure chat document exists (only if not auditing)
+        if (!isAudit) {
+          const parts = [user.uid];
+          if (otherId) parts.push(otherId);
+          await setDoc(chatRef, {
+            orderId,
+            type,
+            participants: arrayUnion(...parts),
+            lastActivityAt: serverTimestamp(),
+          }, { merge: true });
+        }
 
         // Clear unread flag for this user
         await updateDoc(chatRef, {
-          [`unread.${user.uid}`]: false
+          [`unread.${user.uid}`]: 0
         }).catch(() => {});
       }
 
@@ -190,8 +363,8 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
                   <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
                   <span id="chat-audio-timer-${chatId}" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:4px; animation: slideHint 1.5s infinite; color: var(--color-text-tertiary); font-size: 12px; font-weight: 700;">
-                  <span style="font-size:14px; margin-right:4px;">‹</span> Desliza para cancelar
+                <div style="display:flex; align-items:center; gap:4px; position:absolute; right:125px; color: var(--color-text-primary); font-size: 13px; font-weight: 850; pointer-events:none; animation: slideHint 1.5s infinite; white-space:nowrap;">
+                  <span style="font-size:16px; margin-right:2px; font-weight:900;">‹</span> Desliza para cancelar
                 </div>
               </div>
 
@@ -252,18 +425,56 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
 async function updateChatMetadata(chatRef, uid, lastMessageText) {
   try {
     const chatSnap = await getDoc(chatRef);
-    const participants = chatSnap.exists() ? (chatSnap.data().participants || []) : [];
+    if (!chatSnap.exists()) return;
+    const chatData = chatSnap.data();
+    const participants = chatData.participants || [];
     const updates = {
       lastMessage: lastMessageText,
       lastMessageAt: serverTimestamp(),
-      [`unread.${uid}`]: false
+      [`unread.${uid}`]: 0
     };
     participants.forEach(pId => {
       if (pId !== uid) {
-        updates[`unread.${pId}`] = true;
+        updates[`unread.${pId}`] = increment(1);
       }
     });
     await updateDoc(chatRef, updates);
+
+    // Push notification trigger to all other participants
+    const orderId = chatData.orderId;
+    const chatType = chatData.type;
+    const { collection, addDoc } = await import('firebase/firestore');
+    
+    let displayName = chatType === 'client-commerce' ? (uid === chatData.userId ? 'Cliente' : 'Comercio') : 'Mensaje';
+    if (orderId) {
+      const orderSnap = await getDoc(doc(db, 'orders', orderId));
+      if (orderSnap.exists()) {
+        const orderData = orderSnap.data();
+        if (chatType === 'client-commerce') {
+          displayName = uid === orderData.userId ? (orderData.userName || 'Cliente') : (orderData.comercioName || 'Comercio');
+        } else if (chatType === 'client-delivery') {
+          displayName = uid === orderData.userId ? (orderData.userName || 'Cliente') : (orderData.driverName || 'Repartidor');
+        } else if (chatType === 'commerce-delivery') {
+          displayName = uid === orderData.comercioId ? (orderData.comercioName || 'Comercio') : (orderData.driverName || 'Repartidor');
+        }
+      }
+    }
+
+    for (const pId of participants) {
+      if (pId !== uid) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: pId,
+          title: `💬 ${displayName}`,
+          body: lastMessageText,
+          type: 'new_chat_message',
+          chatId: chatRef.id,
+          orderId: orderId || '',
+          url: `#/mis-chats?chatId=${chatRef.id}`,
+          createdAt: new Date(),
+          read: false
+        });
+      }
+    }
   } catch (e) {
     console.error("Error updating chat metadata:", e);
   }
@@ -284,74 +495,98 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
 
   if (!input || !sendBtn) return;
 
-  // Audio Recording Logic
-  let mediaRecorder;
+  // WhatsApp-Grade Audio Recording State Engine
+  let mediaRecorder = null;
   let audioChunks = [];
-  let recordStartTime;
-  let recordTimer;
+  let recordStartTime = 0;
+  let recordTimer = null;
   let isRecording = false;
-  let isLockMode = false;      // Tap once to lock recording
-  let isHoldMode = false;      // Holding down button
-  let pointerDownTimeout;
-  let startX = 0;
-  let startY = 0;
+  let isPendingPermission = false;
   let didCancel = false;
+  let startX = 0;
+  let currentDeltaX = 0;
 
-  const startRecording = async () => {
-    if (isRecording) return;
+  const resetRecordingUI = () => {
+    isRecording = false;
+    isPendingPermission = false;
+    currentDeltaX = 0;
+    if (recordTimer) clearInterval(recordTimer);
+    if (audioIndicator) audioIndicator.style.display = 'none';
+    if (micBtn) {
+      micBtn.style.backgroundColor = '';
+      micBtn.style.color = '';
+      micBtn.style.transform = '';
+      micBtn.style.boxShadow = '';
+      micBtn.style.borderRadius = '';
+      micBtn.innerHTML = icon('mic', 22);
+    }
+  };
+
+  const startRecording = async (e) => {
+    if (isRecording || isPendingPermission) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       import('./toast.js').then(m => m.showToast('Micrófono no soportado en este dispositivo', 'error'));
       return;
     }
+
+    startX = e ? e.clientX : 0;
+    currentDeltaX = 0;
+    didCancel = false;
+    isPendingPermission = true;
+
+    // Immediate visual feedback on touch down
+    micBtn.style.backgroundColor = 'var(--color-primary)';
+    micBtn.style.color = 'white';
+    micBtn.style.transform = 'scale(1.35)';
+    micBtn.style.boxShadow = '0 0 18px rgba(225, 29, 72, 0.55)';
+    micBtn.style.borderRadius = '50%';
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // If user released touch while permission prompt was open, cancel clean
+      if (didCancel) {
+        stream.getTracks().forEach(track => track.stop());
+        resetRecordingUI();
+        return;
+      }
+
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
-      didCancel = false;
 
       mediaRecorder.ondataavailable = ev => {
         if (ev.data.size > 0) audioChunks.push(ev.data);
       };
 
       mediaRecorder.onstart = () => {
+        isPendingPermission = false;
         isRecording = true;
         recordStartTime = Date.now();
-        audioIndicator.style.display = 'flex';
-        micBtn.style.backgroundColor = 'var(--color-primary)';
-        micBtn.style.color = 'white';
-        micBtn.style.transform = 'scale(1.4)';
-        micBtn.style.boxShadow = '0 0 15px rgba(225, 29, 72, 0.5)';
-        micBtn.style.borderRadius = '50%';
-        audioTimer.textContent = '0:00';
+        if (audioIndicator) audioIndicator.style.display = 'flex';
+        if (audioTimer) audioTimer.textContent = '0:00';
+
         recordTimer = setInterval(() => {
           const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
           const m = Math.floor(elapsed / 60);
           const s = (elapsed % 60).toString().padStart(2, '0');
-          audioTimer.textContent = `${m}:${s}`;
+          if (audioTimer) audioTimer.textContent = `${m}:${s}`;
         }, 1000);
       };
 
       mediaRecorder.onstop = async () => {
-        isRecording = false;
-        clearInterval(recordTimer);
-        audioIndicator.style.display = 'none';
-        micBtn.style.backgroundColor = '';
-        micBtn.style.color = '';
-        micBtn.style.transform = '';
-        micBtn.style.boxShadow = '';
-        micBtn.style.borderRadius = '';
+        const wasCancelled = didCancel || currentDeltaX > 160;
+        const recordedChunks = [...audioChunks];
+        const elapsedMs = Date.now() - recordStartTime;
         
         stream.getTracks().forEach(track => track.stop());
+        resetRecordingUI();
 
-        if (didCancel) {
-          audioChunks = [];
+        if (wasCancelled) {
           import('./toast.js').then(m => m.showToast('Grabación cancelada', 'warning'));
           return;
         }
 
-        if (audioChunks.length > 0) {
-          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-          const elapsedMs = Date.now() - recordStartTime;
+        if (recordedChunks.length > 0) {
           if (elapsedMs < 900) {
             import('./toast.js').then(m => m.showToast('Audio muy corto', 'warning'));
             return;
@@ -362,13 +597,14 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
              const storage = getStorage();
              const fileName = `chats/${chatId}/audio_${Date.now()}.webm`;
              const storageRef = ref(storage, fileName);
+             const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
              
              await uploadBytes(storageRef, audioBlob);
              const downloadURL = await getDownloadURL(storageRef);
              
              await addDoc(messagesRef, {
                 senderId: user.uid,
-                senderName: displayName,
+                senderName: senderDisplayName,
                 text: 'Mensaje de voz',
                 type: 'audio',
                 audioUrl: downloadURL,
@@ -376,7 +612,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
                 read: false
              });
              
-             await updateChatMetadata(chatRef, user.uid, '🎙 Mensaje de voz');
+             await updateChatMetadata(chatRef, user.uid, '🎤 Mensaje de voz');
              import('./toast.js').then(m => m.showToast('Audio enviado', 'success'));
           } catch (error) {
              console.error("Error sending audio:", error);
@@ -387,61 +623,97 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
 
       mediaRecorder.start();
     } catch (err) {
-      console.error("Mic access error:", err);
-      import('./toast.js').then(m => m.showToast('Permiso de micrófono denegado', 'error'));
+      console.error("Mic access error or denied:", err);
+      resetRecordingUI();
+      import('./toast.js').then(m => m.showToast('Permiso de micrófono no otorgado', 'error'));
     }
   };
 
   const stopRecording = (cancel = false) => {
-    isLockMode = false;
-    isHoldMode = false;
     if (cancel) didCancel = true;
+    if (isPendingPermission) {
+      didCancel = true;
+      resetRecordingUI();
+      return;
+    }
     if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
       mediaRecorder.stop();
+    } else {
+      resetRecordingUI();
     }
   };
 
-  micBtn.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    micBtn.releasePointerCapture(e.pointerId);
-    startX = e.clientX;
-    startY = e.clientY;
-    isHoldMode = false;
-    didCancel = false;
-    
-    pointerDownTimeout = setTimeout(() => {
-      isHoldMode = true;
-      startRecording();
-    }, 280);
-  });
+  const getClientX = (e) => {
+    if (!e) return 0;
+    if (e.touches && e.touches.length > 0) return e.touches[0].clientX;
+    if (e.changedTouches && e.changedTouches.length > 0) return e.changedTouches[0].clientX;
+    return e.clientX || 0;
+  };
 
-  micBtn.addEventListener('pointermove', (e) => {
-    if (!isRecording) return;
-    if (startX - e.clientX > 60) {
-      stopRecording(true);
+  let touchActive = false;
+
+  const handleDragStart = (e) => {
+    if (e.type === 'touchstart') touchActive = true;
+    else if (e.type === 'pointerdown' && touchActive) return;
+
+    // Immediately dismiss soft keyboard to prevent layout resize during recording drag
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
     }
-  });
+    if (input) input.blur();
 
-  micBtn.addEventListener('pointerup', (e) => {
-    e.preventDefault();
-    clearTimeout(pointerDownTimeout);
-    
-    if (isHoldMode) {
-      stopRecording(false);
-    } else {
-      if (isRecording) {
-        stopRecording(false);
+    if (e.cancelable) e.preventDefault();
+    const x = getClientX(e);
+    startX = x;
+    currentDeltaX = 0;
+    startRecording({ clientX: x });
+  };
+
+  const handleDragMove = (e) => {
+    if (!isRecording && !isPendingPermission) return;
+    if (e.cancelable) e.preventDefault();
+    const x = getClientX(e);
+    const deltaX = Math.max(0, startX - x);
+    currentDeltaX = deltaX;
+
+    if (deltaX > 2) {
+      const clampedX = Math.min(deltaX, 220);
+      micBtn.style.transform = `scale(1.35) translateX(-${clampedX}px)`;
+      if (deltaX > 140) {
+        micBtn.innerHTML = `<span style="font-size:18px; font-weight:900; color:white;">🗑️</span>`;
+        micBtn.style.backgroundColor = '#ef4444';
       } else {
-        isLockMode = true;
-        startRecording();
+        micBtn.innerHTML = `<span style="font-size:18px; font-weight:900; color:white;">‹</span>`;
+        micBtn.style.backgroundColor = 'var(--color-primary)';
       }
+    } else {
+      micBtn.style.transform = 'scale(1.3)';
+      micBtn.innerHTML = icon('mic', 22);
+      micBtn.style.backgroundColor = 'var(--color-primary)';
     }
-  });
+  };
 
-  micBtn.addEventListener('pointercancel', () => {
-    clearTimeout(pointerDownTimeout);
-    if (isHoldMode) stopRecording(true);
-  });
+  const handleDragEnd = (e) => {
+    if (e && e.cancelable) e.preventDefault();
+    setTimeout(() => { touchActive = false; }, 300);
+
+    if (currentDeltaX > 140) {
+      stopRecording(true);
+    } else {
+      stopRecording(false);
+    }
+  };
+
+  // Touch Events (Mobile iOS / Android Safari / Chrome)
+  micBtn.addEventListener('touchstart', handleDragStart, { passive: false });
+  micBtn.addEventListener('touchmove', handleDragMove, { passive: false });
+  micBtn.addEventListener('touchend', handleDragEnd, { passive: false });
+  micBtn.addEventListener('touchcancel', handleDragEnd, { passive: false });
+
+  // Pointer Events (Desktop Mouse)
+  micBtn.addEventListener('pointerdown', handleDragStart);
+  micBtn.addEventListener('pointermove', handleDragMove);
+  micBtn.addEventListener('pointerup', handleDragEnd);
 
   // Emoji Handlers
   emojiBtn?.addEventListener('click', () => {
@@ -561,8 +833,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     document.head.appendChild(s);
   }
 
-  // Auto-focus
-  setTimeout(() => input.focus(), 400);
+  // Do not auto-focus input on chat open so virtual keyboard stays closed
 
   const displayName = senderDisplayName || user.displayName || 'Usuario';
 
@@ -622,6 +893,10 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
 
   const handleFileSelect = async (file) => {
     if (!file) return;
+    if (document.querySelector('.chat-closed-bar')) {
+      import('./toast.js').then(m => m.showToast('El chat ha finalizado. No podés enviar mensajes.', 'warning'));
+      return;
+    }
 
     const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
     const { storage } = await import('../firebase.js');
@@ -691,6 +966,10 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   const sendMessage = async () => {
     const text = input.value.trim();
     if (!text) return;
+    if (document.querySelector('.chat-closed-bar')) {
+      import('./toast.js').then(m => m.showToast('El chat ha finalizado. No podés enviar mensajes.', 'warning'));
+      return;
+    }
 
     input.value = '';
     input.focus();
@@ -743,8 +1022,18 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
   let html = '';
   let lastDate = '';
 
+  // Determine alignment in audit mode: first sender on left, second sender on right
+  const firstSenderId = messages.find(m => m.senderId && m.senderId !== 'system')?.senderId;
+
   messages.forEach((msg, index) => {
-    const isMine = msg.senderId === currentUserId;
+    let isMine = false;
+    if (isAudit) {
+      // In audit mode: align by sender identity so client is on left and commerce/delivery on right (or first sender on left, second on right)
+      isMine = (msg.senderId !== firstSenderId);
+    } else {
+      isMine = (msg.senderId === currentUserId);
+    }
+
     const time = msg.timestamp?.toDate?.();
     const timeStr = time ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).toLowerCase() : '';
     const dateStr = time ? time.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '';
@@ -817,9 +1106,11 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
       return;
     }
 
+    const showBubbleName = isAudit ? (!isConsecutive && msg.senderName) : (!isMine && !isConsecutive);
+
     html += `
       <div class="chat-bubble-row ${isMine ? 'is-mine' : 'is-other'} ${isConsecutive ? 'consecutive' : ''}" style="display: flex; flex-direction: column;">
-        ${!isMine && !isConsecutive ? `<div class="chat-bubble-name">${msg.senderName}</div>` : ''}
+        ${showBubbleName ? `<div class="chat-bubble-name">${msg.senderName}</div>` : ''}
         <div class="chat-bubble ${isMine ? 'bubble-mine' : 'bubble-other'} ${msg.type === 'image' ? 'bubble-image' : ''}">
           ${msg.type === 'image' ? `
             <div class="chat-image-container" data-url="${msg.imageUrl}">
@@ -839,14 +1130,25 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
               `}
             </div>
           ` : msg.type === 'audio' ? `
-            <div class="chat-audio-container" style="display:flex;align-items:center;gap:10px;padding:4px 8px;">
-              <div style="background:rgba(255,255,255,0.2);border-radius:50%;padding:8px;">${icon('mic', 16)}</div>
-              <audio controls src="${msg.audioUrl}" style="height:32px;max-width:180px;"></audio>
+            <div class="wa-audio-player" style="display:flex; align-items:center; gap:10px; padding:6px 6px; min-width:210px; max-width:260px; box-sizing:border-box;">
+              <audio class="wa-chat-audio" src="${msg.audioUrl}" preload="metadata" style="display:none;"></audio>
+              <button onclick="window.playCustomAudio(this)" style="background:white; color:${isMine ? 'var(--color-primary)' : 'var(--color-text-primary)'}; border:none; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,0.18); transition:transform 0.15s ease;">
+                <span class="wa-play-icon" style="font-size:13px; margin-left:2px; font-weight:900;">▶</span>
+              </button>
+              <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:6px; min-width:0;">
+                <input type="range" class="wa-audio-seek" value="0" min="0" max="100" style="width:100%; height:4px; accent-color:white; cursor:pointer; border-radius:2px; margin:0; display:block;">
+                <div style="font-size:11px; font-weight:800; opacity:0.95; line-height:1; margin-top:5px; padding-left:1px;">
+                  <span class="wa-audio-time">0:00</span>
+                </div>
+              </div>
             </div>
           ` : `
             <span class="bubble-text">${escapeHtml(msg.text)}</span>
           `}
-          <span class="bubble-time" style="display:inline-flex; align-items:center; gap:2px;">${timeStr}${ticksHtml}</span>
+        </div>
+        <div class="bubble-time-outside" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:750; color:var(--color-text-tertiary); margin-top:3px; padding:0 4px; ${isMine ? 'align-self:flex-end;' : 'align-self:flex-start;'}">
+          <span>${timeStr}</span>
+          ${isMine ? ticksHtml : ''}
         </div>
         ${seenTimeHtml}
       </div>

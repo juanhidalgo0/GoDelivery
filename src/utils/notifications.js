@@ -53,6 +53,24 @@ export async function initPushNotifications() {
               visibility: 1,
               vibration: true
             });
+            await PushNotifications.createChannel({
+              id: 'exclusive_offers',
+              name: 'Ofertas Exclusivas',
+              description: 'Alertas continuas para ofertas exclusivas directas',
+              importance: 5,
+              visibility: 1,
+              vibration: true,
+              sound: 'alert.mp3'
+            });
+            await PushNotifications.createChannel({
+              id: 'auto_accept_alerts',
+              name: 'Auto Aceptar',
+              description: 'Alertas de pedidos auto-aceptados',
+              importance: 5,
+              visibility: 1,
+              vibration: true,
+              sound: 'cash.mp3'
+            });
           } catch(e) { console.warn('Channel creation error', e); }
         }
         await PushNotifications.register();
@@ -69,12 +87,23 @@ export async function initPushNotifications() {
           localStorage.setItem('gd_last_fcm_token', token.value);
           localStorage.setItem('gd_fcm_registration_status', 'success');
           localStorage.removeItem('gd_fcm_error');
-          await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
-            token: token.value,
-            lastSession: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            platform: 'android-native'
-          }, { merge: true });
+          // Forcing re-upload of admin/driver tokens on every boot/registration to repair missing profiles
+          try {
+            await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
+              token: token.value,
+              lastSession: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              platform: 'android-native'
+            }, { merge: true });
+            
+            // Mirror token to user doc root to ensure fallback paths can query it
+            await setDoc(doc(db, 'users', user.uid), {
+              lastFcmToken: token.value,
+              lastFcmTokenUpdatedAt: serverTimestamp()
+            }, { merge: true });
+          } catch(err) {
+            console.error('Error saving push token to database:', err);
+          }
         });
 
         PushNotifications.addListener('registrationError', (error) => {
@@ -88,9 +117,21 @@ export async function initPushNotifications() {
           const { title, body } = notification;
           if (title) {
             showToast(`${title}: ${body}`, 'info');
-            AudioManager.playSound('/assets/sounds/notification.mp3');
             
-            // For Capacitor native foreground, the in-app Toast and sound are sufficient.
+            // Check if this is an exclusive offer notification to trigger continuous loops
+            const isExclusive = title.includes("OFERTA") || title.includes("Oferta Exclusiva") || (notification.data && (notification.data.type === "exclusive_offer" || notification.data.tag?.includes("exclusive-offer")));
+            const isAutoAccept = title.includes("auto-aceptado") || (notification.data && (notification.data.type === "auto_accept" || notification.data.channelId === "auto_accept_alerts"));
+
+            if (isExclusive) {
+              import('../pages/delivery-panel.js').then(({ playExclusiveOfferAlert }) => {
+                playExclusiveOfferAlert();
+              }).catch(err => console.warn('Could not trigger playExclusiveOfferAlert:', err));
+            } else if (isAutoAccept) {
+              // Play a prominent cash register coin sound for auto-accepted orders
+              AudioManager.playSound('/assets/sounds/chime.mp3');
+            } else {
+              AudioManager.playSound('/assets/sounds/notification.mp3');
+            }
           }
           await addDoc(collection(db, 'users', user.uid, 'notifications'), {
             title: title || '',
@@ -173,41 +214,10 @@ export async function initPushNotifications() {
       return;
     }
 
-    if (Notification.permission === 'default') {
-      console.log('[Push] Skipping prompt on Web/PWA to avoid conflicts with browser permissions.');
-      return;
-    }
-
-    // Use existing registration from main.js with safety catch
-    let swRegistration;
-    try {
-      swRegistration = await navigator.serviceWorker.ready;
-      if (!swRegistration) {
-        throw new Error('Service Worker registration not found');
-      }
-    } catch (swErr) {
-      console.warn('[Push] Service Worker not available or ready check failed (this can happen due to private browsing, cookie restrictions, or low device storage):', swErr);
-      return;
-    }
-
-    // Get FCM token
-    const token = await getToken(messaging, {
-      vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: swRegistration
-    });
-
-    if (token) {
-      console.log('FCM Token generated:', token);
-      // Save/Update token in Firestore under user's document
-      await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token), {
-        token,
-        lastSession: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        platform: navigator.userAgent.includes('Mobile') ? 'mobile-web' : 'desktop-web'
-      }, { merge: true });
-      console.log('FCM Token successfully updated in Firestore for user:', user.uid);
-    } else {
-      console.warn('No FCM token received. Check VAPID key and Firebase configuration.');
+    if (Notification.permission === 'granted') {
+      await requestAndSaveFcmToken(user);
+    } else if (Notification.permission === 'default') {
+      console.log('[Push] Notification permission is default. Waiting for user prompt or gesture.');
     }
 
     const recentlyNotified = window._recentlyNotifiedNotifications || new Set();
@@ -235,10 +245,10 @@ export async function initPushNotifications() {
             await addDoc(collection(db, 'users', user.uid, 'notifications'), {
               title,
               body,
-              type: 'system',
+              type: 'push_mirror',
               url: url || '',
               status: 'unread',
-              createdAt: serverTimestamp()
+              createdAt: new Date()
             });
           }
 
@@ -247,9 +257,6 @@ export async function initPushNotifications() {
             showToast(`${title}: ${body}`, 'info');
             AudioManager.playSound('/assets/sounds/notification.mp3');
             if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-            
-            // Force native browser notification banner in PWA foreground
-            showNativeNotificationBanner(title, body, tag);
           }
         }
       });
@@ -272,7 +279,7 @@ export async function initPushNotifications() {
           await addDoc(collection(db, 'users', user.uid, 'notifications'), {
             title,
             body,
-            type: payload.data?.type || 'system',
+            type: 'push_mirror',
             url: payload.data?.url || '',
             status: 'unread',
             createdAt: serverTimestamp()
@@ -282,9 +289,6 @@ export async function initPushNotifications() {
           showToast(`${title}: ${body}`, 'info');
           AudioManager.playSound('/assets/sounds/notification.mp3');
           if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-          
-          // Force native browser notification banner in PWA foreground
-          showNativeNotificationBanner(title, body, tag);
         }
       });
     }
@@ -301,15 +305,16 @@ export function showNativeNotificationBanner(title, body, tag = '') {
       navigator.serviceWorker.ready.then(reg => {
         reg.showNotification(title, {
           body,
-          icon: '/assets/img/logo.png',
+          icon: '/logo-pwa.png',
           tag: tag || `notif-${Date.now()}`,
-          renotify: true
+          renotify: true,
+          requireInteraction: true // Non-dismissable persistent status notification
         });
       }).catch(() => {
-        new Notification(title, { body, tag });
+        new Notification(title, { body, tag, requireInteraction: true });
       });
     } catch (e) {
-      new Notification(title, { body, tag });
+      new Notification(title, { body, tag, requireInteraction: true });
     }
   }
 }
@@ -398,5 +403,117 @@ function showPushRequiredLockScreen() {
     }
   };
 }
+
+/**
+ * Check if current browser environment is Web/PWA on an iOS device.
+ */
+export function isIOSWeb() {
+  const isNativeApp = window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web';
+  if (isNativeApp) return false;
+  const userAgent = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return isIOS;
+}
+
+/**
+ * Request FCM Token for Web/PWA and save it to Firestore under user profile.
+ */
+export async function requestAndSaveFcmToken(userParam = null) {
+  let user = userParam || getState().user;
+  if (!user) {
+    try {
+      const { auth } = await import('../firebase.js');
+      user = auth.currentUser;
+    } catch (e) {}
+  }
+  if (!user) return null;
+
+  try {
+    const messaging = await getMessagingInstance();
+    if (!messaging) {
+      console.warn('[Push] Messaging instance not available');
+      return null;
+    }
+
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      return null;
+    }
+
+    let swRegistration;
+    try {
+      swRegistration = await navigator.serviceWorker.ready;
+      if (!swRegistration) {
+        swRegistration = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+      }
+    } catch (swErr) {
+      console.warn('[Push] Service Worker ready check failed:', swErr);
+      return null;
+    }
+
+    if (!swRegistration) {
+      console.warn('[Push] No active Service Worker registration found for Web Push');
+      return null;
+    }
+
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: swRegistration
+    });
+
+    if (token) {
+      console.log('[Push] Web FCM Token generated successfully:', token);
+      const isIOS = isIOSWeb();
+      const platformName = isIOS ? 'ios-pwa' : (navigator.userAgent.includes('Mobile') ? 'mobile-web' : 'desktop-web');
+
+      await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token), {
+        token,
+        lastSession: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        platform: platformName
+      }, { merge: true });
+
+      await setDoc(doc(db, 'users', user.uid), {
+        lastFcmToken: token,
+        lastFcmTokenUpdatedAt: serverTimestamp()
+      }, { merge: true });
+
+      console.log('[Push] FCM Token successfully updated in Firestore for platform:', platformName);
+      return token;
+    } else {
+      console.warn('[Push] No FCM token returned by getToken');
+    }
+  } catch (err) {
+    console.error('[Push] Error generating/saving FCM token:', err);
+  }
+  return null;
+}
+
+/**
+ * Request Web Push Notification Permission via user gesture and save FCM token if granted.
+ */
+export async function requestWebPushPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      let user = getState().user;
+      if (!user) {
+        try {
+          const { auth } = await import('../firebase.js');
+          user = auth.currentUser;
+        } catch (e) {}
+      }
+      if (user) {
+        await requestAndSaveFcmToken(user);
+      }
+    }
+    return permission;
+  } catch (err) {
+    console.error('[Push] Error requesting Web Push permission:', err);
+    return 'error';
+  }
+}
+
 
 

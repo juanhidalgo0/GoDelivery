@@ -1,7 +1,9 @@
 // GoDelivery — Admin Users Management
 import { db } from '../../firebase.js';
-import { collection, getDocs, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { isSuperAdmin, isAdmin } from '../../auth.js';
+
+let usersUnsubscribe = null;
 import { getState } from '../../state.js';
 import { showToast } from '../../components/toast.js';
 import { showConfirm, showModal } from '../../components/modal.js';
@@ -32,6 +34,9 @@ export async function renderAdminUsers() {
           </h1>
           <p id="users-subtitle" style="font-size:11px;color:rgba(255,255,255,0.7);font-weight:800;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.05em;">Panel administrativo de permisos</p>
         </div>
+        <button id="users-header-reload-btn" style="background:rgba(255,255,255,0.15); border:none; width:40px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; transition:all 0.2s; position:relative; z-index:2;" title="Recargar página">
+          ${icon('refresh', 22)}
+        </button>
       </div>
 
       <!-- Scrollable Content -->
@@ -48,6 +53,12 @@ export async function renderAdminUsers() {
           <button class="tab-pill" data-filter="delivery">Repartidores</button>
           <button class="tab-pill" data-filter="chofer">Choferes</button>
           <button class="tab-pill" data-filter="comercio">Comercios</button>
+        </div>
+
+        <div id="driver-actions-bar" style="display:none; flex-shrink:0; width:100%; margin-top:-4px;">
+          <button id="reset-all-drivers-debt-btn" style="width:100%; height:46px; border-radius:16px; background:linear-gradient(135deg, #ef4444, #dc2626); color:white; border:none; font-weight:800; font-size:13.5px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; box-shadow:0 6px 16px rgba(239,68,68,0.3); transition:all 0.2s;">
+            ${icon('refresh', 16)} Resetear Deuda de Todos los Repartidores ($0)
+          </button>
         </div>
 
         <!-- Advanced Filters & Sorting -->
@@ -94,6 +105,20 @@ export async function renderAdminUsers() {
                 <option value="android">Android</option>
                 <option value="ios">iOS</option>
                 <option value="web">Web / Desktop (o sin registrar)</option>
+              </select>
+              <span style="position:absolute; right:12px; color:var(--color-text-tertiary); pointer-events:none; display:flex;">${icon('chevronDown', 14)}</span>
+            </div>
+          </div>
+
+          <!-- Connection Status Filter -->
+          <div id="users-connection-filter-container" style="flex:1; min-width:140px; display:flex; flex-direction:column; gap:4px;">
+            <label style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; padding-left:4px;">Conexión (Repartidores)</label>
+            <div style="position:relative; display:flex; align-items:center; background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:12px; padding:0 12px; height:44px; box-shadow:var(--shadow-sm);">
+              <span style="color:var(--color-text-tertiary); display:flex; margin-right:6px;">${icon('power', 16)}</span>
+              <select id="users-connection" style="flex:1; border:none; background:transparent; font-size:13px; font-weight:700; color:var(--color-text); outline:none; appearance:none; cursor:pointer; padding-right:20px;">
+                <option value="all">Todos los estados</option>
+                <option value="online">Conectados</option>
+                <option value="offline">Desconectados</option>
               </select>
               <span style="position:absolute; right:12px; color:var(--color-text-tertiary); pointer-events:none; display:flex;">${icon('chevronDown', 14)}</span>
             </div>
@@ -173,11 +198,53 @@ export async function renderAdminUsers() {
   `;
 
   let users = [];
+  let deliveryLiquidationsMap = {};
+
+  // Wire up the reload button immediately
+  const reloadBtn = document.getElementById('users-header-reload-btn');
+  if (reloadBtn) {
+    reloadBtn.onclick = () => window.location.reload();
+  }
+
+  // Unsubscribe previous if any
+  if (usersUnsubscribe) {
+    usersUnsubscribe();
+    usersUnsubscribe = null;
+  }
+
+  // Search, Filter & Sort values helper
+  let currentFilter = 'all';
+  const getSortVal = () => document.getElementById('users-sort')?.value || 'none';
+  const getStarsVal = () => document.getElementById('users-stars')?.value || 'all';
+  const getOsVal = () => document.getElementById('users-os')?.value || 'all';
+  const getConnVal = () => document.getElementById('users-connection')?.value || 'all';
+
+  function updateList() {
+    const searchVal = document.getElementById('users-search')?.value || '';
+    
+    const connFilterContainer = document.getElementById('users-connection-filter-container');
+    if (connFilterContainer) {
+      if (currentFilter === 'delivery' || currentFilter === 'chofer' || currentFilter === 'all') {
+        connFilterContainer.style.display = 'flex';
+      } else {
+        connFilterContainer.style.display = 'none';
+      }
+    }
+
+    const driverActionsBar = document.getElementById('driver-actions-bar');
+    if (driverActionsBar) {
+      if (currentFilter === 'delivery' || currentFilter === 'chofer') {
+        driverActionsBar.style.display = 'block';
+      } else {
+        driverActionsBar.style.display = 'none';
+      }
+    }
+
+    renderUsersList(users, searchVal, currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal(), getConnVal(), deliveryLiquidationsMap);
+  }
 
   try {
-    const snap = await getDocs(collection(db, 'users'));
-    users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
-
+    // Fetch comercios list once
     try {
       const comSnap = await getDocs(collection(db, 'comercios'));
       comerciosMap = {};
@@ -187,56 +254,112 @@ export async function renderAdminUsers() {
     } catch (comErr) {
       console.error('Error fetching comercios:', comErr);
     }
-    
-    const totalBadge = document.getElementById('users-total-badge');
-    if (totalBadge) {
-      totalBadge.textContent = `${users.length}`;
-      totalBadge.style.display = 'inline-block';
-    }
 
-    const androidCount = users.filter(u => u.deviceOS === 'android').length;
-    const iosCount = users.filter(u => u.deviceOS === 'ios').length;
-    const subtitle = document.getElementById('users-subtitle');
-    if (subtitle) {
-      subtitle.textContent = `Panel administrativo • ${androidCount} Android • ${iosCount} iOS`;
-    }
-    
-    // Auto-assign GO-IDs if missing
-    const usersWithoutId = users.filter(u => !u.goId);
-    if (usersWithoutId.length > 0) {
-      const { runTransaction, doc: fDoc } = await import('firebase/firestore');
-      await runTransaction(db, async (t) => {
-        const sRef = fDoc(db, 'settings', 'users');
-        const sSnap = await t.get(sRef);
-        let last = sSnap.exists() ? sSnap.data().lastGoId || 1000 : 1000;
-        for (const u of usersWithoutId) {
-          last++;
-          const goId = `GO-${last}`;
-          t.update(fDoc(db, 'users', u.uid), { goId });
-          u.goId = goId;
-        }
-        t.set(sRef, { lastGoId: last }, { merge: true });
-      });
-    }
+    // Set up real-time listener for users
+    usersUnsubscribe = onSnapshot(collection(db, 'users'), async (snap) => {
+      users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
 
-    renderUsersList(users, '', currentUser, canChangeRoles, 'all', 'none', 'all', 'all');
-  } catch (e) { console.error(e); }
+      const totalBadge = document.getElementById('users-total-badge');
+      if (totalBadge) {
+        totalBadge.textContent = `${users.length}`;
+        totalBadge.style.display = 'inline-block';
+      }
 
-  // Search, Filter & Sort listeners
-  let currentFilter = 'all';
-  const getSortVal = () => document.getElementById('users-sort')?.value || 'none';
-  const getStarsVal = () => document.getElementById('users-stars')?.value || 'all';
-  const getOsVal = () => document.getElementById('users-os')?.value || 'all';
+      const androidCount = users.filter(u => u.deviceOS === 'android').length;
+      const iosCount = users.filter(u => u.deviceOS === 'ios').length;
+      const subtitle = document.getElementById('users-subtitle');
+      if (subtitle) {
+        subtitle.textContent = `Panel administrativo • ${androidCount} Android • ${iosCount} iOS`;
+      }
 
-  const updateList = () => {
-    const searchVal = document.getElementById('users-search')?.value || '';
-    renderUsersList(users, searchVal, currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
-  };
+      // Fetch delivery_transactions to compute liquidations per driver
+      try {
+        const transSnap = await getDocs(collection(db, 'delivery_transactions'));
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        const startOfWeek = new Date(now);
+        const day = startOfWeek.getDay();
+        const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+        startOfWeek.setDate(diff);
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        deliveryLiquidationsMap = {};
+        transSnap.docs.forEach(dDoc => {
+          const tData = dDoc.data();
+          const dId = tData.driverId;
+          if (!dId) return;
+
+          if (!deliveryLiquidationsMap[dId]) {
+            deliveryLiquidationsMap[dId] = { week: 0, month: 0, total: 0 };
+          }
+
+          const amt = Number(tData.amount || 0);
+          if (tData.type === 'settlement' || tData.type === 'pago') {
+            deliveryLiquidationsMap[dId].total += amt;
+            const tDate = tData.createdAt ? (tData.createdAt.toDate ? tData.createdAt.toDate() : new Date(tData.createdAt)) : null;
+            if (tDate) {
+              if (tDate >= startOfWeek) deliveryLiquidationsMap[dId].week += amt;
+              if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) deliveryLiquidationsMap[dId].month += amt;
+            }
+          }
+        });
+
+        users.forEach(u => {
+          const liq = deliveryLiquidationsMap[u.uid] || { week: 0, month: 0, total: 0 };
+          u.weekLiquidated = liq.week;
+          u.monthLiquidated = liq.month;
+          u.totalLiquidated = liq.total;
+        });
+      } catch (tErr) {
+        console.warn('Error fetching driver liquidations:', tErr);
+      }
+
+      // Re-trigger rendering
+      updateList();
+    });
+
+  } catch (e) { 
+    console.error(e); 
+  }
 
   document.getElementById('users-search')?.addEventListener('input', updateList);
   document.getElementById('users-sort')?.addEventListener('change', updateList);
   document.getElementById('users-stars')?.addEventListener('change', updateList);
   document.getElementById('users-os')?.addEventListener('change', updateList);
+  document.getElementById('users-connection')?.addEventListener('change', updateList);
+
+  document.getElementById('reset-all-drivers-debt-btn')?.addEventListener('click', () => {
+    showConfirm({
+      title: '⚠️ RESETEAR DEUDA DE REPARTIDORES',
+      message: '¿Estás seguro de que deseas poner en <b>$0</b> la deuda de TODOS los repartidores de la plataforma?',
+      danger: true,
+      confirmText: 'Sí, resetear todo a $0',
+      onConfirm: async () => {
+        try {
+          const { writeBatch, collection: fCollection, getDocs: fGetDocs } = await import('firebase/firestore');
+          const snap = await fGetDocs(fCollection(db, 'users'));
+          const batch = writeBatch(db);
+          let count = 0;
+          snap.docs.forEach(docSnap => {
+            const uData = docSnap.data();
+            if (uData.isDelivery || uData.tripStatus === 'approved' || uData.role === 'delivery' || uData.role === 'chofer' || uData.role === 'driver') {
+              batch.update(docSnap.ref, { deliveryDebt: 0 });
+              uData.deliveryDebt = 0;
+              count++;
+            }
+          });
+          await batch.commit();
+          showToast(`¡Se reseteó a $0 la deuda de ${count} repartidores!`, 'success');
+          updateList();
+        } catch (err) {
+          console.error('Error resetting driver debts:', err);
+          showToast('Error al resetear deudas', 'error');
+        }
+      }
+    });
+  });
 
   document.querySelectorAll('.tab-pill').forEach(btn => {
     btn.onclick = () => {
@@ -294,20 +417,75 @@ export async function renderAdminUsers() {
       return;
     }
 
-    // 2. Settle Debt Click (Evaluated first to bypass viewRatingsBtn container bubble)
-    const settleBtn = e.target.closest('[data-settle-debt]');
-    if (settleBtn) {
-      const uid = settleBtn.dataset.settleDebt || settleBtn.dataset.uid;
-      const u = users.find(x => x.uid === uid);
-      if (!u) return;
+
+
+    // 2.3. Toggle Canon Daily Status Click
+    const canonToggleBtn = e.target.closest('[data-toggle-canon]');
+    if (canonToggleBtn) {
+      const uid = canonToggleBtn.dataset.toggleCanon;
+      const targetUser = users.find(u => u.uid === uid);
+      if (!targetUser) return;
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      const isCurrentlyActive = targetUser.lastCanonDate === todayStr;
+      const newStatus = isCurrentlyActive ? null : todayStr;
+
       showConfirm({
-        title: 'Liquidar Saldo',
-        message: `¿Confirmás el cobro de ${formatPrice(u.deliveryDebt)}?`,
+        title: isCurrentlyActive ? 'Bloquear Jornada' : 'Habilitar Jornada',
+        message: `¿Querés ${isCurrentlyActive ? 'BLOQUEAR' : 'HABILITAR'} la jornada de hoy (${todayStr}) para ${targetUser.displayName}?`,
         onConfirm: async () => {
-          await updateDoc(doc(db, 'users', uid), { deliveryDebt: 0 });
-          u.deliveryDebt = 0;
-          renderUsersList(users, document.getElementById('users-search')?.value || '', currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
-          showToast('Saldo liquidado', 'success');
+          try {
+            const canonDocRef = doc(db, 'delivery_canon_payments', `${uid}_${todayStr}`);
+            if (newStatus) {
+              await setDoc(canonDocRef, {
+                driverId: uid,
+                dateStr: todayStr,
+                status: 'approved',
+                amount: 2000,
+                updatedAt: serverTimestamp()
+              }, { merge: true });
+              await updateDoc(doc(db, 'users', uid), { lastCanonDate: todayStr, lastCanonChargeDate: todayStr });
+              targetUser.lastCanonDate = todayStr;
+              targetUser.lastCanonChargeDate = todayStr;
+              showToast(`Jornada habilitada para ${targetUser.displayName}`, 'success');
+            } else {
+              await setDoc(canonDocRef, { status: 'revoked', updatedAt: serverTimestamp() }, { merge: true });
+              await updateDoc(doc(db, 'users', uid), { lastCanonDate: null, lastCanonChargeDate: null });
+              targetUser.lastCanonDate = null;
+              targetUser.lastCanonChargeDate = null;
+              showToast(`Jornada bloqueada / reseteada para ${targetUser.displayName}`, 'info');
+            }
+            renderUsersList(users, document.getElementById('users-search')?.value || '', currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
+          } catch (err) {
+            console.error('Error toggling canon:', err);
+            showToast('Error al actualizar el canon diario', 'error');
+          }
+        }
+      });
+      return;
+    }
+
+    // 2.4. Toggle Canon Exemption Click
+    const canonExemptBtn = e.target.closest('[data-toggle-canon-exempt]');
+    if (canonExemptBtn) {
+      const uid = canonExemptBtn.dataset.toggleCanonExempt;
+      const targetUser = users.find(u => u.uid === uid);
+      if (!targetUser) return;
+
+      const newExemptState = !targetUser.isCanonExempt;
+      showConfirm({
+        title: newExemptState ? 'Eximir de Canon' : 'Quitar Exención',
+        message: `¿Querés ${newExemptState ? 'EXIMIR permanentemente' : 'REQUERIR canon'} de pago a ${targetUser.displayName}?`,
+        onConfirm: async () => {
+          try {
+            await updateDoc(doc(db, 'users', uid), { isCanonExempt: newExemptState });
+            targetUser.isCanonExempt = newExemptState;
+            renderUsersList(users, document.getElementById('users-search')?.value || '', currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
+            showToast(`Exención actualizada para ${targetUser.displayName}`, 'success');
+          } catch (err) {
+            console.error('Error toggling canon exemption:', err);
+            showToast('Error al actualizar exención', 'error');
+          }
         }
       });
       return;
@@ -351,9 +529,13 @@ export async function renderAdminUsers() {
                 updateData['tripApplication.status'] = 'approved';
                 updateData.isDelivery = true;
                 updateData.deliveryMode = 'both';
+                updateData.role = 'chofer';
               } else {
                 updateData.tripStatus = 'rejected';
                 updateData['tripApplication.status'] = 'rejected';
+                if (targetUser.role === 'chofer' || targetUser.role === 'delivery' || targetUser.role === 'driver') {
+                  updateData.role = 'user';
+                }
               }
             } else {
               updateData[field] = newValue;
@@ -362,6 +544,7 @@ export async function renderAdminUsers() {
             if (field === 'isDelivery') {
               if (newValue) {
                 updateData.deliveryStatus = 'approved';
+                updateData.role = 'delivery';
                 if (!targetUser.deliveryId) {
                   const { runTransaction, doc: fDoc } = await import('firebase/firestore');
                   await runTransaction(db, async (t) => {
@@ -376,6 +559,9 @@ export async function renderAdminUsers() {
                 const { deleteField } = await import('firebase/firestore');
                 updateData.deliveryId = deleteField();
                 updateData.deliveryStatus = deleteField();
+                if (targetUser.role === 'delivery' || targetUser.role === 'chofer' || targetUser.role === 'driver') {
+                  updateData.role = 'user';
+                }
               }
             }
             
@@ -518,7 +704,7 @@ export async function renderAdminUsers() {
   renderTripRequests(users, canChangeRoles);
 }
 
-function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'all', sortVal = 'none', starsVal = 'all', osVal = 'all') {
+function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'all', sortVal = 'none', starsVal = 'all', osVal = 'all', connVal = 'all') {
   const container = document.getElementById('users-list');
   if (!container) return;
 
@@ -532,6 +718,14 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
     filtered = filtered.filter(u => u.isDelivery && u.tripStatus !== 'approved');
   } else if (filter === 'chofer') {
     filtered = filtered.filter(u => u.tripStatus === 'approved');
+  }
+
+  // 1.5 Connection Status Filter — isOnline:true is the sole truth
+  if (connVal && connVal !== 'all') {
+    filtered = filtered.filter(u => {
+      const isOnline = u.isOnline === true;
+      return connVal === 'online' ? isOnline : !isOnline;
+    });
   }
 
   // Helper to calculate rating stats
@@ -613,6 +807,40 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
     const { count, avg } = calculateStats(u);
     const avgText = count > 0 ? avg.toFixed(1) : null;
 
+    let connectionBadgeHTML = '';
+    if (u.isDelivery || u.tripStatus === 'approved') {
+      const isOnline = u.isOnline === true;
+      let lastAct = null;
+      if (u.lastActivityAt) {
+        lastAct = u.lastActivityAt.toDate ? u.lastActivityAt.toDate() : new Date(u.lastActivityAt);
+      }
+
+      let lastActText = '';
+      if (lastAct) {
+        const diffMins = Math.floor((Date.now() - lastAct.getTime()) / 60000);
+        if (diffMins < 1) lastActText = 'Ahora';
+        else if (diffMins < 60) lastActText = `${diffMins}m`;
+        else if (diffMins < 1440) lastActText = `${Math.floor(diffMins / 60)}h`;
+        else lastActText = `${Math.floor(diffMins / 1440)}d`;
+      }
+
+      if (isOnline) {
+        connectionBadgeHTML = `
+          <span class="id-badge" style="background:rgba(34,197,94,0.1); color:#22c55e; border:1px solid rgba(34,197,94,0.2); font-weight:850; display:inline-flex; align-items:center; gap:4.5px;">
+            <span style="width:6px; height:6px; background:#22c55e; border-radius:50%; box-shadow:0 0 6px #22c55e;"></span>
+            Online${lastActText ? ` · ${lastActText}` : ''}
+          </span>
+        `;
+      } else {
+        connectionBadgeHTML = `
+          <span class="id-badge" style="background:rgba(148,163,184,0.1); color:#64748b; border:1px solid rgba(148,163,184,0.2); font-weight:850; display:inline-flex; align-items:center; gap:4.5px;">
+            <span style="width:6px; height:6px; background:#64748b; border-radius:50%;"></span>
+            Offline${lastActText ? ` · ${lastActText}` : ''}
+          </span>
+        `;
+      }
+    }
+
     const isComercio = u.isComercio || u.role === 'comercio';
     const commerceData = isComercio ? comerciosMap[u.uid] : null;
     const phone = commerceData?.phone || commerceData?.whatsapp || u.phone || u.phoneNumber;
@@ -654,6 +882,7 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
               <span class="id-badge id-go">${u.goId || '...'}</span>
               ${u.deliveryId ? `<span class="id-badge id-dl">${u.deliveryId}</span>` : ''}
               ${u.tripStatus === 'approved' ? `<span class="id-badge id-ch" style="cursor:pointer;" data-toggle="isChofer" data-uid="${u.uid}">Chofer</span>` : ''}
+              ${connectionBadgeHTML}
               <span class="id-badge" style="background:#fbbf24; color:white; display:inline-flex; align-items:center; gap:3.5px;">
                 ${icon('goPointsLogo', 10)} ${u.points || 0} pts
               </span>
@@ -665,9 +894,30 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
         </div>
 
         ${(u.isDelivery || u.tripStatus === 'approved') ? `
-          <!-- Vehicle details block -->
+          <!-- Vehicle & Canon details block -->
           <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px; margin-top:8px; display:flex; flex-direction:column; gap:6.5px; font-size:12px; font-weight:700;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
+            <!-- Canon Diario Toggle & Exemption -->
+            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(225,29,72,0.04); border:1px solid rgba(225,29,72,0.12); padding:8px 12px; border-radius:12px;">
+              <div>
+                <div style="font-weight:900; font-size:12px; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                  Canon Diario (Hoy)
+                  ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt) ? '<span style="font-size:9px; background:#6366f1; color:white; padding:1px 5px; border-radius:4px;">EXENTO</span>' : ''}
+                </div>
+                <div style="font-size:10px; color:var(--color-text-secondary); font-weight:600;">
+                  ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt) ? 'Admin / Exento de pago' : 'Habilitar o bloquear jornada'}
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button data-toggle-canon-exempt="${u.uid}" title="Cambiar exención permanente" style="padding:4px 8px; border-radius:8px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); font-size:10px; font-weight:800; cursor:pointer; color:var(--color-text-tertiary);">
+                  ${u.isCanonExempt ? '⭐ Exento' : '⚙️ Hacer Exento'}
+                </button>
+                <button data-toggle-canon="${u.uid}" style="padding:6px 12px; border-radius:10px; border:none; font-size:11px; font-weight:900; cursor:pointer; transition:all 0.2s; ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt || u.lastCanonDate === (new Date().toISOString().split('T')[0])) ? 'background:#22c55e; color:white;' : 'background:#ef4444; color:white;'}">
+                  ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt || u.lastCanonDate === (new Date().toISOString().split('T')[0])) ? '🟢 HABILITADO' : '🔴 PENDIENTE'}
+                </button>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px dashed var(--color-border-light); padding-top: 5px;">
               <span style="color:var(--color-text-secondary); display:flex; align-items:center; gap:4px; font-size:11px;">
                 ${icon('car', 14)} Vehículo:
               </span>
@@ -687,9 +937,28 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
                 ${u.patente || u.vehicleDetails || '---'}
               </span>
             </div>
-            <button data-edit-vehicle="${u.uid}" style="margin-top:6px; height:32px; border-radius:8px; border:1px dashed var(--color-primary); background:none; color:var(--color-primary); font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;" onmouseover="this.style.background='rgba(var(--color-primary-rgb), 0.05)'" onmouseout="this.style.background='none'">
+            <button data-edit-vehicle="${u.uid}" style="margin-top:4px; height:32px; border-radius:8px; border:1px dashed var(--color-primary); background:none; color:var(--color-primary); font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;" onmouseover="this.style.background='rgba(var(--color-primary-rgb), 0.05)'" onmouseout="this.style.background='none'">
               ${icon('edit', 12)} Editar Vehículo
             </button>
+
+            <!-- Liquidation Metrics (Week, Month, Total) -->
+            <div style="margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--color-border-light);">
+              <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Total Liquidado / Cobrado</div>
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">
+                <div style="background: var(--color-background); border: 1px solid var(--color-border-light); border-radius: 10px; padding: 6px 4px;">
+                  <div style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Esta Semana</div>
+                  <div style="font-size: 12.5px; font-weight: 900; color: #10b981; margin-top: 2px;">${formatPrice(u.weekLiquidated || 0)}</div>
+                </div>
+                <div style="background: var(--color-background); border: 1px solid var(--color-border-light); border-radius: 10px; padding: 6px 4px;">
+                  <div style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Este Mes</div>
+                  <div style="font-size: 12.5px; font-weight: 900; color: #059669; margin-top: 2px;">${formatPrice(u.monthLiquidated || 0)}</div>
+                </div>
+                <div style="background: var(--color-background); border: 1px solid var(--color-border-light); border-radius: 10px; padding: 6px 4px;">
+                  <div style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Hasta Ahora</div>
+                  <div style="font-size: 12.5px; font-weight: 900; color: var(--color-primary); margin-top: 2px;">${formatPrice(u.totalLiquidated || 0)}</div>
+                </div>
+              </div>
+            </div>
           </div>
         ` : ''}
 
@@ -740,9 +1009,9 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
                 <div style="font-size: 16px; font-weight: 900; color: #ef4444; margin-top: 1px;">${formatPrice(u.deliveryDebt)}</div>
               </div>
             </div>
-            <button data-settle-debt="${u.uid}" data-uid="${u.uid}" style="height: 38px; padding: 0 16px; border-radius: 10px; border: none; background: #ef4444; color: white; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-              ${icon('check', 14)} Liquidar Saldo
-            </button>
+            <a href="#/admin/commissions" style="height: 38px; padding: 0 16px; border-radius: 10px; border: none; background: #ef4444; color: white; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+              ${icon('bank', 14)} Liquidar en Economía
+            </a>
           </div>
         ` : ''}
 

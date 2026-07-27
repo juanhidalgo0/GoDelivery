@@ -2,7 +2,7 @@
 import { db } from '../firebase.js';
 import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { getState, setState } from '../state.js';
-import { formatPrice } from '../utils/format.js';
+import { formatPrice, calculateScheduleSurcharge } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { icon } from '../utils/icons.js';
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
@@ -492,39 +492,40 @@ export async function showMandadoForm() {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; max-height: calc(88dvh - 56px);';
   modalEl.innerHTML = `
     <div style="display: flex; flex-direction: column;">
       <!-- Paso 1 Container -->
-      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px; scrollbar-width: none;">
-          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
-            <button id="pickup-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:36px; height:36px; border-radius:12px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 20)}</div>
+      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; scrollbar-width: none;">
+
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
+            <button id="pickup-addr-btn" style="width: 100%; height: 50px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-surface); font-size: 13.5px; font-weight: 700; display:flex; align-items:center; gap:10px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:32px; height:32px; border-radius:10px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 18)}</div>
                <span id="pickup-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Elegir dirección en el mapa...</span>
                ${icon('chevronRight', 16)}
             </button>
-            <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+            <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
 
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
-            <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
+            <button id="delivery-addr-btn" style="width: 100%; height: 50px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-surface); font-size: 13.5px; font-weight: 700; display:flex; align-items:center; gap:10px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:32px; height:32px; border-radius:10px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 18)}</div>
                <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
                ${icon('chevronRight', 16)}
             </button>
-            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
 
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; margin-bottom:4px; display:block;">Detalles de la Encomienda</label>
-            <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 100px; border-radius: 16px; border: 1.5px solid var(--color-border-light); padding: 14px; background: var(--color-surface); color: var(--color-text-primary); font-size: 13.5px; font-weight: 600; resize: none; outline:none; font-family:inherit; transition:all 0.2s;"></textarea>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; display:block;">Detalles de la Encomienda</label>
+            <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 80px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 10px 12px; background: var(--color-surface); color: var(--color-text-primary); font-size: 12.5px; font-weight: 600; resize: none; outline:none; font-family:inherit; transition:all 0.2s;"></textarea>
           </div>
         </div>
 
-        <button type="button" id="step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
+        <button type="button" id="step-1-next-btn" style="width: 100%; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 14px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 4px; flex-shrink: 0; box-shadow: 0 6px 16px rgba(var(--color-primary-rgb),0.22);">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
@@ -587,13 +588,12 @@ export async function showMandadoForm() {
   showModal({
     title: 'Detalles de la Encomienda',
     content: modalEl,
+    fullscreen: false,
     height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
     headerTextColor: '#ffffff'
   });
-
-  const pickupBtn = modalEl.querySelector('#pickup-addr-btn');
   const deliveryBtn = modalEl.querySelector('#delivery-addr-btn');
   const pickupText = modalEl.querySelector('#pickup-text');
   const deliveryText = modalEl.querySelector('#delivery-text');
@@ -711,7 +711,8 @@ export async function showMandadoForm() {
         }
 
         const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-        const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+        const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedFee);
+        const total = Math.max(calculatedFee + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
 
         distCostEl.textContent = formatPrice(calculatedFee);
         
@@ -877,7 +878,7 @@ export async function showMandadoForm() {
     const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
     const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
 
-    showConfirm({
+    verifyDriversAndConfirm({
       title: '¿Confirmar encomienda?',
       message: `Se enviará un repartidor para realizar tu envío de encomienda.<br><br>Costo del servicio: <strong>${formatPrice(total)}</strong>`,
       onConfirm: async () => {
@@ -908,6 +909,59 @@ export async function showMandadoForm() {
       }
     });
   };
+}
+
+async function checkOnlineDrivers() {
+  try {
+    const { query, collection, where, getDocsFromServer } = await import('firebase/firestore');
+    const q = query(
+      collection(db, 'users'), 
+      where('isOnline', '==', true)
+    );
+    const snap = await getDocsFromServer(q);
+    
+    return snap.docs.some(d => {
+      const data = d.data();
+      const role = data.role || '';
+      const isDel = data.isDelivery === true || data.isDelivery === 'true' || role === 'delivery' || role === 'driver' || role === 'repartidor' || role === 'chofer' || role === 'admin';
+      return isDel;
+    });
+  } catch (err) {
+    console.warn('Error verifying drivers, assuming offline:', err);
+    return false;
+  }
+}
+
+async function verifyDriversAndConfirm(confirmOptions) {
+  const hasDelivery = await checkOnlineDrivers();
+  if (!hasDelivery) {
+    const { showModal } = await import('../components/modal.js');
+    const { close: closeAlert } = showModal({
+      title: '',
+      hideHeader: true,
+      height: 'auto',
+      content: `
+        <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
+          <div style="font-size: 44px; margin-bottom: 4px;">🛵</div>
+          <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3; color: var(--color-danger);">Sin repartidores disponibles</h4>
+          <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
+            No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
+          </p>
+          <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+            ENTENDIDO
+          </button>
+        </div>
+      `
+    });
+    
+    setTimeout(() => {
+      const btn = document.getElementById('no-drivers-close-btn');
+      if (btn) btn.onclick = () => closeAlert();
+    }, 50);
+    return;
+  }
+
+  showConfirm(confirmOptions);
 }
 
 async function createFavorOrder(data) {
@@ -967,115 +1021,151 @@ async function createFavorOrder(data) {
 
 export async function showCompraForm() {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
+  const { doc, getDoc } = await import('firebase/firestore');
+  const { db } = await import('../firebase.js');
+
+  let paulosConfig = { enabled: true, promoDeliveryFee: 1200, merchantCoveragePercent: 30 };
+  try {
+    const pSnap = await getDoc(doc(db, 'settings', 'paulos_config'));
+    if (pSnap.exists()) paulosConfig = pSnap.data();
+  } catch(e) {}
+
   const user = getState().user;
   const currentAddress = '';
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; max-height: calc(88dvh - 56px);';
   modalEl.innerHTML = `
-    <div style="display: flex; flex-direction: column;">
-      
-      <!-- Paso 1 Container -->
-      <div id="compra-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:4px; scrollbar-width: none;">
-          <div style="display:flex; flex-direction:column; gap:12px; margin-top: 4px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
-            <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
-              ${[1, 2, 3, 4, 5].map(n => `
-                <button type="button" class="stop-count-btn" data-stops="${n}" style="height:48px; border-radius:16px; border:2px solid ${n === 1 ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${n === 1 ? 'rgba(var(--color-primary-rgb),0.08)' : 'var(--color-surface)'}; color:${n === 1 ? 'var(--color-primary)' : 'var(--color-text-primary)'}; font-weight:900; font-size:15px; cursor:pointer; transition:all 0.2s; box-shadow: ${n === 1 ? '0 4px 12px rgba(var(--color-primary-rgb), 0.15)' : 'none'};">
-                  ${n}
-                </button>
-              `).join('')}
+    <!-- Step Indicator -->
+    <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-shrink:0;">
+      ${[1,2].map(n => `
+        <div id="compra-step-dot-${n}" style="transition:all 0.3s; width:${n===1?'32px':'8px'}; height:8px; border-radius:99px; background:${n===1?'#E11D48':'var(--color-border-light)'};"></div>
+      `).join('')}
+    </div>
+
+    <!-- Steps wrapper: position:relative container -->
+    <div id="compra-steps-wrapper" style="position:relative; flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; min-height:0;">
+
+      <!-- ── Paso 1: Comercios, Productos y Destino de Entrega ──────────────── -->
+      <div id="compra-step-1-container" style="display:flex; flex-direction:column; gap:10px; width:100%; box-sizing:border-box;">
+        <!-- Preset Banner Premium Maxikiosco Paulos -->
+        <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); border: 1.5px solid rgba(192, 132, 252, 0.35); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: 0 10px 28px rgba(76, 29, 149, 0.4); position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
+          <div style="position: absolute; top: -30%; right: -15%; width: 140px; height: 140px; background: radial-gradient(circle, rgba(236, 72, 153, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
+          <div style="position: absolute; bottom: -30%; left: -10%; width: 120px; height: 120px; background: radial-gradient(circle, rgba(168, 85, 247, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
+
+          <!-- Header row: Logo + Title (single line) + Badge (top right) -->
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; z-index: 1; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+              <div style="width: 44px; height: 44px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.3); background: #5b1a82;">
+                <img src="/paulos-logo-real.jpg?v=9" alt="Maxikiosco Paulos" style="width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%;" />
+              </div>
+
+              <div style="display: flex; flex-direction: column; min-width: 0; flex: 1;">
+                <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: #ffffff; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; text-shadow: 0 1px 3px rgba(0,0,0,0.4);">
+                  Maxikiosco Paulos
+                </h3>
+                <span style="font-size: 11px; font-weight: 700; color: rgba(233, 213, 255, 0.9); margin-top: 1px;">
+                  📍 Chacabuco 451
+                </span>
+              </div>
             </div>
-            <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:4px 0 0; font-weight:600; display:none; line-height:1.4;">
-              📍 Se cobra una parada extra por cada comercio adicional al primero.
-            </p>
+
+            <span style="z-index: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-size: 9px; font-weight: 950; padding: 4px 8px; border-radius: 7px; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 6px rgba(16,185,129,0.35); border: 1px solid rgba(255,255,255,0.2); white-space: nowrap; flex-shrink: 0;">
+              🌙 Abierto 24hs
+            </span>
           </div>
 
-          <!-- Dynamically generated list of stores -->
-          <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:16px;">
-            <!-- Filled dynamically -->
-          </div>
-
-          <!-- Delivery destination -->
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
-            <button id="delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
-               <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-               ${icon('chevronRight', 16)}
-            </button>
-            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
-          </div>
-        </div>
-
-        <button type="button" id="compra-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
-          Siguiente ${icon('chevronRight', 16)}
-        </button>
-      </div>
-
-      <!-- Paso 2 Container -->
-      <div id="compra-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:4px; scrollbar-width: none;">
-          <button type="button" id="compra-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
-            ${icon('chevronLeft', 16)} Volver a Paso 1
+          <!-- Bottom Center Button -->
+          <button type="button" style="z-index: 1; width: 100%; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; border: none; font-size: 12.5px; font-weight: 950; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4); text-transform: uppercase; letter-spacing: 0.05em;">
+            COMPRAR EN PAULOS
           </button>
+        </div>
 
-          <!-- Método de pago -->
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
-            <div style="display:flex; background:var(--color-bg-secondary); padding:4px; border-radius:16px; border:1.5px solid var(--color-border-light);">
-              <button type="button" id="compra-pay-efectivo" style="flex:1; height:42px; border-radius:12px; border:none; font-size:13px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-                ${icon('dollarSign', 14)} Efectivo
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px; flex-shrink:0;">
+          <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
+          <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:6px; flex-shrink:0;">
+            ${[1,2,3,4,5].map(n => `
+              <button type="button" class="stop-count-btn" data-stops="${n}" style="height:38px; border-radius:12px; border:2px solid ${n===1?'var(--color-primary)':'var(--color-border-light)'}; background:${n===1?'rgba(var(--color-primary-rgb),0.08)':'var(--color-surface)'}; color:${n===1?'var(--color-primary)':'var(--color-text-primary)'}; font-weight:900; font-size:13.5px; cursor:pointer; transition:all 0.2s;">
+                ${n}
               </button>
-              <button type="button" id="compra-pay-transfer" style="flex:1; height:42px; border-radius:12px; border:none; font-size:13px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-                ${icon('creditCard', 14)} Transferencia
-              </button>
-            </div>
+            `).join('')}
           </div>
-          
-          <!-- Benefits Container -->
-          <div id="compra-benefits-container"></div>
-          
-          <!-- Cost Preview -->
-          <div id="compra-cost-preview" style="background: var(--color-bg-secondary); padding: 16px; border-radius: 20px; display: none; flex-direction:column; gap:10px; border:1px solid var(--color-border-light); margin-top:auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:var(--color-text-primary);">
-              <span style="display:flex; align-items:center; gap:6px;">
-                Costo de Envío
-                <button type="button" id="compra-info-btn" style="border:none; background:transparent; padding:4px; cursor:pointer; color:#E11D48; display:flex; align-items:center; justify-content:center; outline:none; transition:transform 0.2s;">
-                  ${icon('info', 16)}
-                </button>
-              </span>
-              <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
-            </div>
-            
-            <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:#009EE3;">
-              <span style="display:flex; align-items:center; gap:6px;">
-                ${icon('cloudRain', 16)} Recargo por Lluvia
-              </span>
-              <span id="compra-rain-cost" style="font-weight:900;">$ 0</span>
-            </div>
+          <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:2px 0 0; font-weight:600; display:none; line-height:1.3;">
+            📍 Se cobra una parada extra por cada comercio adicional al primero.
+          </p>
+        </div>
 
-            <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:950; color:#E11D48; border-top:2px dashed var(--color-border-light); padding-top:12px; margin-top:2px;">
-              <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
-            </div>
-            <p style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; line-height:1.3; font-weight:600; text-align:center;">
-              * El valor de los productos se abona al repartidor al recibirlos.
-            </p>
+        <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:10px; flex-shrink:0;"></div>
+
+        <!-- Destino de Entrega -->
+        <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
+          <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
+          <button id="delivery-addr-btn" type="button" style="width:100%; height:44px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow:var(--shadow-sm);">
+            <div style="width:28px; height:28px; border-radius:8px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home',16)}</div>
+            <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress||'Elegir destino...'}</span>
+            ${icon('chevronRight',16)}
+          </button>
+          <input type="text" id="delivery-details" value="${currentAddress?(getState().addressNotes||''):''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+        </div>
+      </div>
+
+      <!-- ── Paso 2: Pago + Costo ────────────────────────────────────────── -->
+      <div id="compra-step-2-container" style="display:none; flex-direction:column; gap:12px; width:100%; box-sizing:border-box;">
+
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
+          <div style="display:flex; background:var(--color-bg-secondary); padding:3px; border-radius:14px; border:1.5px solid var(--color-border-light);">
+            <button type="button" id="compra-pay-efectivo" style="flex:1; height:38px; border-radius:10px; border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('dollarSign',14)} Efectivo
+            </button>
+            <button type="button" id="compra-pay-transfer" style="flex:1; height:38px; border-radius:10px; border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('creditCard',14)} Transferencia
+            </button>
           </div>
         </div>
 
-        <button id="confirm-buy-btn" style="width:100%; height:56px; border-radius:18px; background:#E11D48; color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; box-shadow:0 8px 20px rgba(225,29,72,0.25); text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:10px; flex-shrink:0;">
-          ${icon('check', 20)} Solicitar Compra
-        </button>
+        <div id="compra-benefits-container"></div>
+
+        <div id="compra-cost-preview" style="background:var(--color-bg-secondary); padding:12px 14px; border-radius:16px; display:none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light);">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:var(--color-text-primary);">
+            <span style="display:flex; align-items:center; gap:6px;">
+              Costo de Envío
+              <button type="button" id="compra-info-btn" style="border:none; background:transparent; padding:2px; cursor:pointer; color:#E11D48; display:flex; align-items:center; justify-content:center; outline:none;">${icon('info',15)}</button>
+            </span>
+            <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
+          </div>
+          <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:#009EE3;">
+            <span style="display:flex; align-items:center; gap:6px;">${icon('cloudRain',15)} Recargo por Lluvia</span>
+            <span id="compra-rain-cost" style="font-weight:900;">$ 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:950; color:#E11D48; border-top:1.5px dashed var(--color-border-light); padding-top:10px; margin-top:2px;">
+            <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
+          </div>
+          <p style="font-size:9.5px; color:var(--color-text-tertiary); margin-top:2px; line-height:1.3; font-weight:600; text-align:center;">* El valor de los productos se abona al repartidor al recibirlos.</p>
+        </div>
+
+        <!-- Hidden submit trigger targeted by footer mainBtn delegate -->
+        <button id="confirm-buy-btn" style="display:none;"></button>
+
       </div>
+    </div>
+
+    <!-- ── Footer fijo: botón volver + botón acción principal ────────────── -->
+    <div style="display:flex; gap:8px; flex-shrink:0;">
+      <button type="button" id="compra-back-btn" style="height:48px; width:48px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text-primary); border:1.5px solid var(--color-border-light); font-weight:900; cursor:pointer; display:none; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.2s;">
+        ${icon('chevronLeft',18)}
+      </button>
+      <button type="button" id="compra-main-btn" style="flex:1; height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:14px; cursor:pointer; text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.22); transition:background 0.2s, box-shadow 0.2s;">
+        Siguiente ${icon('chevronRight',16)}
+      </button>
     </div>
   `;
 
   showModal({
     title: 'Mandado: Comprar algo',
     content: modalEl,
+    fullscreen: false,
     height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
@@ -1101,7 +1191,99 @@ export async function showCompraForm() {
   let couponDiscount = 0;
   let total = 0;
 
+  // ── Unified step navigation with CSS transform/opacity ───────────────────
+  let currentStepNum = 1;
+  const STEP_IDS = ['compra-step-1-container', 'compra-step-2-container'];
+
+  const backBtn = modalEl.querySelector('#compra-back-btn');
+  const mainBtn = modalEl.querySelector('#compra-main-btn');
+
+  const STEP_CONFIG = {
+    1: { label: `Siguiente ${icon('chevronRight', 16)}`, bg: 'var(--color-primary)', shadow: '0 6px 16px rgba(var(--color-primary-rgb),0.22)' },
+    2: { label: `${icon('check', 18)} Solicitar Compra`, bg: '#E11D48', shadow: '0 6px 16px rgba(225,29,72,0.22)' }
+  };
+
+  const updateFooter = (stepNum) => {
+    const cfg = STEP_CONFIG[stepNum];
+    mainBtn.innerHTML = cfg.label;
+    mainBtn.style.background = cfg.bg;
+    mainBtn.style.boxShadow = cfg.shadow;
+    // Show/hide back button
+    backBtn.style.display = stepNum > 1 ? 'flex' : 'none';
+  };
+
+  const updateStepDots = (activeStep) => {
+    [1, 2].forEach(n => {
+      const dot = modalEl.querySelector(`#compra-step-dot-${n}`);
+      if (!dot) return;
+      dot.style.width = n === activeStep ? '32px' : '8px';
+      dot.style.background = n === activeStep ? '#E11D48' : 'var(--color-border-light)';
+    });
+  };
+
+  const showStep = (targetNum) => {
+    const step1 = modalEl.querySelector('#compra-step-1-container');
+    const step2 = modalEl.querySelector('#compra-step-2-container');
+    if (!step1 || !step2) return;
+
+    if (targetNum === 1) {
+      step1.style.display = 'flex';
+      step2.style.display = 'none';
+    } else {
+      step1.style.display = 'none';
+      step2.style.display = 'flex';
+    }
+
+    currentStepNum = targetNum;
+    updateStepDots(targetNum);
+    updateFooter(targetNum);
+
+    // Trigger cost calculation when arriving at step 2
+    if (targetNum === 2 && deliveryData?.coords) updateCost();
+  };
+
+  // Back button: always goes to previous step
+  backBtn.onclick = () => showStep(currentStepNum - 1, 'backward');
+
+  // Main button: routes to step-specific logic
+  mainBtn.onclick = () => {
+    if (currentStepNum === 1) {
+      // Validate step 1 (stores + products)
+      const nameInputs = Array.from(subformsContainer.querySelectorAll('.store-name-input'));
+      const detailTextareas = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea'));
+      let validated = true;
+      for (let i = 0; i < stopsCount; i++) {
+        const name = nameInputs[i]?.value.trim();
+        const details = detailTextareas[i]?.value.trim();
+        if (!name || !details) {
+          validated = false;
+          if (nameInputs[i]) nameInputs[i].style.borderColor = 'var(--color-primary)';
+          if (detailTextareas[i]) detailTextareas[i].style.borderColor = 'var(--color-primary)';
+        } else {
+          if (nameInputs[i]) nameInputs[i].style.borderColor = 'var(--color-border-light)';
+          if (detailTextareas[i]) detailTextareas[i].style.borderColor = 'var(--color-border-light)';
+        }
+      }
+      if (!validated) { showWarningModal('Por favor, ingresa los nombres de los comercios y el detalle de los productos a comprar'); return; }
+
+      // Validate delivery destination
+      const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+      const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
+      if (!deliveryData) { showWarningModal('Por favor, selecciona la dirección de entrega'); return; }
+      if (!deliveryDetails) { showWarningModal('Por favor, ingresa el detalle de la dirección de entrega (Nro, depto, ref...)'); return; }
+
+      showStep(2, 'forward');
+    } else if (currentStepNum === 2) {
+      // Trigger confirm — delegate to confirm-buy-btn logic below
+      modalEl.querySelector('#confirm-buy-btn')?.click();
+    }
+  };
+
+  // Initialize footer state
+  updateFooter(1);
+
   const infoBtn = modalEl.querySelector('#compra-info-btn');
+
   if (infoBtn) {
     infoBtn.onclick = async (e) => {
       e.stopPropagation();
@@ -1246,11 +1428,31 @@ export async function showCompraForm() {
     selectedPaymentMethod = 'mercadopago';
     payTransferBtn.style.background = '#2563EB';
     payTransferBtn.style.color = '#ffffff';
-    payTransferBtn.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
     payEfectivoBtn.style.background = 'transparent';
     payEfectivoBtn.style.color = 'var(--color-text-secondary)';
     payEfectivoBtn.style.boxShadow = 'none';
   };
+
+  let isPaulosPreset = false;
+
+  const kioskCompraBtn = modalEl.querySelector('#kiosk-24h-compra-card');
+  if (kioskCompraBtn) {
+    kioskCompraBtn.onclick = () => {
+      isPaulosPreset = true;
+      const nameInput = subformsContainer.querySelector('.store-name-input');
+      const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
+      if (nameInput) nameInput.value = 'Maxikiosco Paulos';
+      if (detailTextarea) {
+        detailTextarea.value = '';
+        setTimeout(() => detailTextarea.focus(), 100);
+      }
+      // Reset delivery data so user chooses their own address
+      if (deliveryData?.coords) {
+        updateCost();
+      }
+      showToast('⭐ Maxikiosco Paulos seleccionado con Envío Preferencial', 'success');
+    };
+  }
 
   const placeholders = [
     { name: 'Ej: Verdulería "El Trébol"', details: 'Ej: 1kg papas, 1/2kg tomates, 1 verdeo...' },
@@ -1265,11 +1467,11 @@ export async function showCompraForm() {
     for (let i = 0; i < stopsCount; i++) {
       const pl = placeholders[i] || placeholders[0];
       const stopDiv = document.createElement('div');
-      stopDiv.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light);';
+      stopDiv.style.cssText = 'display:flex; flex-direction:column; gap:6px; padding:10px 12px; background:var(--color-bg-secondary); border-radius:14px; border:1px solid var(--color-border-light);';
       stopDiv.innerHTML = `
         <span style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
-        <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-card); font-size:13px; font-weight:700; outline:none;" required />
-        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:76px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:10px 12px; background:var(--color-bg-card); font-size:13px; font-weight:600; resize:none; outline:none; font-family:inherit;" required></textarea>
+        <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:38px; border-radius:10px; border:1.5px solid var(--color-border-light); padding:0 10px; background:var(--color-bg-card); font-size:12.5px; font-weight:700; outline:none;" required />
+        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:54px; border-radius:10px; border:1.5px solid var(--color-border-light); padding:8px 10px; background:var(--color-bg-card); font-size:12.5px; font-weight:600; resize:none; outline:none; font-family:inherit;" required></textarea>
       `;
       subformsContainer.appendChild(stopDiv);
     }
@@ -1294,6 +1496,9 @@ export async function showCompraForm() {
     };
   });
 
+  let hasGestion = true;
+  let activePurchaseFee = purchaseFee;
+
   const updateCost = async () => {
     if (!deliveryData?.coords) return;
     try {
@@ -1301,7 +1506,7 @@ export async function showCompraForm() {
       calculatedDistFee = calculateDynamicFee(dist);
 
       const extraStopsTotal = (stopsCount - 1) * extraStopFee;
-      const subtotal = calculatedDistFee + purchaseFee + extraStopsTotal;
+      const subtotal = calculatedDistFee + activePurchaseFee + extraStopsTotal;
       const config = getState().servicesAppFeeConfig?.gofavor || { type: 'percentage', value: 1.2 };
       if (config.type === 'fixed') {
         appFee = config.value;
@@ -1321,7 +1526,8 @@ export async function showCompraForm() {
       }
 
       const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-      total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+      const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedDistFee);
+      total = Math.max(subtotal + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
 
       const summaryTotalEl = modalEl.querySelector('#compra-summary-total');
       if (summaryTotalEl) {
@@ -1342,47 +1548,6 @@ export async function showCompraForm() {
     } catch (e) { console.error(e); }
   };
 
-  modalEl.querySelector('#compra-step-1-next-btn').onclick = () => {
-    const nameInputs = Array.from(subformsContainer.querySelectorAll('.store-name-input'));
-    const detailTextareas = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea'));
-    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
-    const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
-
-    let validated = true;
-    for (let i = 0; i < stopsCount; i++) {
-      const name = nameInputs[i].value.trim();
-      const details = detailTextareas[i].value.trim();
-      if (!name || !details) {
-        validated = false;
-        nameInputs[i].style.borderColor = 'var(--color-primary)';
-        detailTextareas[i].style.borderColor = 'var(--color-primary)';
-      } else {
-        nameInputs[i].style.borderColor = 'var(--color-border-light)';
-        detailTextareas[i].style.borderColor = 'var(--color-border-light)';
-      }
-    }
-
-    if (!validated) {
-      showWarningModal('Por favor, ingresa los nombres de los comercios y el detalle de los productos a comprar');
-      return;
-    }
-    if (!deliveryData) {
-      showWarningModal('Por favor, selecciona la dirección de entrega');
-      return;
-    }
-    if (!deliveryDetails) {
-      showWarningModal('Por favor, ingresa el detalle de la dirección de entrega (Nro, depto, ref...)');
-      return;
-    }
-
-    modalEl.querySelector('#compra-step-1-container').style.display = 'none';
-    modalEl.querySelector('#compra-step-2-container').style.display = 'flex';
-  };
-
-  modalEl.querySelector('#compra-step-2-back-btn').onclick = () => {
-    modalEl.querySelector('#compra-step-1-container').style.display = 'flex';
-    modalEl.querySelector('#compra-step-2-container').style.display = 'none';
-  };
 
   deliveryBtn.onclick = () => {
     showAddressPrompt((addr, notes, coords) => {
@@ -1421,7 +1586,7 @@ export async function showCompraForm() {
     if (calculatedDistFee === 0) await updateCost();
 
     const extraStopsTotal = (stopsCount - 1) * extraStopFee;
-    const subtotal = calculatedDistFee + purchaseFee + extraStopsTotal;
+    const subtotal = calculatedDistFee + activePurchaseFee + extraStopsTotal;
     
     let couponDiscount = 0;
     if (appliedCoupon) {
@@ -1438,22 +1603,28 @@ export async function showCompraForm() {
     const total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
     const stopsLabel = stopsCount === 1 ? '1 comercio' : `${stopsCount} comercios`;
 
-    const packagedDetails = stopsList.map((stop, idx) => `🏪 **${idx + 1}. Comercio:** ${stop.store}\n📦 **Pedido:** ${stop.items}`).join('\n\n');
+    let packagedDetails = stopsList.map((stop, idx) => `🏪 **${idx + 1}. Comercio:** ${stop.store}\n📦 **Pedido:** ${stop.items}`).join('\n\n');
+    if (!hasGestion) {
+      packagedDetails += `\n\n🔄 **MODO REEMPLAZO DIRECTO:** El cliente eligió SIN GESTIÓN. Si un producto no está disponible en el comercio, reemplazalo por uno similar sin consultar por chat.`;
+    }
 
-    showConfirm({
+    verifyDriversAndConfirm({
       title: '¿Confirmar compra?',
-      message: `Se enviará un repartidor a realizar tu compra en <strong>${stopsLabel}</strong>.<br><br>Costo del servicio: <strong>${formatPrice(total)}</strong><br><br><small>* El valor de los productos se abona al repartidor al recibir el pedido.</small>`,
+      message: `Se enviará un repartidor a realizar tu compra en <strong>${stopsLabel}</strong>.<br><br>Modalidad: <strong>${hasGestion ? 'Con Atención Personalizada' : 'Sin Gestión (Reemplazo directo)'}</strong><br>Costo del servicio: <strong>${formatPrice(total)}</strong><br><br><small>* El valor de los productos se abona al repartidor al recibir el pedido.</small>`,
       onConfirm: async () => {
         try {
           const orderId = await createFavorOrder({
             type: 'compra',
+            isPaulosPreset: isPaulosPreset,
+            merchantCoveragePercent: paulosConfig.merchantCoveragePercent || 30,
+            storeName: stopsList[0]?.store || '',
             pickupAddress: stopsCount > 1 ? `Múltiples comercios (${stopsLabel})` : `Comercio: ${stopsList[0].store}`,
             pickupCoords: centerCoords,
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: packagedDetails,
             deliveryCost: calculatedDistFee + rainSurcharge,
-            purchaseFee: purchaseFee,
+            purchaseFee: activePurchaseFee,
             extraStopsFee: extraStopsTotal,
             stopsCount: stopsCount,
             appUsageFee: appFee,
@@ -1461,7 +1632,9 @@ export async function showCompraForm() {
             couponCode: appliedCoupon ? appliedCoupon.code : null,
             couponDiscount: couponDiscount,
             total: total,
-            paymentMethod: selectedPaymentMethod
+            paymentMethod: selectedPaymentMethod,
+            includeGestion: hasGestion,
+            allowDirectReplacement: !hasGestion
           });
           closeModal();
           setTimeout(() => { location.hash = `#/pedido/${orderId}`; }, 150);
@@ -1571,6 +1744,7 @@ export async function showGoCashForm() {
   showModal({
     title: 'Solicitar Go Cash',
     content: modalEl,
+    fullscreen: false,
     height: 'auto',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
@@ -1650,7 +1824,8 @@ export async function showGoCashForm() {
         }
 
         const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-        const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+        const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedFee);
+        const total = Math.max(calculatedFee + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
 
         distCostEl.textContent = formatPrice(calculatedFee);
         
@@ -1778,7 +1953,7 @@ export async function showGoCashForm() {
     const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
     const typeText = selectedType === 'cash_to_transfer' ? 'Efectivo a Transferencia' : 'Transferencia a Efectivo';
     
-    showConfirm({
+    verifyDriversAndConfirm({
       title: '¿Confirmar Go Cash?',
       message: `Se enviará un repartidor para cambiar <strong>${formatPrice(amount)}</strong> (${typeText}).<br><br>Costo estimado del envío: <strong>${formatPrice(total)}</strong>`,
       onConfirm: async () => {
@@ -2439,7 +2614,8 @@ export async function showPagoServiciosForm() {
   showModal({
     title: 'Solicitar Pago de Servicios',
     content: modalEl,
-    height: '94dvh',
+    fullscreen: false,
+    height: '88dvh',
     hideHeader: false,
     headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
     headerTextColor: '#ffffff'
@@ -2535,7 +2711,8 @@ export async function showPagoServiciosForm() {
       }
 
       const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-      const total = Math.max(logisticsCost + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+      const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, logisticsCost);
+      const total = Math.max(logisticsCost + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
 
       const rainRow = modalEl.querySelector('#ps-rain-row');
       const rainCostEl = modalEl.querySelector('#ps-rain-cost');
@@ -2659,7 +2836,7 @@ export async function showPagoServiciosForm() {
       ? deliveryData.coords
       : { lat: -35.0811, lng: -57.5146 };
 
-    showConfirm({
+    verifyDriversAndConfirm({
       title: '¿Confirmar Trámite?',
       message: `Se enviará un repartidor a pagar tu factura de <strong>${selectedService}</strong>.<br><br>Costo del servicio: <strong>${formatPrice(total)}</strong>`,
       onConfirm: async () => {

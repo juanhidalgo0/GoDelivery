@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { doc, getDoc, setDoc, collection, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { isAdmin } from '../../auth.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
@@ -45,6 +45,18 @@ export async function renderAdminSettings() {
             </div>
           </div>
           <div style="color:var(--color-text-tertiary);">${icon('chevronRight', 18)}</div>
+        </a>
+
+        <!-- 1.5 Paulos Convenio -->
+        <a href="#/admin/settings/kiosk-paulos" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:linear-gradient(135deg, rgba(76,29,149,0.06) 0%, rgba(124,58,237,0.1) 100%); border:1.5px solid rgba(124,58,237,0.3); border-radius:24px; text-decoration:none; box-sizing:border-box; box-shadow:var(--shadow-sm); transition:all 0.25s ease;">
+          <div style="display:flex; align-items:center; gap:16px;">
+            <div style="width:44px; height:44px; border-radius:14px; background:linear-gradient(135deg,#7c3aed,#6d28d9); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 4px 10px rgba(124,58,237,0.3); font-size:20px;">⭐</div>
+            <div>
+              <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text); letter-spacing:-0.01em;">Convenio Maxikiosco Paulos</div>
+              <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Tarifas, liquidaciones a $0, historial y reporte WhatsApp/Excel</div>
+            </div>
+          </div>
+          <div style="color:#7c3aed;">${icon('chevronRight', 18)}</div>
         </a>
 
         <!-- 2. Economy -->
@@ -594,6 +606,11 @@ export async function renderAdminEconomySettings(container) {
           </div>
 
           <div style="border-top:1px dashed var(--color-border-light); padding-top:18px; margin-top:8px;">
+            <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Monto de Canon Diario ($)</label>
+            <input type="number" class="input" id="global-canon-amount" value="${s.canonAmount || 2000}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+          </div>
+
+          <div style="border-top:1px dashed var(--color-border-light); padding-top:18px; margin-top:8px;">
             <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">WhatsApp de Pagos y Soporte</label>
             <input type="text" class="input" id="global-whatsapp-payments" value="${s.whatsappPayments || '5491123456789'}" placeholder="Ej: 549221555555" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
           </div>
@@ -614,6 +631,7 @@ export async function renderAdminEconomySettings(container) {
     const commissionRate = (parseFloat(document.getElementById('global-commission-rate').value) || 10) / 100;
     const appUsageFeeRate = (parseFloat(document.getElementById('global-app-fee-rate').value) || 5) / 100;
     const whatsappPayments = document.getElementById('global-whatsapp-payments').value.trim();
+    const canonAmount = parseFloat(document.getElementById('global-canon-amount').value) || 2000;
 
     const servicesAppFeeConfig = {
       gofavor: {
@@ -632,13 +650,14 @@ export async function renderAdminEconomySettings(container) {
 
     try {
       await setDoc(doc(db, 'settings', 'global'), {
-        commissionRate, appUsageFeeRate, whatsappPayments, servicesAppFeeConfig
+        commissionRate, appUsageFeeRate, whatsappPayments, servicesAppFeeConfig, canonAmount
       }, { merge: true });
 
       setState('commissionRate', commissionRate);
       setState('appUsageFeeRate', appUsageFeeRate);
       setState('whatsappPayments', whatsappPayments);
       setState('servicesAppFeeConfig', servicesAppFeeConfig);
+      setState('canonAmount', canonAmount);
 
       showToast('Ajustes de Economía actualizados.', 'success');
     } catch (err) {
@@ -649,6 +668,842 @@ export async function renderAdminEconomySettings(container) {
       btn.innerHTML = `${icon('check', 20)} Guardar Ajustes`;
     }
   };
+}
+
+// 2b. DEDICATED REPARTIDORES CONTROL PANEL
+export async function renderAdminDeliveriesSettings(container) {
+  if (!container) container = document.getElementById('app-content');
+  if (!container) return;
+
+  if (!isAdmin()) {
+    container.innerHTML = `<div class="empty-state"><p>No tenés acceso a esta sección.</p></div>`;
+    return;
+  }
+
+  const s = getState();
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  container.innerHTML = `
+    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
+      <!-- Minimalist 1-Row Header (sticky) -->
+      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+          <a href="#/admin" style="width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; flex-shrink:0; transition:all 0.2s;">
+            ${icon('chevronLeft', 20)}
+          </a>
+          <div style="display:flex; align-items:center; gap:8px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            <h1 style="font-family:var(--font-display); font-weight:900; font-size:16px; color:white; margin:0; letter-spacing:-0.02em; text-transform:uppercase;">REPARTIDORES</h1>
+            <span style="color:rgba(255,255,255,0.3); font-size:12px;">•</span>
+            <span style="font-size:11px; color:rgba(255,255,255,0.65); font-weight:700; overflow:hidden; text-overflow:ellipsis;">Control & Cuotas</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs (sticky) -->
+      <div style="display:flex; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); padding:8px 16px; gap:8px; flex-shrink:0;">
+        <button id="del-tab-drivers" style="flex:1; height:38px; border-radius:12px; border:none; font-weight:800; font-size:12px; cursor:pointer; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; gap:6px;">
+          ${icon('bike', 16)} Repartidores
+        </button>
+        <button id="del-tab-config" style="flex:1; height:38px; border-radius:12px; border:none; font-weight:800; font-size:12px; cursor:pointer; background:var(--color-bg-secondary); color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
+          ${icon('settings', 16)} Configuración
+        </button>
+      </div>
+
+      <!-- Sticky Search + Filter Bar (drivers tab only, shown/hidden by JS) -->
+      <div id="deliveries-search-bar" style="background:var(--color-bg); border-bottom:1px solid var(--color-border-light); padding:10px 16px; display:flex; flex-direction:column; gap:8px; flex-shrink:0; z-index:50;">
+        <div style="position:relative; width:100%;">
+          <input type="text" id="driver-search-input-sticky" placeholder="🔍 Buscar por nombre, email o ID (go-xxxx)..." style="width:100%; height:44px; border-radius:14px; padding:0 16px 0 42px; font-weight:700; font-size:13px; background:var(--color-surface); border:1.5px solid var(--color-border); color:var(--color-text); outline:none; box-sizing:border-box; box-shadow:var(--shadow-sm);" />
+          <div style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); display:flex;">
+            ${icon('search', 18)}
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; -webkit-overflow-scrolling:touch; scrollbar-width:none;">
+          <button class="driver-filter-sticky" data-filter="all" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-primary); color:white;">Todos</button>
+          <button class="driver-filter-sticky" data-filter="online" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">🟢 Conectados</button>
+          <button class="driver-filter-sticky" data-filter="debt" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">⚠️ Con Deuda</button>
+          <button class="driver-filter-sticky" data-filter="clean" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">✅ Al Día</button>
+        </div>
+      </div>
+
+      <!-- Main Container -->
+      <div id="deliveries-panel-body" style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:16px; -webkit-overflow-scrolling:touch; padding-bottom:40px;">
+        <div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+  `;
+
+  let activeTab = 'drivers';
+  let searchQuery = '';
+  let settlementSearchQuery = '';
+  let filterStatus = 'all';
+  let driversData = [];
+  let canonPaymentsData = [];
+  let settlementsData = [];
+  let unsubUsers = null;
+
+  async function loadData() {
+    try {
+      const { onSnapshot } = await import('firebase/firestore');
+
+      // 1. Real-time subscription to drivers (users collection)
+      if (unsubUsers) unsubUsers();
+      unsubUsers = onSnapshot(collection(db, 'users'), (usersSnap) => {
+        driversData = usersSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(u => u.role === 'delivery' || u.isDelivery === true);
+
+        if (activeTab === 'drivers') {
+          renderTab();
+        }
+      }, (err) => {
+        console.warn('Realtime drivers listener error:', err);
+      });
+
+      // 2. Fetch cuota payments
+      try {
+        const canonSnap = await getDocs(collection(db, 'delivery_canon_payments'));
+        canonPaymentsData = canonSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (err) {
+        console.warn('Error loading cuota payments:', err);
+      }
+
+      // 3. Fetch settlements history
+      try {
+        const settlementsSnap = await getDocs(collection(db, 'delivery_debt_settlements'));
+        settlementsData = settlementsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      } catch (err) {
+        console.warn('Error loading settlements:', err);
+      }
+
+      renderTab();
+    } catch (err) {
+      console.error('Error loading deliveries data:', err);
+      showToast('Error al cargar información de repartidores', 'error');
+    }
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    ['drivers', 'settlements', 'config'].forEach(t => {
+      const btn = document.getElementById(`del-tab-${t}`);
+      if (btn) {
+        if (t === tab) {
+          btn.style.background = 'var(--color-primary)';
+          btn.style.color = 'white';
+        } else {
+          btn.style.background = 'var(--color-bg-secondary)';
+          btn.style.color = 'var(--color-text-secondary)';
+        }
+      }
+    });
+    // Show/hide sticky search bar based on active tab
+    const searchBar = document.getElementById('deliveries-search-bar');
+    if (searchBar) searchBar.style.display = tab === 'drivers' ? 'flex' : 'none';
+    renderTab();
+  }
+
+  function renderTab() {
+    const body = document.getElementById('deliveries-panel-body');
+    if (!body) return;
+
+    if (activeTab === 'drivers') {
+      renderDriversTab(body);
+    } else if (activeTab === 'settlements') {
+      renderSettlementsTab(body);
+    } else if (activeTab === 'config') {
+      renderConfigTab(body);
+    }
+  }
+
+  function openIndividualHistoryModal(driver) {
+    const displayId = driver.deliveryId || driver.goId || driver.customId || ('go-' + driver.id.slice(0, 4));
+
+    const modalHtml = `
+      <div id="individual-history-modal" style="position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(6px); z-index:10000; display:flex; align-items:center; justify-content:center; padding:16px;">
+        <div style="background:var(--color-surface); border-radius:24px; width:100%; max-width:500px; max-height:85dvh; display:flex; flex-direction:column; box-shadow:0 20px 50px rgba(0,0,0,0.3); overflow:hidden; border:1px solid var(--color-border-light);">
+          
+          <!-- Header -->
+          <div style="padding:18px 20px; border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between; background:var(--color-bg-secondary);">
+            <div>
+              <div style="font-family:var(--font-display); font-size:16px; font-weight:900; color:var(--color-text);">Historial de Cobros</div>
+              <div style="font-size:12px; font-weight:700; color:var(--color-primary); margin-top:2px;">${driver.displayName || driver.name} (${displayId})</div>
+            </div>
+            <button id="close-ind-modal-btn" style="width:32px; height:32px; border-radius:50%; background:rgba(0,0,0,0.06); border:none; color:var(--color-text); font-weight:900; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+          </div>
+
+          <!-- Body -->
+          <div id="ind-modal-body" style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; -webkit-overflow-scrolling:touch;">
+            <div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    const div = document.createElement('div');
+    div.id = 'ind-modal-container';
+    div.innerHTML = modalHtml;
+    document.body.appendChild(div);
+
+    document.getElementById('close-ind-modal-btn').onclick = () => div.remove();
+
+    // Load settlements for this driver
+    const driverSettlements = settlementsData.filter(s => s.driverId === driver.id);
+    const body = document.getElementById('ind-modal-body');
+    if (!body) return;
+
+    if (driverSettlements.length === 0) {
+      body.innerHTML = `
+        <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary);">
+          ${icon('receipt', 40)}
+          <p style="margin-top:12px; font-weight:700;">Este repartidor no registra cobros o liquidaciones previas.</p>
+        </div>
+      `;
+      return;
+    }
+
+    body.innerHTML = driverSettlements.map(s => {
+      const dateStr = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
+      const methodText = s.method === 'transferencia' ? '🏦 Transferencia' : '💵 Efectivo';
+
+      return `
+        <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:16px; padding:14px; display:flex; align-items:center; justify-content:space-between;">
+          <div>
+            <div style="font-weight:900; font-size:15px; color:#22c55e;">+${formatPrice(s.amount)}</div>
+            <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">${methodText} • ${dateStr}</div>
+            ${s.notes ? `<div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; font-style:italic;">"${s.notes}"</div>` : ''}
+          </div>
+          <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); background:var(--color-surface); padding:4px 8px; border-radius:8px; border:1px solid var(--color-border-light);">
+            Por ${s.settledBy || 'Admin'}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderDriversTab(body) {
+    const totalDebt = driversData.reduce((sum, d) => sum + (d.deliveryDebt || 0), 0);
+    const onlineCount = driversData.filter(d => d.isOnline === true).length;
+    const activeTodayCount = driversData.filter(d => d.lastCanonDate === todayStr || d.isOnline === true).length;
+    const paidCanonTodayCount = driversData.filter(d => d.lastCanonDate === todayStr).length;
+    const withDebtCount = driversData.filter(d => (d.deliveryDebt || 0) > 0).length;
+    const cleanCount = driversData.filter(d => (d.deliveryDebt || 0) <= 0).length;
+
+    // Filter drivers by search & status
+    const filteredDrivers = driversData.filter(d => {
+      const name = (d.displayName || d.name || '').toLowerCase();
+      const email = (d.email || '').toLowerCase();
+      const dlId = (d.deliveryId || d.goId || d.customId || ('go-' + d.id.slice(0, 4))).toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+
+      const matchesSearch = !q || name.includes(q) || email.includes(q) || dlId.includes(q);
+
+      const debt = d.deliveryDebt || 0;
+      const isOnline = d.isOnline === true;
+
+      if (!matchesSearch) return false;
+
+      if (filterStatus === 'online') return isOnline;
+      if (filterStatus === 'debt') return debt > 0;
+      if (filterStatus === 'clean') return debt <= 0;
+      if (filterStatus === 'active') return d.lastCanonDate === todayStr || isOnline;
+
+      return true;
+    });
+
+    body.innerHTML = `
+      <!-- KPI Summary Header -->
+      <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); color: white;">
+        <div style="font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 1px;">Deuda Total Acumulada (Repartidores)</div>
+        <div style="font-size: 34px; font-weight: 950; letter-spacing: -1.5px; margin: 4px 0 16px; color: #ef4444;">${formatPrice(totalDebt)}</div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 14px; text-align: center;">
+            <div style="font-size: 8.5px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase;">Total</div>
+            <div style="font-size: 15px; font-weight: 900; margin-top: 2px;">${driversData.length}</div>
+          </div>
+          <div style="background: rgba(34,197,94,0.12); padding: 8px; border-radius: 14px; text-align: center; border: 1px solid rgba(34,197,94,0.25);">
+            <div style="font-size: 8.5px; font-weight: 800; color: #22c55e; text-transform: uppercase;">Conectados</div>
+            <div style="font-size: 15px; font-weight: 900; color: #22c55e; margin-top: 2px;">${onlineCount}</div>
+          </div>
+          <div style="background: rgba(59,130,246,0.1); padding: 8px; border-radius: 14px; text-align: center; border: 1px solid rgba(59,130,246,0.2);">
+            <div style="font-size: 8.5px; font-weight: 800; color: #60a5fa; text-transform: uppercase;">Activos Hoy</div>
+            <div style="font-size: 15px; font-weight: 900; color: #60a5fa; margin-top: 2px;">${activeTodayCount}</div>
+          </div>
+          <div style="background: rgba(234,179,8,0.1); padding: 8px; border-radius: 14px; text-align: center; border: 1px solid rgba(234,179,8,0.2);">
+            <div style="font-size: 8.5px; font-weight: 800; color: #eab308; text-transform: uppercase;">Cuota Hoy</div>
+            <div style="font-size: 15px; font-weight: 900; color: #eab308; margin-top: 2px;">${paidCanonTodayCount}</div>
+          </div>
+        </div>
+      </div>
+
+
+
+      <!-- Drivers List Section -->
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <h3 style="font-family:var(--font-display); font-size:14px; font-weight:900; margin:0; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Resultados (${filteredDrivers.length})</h3>
+        </div>
+
+        ${filteredDrivers.length === 0 ? `
+          <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary); background:var(--color-surface); border-radius:20px; border:1px dashed var(--color-border-light);">
+            ${icon('search', 32)}
+            <p style="margin-top:12px; font-weight:700;">No se encontraron repartidores con los criterios de búsqueda.</p>
+          </div>
+        ` : filteredDrivers.map(d => {
+          const debt = d.deliveryDebt || 0;
+          const isCanonPaidToday = d.lastCanonDate === todayStr;
+          const isExempt = d.isCanonExempt === true;
+          const isOnlineNow = d.isOnline === true;
+          const isClean = debt <= 0;
+          const photo = d.photoURL || d.avatarUrl || d.photo || d.profileImage || '';
+          const displayId = d.deliveryId || d.goId || d.customId || ('go-' + d.id.slice(0, 4));
+
+          return `
+            <div style="background:var(--color-surface); border:1.5px solid ${debt > 0 ? 'rgba(239,68,68,0.25)' : 'var(--color-border-light)'}; border-radius:24px; padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:16px; transition:all 0.2s;">
+              
+              <!-- Driver Header -->
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                  <div style="position:relative; width:48px; height:48px; flex-shrink:0;">
+                    ${photo ? `
+                      <img src="${photo}" alt="${d.displayName || d.name}" style="width:48px; height:48px; border-radius:16px; object-fit:cover; border:2px solid var(--color-border-light); background:var(--color-bg-secondary);" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                      <div style="display:none; width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fee2e2,#fca5a5); color:#dc2626; font-weight:900; align-items:center; justify-content:center; font-size:16px;">
+                        ${(d.displayName || d.name || 'D').charAt(0).toUpperCase()}
+                      </div>
+                    ` : `
+                      <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fee2e2,#fca5a5); color:#dc2626; font-weight:900; display:flex; align-items:center; justify-content:center; font-size:16px;">
+                        ${(d.displayName || d.name || 'D').charAt(0).toUpperCase()}
+                      </div>
+                    `}
+                    <span style="position:absolute; bottom:-2px; right:-2px; width:12px; height:12px; border-radius:50%; background:${isOnlineNow ? '#22c55e' : '#cbd5e1'}; border:2.5px solid var(--color-surface); ${isOnlineNow ? 'box-shadow:0 0 8px #22c55e;' : ''}" title="${isOnlineNow ? 'Conectado y Disponible' : 'Desconectado'}"></span>
+                  </div>
+                  
+                  <div style="min-width:0;">
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                      <span style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">${d.displayName || d.name || 'Repartidor sin nombre'}</span>
+                      <span style="font-size:10px; font-weight:900; background:rgba(225,29,72,0.08); color:var(--color-primary); padding:2px 7px; border-radius:8px; font-family:monospace; border:1px solid rgba(225,29,72,0.15); letter-spacing:0.5px;">${displayId}</span>
+                    </div>
+                    <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.email || d.phone || 'Sin contacto'}</div>
+                  </div>
+                </div>
+
+                <!-- Badges -->
+                <div style="flex-shrink:0;">
+                  ${isExempt ? `
+                    <span style="background:rgba(168,85,247,0.1); color:#a855f7; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(168,85,247,0.2);">🎟️ Eximido</span>
+                  ` : isOnlineNow ? `
+                    <span style="background:rgba(34,197,94,0.12); color:#22c55e; font-size:10.5px; font-weight:900; padding:5px 10px; border-radius:10px; border:1px solid rgba(34,197,94,0.25); box-shadow:0 0 10px rgba(34,197,94,0.2);">🟢 Conectado</span>
+                  ` : isCanonPaidToday ? `
+                    <span style="background:rgba(59,130,246,0.1); color:#3b82f6; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(59,130,246,0.2);">✅ Cuota Hoy</span>
+                  ` : isClean ? `
+                    <span style="background:rgba(34,197,94,0.1); color:#22c55e; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(34,197,94,0.2);">✅ Al Día</span>
+                  ` : `
+                    <span style="background:rgba(239,68,68,0.1); color:#ef4444; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(239,68,68,0.2);">⚠️ Debe Cuota</span>
+                  `}
+                </div>
+              </div>
+
+              <!-- Debt Info -->
+              <div style="background:${debt > 0 ? 'linear-gradient(135deg, rgba(239,68,68,0.04) 0%, rgba(239,68,68,0.08) 100%)' : 'linear-gradient(135deg, rgba(34,197,94,0.04) 0%, rgba(34,197,94,0.08) 100%)'}; border:1px solid ${debt > 0 ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)'}; border-radius:18px; padding:14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                  <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Deuda Acumulada</div>
+                  <div style="font-size:22px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#22c55e'}; letter-spacing:-0.5px; margin-top:2px;">${formatPrice(debt)}</div>
+                </div>
+                <div>
+                  ${debt > 0 ? `
+                    <span style="font-size:11px; font-weight:800; color:#ef4444; background:white; border:1px solid rgba(239,68,68,0.2); padding:5px 10px; border-radius:10px; box-shadow:0 2px 6px rgba(239,68,68,0.1);">Saldo Pendiente</span>
+                  ` : `
+                    <span style="font-size:11px; font-weight:800; color:#22c55e; background:white; border:1px solid rgba(34,197,94,0.2); padding:5px 10px; border-radius:10px; box-shadow:0 2px 6px rgba(34,197,94,0.1);">Al Día</span>
+                  `}
+                </div>
+              </div>
+
+              <!-- Primary Action Buttons -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <button data-wsp-driver="${d.id}" style="height:46px; border-radius:16px; background:linear-gradient(135deg, #25D366 0%, #128C7E 100%); color:white; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:0 6px 16px rgba(37,211,102,0.25); transition:transform 0.15s active;">
+                  ${icon('whatsappLogo', 18)} WhatsApp Cobro
+                </button>
+                <button data-settle-driver="${d.id}" style="height:46px; border-radius:16px; background:${debt > 0 ? 'linear-gradient(135deg, #E11D48 0%, #BE123C 100%)' : 'var(--color-bg-secondary)'}; color:${debt > 0 ? 'white' : 'var(--color-text-tertiary)'}; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:${debt > 0 ? '0 6px 16px rgba(225,29,72,0.25)' : 'none'}; opacity:${debt > 0 ? '1' : '0.6'};">
+                  ${icon('bank', 18)} Liquidar Deuda
+                </button>
+              </div>
+
+              <!-- Quick Toggles & Controls -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; border-top:1px dashed var(--color-border-light); padding-top:12px;">
+                <button data-toggle-online="${d.id}" style="height:34px; border-radius:10px; background:${isOnlineNow ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)'}; border:1px solid ${isOnlineNow ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)'}; color:${isOnlineNow ? '#ef4444' : '#22c55e'}; font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px;">
+                  ${isOnlineNow ? '⛔ Desconectar' : '🔌 Conectar'}
+                </button>
+                <button data-toggle-canon="${d.id}" style="height:34px; border-radius:10px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); color:var(--color-text); font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px;">
+                  ${isCanonPaidToday ? '↩️ Cuota Hoy' : '💵 Cuota Hoy'}
+                </button>
+              </div>
+
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    // Attach Search & Filter Listeners
+    const searchInput = body.querySelector('#driver-search-input');
+    if (searchInput) {
+      searchInput.oninput = (e) => {
+        searchQuery = e.target.value;
+        renderDriversTab(body);
+        const updatedInput = body.querySelector('#driver-search-input');
+        if (updatedInput) {
+          updatedInput.focus();
+          updatedInput.setSelectionRange(searchQuery.length, searchQuery.length);
+        }
+      };
+    }
+
+    const clearBtn = body.querySelector('#clear-search-btn');
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        searchQuery = '';
+        renderDriversTab(body);
+      };
+    }
+
+    body.querySelectorAll('.driver-filter-btn').forEach(btn => {
+      btn.onclick = () => {
+        filterStatus = btn.dataset.filter;
+        renderDriversTab(body);
+      };
+    });
+
+    // Attach Action Listeners
+    body.querySelectorAll('[data-wsp-driver]').forEach(btn => {
+      btn.onclick = () => {
+        const uid = btn.dataset.wspDriver;
+        const driver = driversData.find(d => d.id === uid);
+        if (!driver) return;
+
+        const phone = (driver.phone || driver.whatsapp || '').replace(/\D/g, '');
+        if (!phone) {
+          showToast('El repartidor no tiene número de teléfono registrado.', 'error');
+          return;
+        }
+
+        const debt = driver.deliveryDebt || 0;
+        const bankAlias = getState().bankAlias || getState().whatsappPayments || 'godelivery.oficial';
+        const text = `Hola ${driver.displayName || driver.name}! Te escribimos de GoDelivery para recordarte la rendición de tu saldo acumulado:
+
+📌 Total Adeudado: ${formatPrice(debt)}
+
+Podés transferir al siguiente Alias:
+💳 ALIAS: ${bankAlias}
+
+Por favor, enviá el comprobante por este medio una vez realizada la transferencia. ¡Muchas gracias!`;
+
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+      };
+    });
+
+    body.querySelectorAll('[data-settle-driver]').forEach(btn => {
+      btn.onclick = () => {
+        const driver = driversData.find(d => d.id === btn.dataset.settleDriver);
+        if (driver) openSettlementsModal(driver);
+      };
+    });
+
+    // Toggle Online / Offline Status manually from Admin
+    body.querySelectorAll('[data-toggle-online]').forEach(btn => {
+      btn.onclick = async () => {
+        const uid = btn.dataset.toggleOnline;
+        const driver = driversData.find(d => d.id === uid);
+        if (!driver) return;
+
+        const newStatus = !(driver.isOnline === true);
+        showConfirm({
+          title: 'Estado de Conexión',
+          message: `¿Querés ${newStatus ? 'CONECTAR' : 'DESCONECTAR'} a ${driver.displayName || driver.name}?`,
+          onConfirm: async () => {
+            try {
+              await updateDoc(doc(db, 'users', uid), {
+                isOnline: newStatus,
+                lastActivityAt: serverTimestamp()
+              });
+              driver.isOnline = newStatus;
+              showToast(`Repartidor ${newStatus ? 'conectado' : 'desconectado'} correctamente`, 'success');
+              renderDriversTab(body);
+            } catch (err) {
+              console.error(err);
+              showToast('Error al cambiar estado de conexión', 'error');
+            }
+          }
+        });
+      };
+    });
+
+    // Individual Driver History Modal
+    body.querySelectorAll('[data-driver-history]').forEach(btn => {
+      btn.onclick = () => {
+        const uid = btn.dataset.driverHistory;
+        const driver = driversData.find(d => d.id === uid);
+        if (!driver) return;
+
+        openIndividualHistoryModal(driver);
+      };
+    });
+
+    body.querySelectorAll('[data-toggle-canon]').forEach(btn => {
+      btn.onclick = async () => {
+        const uid = btn.dataset.toggleCanon;
+        const driver = driversData.find(d => d.id === uid);
+        if (!driver) return;
+
+        const isCurrentlyActive = driver.lastCanonDate === todayStr;
+        const actionText = isCurrentlyActive ? 'desmarcar' : 'marcar como abonado';
+
+        showConfirm({
+          title: 'Cuota Diaria',
+          message: `¿Querés ${actionText} la cuota diaria de hoy de ${driver.displayName || driver.name}?`,
+          onConfirm: async () => {
+            try {
+              const canonDocRef = doc(db, 'delivery_canon_payments', `${uid}_${todayStr}`);
+              if (!isCurrentlyActive) {
+                await setDoc(canonDocRef, {
+                  driverId: uid,
+                  date: todayStr,
+                  amount: getState().canonAmount || 2000,
+                  settled: true,
+                  createdAt: serverTimestamp()
+                }, { merge: true });
+                await updateDoc(doc(db, 'users', uid), { lastCanonDate: todayStr, lastCanonChargeDate: todayStr });
+                driver.lastCanonDate = todayStr;
+              } else {
+                await setDoc(canonDocRef, { status: 'revoked', settled: false, updatedAt: serverTimestamp() }, { merge: true });
+                await updateDoc(doc(db, 'users', uid), { lastCanonDate: null, lastCanonChargeDate: null });
+                driver.lastCanonDate = null;
+              }
+              showToast('Cuota diaria actualizada', 'success');
+              loadData();
+            } catch (err) {
+              console.error(err);
+              showToast('Error al actualizar cuota diaria', 'error');
+            }
+          }
+        });
+      };
+    });
+
+    body.querySelectorAll('[data-toggle-exempt]').forEach(btn => {
+      btn.onclick = async () => {
+        const uid = btn.dataset.toggleExempt;
+        const driver = driversData.find(d => d.id === uid);
+        if (!driver) return;
+
+        const newExempt = !driver.isCanonExempt;
+        showConfirm({
+          title: 'Exención de Cuota Diaria',
+          message: `¿Querés ${newExempt ? 'EXIMIR permanentemente' : 'REQUERIR'} la cuota diaria a ${driver.displayName || driver.name}?`,
+          onConfirm: async () => {
+            try {
+              await updateDoc(doc(db, 'users', uid), { isCanonExempt: newExempt });
+              driver.isCanonExempt = newExempt;
+              showToast('Estado de exención actualizado', 'success');
+              loadData();
+            } catch (err) {
+              console.error(err);
+              showToast('Error al actualizar exención', 'error');
+            }
+          }
+        });
+      };
+    });
+  }
+
+  function renderSettlementsTab(body) {
+    const filteredSettlements = settlementsData.filter(s => {
+      const q = settlementSearchQuery.toLowerCase().trim();
+      if (!q) return true;
+      const name = (s.driverName || '').toLowerCase();
+      const notes = (s.notes || '').toLowerCase();
+      const admin = (s.settledBy || '').toLowerCase();
+      const driver = driversData.find(d => d.id === s.driverId);
+      const email = (driver?.email || '').toLowerCase();
+      const dlId = (driver?.deliveryId || driver?.goId || driver?.customId || ('go-' + (s.driverId || '').slice(0, 4))).toLowerCase();
+
+      return name.includes(q) || notes.includes(q) || admin.includes(q) || email.includes(q) || dlId.includes(q);
+    });
+
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; color:var(--color-text);">Historial de Liquidaciones (${filteredSettlements.length})</h3>
+
+        <!-- Search Bar -->
+        <div style="position:relative; width:100%;">
+          <input type="text" id="settlement-search-input" value="${settlementSearchQuery}" placeholder="🔍 Buscar cobro por repartidor, email o ID (go-xxxx)..." style="width:100%; height:46px; border-radius:14px; padding:0 16px 0 42px; font-weight:700; font-size:13px; background:var(--color-surface); border:1.5px solid var(--color-border); color:var(--color-text); outline:none; box-sizing:border-box;" />
+          <div style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); display:flex;">
+            ${icon('search', 18)}
+          </div>
+          ${settlementSearchQuery ? `
+            <button id="clear-settlement-search" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); background:rgba(0,0,0,0.1); border:none; border-radius:50%; width:24px; height:24px; color:var(--color-text); cursor:pointer; font-weight:900; font-size:12px; display:flex; align-items:center; justify-content:center;">✕</button>
+          ` : ''}
+        </div>
+
+        ${filteredSettlements.length === 0 ? `
+          <div style="text-align:center; padding:50px 20px; color:var(--color-text-tertiary); background:var(--color-surface); border-radius:20px; border:1px dashed var(--color-border-light);">
+            ${icon('receipt', 40)}
+            <p style="margin-top:14px; font-weight:700;">No se encontraron liquidaciones con los criterios de búsqueda.</p>
+          </div>
+        ` : `
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            ${filteredSettlements.map(s => {
+              const dateStr = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
+              const methodText = s.method === 'transferencia' ? '🏦 Transferencia' : '💵 Efectivo';
+
+              return `
+                <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm);">
+                  <div style="display:flex; align-items:center; gap:14px;">
+                    <div style="width:40px; height:40px; border-radius:12px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                      ${icon('checkCircle', 20)}
+                    </div>
+                    <div>
+                      <div style="font-weight:900; font-size:14.5px; color:var(--color-text);">${s.driverName || 'Repartidor'}</div>
+                      <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">
+                        ${methodText} • ${dateStr}
+                      </div>
+                      ${s.notes ? `<div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; font-style:italic;">"${s.notes}"</div>` : ''}
+                    </div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:18px; font-weight:950; color:#22c55e;">${formatPrice(s.amount)}</div>
+                    <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700;">Liquidado por ${s.settledBy || 'Admin'}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+    `;
+
+    const sInput = body.querySelector('#settlement-search-input');
+    if (sInput) {
+      sInput.oninput = (e) => {
+        settlementSearchQuery = e.target.value;
+        renderSettlementsTab(body);
+        const updatedInput = body.querySelector('#settlement-search-input');
+        if (updatedInput) {
+          updatedInput.focus();
+          updatedInput.setSelectionRange(settlementSearchQuery.length, settlementSearchQuery.length);
+        }
+      };
+    }
+
+    const clearS = body.querySelector('#clear-settlement-search');
+    if (clearS) {
+      clearS.onclick = () => {
+        settlementSearchQuery = '';
+        renderSettlementsTab(body);
+      };
+    }
+  }
+
+  function renderConfigTab(body) {
+    const canonAmt = getState().canonAmount || 2000;
+    const bankAlias = getState().bankAlias || 'godelivery.oficial';
+
+    body.innerHTML = `
+      <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:20px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow-sm);">
+        <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; color:var(--color-text);">Configuración de Repartidores</h3>
+        
+        <div>
+          <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Cuota Diaria de Repartidores ($)</label>
+          <input type="number" class="input" id="cfg-canon-amount" value="${canonAmt}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+        </div>
+
+        <div>
+          <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Alias Bancario para Transferencias (WhatsApp)</label>
+          <input type="text" class="input" id="cfg-bank-alias" value="${bankAlias}" placeholder="Ej: godelivery.oficial" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+        </div>
+
+        <button id="save-del-config-btn" style="height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:8px; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.25);">
+          ${icon('check', 18)} Guardar Configuración
+        </button>
+      </div>
+    `;
+
+    const saveBtn = body.querySelector('#save-del-config-btn');
+    if (saveBtn) {
+      saveBtn.onclick = async () => {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = 'Guardando...';
+
+        const newCanon = parseFloat(document.getElementById('cfg-canon-amount').value) || 2000;
+        const newAlias = document.getElementById('cfg-bank-alias').value.trim() || 'godelivery.oficial';
+
+        try {
+          await setDoc(doc(db, 'settings', 'global'), {
+            canonAmount: newCanon,
+            bankAlias: newAlias
+          }, { merge: true });
+
+          setState('canonAmount', newCanon);
+          setState('bankAlias', newAlias);
+
+          showToast('Configuración guardada correctamente.', 'success');
+        } catch (err) {
+          console.error(err);
+          showToast('Error al guardar configuración.', 'error');
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `${icon('check', 20)} Guardar Configuración`;
+        }
+      };
+    }
+  }
+
+  function openSettlementsModal(driver) {
+    const currentDebt = driver.deliveryDebt || 0;
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding:20px; display:flex; flex-direction:column; gap:16px;';
+
+    modalContent.innerHTML = `
+      <div style="text-align:center;">
+        <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Repartidor</div>
+        <div style="font-family:var(--font-display); font-size:18px; font-weight:900; color:var(--color-text); margin-top:2px;">${driver.displayName || driver.name}</div>
+        <div style="font-size:24px; font-weight:950; color:#ef4444; margin-top:6px;">${formatPrice(currentDebt)}</div>
+      </div>
+
+      <div>
+        <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Monto a Liquidar ($)</label>
+        <input type="number" id="settle-amount-input" value="${currentDebt}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:900; font-size:18px; border:1px solid var(--color-border);" />
+      </div>
+
+      <div>
+        <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Método de Cobro</label>
+        <select id="settle-method-select" class="input" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:14px; background:var(--color-bg); border:1px solid var(--color-border); color:var(--color-text);">
+          <option value="efectivo">💵 Efectivo</option>
+          <option value="transferencia">🏦 Transferencia Bancaria</option>
+        </select>
+      </div>
+
+      <div>
+        <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Notas / Comprobante (Opcional)</label>
+        <input type="text" id="settle-notes-input" placeholder="Ej. Rendición semanal abonada en mano" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:600; font-size:13px; border:1px solid var(--color-border);" />
+      </div>
+
+      <button id="confirm-settlement-btn" style="height:54px; border-radius:18px; background:#22c55e; color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 20px rgba(34,197,94,0.25); margin-top:8px;">
+        ${icon('checkCircle', 20)} Confirmar Liquidación
+      </button>
+    `;
+
+    showModal({ title: 'Liquidar Deuda de Repartidor', content: modalContent, height: 'auto' });
+
+    modalContent.querySelector('#confirm-settlement-btn').onclick = async () => {
+      const btn = modalContent.querySelector('#confirm-settlement-btn');
+      btn.disabled = true;
+      btn.innerHTML = 'Procesando...';
+
+      const amountToSettle = parseFloat(modalContent.querySelector('#settle-amount-input').value) || 0;
+      const method = modalContent.querySelector('#settle-method-select').value;
+      const notes = modalContent.querySelector('#settle-notes-input').value.trim();
+
+      if (amountToSettle <= 0) {
+        showToast('Ingresá un monto mayor a $0', 'error');
+        btn.disabled = false;
+        btn.innerHTML = `${icon('checkCircle', 20)} Confirmar Liquidación`;
+        return;
+      }
+
+      try {
+        const newDebt = Math.max(0, currentDebt - amountToSettle);
+        const adminEmail = getState().user?.email || 'Admin';
+
+        // 1. Update driver's deliveryDebt
+        await updateDoc(doc(db, 'users', driver.id), {
+          deliveryDebt: newDebt
+        });
+
+        // 2. Record in delivery_debt_settlements
+        await addDoc(collection(db, 'delivery_debt_settlements'), {
+          driverId: driver.id,
+          driverName: driver.displayName || driver.name || 'Repartidor',
+          driverEmail: driver.email || '',
+          amount: amountToSettle,
+          method,
+          notes,
+          settledBy: adminEmail,
+          createdAt: serverTimestamp()
+        });
+
+        // 3. Record in delivery_transactions for driver history
+        await addDoc(collection(db, 'delivery_transactions'), {
+          driverId: driver.id,
+          type: 'liquidation',
+          amount: -amountToSettle,
+          description: `Liquidación de deuda (${method === 'transferencia' ? 'Transferencia' : 'Efectivo'})${notes ? ': ' + notes : ''}`,
+          settledBy: adminEmail,
+          createdAt: serverTimestamp()
+        });
+
+        // 4. Send Push & In-app Notification to Driver with deep link
+        try {
+          await addDoc(collection(db, 'users', driver.id, 'notifications'), {
+            title: '✅ Deuda Liquidada',
+            body: `¡Tu deuda por ${formatPrice(amountToSettle)} fue liquidada con éxito! Saldo actual: ${formatPrice(newDebt)}.`,
+            type: 'settlement',
+            url: '#/delivery-panel?tab=settlements',
+            status: 'unread',
+            createdAt: serverTimestamp()
+          });
+        } catch (notifErr) {
+          console.warn('Could not send notification to driver:', notifErr);
+        }
+
+        showToast(`Se liquidaron ${formatPrice(amountToSettle)} exitosamente.`, 'success');
+        closeModal();
+        loadData();
+      } catch (err) {
+        console.error(err);
+        showToast('Error al procesar la liquidación', 'error');
+        btn.disabled = false;
+        btn.innerHTML = `${icon('checkCircle', 20)} Confirmar Liquidación`;
+      }
+    };
+  }
+
+  // Attach tab switchers safely
+  const tabDrivers = document.getElementById('del-tab-drivers');
+  if (tabDrivers) tabDrivers.onclick = () => switchTab('drivers');
+  const tabSettlements = document.getElementById('del-tab-settlements');
+  if (tabSettlements) tabSettlements.onclick = () => switchTab('settlements');
+  const tabConfig = document.getElementById('del-tab-config');
+  if (tabConfig) tabConfig.onclick = () => switchTab('config');
+
+  // Wire up sticky search input
+  const stickyInput = document.getElementById('driver-search-input-sticky');
+  if (stickyInput) {
+    stickyInput.oninput = (e) => {
+      searchQuery = e.target.value;
+      if (activeTab === 'drivers') renderTab();
+    };
+  }
+
+  // Wire up sticky filter buttons
+  document.querySelectorAll('.driver-filter-sticky').forEach(btn => {
+    btn.onclick = () => {
+      filterStatus = btn.dataset.filter;
+      // Update button styles
+      document.querySelectorAll('.driver-filter-sticky').forEach(b => {
+        const isActive = b.dataset.filter === filterStatus;
+        b.style.background = isActive ? 'var(--color-primary)' : 'var(--color-surface)';
+        b.style.color = isActive ? 'white' : 'var(--color-text-secondary)';
+        b.style.border = isActive ? 'none' : '1px solid var(--color-border)';
+      });
+      if (activeTab === 'drivers') renderTab();
+    };
+  });
+
+  loadData();
 }
 
 // 3. DYNAMIC PRICING SCHEDULES PAGE
@@ -1192,13 +2047,29 @@ export async function renderAdminMaintenanceSettings(container) {
         <!-- 3. Zona de Peligro -->
         <div>
           <h4 style="font-family:var(--font-display); font-size:12px; font-weight:800; margin-bottom:12px; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Zona de Peligro</h4>
-          <div style="background:rgba(239,68,68,0.02); border:1.5px solid rgba(239,68,68,0.12); border-radius:20px; padding:18px; display:flex; flex-direction:column; gap:12px;">
-            <p style="font-size:12px; color:var(--color-text-secondary); line-height:1.5; margin:0;">
-              Elimina todos los pedidos, chats, balances e historiales del sistema. <span style="color:#ef4444; font-weight:800;">Esta acción es irreversible.</span>
-            </p>
-            <button class="btn btn-block" id="btn-hard-reset" style="width:100%; height:48px; border-radius:12px; background:linear-gradient(135deg,#ef4444,#dc2626); color:white; border:none; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-              ${icon('trash', 16)} RESETEO TOTAL (NUCLEAR)
-            </button>
+          <div style="background:rgba(239,68,68,0.02); border:1.5px solid rgba(239,68,68,0.12); border-radius:20px; padding:18px; display:flex; flex-direction:column; gap:16px;">
+            
+            <!-- Reset Economía & Balances Option -->
+            <div style="background: rgba(245, 158, 11, 0.04); border: 1.5px solid rgba(245, 158, 11, 0.2); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-size: 13.5px; font-weight: 900; color: var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                <span>🔄</span> Resetear Saldos de Economía a $0
+              </div>
+              <p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0;">
+                Resetea a <strong>$0</strong> las deudas de todos los repartidores, comisiones de comercios y tarifas app, marcando las operaciones como liquidadas y limpiando la sección de Economía.
+              </p>
+              <button class="btn" id="btn-reset-economy-balances" style="width: 100%; height: 46px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; font-weight: 900; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);">
+                ${icon('refresh', 16)} RESETEAR SALDOS A $0 Y LIMPIAR ECONOMÍA
+              </button>
+            </div>
+
+            <div>
+              <p style="font-size:12px; color:var(--color-text-secondary); line-height:1.5; margin:0 0 10px 0;">
+                Elimina todos los pedidos, chats, balances e historiales del sistema. <span style="color:#ef4444; font-weight:800;">Esta acción es irreversible.</span>
+              </p>
+              <button class="btn btn-block" id="btn-hard-reset" style="width:100%; height:48px; border-radius:12px; background:linear-gradient(135deg,#ef4444,#dc2626); color:white; border:none; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                ${icon('trash', 16)} RESETEO TOTAL (NUCLEAR)
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1227,6 +2098,76 @@ export async function renderAdminMaintenanceSettings(container) {
       btn.disabled = false;
       btn.innerHTML = 'Guardar Estado';
     }
+  };
+
+  // Bind Reset Economy Balances click
+  document.getElementById('btn-reset-economy-balances').onclick = () => {
+    showConfirm({
+      title: '⚠️ RESETEAR TODO A $0 Y LIMPIAR ECONOMÍA',
+      message: 'Esta acción blanqueará a <b>$0</b> todas las deudas de repartidores, comisiones de comercios y tarifas app.<br><br>Además se eliminará todo el historial de liquidaciones en Economía.<br><br>¿Estás seguro de continuar?',
+      confirmText: 'SÍ, RESETEAR A $0',
+      onConfirm: async () => {
+        showToast('Reseteando saldos a $0...', 'info');
+
+        try {
+          const { collection: fColl, getDocs: fGet, doc: fDoc, writeBatch: fBatch, deleteDoc: fDel, serverTimestamp: fServ } = await import('firebase/firestore');
+          
+          // 1. Reset all driver debts to 0 in users collection
+          const usersSnap = await fGet(fColl(db, 'users'));
+          const b1 = fBatch(db);
+          usersSnap.docs.forEach(uDoc => {
+            const uData = uDoc.data();
+            if (uData.deliveryDebt || uData.role === 'delivery' || uData.isDelivery) {
+              b1.update(fDoc(db, 'users', uDoc.id), { deliveryDebt: 0 });
+            }
+          });
+          await b1.commit();
+
+          // 2. Mark all orders as settled / paid
+          const ordersSnap = await fGet(fColl(db, 'orders'));
+          const b2 = fBatch(db);
+          ordersSnap.docs.forEach(oDoc => {
+            const oData = oDoc.data();
+            if (!oData.isSettled || !oData.isSettledDriver || oData.commissionStatus !== 'paid') {
+              b2.update(fDoc(db, 'orders', oDoc.id), {
+                isSettled: true,
+                commissionStatus: 'paid',
+                isSettledDriver: true,
+                driverCommissionStatus: 'paid',
+                settledAt: fServ()
+              });
+            }
+          });
+          await b2.commit();
+
+          // 3. Delete all settlements documents
+          const setSnap = await fGet(fColl(db, 'settlements'));
+          for (const sDoc of setSnap.docs) {
+            await fDel(fDoc(db, 'settlements', sDoc.id));
+          }
+
+          // 4. Delete all delivery_transactions documents
+          const transSnap = await fGet(fColl(db, 'delivery_transactions'));
+          for (const tDoc of transSnap.docs) {
+            await fDel(fDoc(db, 'delivery_transactions', tDoc.id));
+          }
+
+          // 5. Delete all delivery_debt_settlements documents
+          try {
+            const debtSetSnap = await fGet(fColl(db, 'delivery_debt_settlements'));
+            for (const dDoc of debtSetSnap.docs) {
+              await fDel(fDoc(db, 'delivery_debt_settlements', dDoc.id));
+            }
+          } catch (e) {}
+
+          showToast('Saldos reseteados a $0 y Economía limpiada con éxito', 'success');
+          setTimeout(() => location.reload(), 1200);
+        } catch (err) {
+          console.error('Error during economy reset:', err);
+          showToast('Error al resetear saldos de economía', 'error');
+        }
+      }
+    });
   };
 
   // Bind image optimization click

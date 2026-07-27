@@ -22,21 +22,6 @@ export async function renderHome(content) {
       <div class="home-blob home-blob-1"></div>
       <div class="home-blob home-blob-2"></div>
       
-      <!-- Mundial Banner -->
-      <div style="background: linear-gradient(135deg, #74ACDF 0%, #ffffff 50%, #74ACDF 100%); border-radius: 20px; padding: 14px 16px; margin: 12px 16px 0; display: flex; align-items: center; gap: 14px; box-shadow: 0 8px 24px rgba(116, 172, 223, 0.25); border: 1.5px solid rgba(255, 255, 255, 0.4); position: relative; overflow: hidden;">
-        <div style="position: absolute; right: -15px; bottom: -15px; font-size: 56px; opacity: 0.15; transform: rotate(-15deg); pointer-events: none;">⚽</div>
-        <div style="width: 44px; height: 44px; border-radius: 50%; background: #FFD700; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 4px 10px rgba(255,215,0,0.3); border: 2px solid white; flex-shrink:0;">
-          🏆
-        </div>
-        <div style="flex: 1; min-width: 0;">
-          <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: #1E3A8A; margin: 0; letter-spacing: -0.02em; display: flex; align-items: center; gap: 6px;">
-            ¡VAMOS ARGENTINA! 🇦🇷
-          </h4>
-          <p style="font-size: 11.5px; color: #1E3A8A; font-weight: 800; margin: 2px 0 0; opacity: 0.95; line-height: 1.3;">
-            ¿Listos para el partido? Pedí la picada, birra o fernet y no te pierdas ni un segundo. ⚽
-          </p>
-        </div>
-      </div>
 
       <!-- Quick Services Column Structure (Mandados on Top, Viajes and Market below) -->
       <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 0; margin-bottom: 4px;">
@@ -204,6 +189,85 @@ export async function renderHome(content) {
       ${getFooterHTML()}
     </div>
   `;
+
+  // --- IMMEDIATE INTERACTION EVENT LISTENERS ---
+  // Register static element event listeners synchronously so they are active instantly
+  const searchInput = document.getElementById('header-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      renderComercios(comercios, activeCategory, e.target.value, currentFilters);
+    });
+  }
+
+  const reportBugBtn = document.getElementById('report-bug-btn');
+  if (reportBugBtn) {
+    reportBugBtn.onclick = async () => {
+      const user = getState().user;
+      if (!user) {
+        const { showToast } = await import('../components/toast.js');
+        showToast('Iniciá sesión para reportar un error.', 'warning');
+        return;
+      }
+      showBugReportModal();
+    };
+  }
+
+  const joinCommerceBtn = document.getElementById('join-commerce-banner');
+  if (joinCommerceBtn) {
+    joinCommerceBtn.addEventListener('click', async () => {
+      const user = getState().user;
+      if (!user) {
+        const { showToast } = await import('../components/toast.js');
+        showToast('Iniciá sesión para solicitar la incorporación de tu comercio.', 'warning');
+        return;
+      }
+      showJoinCommerceModal();
+    });
+  }
+
+  const joinTeamBtn = document.getElementById('join-team-banner');
+  if (joinTeamBtn) {
+    joinTeamBtn.addEventListener('click', async () => {
+      const user = getState().user;
+      if (!user) {
+        const { showToast } = await import('../components/toast.js');
+        showToast('Iniciá sesión para postularte.', 'warning');
+        return;
+      }
+      showJoinTeamModal();
+    });
+  }
+
+  const mandadosBtn = document.getElementById('home-mandados-btn');
+  if (mandadosBtn) {
+    mandadosBtn.onclick = async () => {
+      const user = getState().user;
+      if (!user) {
+        const { showToast } = await import('../components/toast.js');
+        showToast('Iniciá sesión para usar el servicio de Mandados.', 'warning');
+        return;
+      }
+      showMandadosOverlayModal();
+    };
+  }
+
+  content.addEventListener('scroll', () => {
+    const fabBtn = document.getElementById('support-bot-fab-btn');
+    const guideFab = document.getElementById('app-guide-fab');
+    const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 160;
+    
+    if (isAtBottom) {
+      if (fabBtn) fabBtn.classList.add('fab-hidden');
+      if (guideFab) guideFab.classList.add('fab-hidden');
+    } else {
+      if (fabBtn) fabBtn.classList.remove('fab-hidden');
+      if (guideFab) guideFab.classList.remove('fab-hidden');
+    }
+  });
+
+  checkAndShowWelcomeModal();
+  checkAndShowWelcomeCouponModal();
+  checkAndShowAppOnlyPromo();
 
   // Filters state
   const currentFilters = { openOnly: false, freeShippingOnly: false, topRatedOnly: false };
@@ -406,95 +470,7 @@ export async function renderHome(content) {
 
 
 
-  // Search handler (Global Header Search)
-  const searchInput = document.getElementById('header-search');
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      renderComercios(comercios, activeCategory, e.target.value, currentFilters);
-    });
-  }
 
-
-
-  // Bug Report button handler
-  const reportBugBtn = document.getElementById('report-bug-btn');
-  if (reportBugBtn) {
-    reportBugBtn.onclick = async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para reportar un error.', 'warning');
-        return;
-      }
-      showBugReportModal();
-    };
-  }
-
-  // Join Commerce button handler
-  const joinCommerceBtn = document.getElementById('join-commerce-banner');
-  if (joinCommerceBtn) {
-    joinCommerceBtn.addEventListener('click', async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para solicitar la incorporación de tu comercio.', 'warning');
-        return;
-      }
-      showJoinCommerceModal();
-    });
-  }
-
-  // Join Team button handler
-  const joinTeamBtn = document.getElementById('join-team-banner');
-  if (joinTeamBtn) {
-    joinTeamBtn.addEventListener('click', async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para postularte.', 'warning');
-        return;
-      }
-      showJoinTeamModal();
-    });
-  }
-
-  // Show welcome beta modal if not shown before
-  checkAndShowWelcomeModal();
-
-  // Show welcome coupon modal for new users with 0 purchases
-  checkAndShowWelcomeCouponModal();
-
-  // Show app-only product promotion modal if not shown in this session
-  checkAndShowAppOnlyPromo();
-
-  // Mandados Home button handler
-  const mandadosBtn = document.getElementById('home-mandados-btn');
-  if (mandadosBtn) {
-    mandadosBtn.onclick = async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para usar el servicio de Mandados.', 'warning');
-        return;
-      }
-      showMandadosOverlayModal();
-    };
-  }
-
-  // Hide FABs at bottom of page to avoid overlapping the bug report card
-  content.addEventListener('scroll', () => {
-    const fabBtn = document.getElementById('support-bot-fab-btn');
-    const guideFab = document.getElementById('app-guide-fab');
-    const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 160;
-    
-    if (isAtBottom) {
-      if (fabBtn) fabBtn.classList.add('fab-hidden');
-      if (guideFab) guideFab.classList.add('fab-hidden');
-    } else {
-      if (fabBtn) fabBtn.classList.remove('fab-hidden');
-      if (guideFab) guideFab.classList.remove('fab-hidden');
-    }
-  });
 
   return {
     cleanup: () => {
@@ -1807,7 +1783,7 @@ async function showBugReportModal() {
           email: user.email || '',
           goId: user.goId || '',
           ticketId: ticketId,
-          status: 'pending_approval',
+          status: 'pending',
           lastMessageText: `🐞 Reporte de Bug: ${text.substring(0, 30)}...`,
           lastMessageTime: serverTimestamp(),
           unreadByAdmin: true,
@@ -1816,7 +1792,7 @@ async function showBugReportModal() {
         });
       } else {
         await updateDoc(chatRef, {
-          status: 'pending_approval',
+          status: 'pending',
           goId: user.goId || chatSnap.data().goId || '',
           ticketId: ticketId,
           lastMessageText: `🐞 Reporte de Bug: ${text.substring(0, 30)}...`,
@@ -2197,18 +2173,36 @@ async function showJoinCommerceModal() {
 
         if (suggestionsDropdown) {
           suggestionsDropdown.innerHTML = suggestions.map(s => `
-            <div class="suggestion-item" data-lat="${s.lat}" data-lng="${s.lng}" data-addr="${s.address}" style="padding:12px 16px; font-size:13px; font-weight:600; color:var(--color-text-primary); cursor:pointer; border-bottom:1px solid var(--color-border-light);">
+            <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="padding:12px 16px; font-size:13px; font-weight:600; color:var(--color-text-primary); cursor:pointer; border-bottom:1px solid var(--color-border-light);">
               ${s.address}
             </div>
           `).join('');
           suggestionsDropdown.style.display = 'block';
 
           suggestionsDropdown.querySelectorAll('.suggestion-item').forEach(item => {
-            item.onclick = () => {
-              const lat = parseFloat(item.dataset.lat);
-              const lng = parseFloat(item.dataset.lng);
+            item.onclick = async () => {
+              let lat = parseFloat(item.dataset.lat);
+              let lng = parseFloat(item.dataset.lng);
+              const placeId = item.dataset.placeid;
               const addr = item.dataset.addr;
-              selectLocation({ lat, lng }, addr);
+
+              if (isNaN(lat) || isNaN(lng)) {
+                if (placeId) {
+                  try {
+                    const { geocodePlaceId } = await import('../utils/geo.js');
+                    const coords = await geocodePlaceId(placeId);
+                    if (coords) {
+                      selectLocation({ lat: coords.lat, lng: coords.lng }, addr);
+                    } else {
+                      console.error('Failed to geocode suggestion place ID');
+                    }
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }
+              } else {
+                selectLocation({ lat, lng }, addr);
+              }
             };
           });
         }

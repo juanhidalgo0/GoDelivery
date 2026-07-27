@@ -177,26 +177,6 @@ function filterAndRenderOrders(orders, filterValue) {
         </div>
       </div>
     </div>
-
-    <!-- Secondary BI KPI Grid -->
-    <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 12px; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 20px; padding: 16px; box-shadow: var(--shadow-xs);">
-      <div style="text-align: left; border-right: 1px solid var(--color-border-light); padding-right: 8px;">
-        <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Ventas Netas</div>
-        <div style="font-size: 17px; font-weight: 900; color: var(--color-text-primary);">$${totalBilled.toLocaleString('es-AR')}</div>
-      </div>
-      <div style="text-align: left; padding-left: 8px;">
-        <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Entregas Exitosas</div>
-        <div style="font-size: 17px; font-weight: 900; color: var(--color-text-primary);">${completedOrders.length}</div>
-      </div>
-      <div style="text-align: left; border-right: 1px solid var(--color-border-light); padding-right: 8px; border-top: 1px solid var(--color-border-light); padding-top: 12px; margin-top: 8px;">
-        <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Ticket Promedio</div>
-        <div style="font-size: 17px; font-weight: 900; color: var(--color-text-primary);">$${Math.round(avgTicket).toLocaleString('es-AR')}</div>
-      </div>
-      <div style="text-align: left; padding-left: 8px; border-top: 1px solid var(--color-border-light); padding-top: 12px; margin-top: 8px;">
-        <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Comisión Promedio</div>
-        <div style="font-size: 17px; font-weight: 900; color: var(--color-text-primary);">$${Math.round(avgCommission).toLocaleString('es-AR')}</div>
-      </div>
-    </div>
   `;
 
   if (filtered.length === 0) {

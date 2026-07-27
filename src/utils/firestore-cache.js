@@ -1,4 +1,5 @@
 import { getDocsFromServer, getDocsFromCache } from 'firebase/firestore';
+import { safeStorage } from './safe-storage.js';
 
 /**
  * Executes a Firestore query with smart caching based on local metadata.
@@ -46,7 +47,7 @@ export async function getDocsOptimized(queryRef, cacheKey, ttlMs = 5 * 60 * 1000
     console.log(`[FirestoreCache] Loaded '${cacheKey}' from SERVER. size: ${serverSnap.size}`);
     
     // Save metadata timestamp to localStorage to mark cache as fresh
-    localStorage.setItem(cacheMetaKey, JSON.stringify({ timestamp: now }));
+    safeStorage.setItem(cacheMetaKey, JSON.stringify({ timestamp: now }));
     return serverSnap;
   } catch (serverErr) {
     console.warn(`[FirestoreCache] Server query failed for '${cacheKey}'. Checking offline cache fallback:`, serverErr);

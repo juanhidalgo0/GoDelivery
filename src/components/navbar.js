@@ -51,6 +51,7 @@ export function renderNavbar() {
   }
 
   const hashPath = hash.split('?')[0];
+  console.log('[NavBar Debug] isDelivery():', isDelivery(), 'userObject:', getState().user);
 
   navbar.innerHTML = `
     <div class="bottom-nav" style="background: var(--footer-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-top: 1px solid var(--footer-border); box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.05);">
@@ -131,7 +132,7 @@ export function initNavbar() {
     if (unreadMarketplaceChatsUnsub) { unreadMarketplaceChatsUnsub(); unreadMarketplaceChatsUnsub = null; }
 
     if (user) {
-      const { collection, doc, query, where, onSnapshot, or } = await import('firebase/firestore');
+      const { collection, query, where, onSnapshot, or } = await import('firebase/firestore');
       const { db } = await import('../firebase.js');
       const { setState: stateSetState } = await import('../state.js');
 
@@ -140,12 +141,35 @@ export function initNavbar() {
       let unreadMarketplace = 0;
 
       const updateCount = () => {
-        stateSetState('totalUnreadChats', unreadSupport + unreadChats + unreadMarketplace);
+        const total = unreadSupport + unreadChats + unreadMarketplace;
+        stateSetState('totalUnreadChats', total);
+        
+        // Update badge directly in DOM if rendered
+        const badgeEl = document.getElementById('support-chats-badge');
+        if (badgeEl) {
+          if (total > 0) {
+            badgeEl.textContent = total;
+            badgeEl.style.display = 'flex';
+          } else {
+            badgeEl.style.display = 'none';
+          }
+        } else {
+          renderNavbar();
+        }
       };
 
-      // 1. Support chat unread
-      unreadUserSupportUnsub = onSnapshot(doc(db, 'support_chats', user.uid), (snap) => {
-        unreadSupport = (snap.exists() && snap.data().unreadByUser === true) ? 1 : 0;
+      // 1. Support chat unread: listen to all support chats for user.uid
+      const qSupport = query(collection(db, 'support_chats'));
+      unreadUserSupportUnsub = onSnapshot(qSupport, (snap) => {
+        let count = 0;
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const matchesUser = data.userId === user.uid || d.id === user.uid || (data.messages && data.messages.some(m => m.sender !== 'user' && m.sender !== user.uid));
+          if (matchesUser && data.unreadByUser === true) {
+            count++;
+          }
+        });
+        unreadSupport = count;
         updateCount();
       }, (err) => console.warn('User support unread listener failed:', err));
 

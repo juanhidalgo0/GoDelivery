@@ -143,9 +143,11 @@ async function loadAndGroupOrders() {
     let globalCommissions = 0;
 
     allOrders.forEach(order => {
+      const orderCommission = order.isManual ? 0 : (order.commissionAmount || 0);
+
       if (order.status !== 'cancelled') {
         if (!order.isSettled) {
-          globalCommissions += (order.commissionAmount || 0);
+          globalCommissions += orderCommission;
         }
         if (!order.isSettledDriver) {
           globalAppFees += (order.appUsageFee || 0);
@@ -171,7 +173,7 @@ async function loadAndGroupOrders() {
         groupedComercios[cid].orders.push(order);
         if (order.status !== 'cancelled') {
           groupedComercios[cid].totalSales += order.total;
-          groupedComercios[cid].totalCommission += (order.commissionAmount || 0);
+          groupedComercios[cid].totalCommission += orderCommission;
           groupedComercios[cid].totalAppFee += (order.appUsageFee || 0);
         }
         if (order.status === 'pending') groupedComercios[cid].pendingCount++;
@@ -187,17 +189,25 @@ async function loadAndGroupOrders() {
       }
     });
 
+    let globalDriverDebts = 0;
+    Object.values(groupedDrivers).forEach(d => {
+      globalDriverDebts += Number(d.debt || 0);
+    });
+
+    const totalPendingBalance = globalAppFees + globalCommissions + globalDriverDebts;
+
     // Render Global Summary
     const summaryTarget = document.getElementById('global-commissions-summary');
     if (summaryTarget) {
-      summaryTarget.innerHTML = `        <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 32px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); position: relative; overflow: hidden;">
+      summaryTarget.innerHTML = `
+        <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 32px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); position: relative; overflow: hidden;">
           <!-- Abstract Background Glow -->
           <div style="position:absolute; top:-20px; right:-20px; width:120px; height:120px; background:var(--color-primary); filter:blur(60px); opacity:0.15; border-radius:50%;"></div>
           
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-              <span style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.7;">Balance Pendiente</span>
-              <div style="font-size: 36px; font-weight: 950; color: white; letter-spacing: -1.5px; margin-top: 4px;">${formatPrice(globalAppFees + globalCommissions)}</div>
+              <span style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.7;">Balance Pendiente Total</span>
+              <div style="font-size: 36px; font-weight: 950; color: white; letter-spacing: -1.5px; margin-top: 4px;">${formatPrice(totalPendingBalance)}</div>
             </div>
             <div style="background: rgba(var(--color-primary-rgb), 0.15); color: var(--color-primary); padding: 6px 12px; border-radius: 12px; font-size: 11px; font-weight: 900; display: flex; align-items: center; gap: 6px;">
               <span style="width: 6px; height: 6px; background: var(--color-primary); border-radius: 50%; display: inline-block; box-shadow: 0 0 8px var(--color-primary);"></span>
@@ -205,14 +215,18 @@ async function loadAndGroupOrders() {
             </div>
           </div>
           
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08);">
-            <div style="background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.04);">
-              <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin-bottom: 4px; opacity: 0.6;">Tarifas App</div>
-              <div style="font-size: 18px; font-weight: 800; color: white; letter-spacing: -0.5px;">${formatPrice(globalAppFees)}</div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08);">
+            <div style="background: rgba(255,255,255,0.03); padding: 12px 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.04);">
+              <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; margin-bottom: 4px; opacity: 0.6; white-space: nowrap;">Tarifas App</div>
+              <div style="font-size: 17px; font-weight: 800; color: white; letter-spacing: -0.5px;">${formatPrice(globalAppFees)}</div>
             </div>
-            <div style="background: rgba(var(--color-primary-rgb),0.05); padding: 12px 16px; border-radius: 18px; border: 1px solid rgba(var(--color-primary-rgb),0.1);">
-              <div style="font-size: 10px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; margin-bottom: 4px; opacity: 0.8;">Comisiones</div>
-              <div style="font-size: 18px; font-weight: 800; color: var(--color-primary); letter-spacing: -0.5px;">${formatPrice(globalCommissions)}</div>
+            <div style="background: rgba(var(--color-primary-rgb),0.05); padding: 12px 14px; border-radius: 18px; border: 1px solid rgba(var(--color-primary-rgb),0.1);">
+              <div style="font-size: 10px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; margin-bottom: 4px; opacity: 0.8; white-space: nowrap;">Comisiones</div>
+              <div style="font-size: 17px; font-weight: 800; color: var(--color-primary); letter-spacing: -0.5px;">${formatPrice(globalCommissions)}</div>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.05); padding: 12px 14px; border-radius: 18px; border: 1px solid rgba(16, 185, 129, 0.15);">
+              <div style="font-size: 10px; font-weight: 800; color: #10b981; text-transform: uppercase; margin-bottom: 4px; opacity: 0.9; white-space: nowrap;">Liquidaciones</div>
+              <div style="font-size: 17px; font-weight: 800; color: #10b981; letter-spacing: -0.5px;">${formatPrice(globalDriverDebts)}</div>
             </div>
           </div>
         </div>

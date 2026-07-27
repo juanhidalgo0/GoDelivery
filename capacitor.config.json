@@ -6,12 +6,16 @@
     "GoogleAuth": {
       "scopes": ["profile", "email"],
       "clientId": "848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com",
+      "serverClientId": "848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com",
       "forceCodeForRefreshToken": true
     },
     "SplashScreen": {
-      "launchShowDuration": 0,
+      "launchShowDuration": 300,
+      "launchAutoHide": true,
+      "launchFadeDuration": 150,
       "backgroundColor": "#E11D48",
       "showSpinner": false,
+      "androidScaleType": "CENTER_CROP",
       "androidSplashResourceName": "splash"
     },
     "PushNotifications": {

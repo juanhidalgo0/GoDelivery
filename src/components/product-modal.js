@@ -19,6 +19,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   const selectedOptions = []; // Array of { groupName, name, price, qty }
   let flavorSearchQuery = '';
   let commerceLogo = '';
+  let commerceBanner = '';
   let localCommerceProducts = [];
 
   import('firebase/firestore').then(async ({ doc, getDoc, collection, getDocs }) => {
@@ -27,7 +28,9 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       
       const logoPromise = getDoc(doc(db, 'comercios', comercioId)).then(snap => {
         if (snap.exists()) {
-          commerceLogo = snap.data().logo || '';
+          const cData = snap.data();
+          commerceLogo = cData.logo || '';
+          commerceBanner = cData.banner || cData.portada || cData.coverImage || '';
         }
       });
 
@@ -59,18 +62,29 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   }
 
   // Load global flavors if checked
-  let flavorsLoading = product.useGlobalFlavors === true;
+  const isUsingFlavors = product.useGlobalFlavors === true || product.useGlobalFlavors === 'true' || (product.allowedFlavors && product.allowedFlavors.length > 0);
+  let flavorsLoading = isUsingFlavors;
   let globalFlavorsGroup = null;
 
-  if (product.useGlobalFlavors) {
+  if (isUsingFlavors) {
     import('firebase/firestore').then(async ({ doc, getDoc }) => {
       try {
         const { db } = await import('../firebase.js');
         
+        let targetProduct = product;
+        try {
+          const prodSnap = await getDoc(doc(db, 'comercios', comercioId, 'products', product.id));
+          if (prodSnap.exists()) {
+            targetProduct = { id: prodSnap.id, ...prodSnap.data() };
+          }
+        } catch (e) {
+          console.error('Error fetching fresh product doc:', e);
+        }
+
         let productCategoryName = '';
-        if (product.categoryId) {
+        if (targetProduct.categoryId) {
           try {
-            const catSnap = await getDoc(doc(db, 'comercios', comercioId, 'categories', product.categoryId));
+            const catSnap = await getDoc(doc(db, 'comercios', comercioId, 'categories', targetProduct.categoryId));
             if (catSnap.exists()) {
               productCategoryName = (catSnap.data().name || '').toLowerCase();
             }
@@ -84,29 +98,35 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           const data = snap.data();
           const rawList = data.sabores || [];
           
-          let filteredRawList = rawList.filter(f => f.isAvailable === true);
+          let filteredRawList = rawList.filter(f => {
+            // Discard paused or explicitly inactive flavors
+            if (f.active === false || f.status === 'inactive' || f.isPaused === true) return false;
+            return true;
+          });
 
-          if (product.allowedFlavors && product.allowedFlavors.length > 0) {
-            filteredRawList = filteredRawList.filter(f => product.allowedFlavors.includes(f.name));
-          } else {
-            const productNameLower = (product.name || '').toLowerCase();
-            const isPizza = productCategoryName.includes('pizza') || productNameLower.includes('pizza');
-            const isEmpanada = productCategoryName.includes('empanada') || productNameLower.includes('empanada');
+          // If product specifies allowedFlavors, filter to them ONLY IF they span multiple categories or represent full selection
+          const activeAllowed = targetProduct.allowedFlavors || product.allowedFlavors;
+          if (activeAllowed && Array.isArray(activeAllowed) && activeAllowed.length > 0) {
+            const normAllowed = activeAllowed.map(n => String(n).trim().toLowerCase());
+            const allowedItems = filteredRawList.filter(f => normAllowed.includes(String(f.name).trim().toLowerCase()));
+            
+            const allowedCats = new Set(allowedItems.map(f => (f.category && String(f.category).trim() !== '') ? String(f.category).trim().toLowerCase() : 'helados'));
 
-            if (isPizza) {
-              filteredRawList = filteredRawList.filter(f => (f.category || '').toLowerCase().includes('pizza'));
-            } else if (isEmpanada) {
-              filteredRawList = filteredRawList.filter(f => (f.category || '').toLowerCase().includes('empanada'));
+            if (allowedCats.size > 1 || allowedItems.length >= filteredRawList.length) {
+              filteredRawList = allowedItems;
             }
           }
 
-          const list = filteredRawList.map(f => ({ name: f.name, category: f.category || 'Otros' }));
+          const list = filteredRawList.map(f => ({
+            name: f.name,
+            category: (f.category && String(f.category).trim() !== '') ? String(f.category).trim() : 'Helados y Variedades'
+          }));
           
           globalFlavorsGroup = {
             name: 'Seleccioná tus sabores',
             multi: true,
             required: true,
-            maxSelections: product.maxSelections || 4,
+            maxSelections: targetProduct.maxSelections || product.maxSelections || 4,
             options: list.sort((a, b) => a.name.localeCompare(b.name))
           };
         }
@@ -120,27 +140,34 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   }
 
   const render = () => {
-    const scrollEl = modalContent.querySelector('.pm-content');
+    const scrollEl = modalContent.querySelector('.pm-scrollable-body');
     const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
 
     const activeId = document.activeElement ? document.activeElement.id : null;
     const start = document.activeElement ? document.activeElement.selectionStart : null;
     const end = document.activeElement ? document.activeElement.selectionEnd : null;
 
+    const freshProduct = localCommerceProducts.find(p => p.id === product.id);
+    const initialImage = (product?.image || product?.imageUrl || '').trim();
+    const freshImage = (freshProduct?.image || freshProduct?.imageUrl || '').trim();
+    const productImage = freshImage !== '' ? freshImage : initialImage;
+    const activeProduct = freshProduct ? { ...product, ...freshProduct, image: productImage } : { ...product, image: productImage };
+    const displayBannerImage = productImage || commerceBanner;
+
     const activeOffers = getState().activeOffers || [];
-    const offer = activeOffers.find(o => o.active && o.comercioId === comercioId && o.productIds && o.productIds.includes(product.id));
+    const offer = activeOffers.find(o => o.active && o.comercioId === comercioId && o.productIds && o.productIds.includes(activeProduct.id));
 
     const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
-    const baseDiscountedPrice = discountPercent > 0 ? product.price * (1 - discountPercent / 100) : product.price;
+    const baseDiscountedPrice = discountPercent > 0 ? activeProduct.price * (1 - discountPercent / 100) : activeProduct.price;
 
     let allProducts = getState().currentProducts || [];
     if (allProducts.length === 0 || allProducts[0].comercioId !== comercioId) {
       allProducts = localCommerceProducts;
     }
-    const combos = product.frequentCombos || {};
+    const combos = activeProduct.frequentCombos || {};
 
     const suggested = allProducts
-      .filter(p => p.id !== product.id && p.isAvailable !== false)
+      .filter(p => p.id !== activeProduct.id && p.isAvailable !== false)
       .sort((a, b) => {
         const comboA = combos[a.id] || 0;
         const comboB = combos[b.id] || 0;
@@ -148,20 +175,21 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           return comboB - comboA; // Prioritize highest purchase co-occurrence count!
         }
         // Fallback: prioritize same category
-        const catA = a.categoryId === product.categoryId ? 1 : 0;
-        const catB = b.categoryId === product.categoryId ? 1 : 0;
+        const catA = a.categoryId === activeProduct.categoryId ? 1 : 0;
+        const catB = b.categoryId === activeProduct.categoryId ? 1 : 0;
         if (catB !== catA) return catB - catA;
         
         return (a.order || 0) - (b.order || 0);
       })
       .slice(0, 4);
 
-    const baseOptionsGroups = product.optionsGroups || [];
+    const baseOptionsGroups = activeProduct.optionsGroups || [];
     const optionsGroups = globalFlavorsGroup ? [globalFlavorsGroup, ...baseOptionsGroups] : baseOptionsGroups;
+    const hasLongFlavorsOrGroups = activeProduct.useGlobalFlavors || optionsGroups.some(g => (g.options || []).length > 4);
     
     const replaceOption = selectedOptions.find(o => o.priceMode === 'replace');
     let effectiveBasePrice = replaceOption ? (replaceOption.price || 0) : baseDiscountedPrice;
-    let effectiveOriginalBasePrice = replaceOption ? (replaceOption.price || 0) : (product.price || 0);
+    let effectiveOriginalBasePrice = replaceOption ? (replaceOption.price || 0) : (activeProduct.price || 0);
 
     const optionsPrice = selectedOptions.reduce((s, o) => s + (o.priceMode === 'replace' ? 0 : (o.price * o.qty || 0)), 0);
     const unitPrice = effectiveBasePrice + optionsPrice;
@@ -170,14 +198,14 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     const originalUnitPrice = effectiveOriginalBasePrice + optionsPrice;
     const originalTotalPrice = originalUnitPrice * qty;
 
-    const isFav = isProductFavorite(product.id);
+    const isFav = isProductFavorite(activeProduct.id);
 
     const currentStockMultiplier = selectedOptions.reduce((max, o) => Math.max(max, o.stockMultiplier || 1), 1);
     const requiredStockPerUnit = currentStockMultiplier;
 
-    const isLimited = product.stockMode === 'limited';
-    const stockQty = typeof product.stockQuantity === 'number' ? product.stockQuantity : 0;
-    const stockThresh = typeof product.stockThreshold === 'number' ? product.stockThreshold : 0;
+    const isLimited = activeProduct.stockMode === 'limited';
+    const stockQty = typeof activeProduct.stockQuantity === 'number' ? activeProduct.stockQuantity : 0;
+    const stockThresh = typeof activeProduct.stockThreshold === 'number' ? activeProduct.stockThreshold : 0;
     const isOutOfStock = isLimited && stockQty < requiredStockPerUnit;
 
     let stockBadgeHTML = '';
@@ -219,33 +247,39 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     modalContent.innerHTML = `
       <button class="pm-close-btn" id="pm-modal-close">${icon('close', 20)}</button>
 
-      <div class="pm-scrollable-body" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; -webkit-overflow-scrolling:touch;">
-        ${product.image ? `
-        <div class="pm-banner">
-          <img src="${product.image}" alt="${product.name}" />
+      ${displayBannerImage ? `
+        <div class="pm-banner" style="flex-shrink: 0;">
+          <img src="${displayBannerImage}" alt="${activeProduct.name}" />
           <div class="pm-banner-overlay"></div>
           <button class="pm-heart-btn" id="pm-modal-heart" title="Me gusta">${icon('heart', 20, isFav ? 'fav-active' : '')}</button>
-          <button class="pm-zoom-btn" id="pm-modal-zoom" title="Ampliar imagen">${icon('search', 18)}</button>
+          ${productImage ? `<button class="pm-zoom-btn" id="pm-modal-zoom" title="Ampliar imagen">${icon('search', 18)}</button>` : ''}
           
           ${commerceLogo ? `
-            <div style="position: absolute; bottom: 12px; left: 12px; width: 80px; height: 80px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 100; background: white; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; bottom: 12px; left: 12px; width: 64px; height: 64px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 100; background: white; overflow: hidden; display: flex; align-items: center; justify-content: center;">
               <img src="${commerceLogo}" alt="${comercioName}" style="width: 100%; height: 100%; object-fit: cover;" />
             </div>
           ` : ''}
           
           ${offer ? `
-            <div class="pm-discount-tag" style="position: absolute; top: 16px; left: 64px; height: 36px; padding: 0 16px; border-radius: 18px; background: var(--color-primary); color: white; font-weight: 900; font-size: 12px; z-index: 100; box-shadow: 0 4px 15px rgba(225,29,72,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid rgba(255,255,255,0.25); font-family: var(--font-display); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);">
+            <div class="pm-discount-tag" style="position: absolute; top: 16px; left: 64px; height: 32px; padding: 0 14px; border-radius: 16px; background: var(--color-primary); color: white; font-weight: 900; font-size: 11px; z-index: 100; box-shadow: 0 4px 15px rgba(225,29,72,0.3); display: flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid rgba(255,255,255,0.25); font-family: var(--font-display); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);">
               ${icon('tag', 14)} ${offer.type === 'percentage' ? `${offer.value}% OFF` : '2x1'}
             </div>
           ` : ''}
         </div>
       ` : `
-        <div style="padding-top: 50px; position: relative;">
-          <button class="pm-heart-btn" id="pm-modal-heart" style="position: absolute; top: 16px; left: 16px;" title="Me gusta">${icon('heart', 20, isFav ? 'fav-active' : '')}</button>
+        <div class="pm-banner" style="background: linear-gradient(135deg, var(--color-primary) 0%, #0f172a 100%); min-height: 120px; flex-shrink: 0;">
+          <div class="pm-banner-overlay"></div>
+          <button class="pm-heart-btn" id="pm-modal-heart" title="Me gusta">${icon('heart', 20, isFav ? 'fav-active' : '')}</button>
+          ${commerceLogo ? `
+            <div style="position: absolute; bottom: 12px; left: 12px; width: 64px; height: 64px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 100; background: white; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+              <img src="${commerceLogo}" alt="${comercioName}" style="width: 100%; height: 100%; object-fit: cover;" />
+            </div>
+          ` : ''}
         </div>
       `}
 
-      <div class="pm-info-section" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 4px;">
+      <!-- FIXED INFO SECTION -->
+      <div class="pm-info-section" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; background: var(--color-surface); border-bottom: 1px solid var(--color-border-light);">
         ${offer && !product.image ? `
           <div class="pm-discount-tag" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; background: var(--color-primary); color: white; font-weight: 900; font-size: 11px; margin-bottom: 4px; box-shadow: 0 4px 10px rgba(225,29,72,0.2); border: 1.5px solid rgba(255,255,255,0.2); font-family: var(--font-display);">
             ${icon('tag', 12)} ${offer.type === 'percentage' ? `${offer.value}% OFF` : '2x1'}
@@ -266,7 +300,9 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         ${stockBadgeHTML ? `<div style="margin-top: 2px;">${stockBadgeHTML.replace('margin-top: 8px;', 'margin-top: 2px;').replace('padding: 4px 12px;', 'padding: 3px 10px;')}</div>` : ''}
       </div>
 
-      <div class="pm-content" style="padding-bottom: 24px; overflow-y: visible; flex: none;">
+      <!-- DYNAMIC SCROLLABLE BODY (ONLY FLAVOR LIST SCROLLS) -->
+      <div class="pm-scrollable-body" style="flex:1; height:100%; min-height:0; overflow-y:scroll; -webkit-overflow-scrolling:touch; touch-action:pan-y; overscroll-behavior-y:contain; background: var(--color-bg-secondary);">
+        <div class="pm-content" style="padding: 8px 0 120px 0; touch-action:pan-y;">
         ${flavorsLoading ? `
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 20px; gap:12px;">
             <div style="border: 3px solid var(--color-border-light); border-top: 3px solid var(--color-primary); border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite;"></div>
@@ -289,8 +325,10 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
             `;
           }
 
+          const isGlobalFlavorGroup = group.name === 'Seleccioná tus sabores' || group.name.toLowerCase().includes('sabor');
+
           return `
-            <div class="pm-group" data-group-idx="${groupIdx}">
+            <div class="pm-group" data-group-idx="${groupIdx}" style="${isGlobalFlavorGroup ? 'display: flex; flex-direction: column; margin-bottom: 12px;' : ''}">
               <div class="pm-group-header" style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--color-border-light); margin-bottom:0; gap:8px;">
                 <div class="pm-group-title" style="margin:0; font-family:var(--font-display); font-size:14px; font-weight:850; color:var(--color-text-primary); display:flex; align-items:center; gap:8px; flex:1;">
                   <span>${group.name}</span>
@@ -298,7 +336,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                 </div>
                 ${countBadgeHtml}
               </div>
-              <div class="pm-options-list" style="border-top:none; ${group.name === 'Seleccioná tus sabores' ? 'display:flex; flex-direction:column; gap:0; padding:0;' : ''}">
+              <div class="pm-options-list" style="border-top:none; ${isGlobalFlavorGroup ? 'flex: 1; display: flex; flex-direction: column; gap: 0; padding: 0;' : ''}">
                 ${(() => {
                   if (group.name === 'Seleccioná tus sabores') {
                     const searchBarHtml = `
@@ -415,7 +453,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         }).join('') : ''}
 
         <!-- Sugeridos / Similares Section -->
-        ${suggested.length > 0 ? `
+        ${(suggested.length > 0 && !hasLongFlavorsOrGroups) ? `
           <div class="pm-suggested-section" style="margin-top: 24px; padding: 0 4px;">
             <h3 style="font-family: var(--font-display); font-size: 13px; font-weight: 850; color: var(--color-text); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
               Otras personas lo combinan con:
@@ -692,22 +730,9 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       };
     });
 
-    const newScrollEl = modalContent.querySelector('.pm-content');
-    if (newScrollEl) {
-      newScrollEl.scrollTop = scrollTop;
-    }
-
-    // Restore focus and cursor selection
-    if (activeId) {
-      const activeEl = modalContent.querySelector(`#${activeId}`);
-      if (activeEl) {
-        activeEl.focus();
-        if (start !== null && end !== null && activeEl.setSelectionRange) {
-          try {
-            activeEl.setSelectionRange(start, end);
-          } catch (e) {}
-        }
-      }
+    const restoredScrollEl = modalContent.querySelector('.pm-scrollable-body');
+    if (restoredScrollEl) {
+      restoredScrollEl.scrollTop = scrollTop;
     }
   };
 
@@ -716,7 +741,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   showModal({
     title: '',
     hideHeader: true,
-    fullSwipe: true,
+    fullscreen: window.innerWidth < 768,
     content: modalContent,
   });
 }

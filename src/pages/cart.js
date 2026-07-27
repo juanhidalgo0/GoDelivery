@@ -55,7 +55,15 @@ export async function renderCart(content) {
   if (auth.currentUser && !isPreview && sessionStorage.getItem('welcome-coupon-cleared') !== 'true') {
     const userObj = getState().user;
     const currentApplied = getState().appliedCoupon;
-    if (userObj && (userObj.completedOrdersCount || 0) === 0 && !currentApplied) {
+    
+    let isWelcomeUsed = false;
+    try {
+      const usedKey = `gd_used_coupons_${auth.currentUser.uid}`;
+      const used = JSON.parse(localStorage.getItem(usedKey) || '[]');
+      isWelcomeUsed = used.includes('BIENVENIDA');
+    } catch (e) {}
+
+    if (userObj && (userObj.completedOrdersCount || 0) === 0 && !currentApplied && !isWelcomeUsed) {
       try {
         const welcomeRef = doc(db, 'coupons', 'BIENVENIDA');
         const welcomeSnap = await getDoc(welcomeRef);
@@ -709,6 +717,9 @@ function renderCartContent(content) {
                     }
                     return sum + basePrice * item.qty;
                   }, 0);
+              } else {
+                // Include shipping fee in targetProductsTotal for admin/global coupons
+                targetProductsTotal = totalProducts + (baseDeliveryFeeCalc || 0) + (nightSurcharge || 0);
               }
 
               if (discountType === 'percentage') {
@@ -1693,6 +1704,31 @@ function openCouponModal() {
                 return sum + basePrice * item.qty;
               }, 0);
           }
+          if (!cData.ownerId || cData.ownerId === 'admin') {
+            if (!(cData.comercioIds && Array.isArray(cData.comercioIds) && cData.comercioIds.length > 0)) {
+              let shippingFee = 0;
+              const state = getState();
+              const cart = state.cart || [];
+              const grouped = {};
+              cart.forEach(item => {
+                if (!grouped[item.comercioId]) grouped[item.comercioId] = [];
+                grouped[item.comercioId].push(item);
+              });
+              const commerceIds = Object.keys(grouped);
+              const dynamicFees = state.dynamicDeliveryFees || {};
+              const allFeesReady = commerceIds.every(cid => dynamicFees[cid] !== undefined);
+              if (allFeesReady) {
+                const individualFees = commerceIds.map(cid => dynamicFees[cid]);
+                const maxIndividualFee = Math.max(...individualFees, 0);
+                const extraStopsFee = (individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+                const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
+                const baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+                const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
+                shippingFee = baseDeliveryFeeCalc + nightSurcharge;
+              }
+              targetProductsTotal = totalProducts + shippingFee;
+            }
+          }
           applicableTotal = targetProductsTotal;
         }
 
@@ -1748,33 +1784,19 @@ function openCouponModal() {
 
 async function checkOnlineDrivers() {
   try {
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     const q = query(
       collection(db, 'users'), 
       where('isOnline', '==', true)
     );
     const snap = await getDocsFromServer(q);
-    
-    console.log('Driver Verification: Found', snap.size, 'online users');
-    
-    const hasDelivery = snap.docs.some(d => {
+    const hasDriver = snap.docs.some(d => {
       const data = d.data();
-      const isDel = data.isDelivery === true || data.isDelivery === 'true' || data.role === 'delivery';
-      
-      let lastAct = null;
-      if (data.lastActivityAt) {
-        if (typeof data.lastActivityAt.toDate === 'function') {
-          lastAct = data.lastActivityAt.toDate();
-        } else {
-          lastAct = new Date(data.lastActivityAt);
-        }
-      }
-      const isActive = lastAct && lastAct >= tenMinutesAgo;
-      
-      console.log(`- Driver ${d.id}: isDelivery=${data.isDelivery}, role=${data.role}, lastActivity=${lastAct} -> isDel=${isDel}, isActive=${isActive}`);
-      return isDel && isActive;
+      const role = data.role || '';
+      const isDel = data.isDelivery === true || data.isDelivery === 'true' || role === 'delivery' || role === 'driver' || role === 'repartidor' || role === 'chofer' || role === 'admin';
+      return isDel;
     });
-    return hasDelivery;
+    console.log('Driver Verification: Found online delivery driver:', hasDriver);
+    return hasDriver;
   } catch (err) {
     console.warn('Error verifying drivers, assuming offline:', err);
     return false;
@@ -1885,6 +1907,28 @@ async function openCheckoutConfirmationModal() {
             }
             return sum + basePrice * item.qty;
           }, 0);
+      } else if (appliedCoupon.comercioIds && Array.isArray(appliedCoupon.comercioIds) && appliedCoupon.comercioIds.length > 0) {
+        const cart = getState().cart || [];
+        targetProductsTotal = cart
+          .filter(item => appliedCoupon.comercioIds.includes(item.comercioId))
+          .reduce((sum, item) => {
+            const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+            const activeOffers = getState().activeOffers || [];
+            const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+            if (offer) {
+              if (offer.type === '2x1') {
+                const paidQty = Math.ceil(item.qty / 2);
+                return sum + basePrice * paidQty;
+              } else if (offer.type === 'percentage') {
+                const disc = (100 - (offer.value || 0)) / 100;
+                return sum + basePrice * item.qty * disc;
+              }
+            }
+            return sum + basePrice * item.qty;
+          }, 0);
+      } else {
+        // Include shipping fee in targetProductsTotal for admin/global coupons
+        targetProductsTotal = totalProducts + (baseDeliveryFee || 0) + (nightSurcharge || 0);
       }
 
       if (discountType === 'percentage') {
@@ -2566,45 +2610,89 @@ async function openCheckoutConfirmationModal() {
       
       AudioManager.hapticError();
       
-      // Show Premium Connection Error Dialog
-      const { showModal: showErrorModal } = await import('../components/modal.js');
-      const { close: closeError } = showErrorModal({
-        title: '',
-        hideHeader: true,
-        height: 'auto',
-        content: `
-          <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
-            <div style="font-size: 40px; margin-bottom: 8px;">📶</div>
-            <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3;">⚠️ Error de Conexión</h4>
-            <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.9;">
-              No pudimos enviar tu pedido al servidor debido a un problema de conexión. Por favor, verifica tu internet e intentalo nuevamente.
-            </p>
-            <button id="error-retry-btn" class="btn btn-primary" style="height: 56px; border-radius: 16px; font-weight: 900; font-size: 16px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); cursor: pointer;">
-              INTENTAR DE NUEVO
-            </button>
-            <button id="error-cancel-btn" class="btn btn-ghost" style="height: 48px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); cursor: pointer;">
-              Cerrar
-            </button>
-          </div>
-        `
-      });
+      // Check if error is related to a coupon
+      const isCouponError = err.message.toLowerCase().includes('cupón') || 
+                            err.message.toLowerCase().includes('cupon') || 
+                            err.message.toLowerCase().includes('coupon');
+      const currentCoupon = isCouponError ? getState().appliedCoupon : null;
+      
+      const isConnectionError = err.message.includes('Failed to fetch') || 
+                                err.message.includes('network') || 
+                                err.message.includes('NetworkError') ||
+                                err.message === 'Error al procesar el pedido en el servidor';
+                                
+      const errorTitle = isConnectionError ? '⚠️ Error de Conexión' : '⚠️ Error al procesar pedido';
+      const errorIcon = isConnectionError ? '📶' : '❌';
+      const errorMessage = isConnectionError 
+        ? 'No pudimos enviar tu pedido al servidor debido a un problema de conexión. Por favor, verifica tu internet e intentalo nuevamente.'
+        : err.message;
+        
+      const retryText = isCouponError ? 'INTENTAR SIN CUPÓN' : 'INTENTAR DE NUEVO';
+      
+      // Delay showing the error modal slightly to let the history pop finish safely
+      setTimeout(async () => {
+        // Show Premium Error Dialog
+        const { showModal: showErrorModal } = await import('../components/modal.js');
+        const { close: closeError } = showErrorModal({
+          title: '',
+          hideHeader: true,
+          height: 'auto',
+          content: `
+            <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
+              <div style="font-size: 40px; margin-bottom: 8px;">${errorIcon}</div>
+              <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3;">${errorTitle}</h4>
+              <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.9;">
+                ${errorMessage}
+              </p>
+              <button id="error-retry-btn" class="btn btn-primary" style="height: 56px; border-radius: 16px; font-weight: 900; font-size: 16px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); cursor: pointer;">
+                ${retryText}
+              </button>
+              <button id="error-cancel-btn" class="btn btn-ghost" style="height: 48px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); cursor: pointer;">
+                Cerrar
+              </button>
+            </div>
+          `
+        });
 
-      const errorRetryBtn = document.getElementById('error-retry-btn');
-      if (errorRetryBtn) {
-        errorRetryBtn.onclick = () => {
-          closeError();
-          AudioManager.hapticLight();
-          openCheckoutConfirmationModal();
-        };
-      }
+        const errorRetryBtn = document.getElementById('error-retry-btn');
+        if (errorRetryBtn) {
+          errorRetryBtn.onclick = () => {
+            closeError();
+            AudioManager.hapticLight();
+            if (isCouponError && currentCoupon && currentCoupon.code) {
+              setState('appliedCoupon', null);
+              try {
+                const usedKey = `gd_used_coupons_${auth.currentUser?.uid || 'guest'}`;
+                const used = JSON.parse(localStorage.getItem(usedKey) || '[]');
+                if (!used.includes(currentCoupon.code)) {
+                  used.push(currentCoupon.code);
+                  localStorage.setItem(usedKey, JSON.stringify(used));
+                }
+              } catch (e) {}
+            }
+            openCheckoutConfirmationModal();
+          };
+        }
 
-      const errorCancelBtn = document.getElementById('error-cancel-btn');
-      if (errorCancelBtn) {
-        errorCancelBtn.onclick = () => {
-          closeError();
-          AudioManager.hapticLight();
-        };
-      }
+        const errorCancelBtn = document.getElementById('error-cancel-btn');
+        if (errorCancelBtn) {
+          errorCancelBtn.onclick = () => {
+            closeError();
+            AudioManager.hapticLight();
+            if (isCouponError && currentCoupon && currentCoupon.code) {
+              setState('appliedCoupon', null);
+              try {
+                const usedKey = `gd_used_coupons_${auth.currentUser?.uid || 'guest'}`;
+                const used = JSON.parse(localStorage.getItem(usedKey) || '[]');
+                if (!used.includes(currentCoupon.code)) {
+                  used.push(currentCoupon.code);
+                  localStorage.setItem(usedKey, JSON.stringify(used));
+                }
+              } catch (e) {}
+            }
+          };
+        }
+      }, 250);
     }
   };
 }

@@ -9,11 +9,13 @@ import { showModal, closeModal, showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
 import { openCropper } from '../../utils/cropper.js';
 import { isAdmin } from '../../auth.js';
+import { renderPendingCommissionStickyFooter } from '../../components/pending-commission-footer.js';
 
 let panelFilteredProducts = [];
 let panelDisplayedCount = 20;
 let panelScrollObserver = null;
 let panelComercioData = null;
+let panelCategories = [];
 let isSyncAllowed = false;
 
 export async function renderComercioProducts() {
@@ -28,7 +30,8 @@ export async function renderComercioProducts() {
   }
 
   content.innerHTML = `
-    <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;">
+    <div class="panel-page" style="position:fixed; inset:0; width:100%; height:100dvh; display:flex; flex-direction:column; overflow:hidden; background:var(--color-bg); z-index:1000;">
+      <!-- Primary Top Bar -->
       <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;height:64px;padding:0 16px;background:var(--color-primary);box-shadow:0 4px 12px rgba(0,0,0,0.1);flex-shrink:0;overflow:hidden;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
@@ -38,39 +41,149 @@ export async function renderComercioProducts() {
             ${icon('chevronLeft', 28)}
           </a>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
-            <span style="font-weight:800;font-size:20px;color:white;letter-spacing:-0.02em;">${isAdmin() ? 'Adm: Productos' : 'Productos'} (<span id="products-total-count">0</span>)</span>
-            <p id="panel-commerce-name" style="font-size:11px;color:rgba(255,255,255,0.85);margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></p>
+            <span style="font-weight:800;font-size:19px;color:white;letter-spacing:-0.02em;">${isAdmin() ? 'Adm: Productos' : 'Productos'} (<span id="products-total-count">0</span>)</span>
+            <p id="panel-commerce-name" style="font-size:10.5px;color:rgba(255,255,255,0.85);margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></p>
           </div>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center; position:relative; z-index:2;">
-          <button class="hdr-icon-btn" id="export-db-btn" title="Exportar Base de Datos" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.1);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
-            ${icon('download', 18)}
+        </div>        <div style="display:flex; gap:8px; align-items:center; position:relative; z-index:2;">
+          <button class="hdr-icon-btn" id="add-product-btn" title="Agregar Producto" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.25);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
+            ${icon('plus', 22)}
           </button>
-          <button class="hdr-icon-btn" id="import-db-btn" title="Importar Base de Datos" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.1);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
-            ${icon('upload', 18)}
-          </button>
-          <button class="hdr-icon-btn" id="add-product-btn" title="Agregar Producto" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.1);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
-            ${icon('plus', 18)}
+          <button class="hdr-icon-btn" id="open-products-sidebar-btn" title="Menú de Acciones" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.25);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
+            ${icon('menu', 20)}
           </button>
         </div>
       </div>
 
-      <div style="flex:1;overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch;">
-        <div class="search-bar" style="margin-bottom:var(--space-3);">
-          <span class="search-icon">${icon('search', 20)}</span>
-          <input type="text" id="products-search" placeholder="Buscar productos..." />
+      <!-- Sticky Search Bar and Categories Filter -->
+      <div style="position:sticky;top:64px;z-index:90;background:var(--color-bg);padding:12px 16px 8px 16px;border-bottom:1px solid var(--color-border-light);box-shadow:0 2px 8px rgba(0,0,0,0.02);flex-shrink:0;">
+        <div class="search-bar" style="margin-bottom:8px; background:#ffffff; border:1.5px solid #e2e8f0; border-radius:12px;">
+          <span class="search-icon">${icon('search', 18)}</span>
+          <input type="text" id="products-search" placeholder="Buscar por nombre, código o categoría..." style="font-size:13px; font-weight:600;" />
         </div>
 
-        <div id="products-categories-filter" class="tab-pills hide-scrollbar" style="margin-bottom:var(--space-4);">
+        <div id="products-categories-filter" class="tab-pills hide-scrollbar" style="margin-bottom:0; display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;">
           <div class="skeleton" style="width:60px;height:32px;border-radius:20px;"></div>
           <div class="skeleton" style="width:80px;height:32px;border-radius:20px;"></div>
         </div>
+      </div>
 
-        <div id="products-list">
-          <div class="skeleton" style="height:90px;margin-bottom:var(--space-3);border-radius:var(--radius-lg);"></div>
-          <div class="skeleton" style="height:90px;margin-bottom:var(--space-3);border-radius:var(--radius-lg);"></div>
+      <!-- Scrollable Product List -->
+      <div style="flex:1;overflow-y:auto;padding:16px 16px 24px 16px;-webkit-overflow-scrolling:touch;">
+        <div id="products-list" style="display:flex; flex-direction:column; gap:10px;">
+          <div class="skeleton" style="height:90px;border-radius:var(--radius-lg);"></div>
+          <div class="skeleton" style="height:90px;border-radius:var(--radius-lg);"></div>
         </div>
       </div>
+
+      <!-- Right Sidebar Drawer for Product Actions -->
+      <div id="products-right-drawer-overlay" style="position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; opacity:0; pointer-events:none; transition:opacity 0.28s ease; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);"></div>
+
+      <div id="products-right-drawer" style="position:fixed; top:0; right:0; bottom:0; width:85%; max-width:320px; background:var(--color-surface); z-index:2001; transform:translateX(100%); transition:transform 0.28s cubic-bezier(0.25, 0.8, 0.25, 1); display:flex; flex-direction:column; box-shadow:-10px 0 30px rgba(0,0,0,0.25);">
+        <div style="padding:20px 18px 16px 18px; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.1);">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <img id="products-sidebar-commerce-img" src="" style="width:38px; height:38px; border-radius:50%; object-fit:cover; border:1.5px solid rgba(255,255,255,0.6); display:none;" />
+            <div id="products-sidebar-commerce-placeholder" style="width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.3);">
+              ${icon('package', 20)}
+            </div>
+            <div>
+              <h3 id="products-sidebar-title" style="font-family:var(--font-display); font-size:15px; font-weight:900; margin:0; color:white;">Acciones de Catálogo</h3>
+              <span style="font-size:10px; opacity:0.85; font-weight:700;">Herramientas Masivas</span>
+            </div>
+          </div>
+          <button id="close-products-sidebar-btn" style="background:rgba(255,255,255,0.2); border:none; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+            ${icon('close', 16)}
+          </button>
+        </div>
+
+        <div style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:18px;">
+          <!-- Tools Section -->
+          <div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <button id="drawer-add-product-btn" class="drawer-menu-row">
+                <div class="drawer-icon-box" style="background:rgba(34,197,94,0.1); color:#22c55e;">${icon('plus', 18)}</div>
+                <div class="drawer-menu-text">
+                  <span class="drawer-title">Nuevo Producto</span>
+                  <span class="drawer-desc">Crear un producto individual</span>
+                </div>
+              </button>
+              <button id="drawer-bulk-increase-btn" class="drawer-menu-row">
+                <div class="drawer-icon-box" style="background:rgba(225,29,72,0.1); color:var(--color-primary);">${icon('percent', 18)}</div>
+                <div class="drawer-menu-text">
+                  <span class="drawer-title">Aumento Masivo</span>
+                  <span class="drawer-desc">Recargo en % o $ a categorías</span>
+                </div>
+              </button>
+              <button id="drawer-import-db-btn" class="drawer-menu-row">
+                <div class="drawer-icon-box" style="background:rgba(59,130,246,0.1); color:#3b82f6;">${icon('upload', 18)}</div>
+                <div class="drawer-menu-text">
+                  <span class="drawer-title">Importar Excel / CSV</span>
+                  <span class="drawer-desc">Carga masiva de catálogo</span>
+                </div>
+              </button>
+              <button id="drawer-export-db-btn" class="drawer-menu-row">
+                <div class="drawer-icon-box" style="background:rgba(168,85,247,0.1); color:#a855f7;">${icon('download', 18)}</div>
+                <div class="drawer-menu-text">
+                  <span class="drawer-title">Exportar Base de Datos</span>
+                  <span class="drawer-desc">Descargar catálogo completo</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <style>
+        .drawer-menu-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 12px;
+          border-radius: 12px;
+          background: var(--color-bg-secondary);
+          border: 1px solid var(--color-border-light);
+          text-decoration: none;
+          color: var(--color-text-primary);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          width: 100%;
+          text-align: left;
+        }
+        .drawer-menu-row:hover {
+          background: var(--color-surface);
+          border-color: var(--color-primary);
+          transform: translateX(2px);
+        }
+        .drawer-icon-box {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          background: rgba(0,0,0,0.05);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          color: var(--color-text-primary);
+        }
+        .drawer-menu-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          flex: 1;
+          min-width: 0;
+        }
+        .drawer-title {
+          font-size: 13px;
+          font-weight: 800;
+          color: var(--color-text-primary);
+        }
+        .drawer-desc {
+          font-size: 10px;
+          color: var(--color-text-secondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      </style>
     </div>
   `;
 
@@ -102,15 +215,26 @@ export async function renderComercioProducts() {
     const nameContainer = document.getElementById('panel-commerce-name');
     if (nameContainer) nameContainer.textContent = isAdmin() ? `Adm: ${comercioData.name}` : comercioData.name;
 
+    const commerceLogo = comercioData.logo || comercioData.imageUrl || comercioData.image;
+    const sidebarImg = document.getElementById('products-sidebar-commerce-img');
+    const sidebarPlaceholder = document.getElementById('products-sidebar-commerce-placeholder');
+    if (commerceLogo && sidebarImg && sidebarPlaceholder) {
+      sidebarImg.src = commerceLogo;
+      sidebarImg.style.display = 'block';
+      sidebarPlaceholder.style.display = 'none';
+    }
+
     const prodsSnap = await getDocs(collection(db, 'comercios', comercioId, 'products'));
     products = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     const catsSnap = await getDocs(query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order')));
     categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    panelCategories = categories;
 
     updateTotalCount();
     renderCategoriesFilter(categories);
     renderProductsList(products, '', currentCategoryId);
+    renderPendingCommissionStickyFooter(comercioId, document.querySelector('.panel-page'));
   } catch (e) {
     console.error('Error loading products:', e);
     showToast('Error al cargar productos', 'error');
@@ -138,13 +262,32 @@ export async function renderComercioProducts() {
     });
   }
 
-  // Search
-  document.getElementById('products-search')?.addEventListener('input', (e) => {
-    renderProductsList(products, e.target.value, currentCategoryId);
-  });
+  // Drawer Sidebar Controls
+  const drawerOverlay = document.getElementById('products-right-drawer-overlay');
+  const drawer = document.getElementById('products-right-drawer');
 
-  // Add product
-  document.getElementById('add-product-btn')?.addEventListener('click', () => {
+  const openDrawer = () => {
+    if (drawerOverlay && drawer) {
+      drawerOverlay.style.opacity = '1';
+      drawerOverlay.style.pointerEvents = 'auto';
+      drawer.style.transform = 'translateX(0)';
+    }
+  };
+
+  const closeDrawer = () => {
+    if (drawerOverlay && drawer) {
+      drawerOverlay.style.opacity = '0';
+      drawerOverlay.style.pointerEvents = 'none';
+      drawer.style.transform = 'translateX(100%)';
+    }
+  };
+
+  document.getElementById('open-products-sidebar-btn')?.addEventListener('click', openDrawer);
+  document.getElementById('close-products-sidebar-btn')?.addEventListener('click', closeDrawer);
+  drawerOverlay?.addEventListener('click', closeDrawer);
+
+  const handleAddProduct = () => {
+    closeDrawer();
     showProductModal(null, categories, comercioId, async (product) => {
       products.push(product);
       updateTotalCount();
@@ -152,12 +295,32 @@ export async function renderComercioProducts() {
     }, (newCat) => {
       renderCategoriesFilter(categories);
     }, comercioData);
-  });
+  };
 
-  // Import database
-  document.getElementById('import-db-btn')?.addEventListener('click', () => {
+  const handleBulkIncrease = () => {
+    closeDrawer();
+    showBulkPriceIncreaseModal(products, categories, comercioId, () => {
+      renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
+    });
+  };
+
+  const handleImportDb = () => {
+    closeDrawer();
     handleImportDatabase();
-  });
+  };
+
+  const handleExportDb = () => {
+    closeDrawer();
+    exportDatabaseJSON();
+  };
+
+  document.getElementById('add-product-btn')?.addEventListener('click', handleAddProduct);
+  document.getElementById('drawer-add-product-btn')?.addEventListener('click', handleAddProduct);
+  document.getElementById('drawer-bulk-increase-btn')?.addEventListener('click', handleBulkIncrease);
+  document.getElementById('drawer-import-db-btn')?.addEventListener('click', handleImportDb);
+  document.getElementById('drawer-export-db-btn')?.addEventListener('click', handleExportDb);
+  document.getElementById('export-db-btn')?.addEventListener('click', handleExportDb);
+  document.getElementById('import-db-btn')?.addEventListener('click', handleImportDb);
   // Export database
   document.getElementById('export-db-btn')?.addEventListener('click', () => {
     if (products.length === 0) {
@@ -568,15 +731,17 @@ function renderProductsList(products, search, categoryId) {
     filtered = filtered.filter(p => p.categoryId === categoryId);
   }
   if (search) {
-    const s = search.toLowerCase().trim();
+    const normalizeStr = str => (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const queryTokens = normalizeStr(search).split(/\s+/).filter(Boolean);
+
     filtered = filtered.filter(p => {
-      if ((p.name || '').toLowerCase().includes(s)) return true;
-      if (p.barcode && String(p.barcode).toLowerCase().includes(s)) return true;
-      if (p.categoryId) {
-        const cat = categories.find(c => c.id === p.categoryId);
-        if (cat && (cat.name || '').toLowerCase().includes(s)) return true;
-      }
-      return false;
+      const nameNorm = normalizeStr(p.name);
+      const barcodeNorm = normalizeStr(p.barcode);
+      const catNorm = p.categoryId ? normalizeStr(panelCategories.find(c => c.id === p.categoryId)?.name) : '';
+      const descNorm = normalizeStr(p.description);
+
+      const targetText = `${nameNorm} ${barcodeNorm} ${catNorm} ${descNorm}`;
+      return queryTokens.every(token => targetText.includes(token));
     });
   }
 
@@ -604,7 +769,6 @@ function renderProductsList(products, search, categoryId) {
         const activeFlavors = (p.allowedFlavors && p.allowedFlavors.length > 0)
           ? (panelComercioData?.sabores || []).filter(s => p.allowedFlavors.includes(s.name))
           : (panelComercioData?.sabores || []);
-        // Note: s.isAvailable means "is stock limited?". So !s.isAvailable means infinite stock.
         hasInfinite = activeFlavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
         
         if (!hasInfinite) {
@@ -630,21 +794,28 @@ function renderProductsList(products, search, categoryId) {
         }
       }
 
+      const productImgUrl = (p.image || p.imageUrl || p.croppedImage || '').trim();
+      const categoryName = p.categoryId ? (panelCategories.find(c => c.id === p.categoryId)?.name || '') : '';
+
       return `
         <div class="panel-product-card ${p.isAvailable === false ? 'unavailable' : ''}">
-          <img src="${p.image || '/logo.png'}" alt="${p.name}" class="panel-product-card-img" style="opacity:${p.isAvailable === false ? '0.5' : '1'};" />
-          <div class="panel-product-card-info" style="opacity:${p.isAvailable === false ? '0.7' : '1'};">
+          <div style="position:relative; width:56px; height:56px; flex-shrink:0; border-radius:12px; overflow:hidden; background:var(--color-bg-secondary); border:1px solid var(--color-border-light);">
+            <img src="${productImgUrl || '/logo.png'}" alt="${p.name}" class="panel-product-card-img" onerror="this.onerror=null; this.src='/logo.png';" style="width:100%; height:100%; object-fit:cover; opacity:${p.isAvailable === false ? '0.5' : '1'};" />
+            ${p.isAvailable === false ? `<span style="position:absolute; inset:0; background:rgba(0,0,0,0.35); color:white; font-size:8px; font-weight:900; display:flex; align-items:center; justify-content:center; text-transform:uppercase;">Pausado</span>` : ''}
+          </div>
+          <div class="panel-product-card-info" style="opacity:${p.isAvailable === false ? '0.7' : '1'}; flex:1; min-width:0;">
             <div class="panel-product-card-name" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-              <span>${p.name}</span>
-              ${p.onlyInApp ? `<span style="font-family:var(--font-sans); font-size:8.5px; font-weight:900; background:rgba(126, 34, 206, 0.08); color:#7e22ce; padding:2px 6px; border-radius:6px; border:1px solid rgba(126, 34, 206, 0.15); display:inline-flex; align-items:center; gap:2px; text-transform:uppercase; vertical-align:middle; line-height:1;">📱 Disponible sólo en la app</span>` : ''}
+              <span style="font-weight:800; color:var(--color-text-primary); font-size:14px;">${p.name}</span>
+              ${categoryName ? `<span style="font-size:9.5px; font-weight:750; background:var(--color-bg-secondary); color:var(--color-text-secondary); padding:2px 7px; border-radius:6px; border:1px solid var(--color-border-light);">${categoryName}</span>` : ''}
+              ${p.onlyInApp ? `<span style="font-family:var(--font-sans); font-size:8.5px; font-weight:900; background:rgba(126, 34, 206, 0.08); color:#7e22ce; padding:2px 6px; border-radius:6px; border:1px solid rgba(126, 34, 206, 0.15); display:inline-flex; align-items:center; gap:2px; text-transform:uppercase; vertical-align:middle; line-height:1;">📱 Solo App</span>` : ''}
             </div>
-            <div class="panel-product-card-desc">${p.description || 'Sin descripción'}</div>
+            <div class="panel-product-card-desc" style="font-size:11.5px; color:var(--color-text-secondary); margin-top:2px;">${p.description || 'Sin descripción'}</div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
-              <div class="panel-product-card-price" style="margin:0;">${formatPrice(p.price)}</div>
+              <div class="panel-product-card-price" style="margin:0; font-size:14px; font-weight:900; color:var(--color-primary);">${formatPrice(p.price)}</div>
               ${stockBadgeHtml}
             </div>
           </div>
-          <div class="panel-product-card-actions">
+          <div class="panel-product-card-actions" style="display:flex; align-items:center; gap:4px;">
             <button class="btn btn-sm btn-ghost" data-action="toggle" data-id="${p.id}" title="${p.isAvailable === false ? 'Activar' : 'Desactivar'}">
               ${icon('eye', 18)}
             </button>
@@ -700,7 +871,7 @@ function renderProductsList(products, search, categoryId) {
 
 function showProductModal(product, categories, comercioId, onSave, onCategoryAdded) {
   const comercioCategory = panelComercioData?.category || 'Comida';
-  let croppedImage = product?.image || '';
+  let croppedImage = product ? (product.image || product.imageUrl || null) : null;
 
   const flavorGroup = product?.optionsGroups?.find(g => g.name === 'Elegí tu sabor');
   const allowFlavors = !!flavorGroup;
@@ -708,6 +879,8 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
   showModal({
     title: product ? 'Editar Producto' : 'Nuevo Producto',
+    headerBackground: 'var(--color-primary)',
+    headerTextColor: '#ffffff',
     content: `
       <style>
         .panel-form {
@@ -843,6 +1016,41 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       </style>
 
       <div class="panel-form">
+        <!-- Availability & Quick Status Switch -->
+        <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 8px rgba(0,0,0,0.02);">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:36px; height:36px; border-radius:10px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center;">
+              ${icon('checkCircle', 20)}
+            </div>
+            <div>
+              <div style="font-size:13px; font-weight:850; color:var(--color-text-primary);">Estado del Producto</div>
+              <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); margin-top:1px;">Visibilidad activa para clientes</div>
+            </div>
+          </div>
+          <label class="prod-switch" style="width:50px; height:28px; cursor:pointer; position:relative; display:inline-block; margin:0; flex-shrink:0;">
+            <input type="checkbox" id="prod-status-toggle" ${product ? (product.isAvailable !== false ? 'checked' : '') : 'checked'} style="opacity:0; width:0; height:0;" />
+            <span class="prod-slider" style="position:absolute; inset:0; border-radius:34px; transition:0.2s; cursor:pointer;"></span>
+          </label>
+        </div>
+
+        <!-- Hero Image Upload Dropzone -->
+        <div class="form-card" style="padding:16px;">
+          <div class="form-card-title">
+            ${icon('image', 18)} Imagen del Producto
+          </div>
+          <div class="image-upload" id="prod-image-upload" style="border: 2px dashed var(--color-primary); border-radius: 16px; background: rgba(225,29,72,0.02); overflow: hidden; position: relative; height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+            <img src="${product?.image || ''}" alt="Preview" id="prod-image-preview" style="max-height: 100%; max-width: 100%; object-fit: contain; ${product?.image ? '' : 'display:none;'}" />
+            <div id="prod-image-placeholder" style="display:${product?.image ? 'none' : 'flex'}; flex-direction:column; align-items:center; gap:6px; color:var(--color-primary);">
+              <div style="width:44px; height:44px; border-radius:50%; background:rgba(225,29,72,0.1); display:flex; align-items:center; justify-content:center;">
+                ${icon('upload', 22)}
+              </div>
+              <span style="font-size:12px; font-weight:800; color:var(--color-text-primary);">Subir Foto del Producto</span>
+              <span style="font-size:10px; font-weight:700; color:var(--color-text-tertiary);">Formatos JPG, PNG • Máx 5MB</span>
+            </div>
+            <input type="file" accept="image/*" id="prod-image-input" style="position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer;" />
+          </div>
+        </div>
+
         <!-- Main Info Card -->
         <div class="form-card" style="display: flex; flex-direction: column; gap: 16px;">
           <div class="form-card-title">
@@ -864,9 +1072,28 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
             <textarea class="textarea-premium" id="prod-desc" placeholder="Detallá los ingredientes o características del producto...">${product?.description || ''}</textarea>
           </div>
           
-          <div class="input-group">
-            <label>Precio de Venta ($) *</label>
-            <input type="number" class="input-premium" id="prod-price" value="${product?.price || ''}" placeholder="0" min="0" />
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+            <div class="input-group">
+              <label>Precio de Venta ($) *</label>
+              <div style="position:relative; display:flex; align-items:center;">
+                <span style="position:absolute; left:16px; font-weight:900; color:var(--color-primary); font-size:16px;">$</span>
+                <input type="number" class="input-premium" id="prod-price" value="${product?.price || ''}" placeholder="0" min="0" style="padding-left:32px; font-size:16px; font-weight:900; color:var(--color-primary);" />
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>Precio de Compra / Costo ($)</label>
+              <div style="position:relative; display:flex; align-items:center;">
+                <span style="position:absolute; left:16px; font-weight:900; color:var(--color-text-secondary); font-size:16px;">$</span>
+                <input type="number" class="input-premium" id="prod-cost-price" value="${product?.costPrice !== undefined ? product.costPrice : ''}" placeholder="0" min="0" style="padding-left:32px; font-size:16px; font-weight:900; color:var(--color-text-primary);" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Profit Margin Badge Indicator -->
+          <div id="prod-profit-calc-badge" style="background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:12px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:800;">
+            <span style="color:var(--color-text-secondary);">Margen de Ganancia Estimado:</span>
+            <span id="prod-profit-calc-value" style="color:#10b981; font-weight:900;">$0 (0%)</span>
           </div>
           
           <div class="input-group">
@@ -876,33 +1103,40 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
                 <option value="">Sin categoría</option>
                 ${categories.map(c => `<option value="${c.id}" ${product?.categoryId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
               </select>
-              <button class="btn btn-outline" id="prod-new-category-btn" type="button" style="height:48px; width:48px; padding:0; flex-shrink:0; display:flex; align-items:center; justify-content:center; border-radius:12px; border:1.5px solid #e2e8f0; background:#f8fafc; color:var(--color-text-primary); cursor:pointer; transition: all 0.2s;" title="Nueva Categoría">
+              <button class="btn btn-outline" id="prod-new-category-btn" type="button" style="height:48px; width:48px; padding:0; flex-shrink:0; display:flex; align-items:center; justify-content:center; border-radius:12px; border:1.5px solid #e2e8f0; background:#f8fafc; color:var(--color-primary); cursor:pointer; transition: all 0.2s;" title="Nueva Categoría">
                 ${icon('plus', 18)}
               </button>
             </div>
           </div>
 
-          <div class="switch-container" style="margin-top:16px;">
+          <div class="switch-container" style="margin-top:8px;">
             <div style="text-align:left;">
               <div style="font-size:13px; font-weight:750; color:var(--color-text-primary);">Disponible sólo en la app</div>
-              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">El producto mostrará un badge exclusivo de la App y se promocionará en la pantalla de inicio.</div>
+              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">Producto o sabor exclusivo para usuarios de la App.</div>
             </div>
             <label class="prod-switch" style="width:50px; height:28px; cursor:pointer; position:relative; display:inline-block; margin:0; flex-shrink:0;">
               <input type="checkbox" id="prod-only-in-app" ${product?.onlyInApp ? 'checked' : ''} style="opacity:0; width:0; height:0;" />
               <span class="prod-slider" style="position:absolute; inset:0; border-radius:34px; transition:0.2s; cursor:pointer;"></span>
             </label>
           </div>
-        </div>
-        <!-- Image Upload Card -->
-        <div class="form-card">
-          <div class="form-card-title">
-            ${icon('image', 18)} Imagen del Producto
-          </div>
-          <div class="image-upload" id="prod-image-upload" style="border: 2px dashed #cbd5e1; border-radius: 16px; background: #f8fafc; overflow: hidden; position: relative; height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-            <img src="${product?.image || '/logo.png'}" alt="Preview" id="prod-image-preview" style="max-height: 100%; max-width: 100%; object-fit: contain; ${product?.image ? '' : 'opacity:0.3;'}" />
-            <span class="image-upload-icon" style="position: absolute; ${product?.image ? 'display:none;' : ''}">${icon('upload', 32)}</span>
-            <span class="image-upload-text" style="position: absolute; bottom: 16px; font-size: 11px; font-weight: 700; color: var(--color-text-secondary); ${product?.image ? 'display:none;' : ''}">Click para subir o ajustar imagen</span>
-            <input type="file" accept="image/*" id="prod-image-input" style="position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer;" />
+
+          <!-- Stylish App-Exclusive Alert Banner -->
+          <div id="prod-only-in-app-banner" style="display:${product?.onlyInApp ? 'flex' : 'none'}; background:linear-gradient(135deg, rgba(225,29,72,0.08) 0%, rgba(168,85,247,0.08) 100%); border:1.5px solid rgba(225,29,72,0.25); border-radius:14px; padding:14px; gap:12px; align-items:flex-start; margin-top:-4px; animation:fadeIn 0.3s ease-out;">
+            <div style="width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg, var(--color-primary), #a855f7); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 4px 12px rgba(225,29,72,0.25);">
+              ${icon('sparkles', 18)}
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:12.5px; font-weight:900; color:var(--color-primary); display:flex; align-items:center; gap:6px;">
+                <span>¡Exclusivo para la App!</span>
+                <span style="font-size:9.5px; background:var(--color-primary); color:white; font-weight:800; padding:1px 6px; border-radius:6px; text-transform:uppercase;">Badge VIP</span>
+              </div>
+              <p style="font-size:11px; color:var(--color-text-secondary); margin:4px 0 0; line-height:1.45; font-weight:600;">
+                Este producto <strong style="color:var(--color-text-primary);">únicamente podrá ser adquirido a través de la App móvil</strong> (no disponible de forma presencial o telefónica).
+              </p>
+              <div style="font-size:10.5px; color:var(--color-text-tertiary); margin-top:6px; font-style:italic;">
+                💡 Ideal para: promociones especiales, sabores/combos exclusivos o descuentos de fidelización.
+              </div>
+            </div>
           </div>
         </div>
 
@@ -955,10 +1189,14 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
               <label style="margin-bottom:8px;">Sabores disponibles para este producto</label>
               <div style="font-size:11px; color:var(--color-text-secondary); margin-bottom:8px;">Selecciona el grupo y tilda los sabores que aplican a este producto.</div>
               
-              <select id="prod-flavors-category-filter" class="input-premium" style="margin-bottom:12px; background-image:none;">
-                <option value="all">Ver todos los sabores mezclados</option>
-                ${[...new Set((panelComercioData?.sabores || []).map(s => s.category || 'Otros'))].sort().map(cat => `<option value="${cat}">${cat}</option>`).join('')}
-              </select>
+              <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+                <select id="prod-flavors-category-filter" class="input-premium" style="flex:1; background-image:none;">
+                  <option value="all">Ver todos los sabores mezclados</option>
+                  ${[...new Set((panelComercioData?.sabores || []).map(s => s.category || 'Otros'))].sort().map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                </select>
+                <button type="button" id="btn-select-all-flavors" style="padding:0 10px; height:42px; border-radius:10px; background:var(--color-bg-secondary); border:1px solid var(--color-border); font-size:11px; font-weight:700; color:var(--color-primary); cursor:pointer; white-space:nowrap;">Marcar Visibles</button>
+                <button type="button" id="btn-deselect-all-flavors" style="padding:0 10px; height:42px; border-radius:10px; background:var(--color-bg-secondary); border:1px solid var(--color-border); font-size:11px; font-weight:700; color:var(--color-text-secondary); cursor:pointer; white-space:nowrap;">Desmarcar</button>
+              </div>
 
               <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; background:var(--color-surface); padding:12px; border-radius:8px; border:1px solid var(--color-border-light); max-height:200px; overflow-y:auto;" id="prod-flavors-checklist">
                 ${(panelComercioData?.sabores || []).map(s => `
@@ -1148,6 +1386,14 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     renderOptionsGroups();
   });
 
+  // Reactive Only In App Toggle
+  document.getElementById('prod-only-in-app')?.addEventListener('change', (e) => {
+    const banner = document.getElementById('prod-only-in-app-banner');
+    if (banner) {
+      banner.style.display = e.target.checked ? 'flex' : 'none';
+    }
+  });
+
   // Reactive Stock Fields Toggle
   document.getElementById('prod-stock-mode')?.addEventListener('change', (e) => {
     const mode = e.target.value;
@@ -1222,20 +1468,47 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
   document.getElementById('prod-flavors-category-filter')?.addEventListener('change', (e) => {
     const selectedCat = e.target.value;
     document.querySelectorAll('.prod-flavor-item').forEach(el => {
-      if (selectedCat === 'all' || el.dataset.category === selectedCat) {
-        el.style.display = 'flex';
-      } else {
-        el.style.display = 'none';
+      const isMatch = selectedCat === 'all' || el.dataset.category === selectedCat;
+      el.style.display = isMatch ? 'flex' : 'none';
+    });
+
+    // Auto-check visible category flavors if no flavors in this category were explicitly checked yet
+    if (selectedCat !== 'all') {
+      const catCheckboxes = Array.from(document.querySelectorAll(`.prod-flavor-item[data-category="${selectedCat}"] .prod-flavor-checkbox`));
+      const hasAnyChecked = catCheckboxes.some(cb => cb.checked);
+      if (!hasAnyChecked) {
+        catCheckboxes.forEach(cb => { cb.checked = true; });
+        updateFlavorsStockSum();
+      }
+    }
+  });
+
+  document.getElementById('btn-select-all-flavors')?.addEventListener('click', () => {
+    document.querySelectorAll('.prod-flavor-item').forEach(el => {
+      if (el.style.display !== 'none') {
+        const cb = el.querySelector('.prod-flavor-checkbox');
+        if (cb) cb.checked = true;
       }
     });
+    updateFlavorsStockSum();
+  });
+
+  document.getElementById('btn-deselect-all-flavors')?.addEventListener('click', () => {
+    document.querySelectorAll('.prod-flavor-item').forEach(el => {
+      if (el.style.display !== 'none') {
+        const cb = el.querySelector('.prod-flavor-checkbox');
+        if (cb) cb.checked = false;
+      }
+    });
+    updateFlavorsStockSum();
   });
   
   // Initialize on open
   if (product?.useGlobalFlavors) {
     toggleGlobalFlavors(true);
     const filter = document.getElementById('prod-flavors-category-filter');
-    if (filter && filter.options.length > 1) {
-      filter.value = filter.options[1].value;
+    if (filter) {
+      filter.value = 'all';
       filter.dispatchEvent(new Event('change'));
     }
   }
@@ -1328,11 +1601,15 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         const cropped = await openCropper(file, { aspectRatio: 4 / 3 });
         croppedImage = cropped;
         const preview = document.getElementById('prod-image-preview');
-        preview.src = cropped;
-        preview.style.opacity = '1';
-        // Hide text
-        document.querySelector('.image-upload-icon').style.display = 'none';
-        document.querySelector('.image-upload-text').style.display = 'none';
+        const placeholder = document.getElementById('prod-image-placeholder');
+        if (preview) {
+          preview.src = cropped;
+          preview.style.display = 'block';
+          preview.style.opacity = '1';
+        }
+        if (placeholder) {
+          placeholder.style.display = 'none';
+        }
       } catch (err) {
         console.log('Cropping cancelled or failed');
       }
@@ -1395,21 +1672,36 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
     try {
 
+      const currentExistingImage = product ? (product.image || product.imageUrl || '') : '';
+      const savedImage = (croppedImage && typeof croppedImage === 'string' && croppedImage.trim() !== '')
+        ? croppedImage
+        : currentExistingImage;
+
+      const isAvailableToggle = document.getElementById('prod-status-toggle');
+      const isAvailable = isAvailableToggle ? isAvailableToggle.checked : (product ? product.isAvailable !== false : true);
+
+      const rawCost = document.getElementById('prod-cost-price')?.value;
+      const costPrice = rawCost !== undefined && rawCost !== '' ? parseFloat(rawCost) : 0;
+
       const productData = {
         name,
         barcode,
         description: desc,
         price,
+        costPrice: isNaN(costPrice) ? 0 : costPrice,
         categoryId: categoryId || '',
-        image: croppedImage,
+        image: savedImage,
+        imageUrl: savedImage,
         optionsGroups: optionsGroups.filter(g => g.name.trim() !== ''),
-        isAvailable: product ? product.isAvailable : true,
+        isAvailable,
         stockMode,
         stockQuantity,
         stockThreshold,
         useGlobalFlavors,
         maxSelections,
         allowedFlavors,
+        selectedFlavorCategory: document.getElementById('prod-flavors-category-filter')?.value || 'all',
+        flavorCategory: document.getElementById('prod-flavors-category-filter')?.value || 'all',
         onlyInApp,
         order: product?.order || 0,
         createdAt: product?.createdAt || new Date()
@@ -1575,4 +1867,160 @@ function showSyncConfirm({ title, message, onSyncBoth, onSyncOnlyCloud, onCancel
       if (cancelBtn) cancelBtn.disabled = false;
     }
   });
+}
+
+function showBulkPriceIncreaseModal(products, categories, comercioId, onComplete) {
+  showModal({
+    title: '📈 Aumento / Recargo Masivo',
+    headerBackground: 'var(--color-primary)',
+    headerTextColor: '#ffffff',
+    content: `
+      <div style="display:flex; flex-direction:column; gap:16px; padding:12px 16px 20px 16px;">
+        <div style="background:linear-gradient(135deg, rgba(225,29,72,0.08), rgba(225,29,72,0.02)); border:1px solid rgba(225,29,72,0.2); border-radius:14px; padding:12px 14px; display:flex; align-items:center; gap:10px;">
+          <div style="width:34px; height:34px; border-radius:10px; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('percent', 18)}
+          </div>
+          <p style="font-size:11.5px; color:var(--color-text-primary); margin:0; line-height:1.4; font-weight:600;">
+            Aumentá precios en lote de forma automática por porcentaje o monto fijo en toda tu carta o por categoría.
+          </p>
+        </div>
+
+        <div class="input-group">
+          <label style="font-size:11.5px; font-weight:850; text-transform:uppercase; letter-spacing:0.4px; color:var(--color-text-secondary);">Categoría Objetivo</label>
+          <select id="bulk-category-select" class="input-premium" style="height:46px; background:#f8fafc; border-radius:12px; font-weight:700; font-size:13px;">
+            <option value="all">⚡ Todos los productos (${products.length})</option>
+            ${categories.map(c => {
+              const count = products.filter(p => p.categoryId === c.id).length;
+              return `<option value="${c.id}">📦 ${c.name} (${count} prod)</option>`;
+            }).join('')}
+          </select>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="input-group">
+            <label style="font-size:11.5px; font-weight:850; text-transform:uppercase; letter-spacing:0.4px; color:var(--color-text-secondary);">Tipo de Recargo</label>
+            <select id="bulk-type-select" class="input-premium" style="height:46px; background:#f8fafc; border-radius:12px; font-weight:700; font-size:13px;">
+              <option value="percentage">Porcentaje (%)</option>
+              <option value="fixed">Monto Fijo ($)</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label style="font-size:11.5px; font-weight:850; text-transform:uppercase; letter-spacing:0.4px; color:var(--color-text-secondary);">Valor del Aumento</label>
+            <input type="number" id="bulk-value-input" class="input-premium" style="height:46px; background:#f8fafc; border-radius:12px; font-weight:800; font-size:14px;" placeholder="ej: 10 o 500" value="10" min="0.1" step="any" />
+          </div>
+        </div>
+
+        <div style="background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:14px; padding:12px 14px; display:flex; align-items:center; gap:10px;">
+          <input type="checkbox" id="bulk-round-checkbox" checked style="width:18px; height:18px; accent-color:var(--color-primary); cursor:pointer;" />
+          <label for="bulk-round-checkbox" style="font-size:12px; font-weight:750; color:var(--color-text-primary); cursor:pointer; user-select:none;">Redondear precios a múltiplos de $50 (ej: $14.050)</label>
+        </div>
+
+        <div style="background:rgba(225,29,72,0.06); border:1px solid rgba(225,29,72,0.2); border-radius:14px; padding:12px 14px; display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:10px; font-weight:900; text-transform:uppercase; color:var(--color-primary); letter-spacing:0.6px;">Simulación de Precios:</span>
+          <span id="bulk-preview-text" style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); line-height:1.3;">...</span>
+        </div>
+      </div>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="bulk-cancel-btn" style="flex:1; border-radius:12px; font-weight:800;">Cancelar</button>
+      <button class="btn btn-primary" id="bulk-apply-btn" style="flex:1; border-radius:12px; font-weight:900;">Aplicar Aumento</button>
+    `
+  });
+
+  const catSelect = document.getElementById('bulk-category-select');
+  const typeSelect = document.getElementById('bulk-type-select');
+  const valInput = document.getElementById('bulk-value-input');
+  const roundCheck = document.getElementById('bulk-round-checkbox');
+  const previewText = document.getElementById('bulk-preview-text');
+  const applyBtn = document.getElementById('bulk-apply-btn');
+
+  const updatePreview = () => {
+    const targetCat = catSelect.value;
+    const type = typeSelect.value;
+    const val = parseFloat(valInput.value) || 0;
+    const shouldRound = roundCheck.checked;
+
+    const targetProds = targetCat === 'all' ? products : products.filter(p => p.categoryId === targetCat);
+    if (targetProds.length === 0) {
+      previewText.textContent = 'No hay productos en la categoría seleccionada.';
+      return;
+    }
+
+    const sample = targetProds[0];
+    let newPrice = sample.price || 0;
+    if (type === 'percentage') {
+      newPrice = newPrice * (1 + val / 100);
+    } else {
+      newPrice = newPrice + val;
+    }
+
+    if (shouldRound) {
+      newPrice = Math.ceil(newPrice / 50) * 50;
+    }
+
+    previewText.textContent = `Afectará a ${targetProds.length} productos. Ej: "${sample.name}" de ${formatPrice(sample.price)} pasa a ${formatPrice(newPrice)}.`;
+  };
+
+  catSelect.onchange = updatePreview;
+  typeSelect.onchange = updatePreview;
+  valInput.oninput = updatePreview;
+  roundCheck.onchange = updatePreview;
+
+  updatePreview();
+
+  document.getElementById('bulk-cancel-btn').onclick = () => closeModal();
+
+  applyBtn.onclick = async () => {
+    const targetCat = catSelect.value;
+    const type = typeSelect.value;
+    const val = parseFloat(valInput.value) || 0;
+    const shouldRound = roundCheck.checked;
+
+    if (val <= 0) {
+      showToast('Ingresá un valor de aumento válido', 'warning');
+      return;
+    }
+
+    const targetProds = targetCat === 'all' ? products : products.filter(p => p.categoryId === targetCat);
+    if (targetProds.length === 0) {
+      showToast('No hay productos para actualizar', 'warning');
+      return;
+    }
+
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Aplicando...';
+
+    try {
+      const batch = writeBatch(db);
+      for (const prod of targetProds) {
+        let newPrice = prod.price || 0;
+        if (type === 'percentage') {
+          newPrice = newPrice * (1 + val / 100);
+        } else {
+          newPrice = newPrice + val;
+        }
+
+        if (shouldRound) {
+          newPrice = Math.ceil(newPrice / 50) * 50;
+        }
+
+        newPrice = Math.max(0, Math.round(newPrice));
+
+        const prodRef = doc(db, 'comercios', comercioId, 'products', prod.id);
+        batch.update(prodRef, { price: newPrice });
+
+        prod.price = newPrice;
+      }
+
+      await batch.commit();
+      closeModal();
+      showToast(`¡Se aumentó el precio de ${targetProds.length} productos!`, 'success');
+      onComplete();
+    } catch (err) {
+      console.error('Error applying bulk price increase:', err);
+      showToast('Error al aplicar aumento masivo', 'error');
+      applyBtn.disabled = false;
+      applyBtn.textContent = 'Aplicar Aumento';
+    }
+  };
 }

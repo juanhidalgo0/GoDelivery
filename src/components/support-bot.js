@@ -16,6 +16,7 @@ export function initSupportBot() {
   style.id = 'support-bot-styles';
   style.innerHTML = `
     .support-bot-fab {
+      display: none !important;
       position: fixed;
       bottom: 115px;
       right: 20px;
@@ -1126,10 +1127,23 @@ export async function openSupportTicketModal(orderId, orderNum) {
     return;
   }
 
-  const isFullTicketId = orderId && (orderId.toString().startsWith('ticket_') || orderId.toString().length >= 20);
+  const isFullTicketId = orderId && (orderId.toString().startsWith('ticket_') || orderId.toString().length >= 15);
   const ticketDocId = isFullTicketId ? orderId : `ticket_${orderId}`;
   const displayTicketNum = orderNum || (isFullTicketId ? (orderId.toString().includes('_') ? orderId.split('_')[1] : orderId.slice(0, 6).toUpperCase()) : orderId);
-  const chatRef = doc(db, 'support_chats', ticketDocId);
+  
+  // Create reference trying both the exact orderId and ticket_ prefix if needed
+  let chatRef = doc(db, 'support_chats', orderId);
+  const rawSnap = await getDoc(chatRef);
+  if (!rawSnap.exists() && orderId !== ticketDocId) {
+    const altRef = doc(db, 'support_chats', ticketDocId);
+    const altSnap = await getDoc(altRef);
+    if (altSnap.exists()) {
+      chatRef = altRef;
+    }
+  }
+
+  // Clear unread indicator when user opens ticket
+  updateDoc(chatRef, { unreadByUser: false }).catch(() => {});
   
   // Chat document creation is deferred until the first message is sent to prevent empty tickets.
 
@@ -1245,6 +1259,10 @@ export async function openSupportTicketModal(orderId, orderNum) {
           headerNumEl.textContent = tId.startsWith('#') ? `Ticket ${tId}` : `Ticket #${tId}`;
         }
 
+        if (data.unreadByUser === true) {
+          updateDoc(chatRef, { unreadByUser: false }).catch(() => {});
+        }
+
         if (messages.length === 0) {
           messagesBox.innerHTML = `
             <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary); font-weight:600; font-size:13px; line-height:1.6; display:flex; flex-direction:column; align-items:center; gap:10px;">
@@ -1351,12 +1369,18 @@ export async function openSupportTicketModal(orderId, orderNum) {
             // Write notifications to all admin users
             try {
               const { getDocs, query, collection, where, addDoc } = await import('firebase/firestore');
-              const adminsSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'admin')));
-              
+              const [roleSnap, isAdminSnap] = await Promise.all([
+                getDocs(query(collection(db, 'users'), where('role', '==', 'admin'))).catch(() => ({ docs: [] })),
+                getDocs(query(collection(db, 'users'), where('isAdmin', '==', true))).catch(() => ({ docs: [] }))
+              ]);
+
+              const adminIds = new Set();
+              [...roleSnap.docs, ...isAdminSnap.docs].forEach(d => adminIds.add(d.id));
+
               const notifPromises = [];
-              adminsSnap.forEach(adminDoc => {
+              adminIds.forEach(adminId => {
                 notifPromises.push(
-                  addDoc(collection(db, 'users', adminDoc.id, 'notifications'), {
+                  addDoc(collection(db, 'users', adminId, 'notifications'), {
                     title: 'Nuevo Ticket de Soporte',
                     body: `El repartidor ${user.displayName || 'Repartidor'} inició un chat por el Pedido #${displayTicketNum}: "${text.slice(0, 60)}"`,
                     createdAt: serverTimestamp(),

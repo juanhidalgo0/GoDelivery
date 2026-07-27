@@ -144,7 +144,7 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
               const results = await searchAddressSuggestions(val);
               if (results && results.length > 0) {
                 suggestionsBox.innerHTML = results.map(r => `
-                  <div class="suggestion-item" data-lat="${r.lat}" data-lng="${r.lng}" data-address="${r.address}" style="padding:12px 16px; border-bottom:1px solid var(--color-border-light); cursor:pointer; font-size:13px; font-weight:600; color:var(--color-text);">
+                  <div class="suggestion-item" data-lat="${r.lat || ''}" data-lng="${r.lng || ''}" data-placeid="${r.placeId || ''}" data-address="${r.address}" style="padding:12px 16px; border-bottom:1px solid var(--color-border-light); cursor:pointer; font-size:13px; font-weight:600; color:var(--color-text);">
                     <div style="display:flex; align-items:center; gap:8px;">
                       <span style="color:var(--color-primary); display:flex;">${icon('mapPin', 14)}</span>
                       <div>
@@ -157,23 +157,45 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
                 suggestionsBox.style.display = 'block';
 
                 suggestionsBox.querySelectorAll('.suggestion-item').forEach(item => {
-                  item.onclick = () => {
-                    const lat = parseFloat(item.dataset.lat);
-                    const lng = parseFloat(item.dataset.lng);
+                  item.onclick = async () => {
+                    let lat = parseFloat(item.dataset.lat);
+                    let lng = parseFloat(item.dataset.lng);
+                    const placeId = item.dataset.placeid;
                     const addr = item.dataset.address;
 
-                    selectedCoords = { lat, lng };
-                    selectedAddress = addr;
+                    const applyCoords = (finalLat, finalLng) => {
+                      selectedCoords = { lat: finalLat, lng: finalLng };
+                      selectedAddress = addr;
 
-                    map.setCenter(selectedCoords);
-                    map.setZoom(17);
+                      map.setCenter(selectedCoords);
+                      map.setZoom(17);
 
-                    const addrDisplay = document.getElementById('detected-address');
-                    if (addrDisplay) addrDisplay.textContent = selectedAddress;
+                      const addrDisplay = document.getElementById('detected-address');
+                      if (addrDisplay) addrDisplay.textContent = selectedAddress;
 
-                    suggestionsBox.style.display = 'none';
-                    suggestionsBox.innerHTML = '';
-                    searchInput.value = addr;
+                      suggestionsBox.style.display = 'none';
+                      suggestionsBox.innerHTML = '';
+                      searchInput.value = addr;
+                    };
+
+                    if (isNaN(lat) || isNaN(lng)) {
+                      if (placeId) {
+                        try {
+                          const { geocodePlaceId } = await import('../utils/geo.js');
+                          const coords = await geocodePlaceId(placeId);
+                          if (coords) {
+                            applyCoords(coords.lat, coords.lng);
+                          } else {
+                            const { showToast } = await import('./toast.js');
+                            showToast('No se pudo geocodificar la sugerencia', 'error');
+                          }
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }
+                    } else {
+                      applyCoords(lat, lng);
+                    }
                   };
                 });
               } else {

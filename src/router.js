@@ -25,8 +25,9 @@ const getMainRoutes = () => {
     '/profile/appearance': 'page-profile',
     '/mis-chats': 'page-mis-chats'
   };
-  if (!isDelivery()) delete list['/delivery'];
-  if (!isComercio() && !isAdmin()) {
+  const user = getState().user;
+  if (user && !isDelivery() && !isAdmin()) delete list['/delivery'];
+  if (user && !isComercio() && !isAdmin()) {
     delete list['/mi-comercio'];
     delete list['/mi-comercio/:id/orders'];
   }
@@ -90,8 +91,9 @@ async function handleRoute() {
     if (getState().loading) return;
 
     const maintenanceMode = getState().maintenanceMode === true;
-    const isUserAdmin = isAdmin();
-    if (maintenanceMode && !isUserAdmin) {
+    const currentUserEmail = (getState().user?.email || '').toLowerCase().trim();
+    const isSuperOwner = currentUserEmail === 'juanhidalgobass@gmail.com';
+    if (maintenanceMode && !isSuperOwner) {
       checkMaintenanceState();
       isRouting = false;
       return;
@@ -156,7 +158,7 @@ async function handleRoute() {
           }
         } catch (err) {
           console.error('Route error (main):', err);
-          if (err.name === 'TypeError' || err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript')) {
+          if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
             console.warn('Failed to load main route module. Reloading page...');
             window.location.reload();
             return;
@@ -206,7 +208,7 @@ async function handleRoute() {
         }
       } catch (err) {
         console.error('Route error (overlay):', err);
-        if (err.name === 'TypeError' || err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript')) {
+        if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
           console.warn('Failed to load overlay route module. Reloading page...');
           window.location.reload();
           return;
@@ -383,11 +385,12 @@ export function initRouter() {
 
 export function checkMaintenanceState() {
   const maintenanceMode = getState().maintenanceMode === true;
-  const isUserAdmin = isAdmin();
+  const currentUserEmail = (getState().user?.email || '').toLowerCase().trim();
+  const isSuperOwner = currentUserEmail === 'juanhidalgobass@gmail.com';
   
   let overlay = document.getElementById('maintenance-overlay');
   
-  if (maintenanceMode && !isUserAdmin) {
+  if (maintenanceMode && !isSuperOwner) {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'maintenance-overlay';

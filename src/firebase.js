@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
@@ -9,7 +9,13 @@ import {
 import { getStorage } from 'firebase/storage';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
-const firebaseConfig = {
+const isTestingHost = typeof window !== 'undefined' && (
+  window.location.hostname.includes('godelivery-testing') ||
+  window.location.hostname.includes('testing')
+);
+const isTesting = import.meta.env.VITE_FIREBASE_ENV === 'testing' || import.meta.env.MODE === 'testing' || isTestingHost;
+
+const prodConfig = {
   apiKey: "AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",
   authDomain: "godelivery-magdalena.firebaseapp.com",
   projectId: "godelivery-magdalena",
@@ -19,8 +25,29 @@ const firebaseConfig = {
   measurementId: "G-80XHGQE5RR"
 };
 
+const testingConfig = {
+  apiKey: "AIzaSyDqyQ6aRA_1q0E8GUb6nqXIJhghzD4L00A",
+  authDomain: "godelivery-testing.firebaseapp.com",
+  projectId: "godelivery-testing",
+  storageBucket: "godelivery-testing.firebasestorage.app",
+  messagingSenderId: "584541077992",
+  appId: "1:584541077992:web:20c37a8b58595bf510e45d",
+  measurementId: "G-DWNQDRZG27"
+};
+
+const firebaseConfig = isTesting ? testingConfig : prodConfig;
+if (isTesting) {
+  console.log("🧪 Running in TESTING environment (godelivery-testing)");
+}
+
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+// Enforce browserLocalPersistence to guarantee session survival across iOS Safari / PWA reloads & redirects
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('[Firebase Auth] Could not set browserLocalPersistence:', err);
+});
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
   prompt: 'select_account'
@@ -28,9 +55,7 @@ googleProvider.setCustomParameters({
 
 // Modern Firestore initialization with Persistent Local Cache
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
+  localCache: persistentLocalCache()
 });
 
 // Clear IndexedDB offline cache if flagged by hard reset

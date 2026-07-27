@@ -66,7 +66,8 @@ const state = {
 
   // Dynamic schedule pricing
   nightSurchargeConfig: { enabled: false, start: '00:00', end: '06:00', type: 'fixed', value: 0 },
-  driverIncentiveConfig: { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 }
+  driverIncentiveConfig: { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 },
+  serverTimeOffset: 0
 };
 
 export function getUserLevel(orderCount = 0) {
@@ -81,6 +82,24 @@ export function getUserLevel(orderCount = 0) {
 
 export async function initSettings() {
   try {
+    // Sync time offset with server clock via Cloud Function
+    try {
+      const start = Date.now();
+      const res = await fetch('https://us-central1-godelivery-magdalena.cloudfunctions.net/getServerTime');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.serverTime) {
+          const latency = Math.floor((Date.now() - start) / 2);
+          const adjustedServerTime = data.serverTime + latency;
+          const offset = adjustedServerTime - Date.now();
+          state.serverTimeOffset = offset;
+          console.log(`[Time Sync] Server offset calculated: ${offset}ms (latency: ${latency}ms)`);
+        }
+      }
+    } catch (timeErr) {
+      console.warn('[Time Sync] Failed to sync server clock:', timeErr);
+    }
+
     // Listen to settings/global in real-time
     onSnapshot(doc(db, 'settings', 'global'), (snap) => {
       if (snap.exists()) {
@@ -534,7 +553,11 @@ export async function toggleProductFavorite(productId) {
     } else {
       favs.push(productId);
     }
-    localStorage.setItem('gd-favorites', JSON.stringify(favs));
+    try {
+      localStorage.setItem('gd-favorites', JSON.stringify(favs));
+    } catch (e) {
+      console.warn('[Storage] QuotaExceeded writing favorites in state.js', e);
+    }
 
     const currentUser = state.user;
     if (currentUser && currentUser.uid) {

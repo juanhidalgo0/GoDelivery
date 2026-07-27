@@ -7,12 +7,13 @@
     const savedTheme = localStorage.getItem('gd-theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
   </script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
   <meta name="description"
     content="GoDelivery — Pedí lo que necesites, lo llevamos a tu puerta. Delivery de comercios locales." />
   <meta name="theme-color" content="#E11D48" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>GoDelivery — Delivery a tu puerta</title>
   <link rel="icon" type="image/png" href="/logo-pwa.png" />
   <link rel="apple-touch-icon" href="/logo-pwa.png" />
@@ -114,11 +115,12 @@
       }
     }
 
-    #splash-screen.fade-out {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-      transition: opacity 0.4s ease 1.2s, visibility 0.4s ease 1.2s;
+    #splash-screen.fade-out,
+    #app.ready #splash-screen {
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.6s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     #app.ready #splash-progress-container {
@@ -187,10 +189,12 @@
       0% {
         transform: scale(1);
         opacity: 1;
+        filter: blur(0px);
       }
       100% {
-        transform: scale(0);
+        transform: scale(1.15);
         opacity: 0;
+        filter: blur(8px);
       }
     }
 
@@ -389,9 +393,15 @@
   </style>
 
 
+  <!-- Non-blocking Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap"
-    rel="stylesheet" />
+    rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </noscript>
 
   <link rel="stylesheet" href="/src/styles/index.css" />
   <link rel="stylesheet" href="/src/styles/theme.css" />
@@ -405,19 +415,18 @@
   <link rel="stylesheet" href="/src/styles/onboarding.css" />
   <link rel="stylesheet" href="/src/styles/app-guide.css" />
 
-  <!-- Leaflet Map -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Non-blocking Third-Party Scripts & Stylesheets -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" media="print" onload="this.media='all'" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js" defer></script>
 
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
-  <!-- Google Maps API -->
-  <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places"></script>
+  <!-- Google Maps API (Async Non-Blocking) -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places" async defer></script>
 
-  <!-- Phosphor Icons -->
-  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- Phosphor Icons (Non-Blocking) -->
+  <script src="https://unpkg.com/@phosphor-icons/web" async defer></script>
 
   <script>
     // Bridge for OAuth Redirects (Mercado Pago doesn't like #)
@@ -430,13 +439,73 @@
 
 <body>
   <div id="app">
-    <!-- App shell -->
-    <header id="app-header"></header>
+    <!-- Pre-rendered Mobile Header matching exact Brand Red aesthetics -->
+    <header id="app-header" style="background: var(--color-primary); border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 10px 30px rgba(var(--color-primary-rgb), 0.3); border: none; margin: 0; padding: 0; position: sticky; top: 0; z-index: 2000; overflow: visible; opacity: 1; transform: none;">
+      <div class="mobile-header-only" style="width:100%; padding-top: var(--status-bar-height, 24px); padding-bottom: 14px;">
+        <div class="header-top" style="height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 2;">
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <span id="static-header-address-label" style="font-weight: 700; font-size: 14px; color: white; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              📍 Cargando ubicación...
+            </span>
+            <script>
+              try {
+                const cachedAddr = localStorage.getItem('gd_delivery_address') || localStorage.getItem('gd_last_known_address');
+                if (cachedAddr) {
+                  const shortAddr = cachedAddr.split(',')[0];
+                  document.getElementById('static-header-address-label').textContent = '📍 ' + shortAddr;
+                }
+              } catch(e) {}
+            </script>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.2);" class="skeleton"></div>
+            <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.2);" class="skeleton"></div>
+          </div>
+        </div>
+        <!-- Search bar input -->
+        <div style="padding: 0 16px; margin-top: 4px;">
+          <div style="background: white; border-radius: 20px; height: 46px; display: flex; align-items: center; padding: 0 16px; justify-content: space-between; box-shadow: 0 4px 15px rgba(0,0,0,0.06);">
+            <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">Locales, platos y productos</span>
+            <div style="width: 30px; height: 30px; border-radius: 50%; background: var(--color-primary); display: flex; align-items: center; justify-content: center; color: white; font-size: 12px;">🔍</div>
+          </div>
+        </div>
+      </div>
+    </header>
     <div id="active-order-banner-container"></div>
 
 
     <main id="app-slider" class="main-slider">
-      <div id="page-home" class="slide-panel"></div>
+      <div id="page-home" class="slide-panel">
+        <div class="home-page" style="padding-top: 8px; position: relative; overflow: hidden; opacity: 0.85;">
+          <!-- Ambient Background Blobs (Soft Glows) -->
+          <div class="home-blob home-blob-1"></div>
+          <div class="home-blob home-blob-2"></div>
+
+          <!-- Quick Services Column Structure (Mandados on Top, Viajes and Market below) -->
+          <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 0; margin-bottom: 4px;">
+            <!-- Mandados Hero Card (100% width) -->
+            <div style="background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); border-radius: 20px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; height: 76px; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); width: 100%;" class="skeleton"></div>
+            <!-- Viajes & Market split row -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%;">
+              <div style="background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15);" class="skeleton"></div>
+              <div style="background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15);" class="skeleton"></div>
+            </div>
+          </div>
+
+          <!-- Premium Category Grid (Comida & GoMarket) -->
+          <div class="category-grid" style="margin-top: 10px; margin-bottom: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px;">
+            <div style="background: #e4e4e7; height: 110px; border-radius: 18px; position: relative; overflow: hidden;" class="skeleton"></div>
+            <div style="background: #e4e4e7; height: 110px; border-radius: 18px; position: relative; overflow: hidden;" class="skeleton"></div>
+          </div>
+
+          <!-- Small Categories Slider Section Skeletons -->
+          <div style="display: flex; gap: 12px; overflow-x: hidden; padding: 6px 16px 12px;">
+            <div class="category-card-small skeleton" style="min-width:110px; height:140px; background:#e4e4e7; border-radius:18px;"></div>
+            <div class="category-card-small skeleton" style="min-width:110px; height:140px; background:#e4e4e7; border-radius:18px;"></div>
+            <div class="category-card-small skeleton" style="min-width:110px; height:140px; background:#e4e4e7; border-radius:18px;"></div>
+          </div>
+        </div>
+      </div>
       <div id="page-commerce" class="slide-panel"></div>
       <div id="page-delivery" class="slide-panel"></div>
       <div id="page-cart" class="slide-panel"></div>
@@ -458,57 +527,33 @@
           <div class="splash-circle-red-collapse"></div>
           <img src="/logo-brand.jpg?v=2" alt="GoDelivery" class="splash-logo-img" />
         </div>
-        <div id="splash-progress-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 28px; gap: 8px; transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
-          <div style="width: 140px; height: 3px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; overflow: hidden; position: relative;">
-            <div id="splash-progress-bar" style="width: 0%; height: 100%; background: #FFFFFF; border-radius: 10px; transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1);"></div>
-          </div>
-          <div id="splash-progress-text" style="font-weight: 900; font-size: 14px; color: rgba(255, 255, 255, 0.9); font-family: 'Outfit', sans-serif; letter-spacing: -0.01em;">
-            0%
-          </div>
-        </div>
         <script>
-          (function() {
-            let currentPct = 0;
-            let targetPct = 0;
-            
-            window.setSplashProgress = function(pct) {
-              if (pct === 0) {
-                currentPct = 0;
-                targetPct = 0;
-                const bar = document.getElementById('splash-progress-bar');
-                const txt = document.getElementById('splash-progress-text');
-                if (bar) bar.style.width = '0%';
-                if (txt) txt.textContent = '0%';
-                return;
-              }
-              targetPct = Math.min(100, Math.max(currentPct, pct));
-            };
-
-            const interval = setInterval(function() {
-              const activeBar = document.getElementById('splash-progress-bar');
-              const activeTxt = document.getElementById('splash-progress-text');
-              
-              if (currentPct < targetPct) {
-                currentPct += 1;
-                if (activeBar) activeBar.style.width = currentPct + '%';
-                if (activeTxt) activeTxt.textContent = currentPct + '%';
-              }
-            }, 12);
-
-            // Simulate quick loader up to 85%
-            let simInterval = setInterval(function() {
-              if (targetPct < 85) {
-                window.setSplashProgress(targetPct + Math.floor(Math.random() * 20 + 8));
-              } else {
-                clearInterval(simInterval);
-              }
-            }, 180);
-          })();
+          window.setSplashProgress = function() {};
         </script>
       </div>
     </div>
 
-    <nav id="app-navbar"></nav>
+    <!-- Pre-rendered Mobile Navbar matching exact brand icons and items -->
+    <nav id="app-navbar" class="app-navbar" style="opacity: 1; transform: none; display: block;">
+      <div class="bottom-nav" style="background: var(--footer-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-top: 1px solid var(--footer-border); box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.05);">
+        <a href="#/" class="nav-item active">
+          <span class="nav-item-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M224,115.55V208a16,16,0,0,1-16,16H160a16,16,0,0,1-16-16V160H112v48a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V115.55a16,16,0,0,1,5.17-11.78l80-75.25a16,16,0,0,1,21.66,0l80,75.25A16,16,0,0,1,224,115.55Z"></path></svg></span>
+          <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Inicio</span>
+        </a>
+        <a href="#/offers" class="nav-item">
+          <span class="nav-item-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M243.31,136,144,36.69A15.86,15.86,0,0,0,132.69,32H40A16,16,0,0,0,24,48v92.69A15.86,15.86,0,0,0,28.69,152L128,251.31a16,16,0,0,0,22.63,0l92.68-92.68A16,16,0,0,0,243.31,136ZM84,96A12,12,0,1,1,96,84,12,12,0,0,1,84,96Z"></path></svg></span>
+          <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Ofertas</span>
+        </a>
+        <a href="#/cart" class="nav-item">
+          <span class="nav-item-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M222.14,58.87A16,16,0,0,0,210.6,54H54.17l-9.1-36.42A16,16,0,0,0,29.56,4H16A8,8,0,0,0,16,20H29.56l38,152.08A24,24,0,1,0,104,192h64a24,24,0,1,0,23-17.73l22.6-90.4A16,16,0,0,0,222.14,58.87Z"></path></svg></span>
+          <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Carrito</span>
+        </a>
+        <a href="#/mis-chats" class="nav-item">
+          <span class="nav-item-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM72,116a12,12,0,1,0,12,12A12,12,0,0,0,72,116Zm156,12A100.11,100.11,0,0,1,128,228a100.22,100.22,0,0,1-43.51-9.92l-42.53,14.18A16,16,0,0,1,21.74,212l14.18-42.53A100.11,100.11,0,0,1,28,128,100.11,100.11,0,0,1,128,28,100.11,100.11,0,0,1,228,128Z"></path></svg></span>
+          <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Mis Chats</span>
+        </a>
+      </div>
+    </nav>
   </div>
   <!-- Toast container -->
   <div id="toast-container"></div>

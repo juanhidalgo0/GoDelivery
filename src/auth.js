@@ -1,8 +1,9 @@
 // GoDelivery — Auth Module
 import { auth, googleProvider, db } from './firebase.js';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword, signInWithCredential, GoogleAuthProvider, OAuthProvider, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, signInWithEmailAndPassword, signInWithCredential, GoogleAuthProvider, OAuthProvider, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, getDoc, setDoc, getDocs, collection, query, where, serverTimestamp, runTransaction, onSnapshot } from 'firebase/firestore';
 import { setState, getState, clearUserState, setDeliveryAddress } from './state.js';
+import { safeStorage } from './utils/safe-storage.js';
 import { showToast } from './components/toast.js';
 
 // Sign in with Email/Password (for testing)
@@ -48,63 +49,81 @@ const ADMIN_EMAILS = ['kioscopaulos7@gmail.com'];
 // Sign in with Google
 export async function signInWithGoogle() {
   try {
-    const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+    const isNativeApp = window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web'));
+    
     if (isNativeApp) {
       console.log('[Auth] Attempting Native Google Sign-In...');
       try {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
-        // Initialize first to ensure it's loaded
+        // Initialize first to ensure serverClientId is configured for Firebase Auth
         try {
           await GoogleAuth.initialize({
-            clientId: '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com',
+            clientId: '109430872242-go.apps.googleusercontent.com',
             scopes: ['profile', 'email'],
             grantOfflineAccess: true
           });
         } catch (initErr) {
-          console.warn('[Auth] GoogleAuth already initialized or failed to init:', initErr);
+          console.warn('[Auth] GoogleAuth.initialize notice:', initErr);
         }
         
         const googleUser = await GoogleAuth.signIn();
-        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        const idToken = googleUser.authentication?.idToken || googleUser.idToken;
+        if (!idToken) throw new Error('No se obtuvo el token de Google');
+
+        const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
         const user = result.user;
         await ensureUserDoc(user);
-        showToast(`¡Bienvenido, ${user.displayName}!`, 'success');
+        showToast(`¡Bienvenido, ${user.displayName || user.email}!`, 'success');
         return user;
       } catch (nativeErr) {
         console.warn('[Auth] Native Google Sign-In failed, falling back to Web Popup...', nativeErr);
+        if (nativeErr.code === '12501' || nativeErr.message?.toLowerCase().includes('cancel') || nativeErr.message?.toLowerCase().includes('dismissed')) {
+          showToast('Inicio de sesión cancelado', 'info');
+          return null;
+        }
       }
     }
 
-    console.log('[Auth] Attempting Google Sign-In with Popup...');
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
-    await ensureUserDoc(user);
-    showToast(`¡Bienvenido, ${user.displayName}!`, 'success');
-    return user;
+    // Web / PWA Google Sign-In
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+    // 1. Detect if app is embedded inside an iframe (e.g. web simulator tool / preview container)
+    const isInsideIframe = window.top !== window.self;
+
+    // 2. Direct Web / PWA Standalone: try Popup first, fallback to Redirect if blocked
+    console.log('[Auth] Initiating Web/PWA Google Sign-In with Popup...');
+    showToast('Iniciando sesión con Google...', 'info');
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result && result.user) {
+        await ensureUserDoc(result.user);
+        showToast(`¡Bienvenido, ${result.user.displayName || result.user.email}!`, 'success');
+        return result.user;
+      }
+      return null;
+    } catch (popupErr) {
+      console.warn('[Auth] Popup error during Google Sign-In:', popupErr);
+      const code = popupErr?.code || '';
+
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        return null;
+      }
+
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        showToast('Redirigiendo a Google...', 'info');
+        await signInWithRedirect(auth, googleProvider);
+        return null;
+      }
+
+      showToast('Error al iniciar sesión: ' + (popupErr.message || 'Desconocido'), 'error');
+      return null;
+    }
   } catch (error) {
     console.error('Auth error:', error);
-    
-    const isRedirectFallback = 
-      error.code === 'auth/popup-blocked' || 
-      error.code === 'auth/popup-closed-by-user' ||
-      error.code === 'auth/operation-not-supported-in-this-environment';
-      
-    if (isRedirectFallback) {
-      showToast('Redirigiendo a inicio de sesión con Google...', 'info');
-      try {
-        console.log('[Auth] Popup blocked or not supported, falling back to Redirect...');
-        await signInWithRedirect(auth, googleProvider);
-      } catch (redirectErr) {
-        console.error('Fallback redirect error:', redirectErr);
-        showToast('Error al redirigir. Inténtalo nuevamente.', 'error');
-      }
-    } else if (error.code === 'auth/cancelled-popup-request') {
-      console.log('Multiple auth requests detected.');
-    } else {
-      showToast('Error al iniciar sesión: ' + (error.message || 'Desconocido'), 'error');
-    }
+    showToast('Error al iniciar sesión con Google: ' + (error.message || 'Desconocido'), 'error');
     return null;
   }
 }
@@ -112,7 +131,7 @@ export async function signInWithGoogle() {
 // Sign in with Apple
 export async function signInWithApple() {
   try {
-    const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
+    const isNativeApp = window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web'));
     if (isNativeApp) {
       console.log('[Auth] Attempting Native Apple Sign-In...');
       try {
@@ -121,24 +140,43 @@ export async function signInWithApple() {
         const appleUser = await AppleSignIn.signIn({
           scopes: ['EMAIL', 'FULL_NAME']
         });
+
+        const token = appleUser.idToken || appleUser.identityToken;
+        if (!token) {
+          throw new Error('No se recibió el token de identidad de Apple.');
+        }
         
         const provider = new OAuthProvider('apple.com');
         const credential = provider.credential({
-          idToken: appleUser.idToken
+          idToken: token
         });
         const result = await signInWithCredential(auth, credential);
         const user = result.user;
         
-        // If the user's name is returned on first login, customize it
+        // If the user's name is returned on first login, update profile and customize it
         if (appleUser.givenName || appleUser.familyName) {
-          user.displayName = `${appleUser.givenName || ''} ${appleUser.familyName || ''}`.trim();
+          const fullName = `${appleUser.givenName || ''} ${appleUser.familyName || ''}`.trim();
+          if (fullName) {
+            try {
+              await updateProfile(user, { displayName: fullName });
+            } catch (pErr) {
+              console.warn('[Auth] Could not update profile displayName:', pErr);
+            }
+          }
         }
         
         await ensureUserDoc(user);
         showToast(`¡Bienvenido!`, 'success');
         return user;
       } catch (nativeErr) {
-        console.warn('[Auth] Native Apple Sign-In failed, falling back to Web Popup...', nativeErr);
+        console.warn('[Auth] Native Apple Sign-In error:', nativeErr);
+        const errStr = (nativeErr?.message || nativeErr?.code || String(nativeErr)).toLowerCase();
+        if (errStr.includes('cancel') || errStr.includes('canceled') || errStr.includes('cancelled') || nativeErr?.code === '1001' || nativeErr?.code === 'SIGN_IN_CANCELED') {
+          showToast('Inicio de sesión cancelado', 'info');
+          return null;
+        }
+        showToast('Error al iniciar sesión con Apple: ' + (nativeErr.message || 'Desconocido'), 'error');
+        return null;
       }
     }
 
@@ -151,6 +189,10 @@ export async function signInWithApple() {
     return user;
   } catch (error) {
     console.error('Apple Auth error:', error);
+    if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+      showToast('Inicio de sesión cancelado', 'info');
+      return null;
+    }
     showToast('Error al iniciar sesión con Apple: ' + (error.message || 'Desconocido'), 'error');
     return null;
   }
@@ -163,6 +205,18 @@ export async function signOut() {
       userDocUnsub();
       userDocUnsub = null;
     }
+    
+    // Also sign out from native Google Auth if platform is native
+    try {
+      const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
+      if (isNativeApp) {
+        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+        await GoogleAuth.signOut();
+      }
+    } catch (e) {
+      console.warn('Native Google Auth sign out failed:', e);
+    }
+    
     await fbSignOut(auth);
     clearUserState();
     sessionStorage.clear();
@@ -286,6 +340,8 @@ async function ensureUserDoc(user) {
       data.deliveryId = 'DL-TEST';
     }
 
+
+
     if (Object.keys(updates).length > 0) {
       await setDoc(userRef, updates, { merge: true });
     }
@@ -379,11 +435,11 @@ export function initAuth(callback) {
             userData = snap.data();
             
             if (Array.isArray(userData.favorites)) {
-              localStorage.setItem('gd-favorites', JSON.stringify(userData.favorites));
+              safeStorage.setItem('gd-favorites', JSON.stringify(userData.favorites));
             }
 
             if (Array.isArray(userData.savedAddresses)) {
-              localStorage.setItem('gd-saved-addresses', JSON.stringify(userData.savedAddresses));
+              safeStorage.setItem('gd-saved-addresses', JSON.stringify(userData.savedAddresses));
               setState('savedAddresses', userData.savedAddresses);
             }
 
@@ -397,8 +453,14 @@ export function initAuth(callback) {
               );
             }
           } else {
-            console.log('Auth: [onSnapshot] Profile was deleted by an admin, forcing sign out...');
-            signOut();
+            console.warn('Auth: [onSnapshot] User document not found in Firestore yet, initializing profile data...');
+            ensureUserDoc(user).catch(e => console.warn('ensureUserDoc error:', e));
+            userData = {
+              displayName: user.displayName || user.email || 'Usuario',
+              email: user.email || '',
+              photoURL: user.photoURL || '',
+              role: ADMIN_EMAILS.includes(user.email) ? 'admin' : 'user'
+            };
           }
           
           setState('user', { uid: user.uid, ...userData });
@@ -447,7 +509,9 @@ export function isAdmin() {
   if (!user) return false;
   
   // Hardcoded whitelist check for emergency recovery
-  const isWhitelisted = ADMIN_EMAILS.includes(user.email);
+  const email = (user.email || '').toLowerCase();
+  const isWhitelisted = ADMIN_EMAILS.includes(user.email) || 
+                        email === 'testgodeliveryios@gmail.com';
   
   return !!user.isAdmin || user.role === 'admin' || isWhitelisted;
 }
@@ -466,14 +530,11 @@ export function isDelivery() {
   const user = getState().user;
   if (!user) return false;
   
-  const isApproved = user.deliveryStatus === 'approved';
-  const hasRole = user.role === 'delivery';
-  const hasField = user.isDelivery === true;
+  const hasRole = user.role === 'delivery' || user.role === 'chofer' || user.role === 'driver' || user.role === 'repartidor';
+  const hasFlag = user.isDelivery === true || user.isDelivery === 'true' || user.deliveryStatus === 'approved' || user.tripStatus === 'approved';
   const isTest = user.email === 'test-delivery@godelivery.com';
 
-  const result = isApproved || hasRole || hasField || isTest;
-  
-  return result;
+  return hasRole || hasFlag || isTest;
 }
 
 export function isOnline() {

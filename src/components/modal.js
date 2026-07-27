@@ -34,15 +34,15 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       ">
         ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(120,120,120,0.4); border-radius:var(--radius-full); position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab;"></div>` : ''}
         ${!hideHeader && !isFullscreen ? `
-          <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1.5px solid rgba(0,0,0,0.06); z-index:90; ${headerBackground ? `background:${headerBackground};` : 'background:var(--color-bg-secondary);'}">
+          <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1.5px solid rgba(0,0,0,0.06); z-index:90; flex-shrink:0; ${headerBackground ? `background:${headerBackground};` : 'background:var(--color-bg-secondary);'}">
             <h3 style="font-family:var(--font-display); font-size:1.2rem; font-weight:900; margin:0; letter-spacing:-0.01em; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-primary);'}">${title}</h3>
             <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
         ` : ''}
-        <div class="modal-body" id="${modalId}-body" style="flex:1; overflow:hidden; position:relative; display:flex; flex-direction:column; ${hideHeader || isFullscreen ? 'padding:0;' : ''}">
+        <div class="modal-body" id="${modalId}-body" style="flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; position:relative; display:flex; flex-direction:column; ${hideHeader || isFullscreen ? 'padding:0;' : ''}">
           ${typeof content === 'string' ? content : ''}
         </div>
-        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px calc(20px + env(safe-area-inset-bottom, 0px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg);">${footer}</div>` : ''}
+        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px calc(20px + env(safe-area-inset-bottom, 0px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
       </div>
     </div>
   `;
@@ -96,14 +96,47 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   const modalObj = { id: modalId, wrapper: modalWrapper, onClose, close };
   modalStack.push(modalObj);
 
-  // Prevent pull-to-refresh when modals are open
-  if (modalStack.length === 1) {
-    document.body.style.overscrollBehaviorY = 'contain';
-    document.documentElement.style.overscrollBehaviorY = 'contain';
-    document.body.classList.add('modal-open');
-  } else if (modalStack.length > 1) {
-    document.body.classList.add('multiple-modals');
+  // Handle VisualViewport for iOS virtual keyboard
+  if (window.visualViewport) {
+    const handleViewportChange = () => {
+      if (!dialog || !overlay) return;
+      const vh = window.visualViewport.height;
+      const vt = window.visualViewport.offsetTop;
+      
+      overlay.style.height = `${vh}px`;
+      overlay.style.top = `${vt}px`;
+
+      if (!isFullscreen) {
+        dialog.style.maxHeight = `${vh - 8}px`;
+      }
+    };
+
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    window.visualViewport.addEventListener('scroll', handleViewportChange);
+    handleViewportChange();
+
+    const origCloseFunc = close;
+    modalObj.close = (isPopState = false) => {
+      window.visualViewport.removeEventListener('resize', handleViewportChange);
+      window.visualViewport.removeEventListener('scroll', handleViewportChange);
+      origCloseFunc(isPopState);
+    };
   }
+
+  // Auto scroll focused input into view inside modal
+  body.addEventListener('focusin', (e) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+      setTimeout(() => {
+        e.target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 250);
+    }
+  });
+
+  body.addEventListener('focusout', (e) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  });
 
   if (onOpen) requestAnimationFrame(() => onOpen());
 
@@ -117,7 +150,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     if (['INPUT', 'BUTTON', 'A', 'TEXTAREA'].includes(e.target.tagName)) return;
     
     // Disable card dragging when touching inside scrollable containers (like the flavors list)
-    const scrollableArea = e.target.closest('.pm-content, .scrollable, [style*="overflow-y: auto"], [style*="overflow-y:auto"]');
+    const scrollableArea = e.target.closest('.pm-content, .pm-scrollable-body, .pm-options-list, .scrollable, [style*="overflow-y: auto"], [style*="overflow-y:auto"]');
     if (scrollableArea) {
       if (!e.target.closest('.modal-handle, #modal-handle, [id*="-handle"], [id*="-header-drag"]')) {
         return;
@@ -157,7 +190,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     dialog.style.transition = 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
     overlay.style.transition = 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
 
-    if (diff > 180 || (velocity > 0.6 && diff > 50)) {
+    if (diff > 90 || (velocity > 0.35 && diff > 40)) {
       close();
     } else {
       dialog.style.transform = 'translateY(0)';
@@ -177,21 +210,26 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     el.addEventListener('touchend', onTouchEnd);
   };
 
-  if (!persistent) {
+  if (!persistent && !isFullscreen) {
     addListeners(handle);
     addListeners(headerDrag);
 
     if (fullSwipe) {
       addListeners(dialog);
     } else {
-      // Top-portion fallback (increased to 140px for easier catch)
       dialog.addEventListener('touchstart', (e) => {
         const rect = dialog.getBoundingClientRect();
         const relativeY = e.touches[0].clientY - rect.top;
-        if (relativeY < 140) onTouchStart(e);
+        if (relativeY < 60 && !e.target.closest('.pm-scrollable-body, .modal-body, input, select, textarea, button')) {
+          onTouchStart(e);
+        }
       }, { passive: true });
-      dialog.addEventListener('touchmove', onTouchMove, { passive: true });
-      dialog.addEventListener('touchend', onTouchEnd);
+      dialog.addEventListener('touchmove', (e) => {
+        if (isDragging) onTouchMove(e);
+      }, { passive: true });
+      dialog.addEventListener('touchend', (e) => {
+        if (isDragging) onTouchEnd(e);
+      });
     }
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });

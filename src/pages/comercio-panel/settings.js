@@ -450,18 +450,36 @@ export async function renderComercioSettings() {
 
           if (suggestionsDropdown) {
             suggestionsDropdown.innerHTML = suggestions.map(s => `
-              <div class="suggestion-item" data-lat="${s.lat}" data-lng="${s.lng}" data-addr="${s.address}">
+              <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}">
                 ${s.address}
               </div>
             `).join('');
             suggestionsDropdown.style.display = 'block';
 
             suggestionsDropdown.querySelectorAll('.suggestion-item').forEach(item => {
-              item.onclick = () => {
-                const lat = parseFloat(item.dataset.lat);
-                const lng = parseFloat(item.dataset.lng);
+              item.onclick = async () => {
+                let lat = parseFloat(item.dataset.lat);
+                let lng = parseFloat(item.dataset.lng);
+                const placeId = item.dataset.placeid;
                 const addr = item.dataset.addr;
-                selectLocation({ lat, lng }, addr);
+
+                if (isNaN(lat) || isNaN(lng)) {
+                  if (placeId) {
+                    try {
+                      const { geocodePlaceId } = await import('../../utils/geo.js');
+                      const coords = await geocodePlaceId(placeId);
+                      if (coords) {
+                        selectLocation({ lat: coords.lat, lng: coords.lng }, addr);
+                      } else {
+                        console.error('Failed to geocode suggestion place ID');
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }
+                } else {
+                  selectLocation({ lat, lng }, addr);
+                }
               };
             });
           }

@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, serverTimestamp, addDoc, getDocs, orderBy, setDoc, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, serverTimestamp, addDoc, getDocs, orderBy, setDoc, limit, Timestamp } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { isAdmin } from '../../auth.js';
@@ -11,6 +11,8 @@ import { getUnreadCount, onUnreadChange } from '../../components/chat-notifier.j
 import { openChat } from '../../components/chat.js';
 
 let ordersUnsub = null;
+let commerceHeaderUnsub = null;
+const clientUserCache = {};
 
 export async function renderComercioOrders(manualId = null) {
   const params = getRouteParams();
@@ -18,15 +20,38 @@ export async function renderComercioOrders(manualId = null) {
   if (!comercioId) return;
 
   // Dynamically inject styles into head to guarantee active CSS rules
-  if (!document.getElementById('orders-panel-styles')) {
-    const styleEl = document.createElement('style');
+  let styleEl = document.getElementById('orders-panel-styles');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
     styleEl.id = 'orders-panel-styles';
-    styleEl.innerHTML = getOrderStyles().replace('<style>', '').replace('</style>', '');
     document.head.appendChild(styleEl);
   }
+  styleEl.innerHTML = getOrderStyles().replace('<style>', '').replace('</style>', '');
 
   const panelId = 'page-commerce';
   const content = document.getElementById(panelId) || document.getElementById('app-content');
+
+  // Always clean up/remove old drawer and backdrop to prevent duplicates
+  document.getElementById('commerce-drawer-backdrop')?.remove();
+  document.getElementById('commerce-drawer')?.remove();
+
+  // Create and append backdrop and drawer dynamically to document.body
+  const backdropEl = document.createElement('div');
+  backdropEl.id = 'commerce-drawer-backdrop';
+  backdropEl.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; opacity: 0; pointer-events: none; transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);";
+  document.body.appendChild(backdropEl);
+
+  const drawerEl = document.createElement('div');
+  drawerEl.id = 'commerce-drawer';
+  drawerEl.style.cssText = "position: fixed; top: 0; right: 0; bottom: 0; width: 300px; background: var(--color-surface); box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 10001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; border-top-left-radius: 20px; border-bottom-left-radius: 20px;";
+  drawerEl.innerHTML = `
+    <div class="commerce-drawer-header">
+      <h2 class="commerce-drawer-title">Opciones de Gestión</h2>
+      <button id="commerce-drawer-close-btn" class="commerce-drawer-close">${icon('close', 16)}</button>
+    </div>
+    <div id="commerce-drawer-body-container" class="commerce-drawer-body"></div>
+  `;
+  document.body.appendChild(drawerEl);
 
   // SMART RENDER: Only set shell if it's not already there to avoid white flash
   if (!content.querySelector('.orders-panel-page')) {
@@ -50,69 +75,7 @@ export async function renderComercioOrders(manualId = null) {
   let isAlarmMutedLocally = false;
 
   const updateMutePill = () => {
-    const pendingCount = allOrders.filter(o => o.status === 'pending').length;
-    let pill = document.getElementById('comercio-mute-alarm-pill');
-
-    if (pendingCount > 0 && !isAlarmMutedLocally && viewMode === 'management') {
-      if (!pill) {
-        pill = document.createElement('div');
-        pill.id = 'comercio-mute-alarm-pill';
-        pill.style.cssText = `
-          position: fixed;
-          bottom: 84px;
-          left: 50%;
-          transform: translateX(-50%) translateY(20px);
-          background: rgba(15, 23, 42, 0.95);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          border: 1.5px solid rgba(225, 29, 72, 0.35);
-          border-radius: 30px;
-          padding: 12px 24px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          z-index: 1000;
-          cursor: pointer;
-          color: white;
-          font-family: var(--font-display);
-          font-weight: 900;
-          font-size: 12px;
-          letter-spacing: 0.05em;
-          box-shadow: 0 10px 30px rgba(225, 29, 72, 0.35);
-          transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-          opacity: 0;
-        `;
-        document.body.appendChild(pill);
-
-        pill.onclick = () => {
-          import('../../utils/audio-manager.js').then(m => {
-            m.AudioManager.hapticLight();
-          });
-          isAlarmMutedLocally = true;
-          window.dispatchEvent(new CustomEvent('mute-commerce-alarm'));
-          updateMutePill();
-        };
-      }
-
-      pill.innerHTML = `
-        <span class="animate-pulse" style="display:inline-block; width:8px; height:8px; background:#e11d48; border-radius:50%; box-shadow:0 0 10px #e11d48;"></span>
-        ${icon('bell', 16)}
-        <span>SILENCIAR ALARMA PENDIENTE</span>
-      `;
-
-      requestAnimationFrame(() => {
-        pill.style.transform = 'translateX(-50%) translateY(0)';
-        pill.style.opacity = '1';
-      });
-    } else {
-      if (pill) {
-        pill.style.transform = 'translateX(-50%) translateY(20px)';
-        pill.style.opacity = '0';
-        setTimeout(() => {
-          pill.remove();
-        }, 400);
-      }
-    }
+    // Handled globally by commerce-monitor.js
   };
 
   const renderHeader = async () => {
@@ -124,9 +87,9 @@ export async function renderComercioOrders(manualId = null) {
       const cached = getState().currentComercio;
       const comData = (cached && cached.id === comercioId) ? cached : null;
       
-      let isPaused = comData ? comData.isPaused : false;
-      const comercioName = comData ? comData.name : 'Cargando...';
-      const headerTitle = isAdmin() ? `Adm: ${comercioName}` : 'Gestión de Pedidos';
+      let isPaused = comData ? !!comData.isPaused : false;
+      let comercioName = comData ? comData.name : 'Cargando...';
+      let logoUrl = comData?.logo || '/logo.png';
 
       // Render instantly with what we have
       const isNative = !!window.Capacitor;
@@ -134,69 +97,207 @@ export async function renderComercioOrders(manualId = null) {
       const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
       const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
 
-      headerContainer.innerHTML = `
-        <div class="orders-sticky-header-container" style="padding-top: ${topPadding};">
-          <div class="orders-sticky-header" style="position: relative; overflow: hidden;">
-            <!-- Decorative Circles -->
-            <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      const renderHeaderContent = () => {
+        headerContainer.innerHTML = `
+          <div class="orders-sticky-header-container" style="background: var(--color-primary); box-shadow: 0 4px 12px rgba(var(--color-primary-rgb),0.2); padding-top: ${topPadding};">
+            <div class="orders-sticky-header" style="position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 14px 20px;">
+              <!-- Decorative Circles -->
+              <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
 
-          
-          <div class="orders-header-left" style="position: relative; z-index: 2; display: flex; align-items: center;">
-            ${window.innerWidth >= 1024 ? `
-              <a href="#/" style="display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.25); text-decoration: none; margin-right: 14px; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                ${icon('chevronLeft', 22)}
-              </a>
-            ` : ''}
-            <div class="orders-header-icon-wrap">
-              ${icon('restaurant', 20)}
-            </div>
-            <div class="orders-header-info">
-              <h1 class="orders-header-title">${headerTitle}</h1>
-              <div class="orders-header-status-row">
-                <span class="orders-live-dot ${isPaused ? 'paused' : ''}"></span>
-                <p class="orders-header-subtitle">${isPaused ? 'Pausado' : 'En vivo'}</p>
+              <div class="orders-header-left" style="position: relative; z-index: 2; display: flex; align-items: center; min-width: 0; flex: 1; gap: 10px;">
+                ${window.innerWidth >= 1024 ? `
+                  <a href="#/" style="display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.25); text-decoration: none; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                    ${icon('chevronLeft', 22)}
+                  </a>
+                ` : ''}
+                <div class="orders-header-icon-wrap" style="width:42px; height:42px; border-radius:50%; overflow:hidden; border:2px solid white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: var(--shadow-sm); background: white;">
+                  <img src="${logoUrl}" style="width:100%; height:100%; object-fit:cover;" />
+                </div>
+                <div class="orders-header-info" style="min-width: 0; flex: 1;">
+                  <h1 class="orders-header-title" style="font-family:var(--font-display); font-weight:900; font-size:21px; color:white; margin:0; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${comercioName}</h1>
+                </div>
               </div>
+
+              <!-- Hamburger Menu Button -->
+              <button id="header-menu-btn" style="position: relative; z-index: 2; width: 40px; height: 40px; border-radius: 12px; border: none; background: rgba(255,255,255,0.15); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                ${icon('menu', 22)}
+              </button>
             </div>
           </div>
+        `;
 
-            <button class="hdr-icon-btn" id="create-manual-order-btn" title="Nuevo Pedido Manual">
-              ${icon('plus', 18)}
+        // Render drawer body content dynamically
+        const bodyContainer = document.getElementById('commerce-drawer-body-container');
+        if (bodyContainer) {
+          bodyContainer.innerHTML = `
+            <!-- Manual Order (Emerald) -->
+            <button class="commerce-drawer-item" id="drawer-manual-btn">
+              <div class="drawer-item-icon-wrap" style="background: rgba(16, 185, 129, 0.09); color: #10b981;">
+                ${icon('plus', 18)}
+              </div>
+              <span style="flex:1;">Nuevo Pedido Manual</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
             </button>
-            <a href="#/comercio/${comercioId}" class="hdr-icon-btn" title="Ver Tienda Online" style="display: flex; align-items: center; justify-content: center; text-decoration: none;">
-              ${icon('eye', 18)}
-            </a>
-            <button class="hdr-icon-btn" id="go-to-history" title="Historial">
-              ${icon('history', 18)}
-            </button>
-            <a href="#/mi-comercio/${comercioId}" class="hdr-icon-btn" title="Panel General" style="display: flex; align-items: center; justify-content: center; text-decoration: none;">
-              ${icon('grid', 18)}
-            </a>
-          </div>
-          </div>
-        </div>
-      `;
 
-      // Background update if no cache or to ensure freshness
-      if (!comData) {
-        const comSnap = await getDoc(doc(db, 'comercios', comercioId));
-        if (comSnap.exists()) {
-          const freshData = { id: comSnap.id, ...comSnap.data() };
-          import('../../state.js').then(m => m.setState('currentComercio', freshData));
-          if (isAdmin()) {
-            const titleEl = headerContainer.querySelector('.orders-header-title');
-            if (titleEl) titleEl.textContent = `Adm: ${freshData.name || 'Comercio'}`;
-          }
-          if (freshData.isPaused !== isPaused) {
-            const dot = headerContainer.querySelector('.orders-live-dot');
-            const sub = headerContainer.querySelector('.orders-header-subtitle');
-            if (dot) dot.className = `orders-live-dot ${freshData.isPaused ? 'paused' : ''}`;
-            if (sub) sub.textContent = freshData.isPaused ? 'Pausado' : 'En vivo';
-          }
+            <!-- Pause / Play Button (Red/Green) -->
+            <button class="commerce-drawer-item" id="drawer-pause-btn">
+              <div class="drawer-item-icon-wrap" style="background: ${isPaused ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.09)'}; color: ${isPaused ? '#22c55e' : '#ef4444'};">
+                ${isPaused ? icon('play', 18) : icon('pause', 18)}
+              </div>
+              <span style="flex:1;">${isPaused ? 'Reanudar Ventas' : 'Pausar Ventas'}</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </button>
+
+            <!-- Deliveries Button (PedidosYa Red Style) -->
+            <button class="commerce-drawer-item" id="drawer-deliveries-btn">
+              <div class="drawer-item-icon-wrap" style="background: rgba(227, 0, 27, 0.09); color: #E3001B;">
+                ${icon('users', 18)}
+              </div>
+              <span style="flex:1;">Mis Repartidores (Propios)</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </button>
+
+            <!-- History (Slate) - SWAPPED position -->
+            <button class="commerce-drawer-item" id="drawer-history-btn">
+              <div class="drawer-item-icon-wrap" style="background: rgba(100, 116, 139, 0.09); color: #64748b;">
+                ${icon('history', 18)}
+              </div>
+              <span style="flex:1;">Ver Historial</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </button>
+
+            <!-- Support Button (Blue/Sky) - SWAPPED position -->
+            <button class="commerce-drawer-item" id="drawer-support-btn">
+              <div class="drawer-item-icon-wrap" style="background: rgba(14, 165, 233, 0.08); color: #0284c7;">
+                ${icon('headset', 18)}
+              </div>
+              <span style="flex:1;">Soporte Técnico</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </button>
+
+            <!-- Divider -->
+            <div style="height: 1px; background: var(--color-border-light); margin: 8px 0;"></div>
+
+            <!-- View Store (Cyan) -->
+            <a href="#/comercio/${comercioId}" class="commerce-drawer-item" id="drawer-store-link">
+              <div class="drawer-item-icon-wrap" style="background: rgba(6, 182, 212, 0.09); color: #06b6d4;">
+                ${icon('eye', 18)}
+              </div>
+              <span style="flex:1; color:var(--color-text-primary);">Ver Tienda Online</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </a>
+
+            <!-- General Panel (Indigo) -->
+            <a href="#/mi-comercio/${comercioId}" class="commerce-drawer-item" id="drawer-panel-link">
+              <div class="drawer-item-icon-wrap" style="background: rgba(99, 102, 241, 0.09); color: #6366f1;">
+                ${icon('grid', 18)}
+              </div>
+              <span style="flex:1; color:var(--color-text-primary);">Panel General</span>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </a>
+          `;
         }
+
+        const closeDrawer = () => {
+          const drawer = document.getElementById('commerce-drawer');
+          const backdrop = document.getElementById('commerce-drawer-backdrop');
+          if (drawer && backdrop) {
+            drawer.style.transform = 'translateX(100%)';
+            backdrop.style.opacity = '0';
+            backdrop.style.pointerEvents = 'none';
+          }
+        };
+
+        // Open Drawer Click
+        document.getElementById('header-menu-btn')?.addEventListener('click', () => {
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          const drawer = document.getElementById('commerce-drawer');
+          const backdrop = document.getElementById('commerce-drawer-backdrop');
+          if (drawer && backdrop) {
+            drawer.style.transform = 'translateX(0)';
+            backdrop.style.opacity = '1';
+            backdrop.style.pointerEvents = 'auto';
+          }
+        });
+
+        // Close events
+        document.getElementById('commerce-drawer-backdrop')?.addEventListener('click', closeDrawer);
+        document.getElementById('commerce-drawer-close-btn')?.addEventListener('click', closeDrawer);
+
+        // Bind items
+        document.getElementById('drawer-manual-btn')?.addEventListener('click', () => {
+          closeDrawer();
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          showNewManualOrderModal(comercioId);
+        });
+
+        document.getElementById('drawer-pause-btn')?.addEventListener('click', async () => {
+          closeDrawer();
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          if (!isPaused) {
+            showConfirm({
+              title: 'Pausar Comercio',
+              message: 'Esta acción va a pausar tu comercio marcándolo como cerrado temporalmente y no podrás recibir pedidos hasta volver a activarlo. ¿Deseas pausar?',
+              confirmText: 'Sí, pausar',
+              danger: true,
+              onConfirm: async () => {
+                await updateDoc(doc(db, 'comercios', comercioId), { isPaused: true });
+                showToast('Comercio pausado', 'info');
+              }
+            });
+          } else {
+            await updateDoc(doc(db, 'comercios', comercioId), { isPaused: false });
+            showToast('Comercio reactivado', 'success');
+          }
+        });
+
+        document.getElementById('drawer-deliveries-btn')?.addEventListener('click', () => {
+          closeDrawer();
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          showOwnDeliveriesModal(comercioId);
+        });
+
+        document.getElementById('drawer-support-btn')?.addEventListener('click', async () => {
+          closeDrawer();
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          try {
+            const { openSupportTicketModal } = await import('../../components/support-bot.js');
+            await openSupportTicketModal(comercioId, `Comercio: ${comercioName}`);
+          } catch (err) {
+            console.error('Error opening support ticket chat:', err);
+            showToast('Error al abrir chat de soporte', 'danger');
+          }
+        });
+
+        document.getElementById('drawer-history-btn')?.addEventListener('click', () => {
+          closeDrawer();
+          viewMode = 'history';
+          renderView();
+        });
+
+        document.getElementById('drawer-store-link')?.addEventListener('click', () => closeDrawer());
+        document.getElementById('drawer-panel-link')?.addEventListener('click', () => closeDrawer());
+      };
+
+      // Initial draw
+      renderHeaderContent();
+
+      // Subscribe to real-time updates for settings/status of the shop
+      if (commerceHeaderUnsub) {
+        commerceHeaderUnsub();
       }
+      commerceHeaderUnsub = onSnapshot(doc(db, 'comercios', comercioId), (snap) => {
+        if (snap.exists()) {
+          const freshData = snap.data();
+          isPaused = !!freshData.isPaused;
+          comercioName = freshData.name || '';
+          logoUrl = freshData.logo || '/logo.png';
+          
+          import('../../state.js').then(m => m.setState('currentComercio', { id: snap.id, ...freshData }));
+          renderHeaderContent();
+        }
+      });
 
-
-      // Panic toggle removed from header — now lives in Settings page
     } else {
       const isNative = !!window.Capacitor;
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -214,21 +315,12 @@ export async function renderComercioOrders(manualId = null) {
           </div>
         </div>
       `;
-    }
 
-    document.getElementById('create-manual-order-btn')?.addEventListener('click', () => {
-      import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-      showNewManualOrderModal(comercioId);
-    });
-    
-    document.getElementById('go-to-history')?.addEventListener('click', () => {
-      viewMode = 'history';
-      renderView();
-    });
-    document.getElementById('back-to-mgmt')?.addEventListener('click', () => {
-      viewMode = 'management';
-      renderView();
-    });
+      document.getElementById('back-to-mgmt')?.addEventListener('click', () => {
+        viewMode = 'management';
+        renderView();
+      });
+    }
   };
 
   const renderTabs = () => {
@@ -354,9 +446,15 @@ export async function renderComercioOrders(manualId = null) {
   return {
     cleanup: () => {
       if (ordersUnsub) ordersUnsub();
+      if (commerceHeaderUnsub) {
+        commerceHeaderUnsub();
+        commerceHeaderUnsub = null;
+      }
       if (unreadUnsub) unreadUnsub();
       const pill = document.getElementById('comercio-mute-alarm-pill');
       if (pill) pill.remove();
+      document.getElementById('commerce-drawer-backdrop')?.remove();
+      document.getElementById('commerce-drawer')?.remove();
     }
   };
 }
@@ -608,6 +706,9 @@ function showOrderDetailModal(initialOrder) {
 
         ${!isHistory ? `
         <div class="detail-actions-section-premium">
+          <button class="btn-action-premium outline live-tracking-map-btn" style="background:rgba(59,130,246,0.1); color:#3b82f6; border:1.5px solid rgba(59,130,246,0.3); font-weight:900; margin-bottom:6px; display:flex; align-items:center; justify-content:center; gap:8px;">
+            ${icon('navigationArrow', 18)} Ver Seguimiento en Tiempo Real (GPS)
+          </button>
           ${o.status === 'ready' ? `
             <div style="margin-bottom:12px; padding:12px; border-radius:14px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); font-size:12.5px; font-weight:700; width:100%; text-align:left;">
               <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9.5px; display:block; margin-bottom:4px; font-weight:800;">Estado de asignación:</span>
@@ -617,7 +718,7 @@ function showOrderDetailModal(initialOrder) {
                 </span>
                 ${(!o.driverName && o.queueOfferedAt) ? `
                   <span style="color:var(--color-warning); font-size:12px;" class="modal-queue-timer" data-expiry="${(o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000}">
-                    ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000 - Date.now()) / 1000))}s
+                    ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000 - (Date.now() + (getState().serverTimeOffset || 0))) / 1000))}s
                   </span>
                 ` : ''}
               </div>
@@ -625,20 +726,17 @@ function showOrderDetailModal(initialOrder) {
           ` : ''}
           ${o.status === 'pending' ? `
             <button class="btn-action-premium confirm confirm-order-btn" data-id="${o.id}">${icon('check', 18)} Confirmar Pedido</button>
-            <button class="btn-action-premium manual-assign-btn" data-id="${o.id}" style="background:var(--color-warning); color:white; border:none; margin-bottom:8px;">Asignar Repartidor Manual</button>
             <div class="action-grid-2">
               <button class="btn-action-premium outline modify-order-btn" data-id="${o.id}">${icon('edit', 16)} Modificar</button>
               <button class="btn-action-premium reject reject-order-btn" data-id="${o.id}">${icon('close', 16)} Rechazar</button>
             </div>
           ` : o.status === 'confirmed' ? `
             <button class="btn-action-premium confirm ready-order-btn" data-id="${o.id}">${icon('readyBox', 18)} Marcar como Listo</button>
-            <button class="btn-action-premium manual-assign-btn" data-id="${o.id}" style="background:var(--color-warning); color:white; border:none; margin-bottom:8px;">Asignar Repartidor Manual</button>
             <div class="action-grid-2">
               <button class="btn-action-premium outline modify-order-btn" data-id="${o.id}">${icon('edit', 16)} Modificar</button>
               <button class="btn-action-premium reject cancel-confirmed-btn" data-id="${o.id}">${icon('close', 16)} Cancelar</button>
             </div>
           ` : o.status === 'ready' ? `
-            <button class="btn-action-premium manual-assign-btn" data-id="${o.id}" style="background:var(--color-warning); color:white; border:none; margin-bottom:12px; width:100%; height:44px; border-radius:12px;">Forzar Asignación Manual</button>
             <div style="display:flex; align-items:center; gap:8px; justify-content:center; padding:16px; border-radius:16px; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); color:#0d9488; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:0.02em; width:100%;">
               ${icon('bike', 18)} Esperando retiro del repartidor
             </div>
@@ -669,6 +767,11 @@ function showOrderDetailModal(initialOrder) {
         toggleBtn?.classList.remove('active');
         if (btnText) btnText.textContent = 'Mostrar entrega y reemplazos';
       }
+    });
+
+    modalEl.querySelector('.live-tracking-map-btn')?.addEventListener('click', async () => {
+      const { showDeliveryMapModal } = await import('../../components/delivery-map-modal.js');
+      showDeliveryMapModal(o);
     });
 
     modalEl.querySelector('#close-detail-modal')?.addEventListener('click', () => {
@@ -820,7 +923,7 @@ function showOrderDetailModal(initialOrder) {
       const timerEl = modalEl.querySelector('.modal-queue-timer');
       if (!timerEl) return;
       const expiry = parseInt(timerEl.dataset.expiry);
-      const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.floor((expiry - (Date.now() + (getState().serverTimeOffset || 0))) / 1000));
       timerEl.textContent = `${remaining}s`;
       if (remaining <= 0) {
         clearInterval(modalTimerInterval);
@@ -873,7 +976,7 @@ function showOrderDetailModal(initialOrder) {
                   acceptedAt: serverTimestamp(),
                   queueTargetDriverId: dId,
                   queueTargetDriverName: dName,
-                  queueOfferedAt: Date.now()
+                  queueOfferedAt: Date.now() + (getState().serverTimeOffset || 0)
                 });
                 
                 showToast(`Repartidor ${dName} asignado correctamente.`, 'success');
@@ -897,14 +1000,29 @@ function showOrderDetailModal(initialOrder) {
       showModifyOrderModal(o);
     });
 
-    if (!o.goId && o.userId) {
-      getDoc(doc(db, 'users', o.userId)).then(snap => {
-        if (snap.exists()) {
-          const u = snap.data();
-          const badgeEl = modalEl.querySelector('.customer-id-premium');
-          if (badgeEl && u.goId) badgeEl.textContent = `ID: ${u.goId}`;
+    if (o.userId) {
+      const renderClientData = (u) => {
+        const badgeEl = modalEl.querySelector('.customer-id-premium');
+        if (badgeEl && u.goId) badgeEl.textContent = `ID: ${u.goId}`;
+        
+        const avatarEl = modalEl.querySelector('.customer-avatar-premium');
+        if (avatarEl && u.photoURL) {
+          avatarEl.innerHTML = `<img src="${u.photoURL}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;" onerror="this.style.display='none';" />`;
+          avatarEl.style.background = 'none';
         }
-      }).catch(() => {});
+      };
+
+      if (clientUserCache[o.userId]) {
+        renderClientData(clientUserCache[o.userId]);
+      } else {
+        getDoc(doc(db, 'users', o.userId)).then(snap => {
+          if (snap.exists()) {
+            const u = snap.data();
+            clientUserCache[o.userId] = u;
+            renderClientData(u);
+          }
+        }).catch(() => {});
+      }
     }
   };
 
@@ -944,7 +1062,7 @@ function showOrderDetailModal(initialOrder) {
   });
 }
 
-async function showModifyOrderModal(order) {
+function showModifyOrderModal(order) {
   const commerceId = order.comercioId;
   let items = JSON.parse(JSON.stringify(order.items || []));
   let customMode = false;
@@ -962,15 +1080,31 @@ async function showModifyOrderModal(order) {
     customDesc = items[0].name;
   }
 
-  try {
-    const prodsSnap = await getDocs(collection(db, 'comercios', commerceId, 'products'));
-    allProducts = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const catsSnap = await getDocs(query(collection(db, 'comercios', commerceId, 'categories'), orderBy('order')));
-    categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (e) { }
-
   const modalEl = document.createElement('div');
   modalEl.className = "modify-order-modal-container";
+
+  // Async load in the background
+  getDocs(collection(db, 'comercios', commerceId, 'products')).then(prodsSnap => {
+    allProducts = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return getDocs(query(collection(db, 'comercios', commerceId, 'categories'), orderBy('order')));
+  }).then(catsSnap => {
+    categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    
+    // Update categories pills dynamically in the DOM
+    const catScroll = modalEl.querySelector('.mod-cat-scroll');
+    if (catScroll) {
+      catScroll.innerHTML = `<button class="mod-cat-pill ${selectedCatId === 'all' ? 'active' : ''}" data-cat-id="all">Todos</button>` + 
+        categories.map(c => `<button class="mod-cat-pill ${selectedCatId === c.id ? 'active' : ''}" data-cat-id="${c.id}">${c.name}</button>`).join('');
+      
+      catScroll.querySelectorAll('.mod-cat-pill').forEach(btn => btn.addEventListener('click', () => {
+        selectedCatId = btn.dataset.catId;
+        modalEl.querySelectorAll('.mod-cat-pill').forEach(b => b.classList.toggle('active', b.dataset.catId === selectedCatId));
+        renderResults();
+      }));
+    }
+  }).catch(e => {
+    console.error('Error fetching modify details:', e);
+  });
   modalEl.style.cssText = 'display:flex;flex-direction:column;height:100%;background:var(--color-bg);color:var(--color-text-primary);';
   let changeDetails = '';
 
@@ -1301,6 +1435,20 @@ async function showNewManualOrderModal(comercioId) {
         <input type="number" id="manual-subtotal" placeholder="0.00" style="width:100%; height:48px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text); font-size:18px; font-weight:800; padding:0 16px; outline:none;" inputmode="decimal" />
       </div>
 
+      <!-- Preparation Time Selector -->
+      <div>
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
+          <span>Tiempo de Preparación</span>
+          <span style="font-size:10px; color:var(--color-primary); font-weight:800;" id="prep-time-hint">⚡ Se asignará de inmediato</span>
+        </label>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;" id="prep-time-chips">
+          <button type="button" class="prep-chip active" data-time="0" style="height:40px; border-radius:10px; border:1.5px solid var(--color-primary); background:var(--color-primary); color:white; font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s;">⚡ Listo</button>
+          <button type="button" class="prep-chip" data-time="15" style="height:40px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text); font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s;">⏱️ 15 min</button>
+          <button type="button" class="prep-chip" data-time="25" style="height:40px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text); font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s;">⏱️ 25 min</button>
+          <button type="button" class="prep-chip" data-time="40" style="height:40px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text); font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s;">⏱️ 40 min</button>
+        </div>
+      </div>
+
       <!-- Pricing Summary Box -->
       <div class="pricing-summary-box">
         <div class="row">
@@ -1408,7 +1556,7 @@ async function showNewManualOrderModal(comercioId) {
         }
 
         suggestionsDropdown.innerHTML = suggestions.map(s => `
-          <div class="suggestion-item" data-lat="${s.lat}" data-lng="${s.lng}" data-addr="${s.address}" style="padding: 12px 16px; font-size: 13px; font-weight: 700; color: var(--color-text-primary, #1e293b); cursor: pointer; border-bottom: 1px solid var(--color-border-light, #e2e8f0); background: var(--color-surface, #ffffff); transition: background 0.2s;">
+          <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="padding: 12px 16px; font-size: 13px; font-weight: 700; color: var(--color-text-primary, #1e293b); cursor: pointer; border-bottom: 1px solid var(--color-border-light, #e2e8f0); background: var(--color-surface, #ffffff); transition: background 0.2s;">
             ${s.address}
           </div>
         `).join('');
@@ -1423,11 +1571,29 @@ async function showNewManualOrderModal(comercioId) {
             item.style.background = 'var(--color-surface, #ffffff)';
             item.style.color = 'var(--color-text-primary, #1e293b)';
           };
-          item.onclick = () => {
-            const lat = parseFloat(item.dataset.lat);
-            const lng = parseFloat(item.dataset.lng);
+          item.onclick = async () => {
+            let lat = parseFloat(item.dataset.lat);
+            let lng = parseFloat(item.dataset.lng);
+            const placeId = item.dataset.placeid;
             const addr = item.dataset.addr;
-            selectLocation({ lat, lng }, addr);
+
+            if (isNaN(lat) || isNaN(lng)) {
+              if (placeId) {
+                try {
+                  const { geocodePlaceId } = await import('../../utils/geo.js');
+                  const coords = await geocodePlaceId(placeId);
+                  if (coords) {
+                    selectLocation({ lat: coords.lat, lng: coords.lng }, addr);
+                  } else {
+                    console.error('Failed to geocode suggestion place ID');
+                  }
+                } catch (err) {
+                  console.error(err);
+                }
+              }
+            } else {
+              selectLocation({ lat, lng }, addr);
+            }
           };
         });
       } catch (err) {
@@ -1471,6 +1637,38 @@ async function showNewManualOrderModal(comercioId) {
     }
   };
 
+  // Preparation time chips logic
+  let selectedPrepTimeMinutes = 0; // Default: 0 (Listo ahora)
+  const chips = modalEl.querySelectorAll('.prep-chip');
+  const prepHint = modalEl.querySelector('#prep-time-hint');
+
+  chips.forEach(chip => {
+    chip.onclick = () => {
+      chips.forEach(c => {
+        c.classList.remove('active');
+        c.style.background = 'var(--color-bg-secondary)';
+        c.style.borderColor = 'var(--color-border)';
+        c.style.color = 'var(--color-text)';
+      });
+      chip.classList.add('active');
+      chip.style.background = 'var(--color-primary)';
+      chip.style.borderColor = 'var(--color-primary)';
+      chip.style.color = 'white';
+
+      selectedPrepTimeMinutes = parseInt(chip.dataset.time) || 0;
+      if (prepHint) {
+        if (selectedPrepTimeMinutes === 0) {
+          prepHint.textContent = '⚡ Se asignará de inmediato';
+        } else if (selectedPrepTimeMinutes <= 5) {
+          prepHint.textContent = `⚡ Se asignará de inmediato (Listo en ${selectedPrepTimeMinutes} min)`;
+        } else {
+          const dispatchIn = selectedPrepTimeMinutes - 5;
+          prepHint.textContent = `📢 Asignación en ${dispatchIn} min (Listo en ${selectedPrepTimeMinutes} min)`;
+        }
+      }
+    };
+  });
+
   // Live total sum recalculation
   const updateTotals = () => {
     const subtotal = parseFloat(subtotalInput.value) || 0;
@@ -1501,44 +1699,75 @@ async function showNewManualOrderModal(comercioId) {
       return;
     }
 
-    const btn = modalEl.querySelector('#create-manual-btn');
-    btn.disabled = true;
-    btn.innerHTML = icon('loader', 20, 'animate-spin');
+    const isImmediate = selectedPrepTimeMinutes <= 5;
+    const confirmMessage = isImmediate
+      ? 'Este pedido se creará y se asignará **de inmediato** a los repartidores disponibles.'
+      : `Este pedido estará en preparación (${selectedPrepTimeMinutes} min). Se asignará a los repartidores **${selectedPrepTimeMinutes - 5} min después** (5 min antes de estar listo en cocina). ¿Deseas crearlo?`;
 
-    try {
-      const orderData = {
-        orderId: Math.floor(1000 + Math.random() * 9000),
-        comercioId,
-        comercioName: comData.name,
-        comercioCoords: comData.coords || null,
-        comercioAddress: comData.address || '',
-        userName: name,
-        deliveryAddress: selectedAddress,
-        deliveryCoords: selectedCoords,
-        deliveryCost: deliveryCost,
-        items: [{ name: detail || 'Pedido Manual', qty: 1, price: subtotal }],
-        subtotal: subtotal,
-        total: subtotal + deliveryCost,
-        status: 'confirmed',
-        createdAt: serverTimestamp(),
-        confirmedAt: serverTimestamp(),
-        paymentMethod: 'efectivo',
-        paymentStatus: 'pending',
-        isManual: true,
-        isRaining: getState().isRaining || false,
-        rainSurcharge: getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0,
-        appUsageFee: 0
-      };
+    showConfirm({
+      title: '📦 Crear Pedido Manual',
+      message: confirmMessage,
+      confirmText: isImmediate ? 'Sí, crear e iniciar asignación' : 'Sí, crear pedido programado',
+      onConfirm: async () => {
+        const btn = modalEl.querySelector('#create-manual-btn');
+        btn.disabled = true;
+        btn.innerHTML = icon('loader', 20, 'animate-spin');
 
-      await addDoc(collection(db, 'orders'), orderData);
-      closeModal();
-      showToast('Pedido manual creado', 'success');
-    } catch (err) {
-      console.error('Error writing order document:', err);
-      showToast('Error al crear pedido', 'error');
-      btn.disabled = false;
-      btn.innerHTML = 'Crear Pedido';
-    }
+        try {
+          const now = new Date();
+          const estimatedReadyMs = now.getTime() + (selectedPrepTimeMinutes * 60 * 1000);
+          const dispatchMs = Math.max(now.getTime(), estimatedReadyMs - (5 * 60 * 1000));
+
+          const estimatedReadyAt = new Date(estimatedReadyMs);
+          const dispatchAt = new Date(dispatchMs);
+
+          const initialStatus = isImmediate ? 'ready' : 'preparing';
+
+          const comRate = 0; // Manual orders carry NO commission for commerce
+          const commissionAmount = 0;
+
+          const orderData = {
+            orderId: Math.floor(1000 + Math.random() * 9000),
+            comercioId,
+            comercioName: comData.name,
+            comercioCoords: comData.coords || null,
+            comercioAddress: comData.address || '',
+            userName: name,
+            deliveryAddress: selectedAddress,
+            deliveryCoords: selectedCoords,
+            deliveryCost: deliveryCost,
+            items: [{ name: detail || 'Pedido Manual', qty: 1, price: subtotal }],
+            subtotal: subtotal,
+            total: subtotal + deliveryCost,
+            status: initialStatus,
+            preparationTimeMinutes: selectedPrepTimeMinutes,
+            estimatedReadyAt: Timestamp.fromDate(estimatedReadyAt),
+            dispatchAt: Timestamp.fromDate(dispatchAt),
+            createdAt: serverTimestamp(),
+            confirmedAt: serverTimestamp(),
+            readyAt: isImmediate ? serverTimestamp() : null,
+            paymentMethod: 'efectivo',
+            paymentStatus: 'pending',
+            isManual: true,
+            commissionRate: 0,
+            commissionAmount: 0,
+            commissionStatus: 'paid', // Auto paid / no commission debt
+            isRaining: getState().isRaining || false,
+            rainSurcharge: getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0,
+            appUsageFee: 0
+          };
+
+          await addDoc(collection(db, 'orders'), orderData);
+          closeModal();
+          showToast(isImmediate ? 'Pedido manual creado y enviado a repartidores 🛵' : `Pedido en cocina. Se enviará a repartidores en ${selectedPrepTimeMinutes - 5} min ⏱️`, 'success');
+        } catch (err) {
+          console.error('Error writing order document:', err);
+          showToast('Error al crear pedido', 'error');
+          btn.disabled = false;
+          btn.innerHTML = 'Crear Pedido';
+        }
+      }
+    });
   };
 }
 
@@ -2322,6 +2551,63 @@ function getOrderStyles() {
       box-shadow: none;
       cursor: not-allowed;
     }
+    /* ── DRAWER STYLE ────────────────────────────── */
+    .commerce-drawer-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    }
+    .commerce-drawer-backdrop.active {
+      opacity: 1; pointer-events: auto;
+    }
+    .commerce-drawer-content {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 300px;
+      background: var(--color-surface); box-shadow: -4px 0 24px rgba(0,0,0,0.15);
+      z-index: 10001; transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex; flex-direction: column;
+      border-top-left-radius: 20px; border-bottom-left-radius: 20px;
+    }
+    .commerce-drawer-content.active {
+      transform: translateX(0);
+    }
+    .commerce-drawer-header {
+      padding: 20px; border-bottom: 1px solid var(--color-border-light);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .commerce-drawer-title {
+      font-family: var(--font-display); font-weight: 900; font-size: 17px;
+      color: var(--color-text-primary); margin: 0; letter-spacing: -0.01em;
+    }
+    .commerce-drawer-close {
+      background: none; border: none; color: var(--color-text-secondary); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+      border-radius: 50%; background: var(--color-bg-secondary); transition: all 0.2s;
+    }
+    .commerce-drawer-close:active {
+      transform: scale(0.92);
+    }
+    .commerce-drawer-body {
+      padding: 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+    }
+    .commerce-drawer-item {
+      display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+      border-radius: 14px; border: none; background: none; cursor: pointer;
+      text-align: left; text-decoration: none; width: 100%; box-sizing: border-box;
+      transition: all 0.2s; font-family: var(--font-body); font-weight: 700;
+      color: var(--color-text-primary); font-size: 14.5px;
+    }
+    .commerce-drawer-item:hover {
+      background: var(--color-bg-secondary);
+      transform: translateY(-1px);
+    }
+    .commerce-drawer-item:active {
+      transform: scale(0.98) translateY(0);
+    }
+    .drawer-item-icon-wrap {
+      width: 36px; height: 36px; border-radius: 10px; display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+    }
   </style>`;
 }
 
@@ -2348,4 +2634,108 @@ async function updateCommerceAveragePrepTime(comercioId, orderConfirmedAt) {
   } catch (err) {
     console.warn('Error updating commerce average prep time:', err);
   }
+}
+
+async function showOwnDeliveriesModal(comercioId) {
+  const modalEl = document.createElement('div');
+  modalEl.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px; max-height:85dvh; overflow-y:auto; scrollbar-width:none;';
+
+  const renderContent = async () => {
+    let ownDeliveries = [];
+    try {
+      const { doc, getDoc } = await import('firebase/firestore');
+      const snap = await getDoc(doc(db, 'comercios', comercioId));
+      if (snap.exists()) {
+        ownDeliveries = snap.data().ownDeliveries || [];
+      }
+    } catch (err) {
+      console.error('Error reading own deliveries:', err);
+    }
+
+    modalEl.innerHTML = `
+      <div style="font-family:var(--font-body); display:flex; flex-direction:column; gap:16px;">
+        <p style="color:var(--color-text-secondary); font-size:14px; margin:0; line-height:1.5;">
+          Los pedidos de tu comercio serán enviados <strong>exclusivamente</strong> a los repartidores que agregues aquí. No tendrán límites de tiempo para aceptar ni rotarán.
+        </p>
+
+        <!-- Form to Add -->
+        <div style="display:flex; gap:8px;">
+          <input type="email" id="own-delivery-email-input" placeholder="correo@repartidor.com" style="flex:1; height:46px; border-radius:12px; border:1px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-surface); color:var(--color-text-primary);" />
+          <button id="add-own-delivery-btn" style="height:46px; padding:0 18px; border-radius:12px; border:none; background:#E3001B; color:white; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+            ${icon('plus', 16)} Agregar
+          </button>
+        </div>
+
+        <div style="height:1px; background:var(--color-border-light); margin:8px 0;"></div>
+
+        <!-- Deliveries List -->
+        <h4 style="margin:0; font-size:15px; font-weight:800; color:var(--color-text-primary);">Repartidores Vinculados (${ownDeliveries.length})</h4>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${ownDeliveries.length === 0 ? `
+            <div style="text-align:center; padding:24px; color:var(--color-text-tertiary); font-size:13px; border:2px dashed var(--color-border-light); border-radius:16px;">
+              No tienes ningún repartidor propio agregado.
+            </div>
+          ` : ownDeliveries.map(email => `
+            <div style="display:flex; align-items:center; background:var(--color-surface); border:1px solid var(--color-border-light); padding:12px 16px; border-radius:16px; box-shadow:var(--shadow-sm); justify-content: space-between;">
+              <span style="font-size:14px; font-weight:700; color:var(--color-text-primary); word-break:break-all;">${email}</span>
+              <button class="delete-own-delivery-btn" data-email="${email}" style="border:none; background:none; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; justify-content:center; padding:6px; border-radius:8px; transition:background 0.2s;" onmouseover="this.style.background='rgba(227, 0, 27, 0.05)'" onmouseout="this.style.background='none'">
+                ${icon('trash', 16)}
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    // Event handlers
+    const addBtn = modalEl.querySelector('#add-own-delivery-btn');
+    const input = modalEl.querySelector('#own-delivery-email-input');
+    
+    addBtn?.addEventListener('click', async () => {
+      const email = input.value.trim().toLowerCase();
+      if (!email) return;
+      
+      // Basic email check
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showToast('Por favor ingresa un correo electrónico válido.', 'warning');
+        return;
+      }
+
+      addBtn.disabled = true;
+      try {
+        const { doc, updateDoc, arrayUnion } = await import('firebase/firestore');
+        await updateDoc(doc(db, 'comercios', comercioId), {
+          ownDeliveries: arrayUnion(email)
+        });
+        showToast('Repartidor agregado correctamente.', 'success');
+        renderContent();
+      } catch (err) {
+        console.error('Error adding delivery email:', err);
+        showToast('Error al agregar el repartidor.', 'error');
+        addBtn.disabled = false;
+      }
+    });
+
+    modalEl.querySelectorAll('.delete-own-delivery-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const email = btn.dataset.email;
+        btn.disabled = true;
+        try {
+          const { doc, updateDoc, arrayRemove } = await import('firebase/firestore');
+          await updateDoc(doc(db, 'comercios', comercioId), {
+            ownDeliveries: arrayRemove(email)
+          });
+          showToast('Repartidor removido.', 'info');
+          renderContent();
+        } catch (err) {
+          console.error('Error removing delivery email:', err);
+          showToast('Error al remover el repartidor.', 'error');
+          btn.disabled = false;
+        }
+      });
+    });
+  };
+
+  renderContent();
+  showModal({ title: 'Mis Repartidores (Propios)', content: modalEl, height: '80dvh', hideHeader: false });
 }

@@ -1,7 +1,7 @@
 import { collection, query, where, getDocs, doc, updateDoc, onSnapshot as firebaseOnSnapshot, runTransaction, serverTimestamp, writeBatch, increment, addDoc, getDoc, arrayUnion } from 'firebase/firestore';
 import { getState, setState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
-import { formatPrice } from '../utils/format.js';
+import { formatPrice, isScheduleActive } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { db } from '../firebase.js';
 import { App } from '@capacitor/app';
@@ -166,6 +166,39 @@ export async function renderDeliveryPanel() {
     return;
   }
   window.autoAcceptEnabled = user.autoAcceptEnabled || false;
+  window.expiredLocalOrders = new Set();
+
+  const currentHash = window.location.hash || '';
+  if (currentHash.includes('tab=settlements')) {
+    setTimeout(() => {
+      if (user?.uid) {
+        showBalanceHistoryModal(user.uid);
+      }
+    }, 500);
+  }
+
+  if (currentHash.includes('action=renew_session')) {
+    setTimeout(async () => {
+      try {
+        const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+        const { db } = await import('../firebase.js');
+        await updateDoc(doc(db, 'users', user.uid), {
+          lastTripAcceptedAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          inactivityWarningSentAt: null
+        });
+        setState('user', {
+          ...getState().user,
+          lastTripAcceptedAt: new Date(),
+          lastActivityAt: new Date(),
+          inactivityWarningSentAt: null
+        });
+        showToast('✅ Tu sesión fue restablecida. Seguís conectado y disponible para recibir pedidos.', 'success');
+      } catch (err) {
+        console.error('Error renewing session:', err);
+      }
+    }, 300);
+  }
 
   window.toggleAutoAccept = async (checked, userId) => {
     window.autoAcceptEnabled = checked;
@@ -260,7 +293,7 @@ export async function renderDeliveryPanel() {
 
 
 
-  const isNative = !!window.Capacitor;
+  const isNative = !!(window.Capacitor && (window.Capacitor.isNativePlatform ? window.Capacitor.isNativePlatform() : window.Capacitor.platform !== 'web'));
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
@@ -274,27 +307,30 @@ export async function renderDeliveryPanel() {
         
         <!-- Scrollable content area -->
         <div id="delivery-scroll-area" style="flex:1; overflow-y:auto; padding:20px 20px 100px 20px; -webkit-overflow-scrolling:touch;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-4); background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.05); padding: var(--space-3) var(--space-4); border-radius: 16px; border: 1px dashed rgba(var(--color-primary-rgb, 225, 29, 72), 0.15);">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
-                Auto-Aceptar Pedidos
-              </span>
-              <button id="auto-accept-info-btn" style="border:none; background:none; color:var(--color-text-secondary); cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">
-                ${icon('helpCircle', 16)}
-              </button>
+          <div id="delivery-earnings-widget"></div>
+          ${isNative ? `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-4); background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.05); padding: var(--space-3) var(--space-4); border-radius: 16px; border: 1px dashed rgba(var(--color-primary-rgb, 225, 29, 72), 0.15);">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                  Auto-Aceptar Pedidos
+                </span>
+                <button id="auto-accept-info-btn" style="border:none; background:none; color:var(--color-text-secondary); cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">
+                  ${icon('helpCircle', 16)}
+                </button>
+              </div>
+              <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
+                <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0; position:absolute;" onchange="
+                  window.toggleAutoAccept(this.checked, '${user.uid}');
+                  const slider = this.nextElementSibling;
+                  slider.style.backgroundColor = this.checked ? 'var(--color-primary, #e11d48)' : '#ccc';
+                  slider.querySelector('span').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';
+                " ${window.autoAcceptEnabled ? 'checked' : ''} />
+                <span class="ios-slider" style="position:absolute; inset:0; background-color:${window.autoAcceptEnabled ? 'var(--color-primary, #e11d48)' : '#ccc'}; border-radius:34px; transition:0.3s; display:flex; align-items:center; padding: 0 3px;">
+                  <span style="height:18px; width:18px; background-color:white; border-radius:50%; transition:0.3s; box-shadow:0 2px 4px rgba(0,0,0,0.2); display:block; transform:${window.autoAcceptEnabled ? 'translateX(20px)' : 'translateX(0)'};"></span>
+                </span>
+              </label>
             </div>
-            <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
-              <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0; position:absolute;" onchange="
-                window.toggleAutoAccept(this.checked, '${user.uid}');
-                const slider = this.nextElementSibling;
-                slider.style.backgroundColor = this.checked ? 'var(--color-primary, #e11d48)' : '#ccc';
-                slider.querySelector('span').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';
-              " ${window.autoAcceptEnabled ? 'checked' : ''} />
-              <span class="ios-slider" style="position:absolute; inset:0; background-color:${window.autoAcceptEnabled ? 'var(--color-primary, #e11d48)' : '#ccc'}; border-radius:34px; transition:0.3s; display:flex; align-items:center; padding: 0 3px;">
-                <span style="height:18px; width:18px; background-color:white; border-radius:50%; transition:0.3s; box-shadow:0 2px 4px rgba(0,0,0,0.2); display:block; transform:${window.autoAcceptEnabled ? 'translateX(20px)' : 'translateX(0)'};"></span>
-              </span>
-            </label>
-          </div>
+          ` : ''}
           <div class="tab-pills" style="margin-bottom: var(--space-6); display: flex; gap: var(--space-2); scrollbar-width: none;">
             <button class="tab-pill" data-tab="available" style="flex: 1; white-space: nowrap; height:44px; border-radius:12px; border:none; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon('package', 18)} Disponibles
@@ -407,12 +443,90 @@ export async function renderDeliveryPanel() {
   }
 
   // Ensure inactivity check and heartbeat is running if online
-  if (user.isOnline) {
+  if (user?.isOnline) {
     startInactivityCheck(user);
     startHeartbeat(user);
   }
 
   // Update header and status bar (non-destructive)
+  // ─── Delivery Drawer (hamburger menu, identical pattern to commerce panel) ───
+  document.getElementById('delivery-drawer-backdrop')?.remove();
+  document.getElementById('delivery-drawer')?.remove();
+
+  const deliveryBackdropEl = document.createElement('div');
+  deliveryBackdropEl.id = 'delivery-drawer-backdrop';
+  deliveryBackdropEl.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; opacity: 0; pointer-events: none; transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);";
+  document.body.appendChild(deliveryBackdropEl);
+
+  const deliveryDrawerEl = document.createElement('div');
+  deliveryDrawerEl.id = 'delivery-drawer';
+  deliveryDrawerEl.style.cssText = "position: fixed; top: 0; right: 0; bottom: 0; width: 300px; background: var(--color-surface); box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 10001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; border-top-left-radius: 20px; border-bottom-left-radius: 20px;";
+  deliveryDrawerEl.innerHTML = `
+    <div style="padding: 20px 20px 14px; display:flex; align-items:center; justify-content:space-between; border-bottom: 1px solid var(--color-border-light);">
+      <h2 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Opciones</h2>
+      <button id="delivery-drawer-close-btn" style="width:36px; height:36px; border-radius:10px; border:none; background:var(--color-bg-secondary); color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center;">${icon('close', 16)}</button>
+    </div>
+    <div style="flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:4px;">
+      <a href="#/delivery/history" id="delivery-drawer-history" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; text-decoration:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer;">
+        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(100,116,139,0.09); color:#64748b;">${icon('history', 18)}</div>
+        <span style="flex:1; font-size:14.5px; font-weight:700;">Historial de Pedidos</span>
+        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+      </a>
+      <a href="#/delivery/finances" id="delivery-drawer-finances" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; text-decoration:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer;">
+        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(34,197,94,0.09); color:#16a34a;">${icon('bank', 18)}</div>
+        <span style="flex:1; font-size:14.5px; font-weight:700;">Finanzas y Cuentas</span>
+        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+      </a>
+      <a href="#/delivery/config" id="delivery-drawer-config" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; text-decoration:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer;">
+        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(99,102,241,0.09); color:#6366f1;">${icon('settings', 18)}</div>
+        <span style="flex:1; font-size:14.5px; font-weight:700;">Configuración de Perfil</span>
+        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+      </a>
+      <div style="height:1px; background:var(--color-border-light); margin:8px 0;"></div>
+      <button id="delivery-drawer-support-btn" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; border:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer; width:100%; text-align:left;">
+        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(14,165,233,0.08); color:#0284c7;">${icon('headset', 18)}</div>
+        <span style="flex:1; font-size:14.5px; font-weight:700;">Soporte Técnico</span>
+        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+      </button>
+      <button id="delivery-drawer-info-btn" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; border:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer; width:100%; text-align:left;">
+        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:rgba(245,158,11,0.1); color:#f59e0b;">${icon('helpCircle', 18)}</div>
+        <span style="flex:1; font-size:14.5px; font-weight:700;">Funcionamiento del Sistema</span>
+        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+      </button>
+    </div>
+  `;
+  document.body.appendChild(deliveryDrawerEl);
+
+  const openDeliveryDrawer = () => {
+    deliveryDrawerEl.style.transform = 'translateX(0)';
+    deliveryBackdropEl.style.opacity = '1';
+    deliveryBackdropEl.style.pointerEvents = 'auto';
+  };
+  const closeDeliveryDrawer = () => {
+    deliveryDrawerEl.style.transform = 'translateX(100%)';
+    deliveryBackdropEl.style.opacity = '0';
+    deliveryBackdropEl.style.pointerEvents = 'none';
+  };
+
+  deliveryBackdropEl.addEventListener('click', closeDeliveryDrawer);
+  document.getElementById('delivery-drawer-close-btn')?.addEventListener('click', closeDeliveryDrawer);
+
+  // Close drawer on nav link click
+  ['delivery-drawer-history','delivery-drawer-finances','delivery-drawer-config'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', closeDeliveryDrawer);
+  });
+
+  // Support button
+  document.getElementById('delivery-drawer-support-btn')?.addEventListener('click', async () => {
+    closeDeliveryDrawer();
+    try {
+      const { openSupportTicketModal } = await import('../components/support-bot.js');
+      await openSupportTicketModal(user.uid, `Repartidor: ${user.displayName || user.email || user.uid}`);
+    } catch (err) {
+      console.error('Error opening support ticket:', err);
+    }
+  });
+
   const headerSlot = document.getElementById('delivery-header-slot');
   if (headerSlot) {
     headerSlot.innerHTML = `
@@ -424,128 +538,68 @@ export async function renderDeliveryPanel() {
           <h1 style="font-family:var(--font-display);font-weight:800;font-size:17px;color:white;margin:0;line-height:1.2;letter-spacing:-0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Panel Delivery</h1>
           <p style="font-size:10px;color:rgba(255,255,255,0.85);font-weight:700;margin:2px 0 0;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Repartidor ${user.deliveryId || 'Oficial'}</p>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;position:relative;z-index:2;flex-shrink:0;">
-          <a href="#/delivery/history" title="Historial de Pedidos" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-            ${icon('history', 22)}
-          </a>
-          <a href="#/delivery/finances" title="Finanzas y Cuentas" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-            ${icon('bank', 22)}
-          </a>
-          <a href="#/delivery/config" title="Configuración de Perfil" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-            ${icon('settings', 22)}
-          </a>
-          <button id="delivery-contact-support-btn" title="Información del Sistema de Delivery" style="width:40px; height:40px; border-radius:12px; background:#f59e0b; color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s; box-shadow: 0 4px 10px rgba(245,158,11,0.3);" onmouseover="this.style.background='#d97706'" onmouseout="this.style.background='#f59e0b'">
-            ${icon('helpCircle', 22)}
+        <div style="position:relative;z-index:2;flex-shrink:0;">
+          <button id="delivery-hamburger-btn" title="Menú de Opciones" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+            ${icon('menu', 22)}
           </button>
         </div>
       </div>
     `;
- 
-    document.getElementById('delivery-contact-support-btn')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
 
-      // Remove existing sheet if any
+    document.getElementById('delivery-hamburger-btn')?.addEventListener('click', () => {
+      import('../utils/audio-manager.js').catch(() => {});
+      openDeliveryDrawer();
+    });
+
+    // Wire info button inside drawer
+    document.getElementById('delivery-drawer-info-btn')?.addEventListener('click', () => {
+      closeDeliveryDrawer();
+
       const existing = document.getElementById('info-bottom-sheet');
       if (existing) existing.remove();
 
       const overlay = document.createElement('div');
       overlay.id = 'info-bottom-sheet';
-      overlay.style.cssText = `
-        position: fixed;
-        inset: 0;
-        z-index: 999999;
-        background: rgba(0,0,0,0.4);
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-        opacity: 0;
-        transition: opacity 0.3s ease;
-      `;
-
+      overlay.style.cssText = `position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.4); display: flex; flex-direction: column; justify-content: flex-end; opacity: 0; transition: opacity 0.3s ease;`;
       overlay.innerHTML = `
-        <div id="info-bottom-sheet-card" style="
-          background: var(--color-bg);
-          border-top-left-radius: 24px;
-          border-top-right-radius: 24px;
-          padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5);
-          box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
-          transform: translateY(100%);
-          transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-4);
-          max-height: 85vh;
-        ">
-          <!-- Drag indicator handle -->
+        <div id="info-bottom-sheet-card" style="background: var(--color-bg); border-top-left-radius: 24px; border-top-right-radius: 24px; padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5); box-shadow: 0 -8px 32px rgba(0,0,0,0.15); transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; gap: var(--space-4); max-height: 85vh;">
           <div style="width: 36px; height: 5px; background: var(--color-border-light, #e5e7eb); border-radius: 3px; align-self: center; margin-bottom: 8px;"></div>
-          
-          <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6); text-align: left;">
-            Funcionamiento del Sistema
-          </h3>
-          
+          <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6); text-align: left;">Funcionamiento del Sistema</h3>
           <div style="font-size: 14px; line-height: 1.6; color: var(--color-text-secondary); font-weight: 550; display:flex; flex-direction:column; gap:16px; max-height:55vh; overflow-y:auto; padding-right:6px; text-align: left;">
             <div>
               <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🔄 Asignación en Cola (Round-Robin)</p>
               <p style="margin: 0;">Los pedidos listos se ofrecen a un repartidor a la vez de forma exclusiva durante 30 segundos. La cola prioriza a quienes no hayan rechazado el pedido y desempata seleccionando a quien tenga menos pedidos completados hoy.</p>
             </div>
-            
             <div>
               <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🛑 Desconexión Automática por Inactividad</p>
               <p style="margin: 0;">Si dejas expirar o rechazas 2 pedidos de forma consecutiva, el sistema pausará tu sesión automáticamente cambiándote a desconectado. Esto evita que dejes pedidos trabados si no estás atento al celular.</p>
             </div>
-
             <div>
               <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">📦 Co-retiros Simultáneos</p>
               <p style="margin: 0;">Puedes llevar hasta 2 pedidos activos en curso de comercios diferentes. Si los pedidos pertenecen al mismo comercio, puedes llevar hasta 3 pedidos simultáneos (lote optimizado del local).</p>
             </div>
-
             <div>
               <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">❌ Cancelación Automática por Falta de Cobertura</p>
               <p style="margin: 0;">Si todos los repartidores activos de la zona rechazan o ignoran el pedido, la orden se cancela de forma automática, notificando al cliente y reembolsándole su saldo y puntos al instante.</p>
             </div>
           </div>
-          
-          <button id="info-bottom-sheet-close-btn" style="
-            width: 100%;
-            height: 54px;
-            border: none;
-            background: var(--color-primary);
-            color: white;
-            border-radius: 16px;
-            font-weight: 900;
-            font-size: 15.5px;
-            cursor: pointer;
-            margin-top: 8px;
-            box-shadow: 0 8px 24px rgba(225,29,72,0.25);
-          ">
-            Entendido
-          </button>
+          <button id="info-bottom-sheet-close-btn" style="width: 100%; height: 54px; border: none; background: var(--color-primary); color: white; border-radius: 16px; font-weight: 900; font-size: 15.5px; cursor: pointer; margin-top: 8px; box-shadow: 0 8px 24px rgba(225,29,72,0.25);">Entendido</button>
         </div>
       `;
-
       document.body.appendChild(overlay);
-
-      // Animate in
       setTimeout(() => {
         overlay.style.opacity = '1';
         const card = document.getElementById('info-bottom-sheet-card');
         if (card) card.style.transform = 'translateY(0)';
       }, 10);
-
       const closeSheet = () => {
         const card = document.getElementById('info-bottom-sheet-card');
         if (card) card.style.transform = 'translateY(100%)';
         overlay.style.opacity = '0';
         setTimeout(() => overlay.remove(), 300);
       };
-
-      overlay.onclick = (e) => {
-        if (e.target === overlay) closeSheet();
-      };
-
-      const closeBtn = document.getElementById('info-bottom-sheet-close-btn');
-      if (closeBtn) closeBtn.onclick = closeSheet;
+      overlay.onclick = (e) => { if (e.target === overlay) closeSheet(); };
+      document.getElementById('info-bottom-sheet-close-btn')?.addEventListener('click', closeSheet);
     });
   }
 
@@ -557,6 +611,8 @@ export async function renderDeliveryPanel() {
 
   let activeTab = sessionStorage.getItem('deliveryTab') || 'available';
   sessionStorage.removeItem('deliveryTab');
+
+  renderDailyEarningsWidget(user);
 
   const container = document.getElementById('delivery-content');
 
@@ -592,8 +648,17 @@ export async function renderDeliveryPanel() {
     window.__gd_delivery_unsub();
   }
 
-  let lastKnownOnlineStatus = user.isOnline;
+  let lastKnownOnlineStatus = user?.isOnline || false;
   window.__gd_delivery_unsub = subscribe('user', (newUser) => {
+    if (!newUser) {
+      if (inactivityTimer) {
+        clearInterval(inactivityTimer);
+        inactivityTimer = null;
+      }
+      stopHeartbeat();
+      return;
+    }
+
     const bar = document.getElementById('session-status-bar-container');
     if (bar) {
       bar.innerHTML = renderStatusBar(newUser);
@@ -606,6 +671,9 @@ export async function renderDeliveryPanel() {
         inactivityTimer = null;
       }
       stopHeartbeat();
+      hidePausedSessionModal();
+    } else {
+      hidePausedSessionModal();
     }
 
     // Middle content sync
@@ -640,6 +708,8 @@ export async function renderDeliveryPanel() {
 
   // --- PERSISTENT TAB BADGE LISTENERS ---
   function setupPersistentBadges() {
+    if (!user || !user.uid) return;
+
     // Available Badge
     const qAvailable = query(collection(db, 'orders'), where('status', 'in', ['ready', 'preparing', 'confirmed', 'pending']));
     const unsubAvailable = onSnapshot(qAvailable, (snap) => {
@@ -647,17 +717,17 @@ export async function renderDeliveryPanel() {
       const batches = new Set();
       allOrders.forEach(o => {
         if (o.driverId) return;
-        if (o.queueTargetDriverId !== user.uid) return;
+        if (o.queueTargetDriverId !== user?.uid) return;
         
-        const mode = user.deliveryMode || 'both';
+        const mode = user?.deliveryMode || 'both';
         if (mode === 'trip' && !o.isTrip) return;
         if (mode === 'delivery' && o.isTrip) return;
         
         if (o.isTrip) {
-          const isApproved = user.tripStatus === 'approved' || user.role === 'chofer';
+          const isApproved = user?.tripStatus === 'approved' || user?.role === 'chofer';
           if (!isApproved) return;
            const requestedTripType = (o.tripType || 'auto').toLowerCase();
-           const driverVehicleType = (user.tripVehicleType || user.vehicleType || '').toLowerCase();
+           const driverVehicleType = (user?.tripVehicleType || user?.vehicleType || '').toLowerCase();
            if (requestedTripType !== driverVehicleType) return;
            batches.add(o.id);
         }
@@ -757,21 +827,46 @@ function loadTabContent(tab, container, user) {
         allOrders.forEach(o => {
           if (o.driverId) return;
 
-          const now = Date.now();
+          const now = Date.now() + (getState().serverTimeOffset || 0);
           const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
           const isTargetMe = o.queueTargetDriverId === user.uid;
-          const needsQueueAssign = (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
-                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 30000)) ||
-                                   (o.queueTargetDriverId && !isTargetMe && (now - offeredAt >= 33000));
+          const isOwn = o.isOwnDeliveryOrder || o.isPermanentOffer || false;
+          const needsQueueAssign = !isOwn && offeredAt > 0 && (
+                                   (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
+                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 60000)) ||
+                                   (o.queueTargetDriverId && !isTargetMe && (now - offeredAt >= 63000))
+                                   );
           if (needsQueueAssign) {
             updateDispatchQueue(o.id);
           }
 
-          // Filter: only show if offered to me!
-          if (o.queueTargetDriverId !== user.uid) return;
+          if (o.queueTargetDriverId === user.uid) {
+            window.expiredLocalOrders = window.expiredLocalOrders || new Set();
+            window.expiredLocalOrders.delete(o.id);
+          }
+
+          // Filter: show if offered to me exclusively, or if it is public (no target driver) and I haven't rejected it
+          window.expiredLocalOrders = window.expiredLocalOrders || new Set();
+          if (window.expiredLocalOrders.has(o.id)) return;
+
+          // For regular commerce orders, require status === 'ready' before offering to drivers
+          if (!o.isFavor && !o.isTrip && o.status !== 'ready') return;
+
+          const isRejectedByMe = (o.queueRejectedDrivers || []).includes(user.uid);
+          if (o.queueTargetDriverId) {
+            // Exclusive offer: only show to targeted driver
+            if (o.queueTargetDriverId !== user.uid) return;
+          } else {
+            // Regular commerce order in public pool: hide if rejected by me
+            if (isRejectedByMe) return;
+            // Guard against a very brief flash during initial server dispatch (order newer than 8s with no queue fields)
+            const createdMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
+            const ageMs = Date.now() - createdMs;
+            if (!o.queueRejectedDrivers && ageMs < 8000) return;
+          }
 
           // Handle Auto-Accept
-          if (o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
+          if (false && o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
             if (!window.activeAutoAccepts) window.activeAutoAccepts = new Set();
             if (!window.activeAutoAccepts.has(o.id)) {
               window.activeAutoAccepts.add(o.id);
@@ -988,7 +1083,19 @@ function loadTabContent(tab, container, user) {
             }
           });
         }
-        isInitial = false;
+        // Full-screen overlay trigger for exclusive offer
+        const exclusiveBatch = sortedBatches.find(b => {
+          const orderObj = b.isBundle ? b.orders[0] : b.order;
+          return orderObj && !orderObj.driverId && orderObj.queueTargetDriverId === user.uid;
+        });
+
+        if (exclusiveBatch) {
+          stopExclusiveOfferAlert();
+          showExclusiveOfferOverlay(exclusiveBatch, user);
+        } else {
+          stopExclusiveOfferAlert();
+          hideExclusiveOfferOverlay();
+        }
 
         // Bypassing DOM updates if the batches fingerprint hasn't changed
         const availableFingerprint = JSON.stringify(sortedBatches.map(b => {
@@ -1009,6 +1116,13 @@ function loadTabContent(tab, container, user) {
         }
         container.dataset.lastAvailableFingerprint = availableFingerprint;
 
+        const userState = getState().user;
+        const nowMs = Date.now() + (getState().serverTimeOffset || 0);
+        const cooldownMs = userState?.cooldownUntil ? (userState.cooldownUntil.toMillis ? userState.cooldownUntil.toMillis() : new Date(userState.cooldownUntil).getTime()) : 0;
+        const cooldownRemaining = Math.max(0, Math.floor((cooldownMs - nowMs) / 1000));
+
+        let cooldownHtml = '';
+
         if (!getState().user?.isOnline) {
           container.innerHTML = `
             <div class="empty-state-mini offline-message-container" style="padding: 5rem 1rem; text-align: center;">
@@ -1022,7 +1136,7 @@ function loadTabContent(tab, container, user) {
         }
 
         if (sortedBatches.length === 0) {
-          container.innerHTML = `
+          container.innerHTML = cooldownHtml + `
             <div class="empty-state-mini" style="padding: 5rem 1rem; text-align: center;">
               <div style="font-size: 64px; margin-bottom: 1.5rem; opacity: 0.1; color: var(--color-text-primary); display: flex; justify-content: center;">${icon('package', 64)}</div>
               <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--color-text-secondary);">Sin pedidos disponibles</h3>
@@ -1054,7 +1168,7 @@ function loadTabContent(tab, container, user) {
           document.head.appendChild(s);
         }
 
-        container.innerHTML = `
+        container.innerHTML = cooldownHtml + `
           <div class="delivery-orders-list">
             ${sortedBatches.map(b => {
               const isBundle = b.isBundle;
@@ -1094,22 +1208,29 @@ function loadTabContent(tab, container, user) {
               const favorRgb = favorMeta ? getRgbString(favorMeta.color) : '239, 68, 68';
 
               const orderObj = b.isBundle ? b.orders[0] : b.order;
-              const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (orderObj?.queueTargetDriverId ? Date.now() : 0);
-              const elapsed = Math.floor((Date.now() - offeredAt) / 1000);
-              const remaining = offeredAt > 0 ? Math.max(0, 30 - elapsed) : 0;
+              const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (orderObj?.queueTargetDriverId ? (Date.now() + (getState().serverTimeOffset || 0)) : 0);
+              const elapsed = Math.floor(((Date.now() + (getState().serverTimeOffset || 0)) - offeredAt) / 1000);
+              const remaining = offeredAt > 0 ? Math.max(0, 60 - elapsed) : 0;
 
               return `
                 <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
                   <div style="position:absolute; top:0; left:0; width:6px; height:100%; background:${isTrip ? '#3b82f6' : (isFavor ? favorColor : '#00D67F')};"></div>
                   
-                  ${remaining > 0 ? `
+                  ${orderObj?.isOwnDeliveryOrder || orderObj?.isPermanentOffer ? `
+                    <div style="background:rgba(227, 0, 27, 0.08); border:1px solid rgba(227, 0, 27, 0.15); border-radius:16px; padding:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; width:100%;">
+                      <span style="font-size:12px; font-weight:800; color:#E3001B; display:flex; align-items:center; gap:6px;">
+                        ⚠️ ${orderObj?.isPermanentOffer ? 'OFERTA DISPONIBLE:' : 'EXCLUSIVO COMERCIO:'}
+                      </span>
+                      <span style="font-size:14px; font-weight:950; color:#E3001B;" class="queue-countdown" data-is-own-delivery="true" data-expiry="0" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">Permanente</span>
+                    </div>
+                  ` : (remaining > 0 ? `
                     <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.15); border-radius:16px; padding:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; width:100%;">
                       <span style="font-size:12px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:6px;">
                         ⚠️ OFERTA EXCLUSIVA:
                       </span>
-                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 30000}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
+                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 60000}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
                     </div>
-                  ` : ''}
+                  ` : '')}
                   
                   <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
                     <div style="flex:1;">
@@ -1191,6 +1312,15 @@ function loadTabContent(tab, container, user) {
                     ` : isFavor ? `
                       <div style="margin-bottom:16px; padding:14px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light); text-align:left;">
                         <div style="font-size:9px; font-weight:900; color:${favorMeta.textColor}; text-transform:uppercase; margin-bottom:10px; letter-spacing:0.04em;">${favorMeta.headerText}</div>
+                        ${b.order.favorType === 'compra' ? `
+                          <div style="margin-bottom:10px; padding:10px 12px; border-radius:12px; background:${b.order.allowDirectReplacement ? 'rgba(5,150,105,0.1)' : 'rgba(225,29,72,0.1)'}; border:1px solid ${b.order.allowDirectReplacement ? 'rgba(5,150,105,0.3)' : 'rgba(225,29,72,0.3)'}; color:${b.order.allowDirectReplacement ? '#059669' : '#E11D48'}; font-size:11.5px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                            ${b.order.allowDirectReplacement ? `
+                              <span>🔄 <strong>MODO REEMPLAZO DIRECTO:</strong> Si un producto no está en stock, traé uno similar (ej: Coca por Pepsi) sin consultar al cliente.</span>
+                            ` : `
+                              <span>💬 <strong>ATENCIÓN PERSONALIZADA:</strong> Consultá al cliente por chat ante cualquier cambio, variante o precio.</span>
+                            `}
+                          </div>
+                        ` : ''}
                         ${(() => {
                           const stores = parseFavorDetails(b.order.details || b.order.description);
                           const storePrices = b.order.storePrices || {};
@@ -1248,7 +1378,7 @@ function loadTabContent(tab, container, user) {
                            ${icon('checkCircle', 18)} Aceptar
                          </button>
                          <button class="btn reject-order-btn" 
-                                 data-id="${b.isBundle ? b.orders[0].id : b.order.id}" 
+                                 data-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}" 
                                  style="flex:1; height: 50px; border-radius:16px; font-weight:950; font-size:14px; text-transform:uppercase; border:1.5px solid rgba(239, 68, 68, 0.4); background:rgba(239, 68, 68, 0.05); color:#ef4444; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
                            ${icon('close', 14)} Rechazar
                          </button>
@@ -1278,20 +1408,71 @@ function loadTabContent(tab, container, user) {
         // Start active countdown intervals
         if (window.queueCountdownInterval) clearInterval(window.queueCountdownInterval);
         const countdownInterval = setInterval(() => {
-          container.querySelectorAll('.queue-countdown').forEach(el => {
+          const countdownElements = container.querySelectorAll('.queue-countdown');
+          const cooldownEl = container.querySelector('.cooldown-timer');
+          if (countdownElements.length === 0 && !cooldownEl) {
+            clearInterval(countdownInterval);
+            window.queueCountdownInterval = null;
+            return;
+          }
+
+          // Update cooldown banner in real-time
+          if (cooldownEl) {
+            const expiry = parseInt(cooldownEl.dataset.expiry);
+            const now = Date.now() + (getState().serverTimeOffset || 0);
+            const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
+            
+            const minutes = Math.floor(remaining / 60);
+            const seconds = remaining % 60;
+            cooldownEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+            if (remaining <= 0) {
+              if (window.queueCountdownInterval) clearInterval(window.queueCountdownInterval);
+              window.queueCountdownInterval = null;
+              loadTabContent('available', container, user);
+              return;
+            }
+          }
+
+          countdownElements.forEach(el => {
+            if (el.dataset.expired === 'true') return;
+
+            const isOwn = el.dataset.isOwnDelivery === 'true';
+            if (isOwn) {
+              el.textContent = "Permanente";
+              return;
+            }
+
             const expiry = parseInt(el.dataset.expiry);
-            const now = Date.now();
+            if (isNaN(expiry)) return;
+
+            const now = Date.now() + (getState().serverTimeOffset || 0);
             const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
             el.textContent = `${remaining}s`;
-             if (remaining <= 0) {
-               clearInterval(countdownInterval);
-               const orderIdsStr = el.dataset.orderIds;
-               if (orderIdsStr) {
-                 const orderIds = orderIdsStr.split(',');
-                 console.log(`[Queue countdown expired] Triggering rotation for orders:`, orderIds);
-                 orderIds.forEach(id => updateDispatchQueue(id));
-               }
-             }
+
+            if (remaining <= 0) {
+              el.dataset.expired = 'true';
+              const orderIdsStr = el.dataset.orderIds;
+              console.log(`[Queue Countdown] Timer expired for orderIds: ${orderIdsStr}`);
+
+              if (orderIdsStr) {
+                const orderIds = orderIdsStr.split(',');
+                window.expiredLocalOrders = window.expiredLocalOrders || new Set();
+
+                orderIds.forEach(oid => {
+                  window.expiredLocalOrders.add(oid);
+                });
+
+                stopExclusiveOfferAlert();
+
+                // 2. Trigger instant server rotation for each expired order
+                orderIds.forEach(id => {
+                  updateDispatchQueue(id).catch(err => {
+                    console.error(`[Queue Countdown] Error updating dispatch queue for ${id}:`, err);
+                  });
+                });
+              }
+            }
           });
         }, 1000);
         window.queueCountdownInterval = countdownInterval;
@@ -1312,62 +1493,39 @@ function loadTabContent(tab, container, user) {
         });
 
         container.querySelectorAll('.reject-order-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const rejectModalContent = document.createElement('div');
-            rejectModalContent.style.cssText = 'padding:20px; display:flex; flex-direction:column; gap:16px;';
-            rejectModalContent.innerHTML = `
-              <p style="font-size:13px; color:var(--color-text-secondary); line-height:1.5; text-align:center;">
-                Por favor selecciona el motivo del rechazo. Se aplicará una pausa de 3 minutos.
-              </p>
-              <select id="reject-reason-select" style="width:100%; height:48px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); outline:none;">
-                <option value="distancia">Distancia excesiva</option>
-                <option value="mecanico">Problema mecánico / Pinchadura</option>
-                <option value="inseguro">Zona insegura</option>
-                <option value="emergencia">Emergencia personal</option>
-                <option value="poca_ganancia">Poca ganancia</option>
-              </select>
-              <button id="confirm-reject-btn" style="width:100%; height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:14px; cursor:pointer; box-shadow:0 8px 16px rgba(var(--color-primary-rgb), 0.2);">
-                CONFIRMAR RECHAZO
-              </button>
-            `;
-            showModal({ title: 'Motivo del Rechazo', content: rejectModalContent, height: 'auto' });
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            showToast('Rechazando pedido...', 'info');
             
-            rejectModalContent.querySelector('#confirm-reject-btn').onclick = async () => {
-              const reason = rejectModalContent.querySelector('#reject-reason-select').value;
-              closeModal();
-              showToast('Procesando rechazo...', 'info');
-              
-              try {
-                // Apply cooldown of 3 minutes in driver users document
-                await updateDoc(doc(db, 'users', user.uid), {
-                  cooldownUntil: new Date(Date.now() + 3 * 60 * 1000)
-                });
-                
-                // Add driver to queueRejectedDrivers of this order
-                await runTransaction(db, async (transaction) => {
-                  const oId = btn.dataset.id;
+            try {
+              // Add driver to queueRejectedDrivers of these orders
+              await runTransaction(db, async (transaction) => {
+                const oIdsStr = btn.dataset.ids;
+                if (!oIdsStr) return;
+                const oIds = oIdsStr.split(',');
+                for (const oId of oIds) {
                   const orderRef = doc(db, 'orders', oId);
                   const oSnap = await transaction.get(orderRef);
                   if (oSnap.exists()) {
                     const rejected = oSnap.data().queueRejectedDrivers || [];
-                    if (!rejected.includes(user.uid)) {
-                      rejected.push(user.uid);
-                    }
+                    if (!rejected.includes(user.uid)) rejected.push(user.uid);
                     transaction.update(orderRef, {
                       queueRejectedDrivers: rejected,
                       queueTargetDriverId: null,
                       queueTargetDriverName: null,
-                      queueOfferedAt: null
+                      queueOfferedAt: null,
+                      isPermanentOffer: null
                     });
                   }
-                });
-                
-                showToast('Pedido rechazado. Cooldown de 3 minutos activo.', 'warning');
-              } catch (err) {
-                console.error(err);
-                showToast('Error al procesar rechazo', 'error');
-              }
-            };
+                }
+              });
+              
+              showToast('Pedido rechazado', 'warning');
+            } catch (err) {
+              console.error(err);
+              showToast('Error al procesar rechazo', 'error');
+              btn.disabled = false;
+            }
           });
         });
 
@@ -1601,15 +1759,16 @@ function loadTabContent(tab, container, user) {
     } else if (tab === 'active') {
       const q = query(
         collection(db, 'orders'),
-        where('driverId', '==', user.uid),
-        where('status', 'in', ['confirmed', 'ready', 'delivering'])
+        where('driverId', '==', user.uid)
       );
 
       let suggestedUnsub = null;
       let currentSuggestedOrders = [];
 
       const listUnsub = onSnapshot(q, (snap) => {
-        const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const orders = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(o => !['completed', 'cancelled'].includes(o.status));
 
         if (suggestedUnsub) {
           suggestedUnsub();
@@ -1617,7 +1776,41 @@ function loadTabContent(tab, container, user) {
         }
 
         if (orders.length === 0) {
-          container.innerHTML = `<div class="empty-state-mini" style="padding: 3rem 1rem;">No tenés pedidos en curso</div>`;
+          container.innerHTML = `
+            <div class="empty-state-mini" style="padding: 3rem 1rem; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px;">
+              <p style="margin: 0; color: var(--color-text-tertiary); font-weight: 700;">No tenés pedidos en curso</p>
+              <button id="btn-demo-hoja-ruta" style="padding: 10px 18px; border-radius: 14px; border: 1.5px solid var(--color-primary); background: rgba(var(--color-primary-rgb), 0.08); color: var(--color-primary); font-weight: 800; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow-sm); transition: all 0.2s;">
+                ${icon('eye', 16)} Ver Hoja de Ruta Demo (Simulación)
+              </button>
+            </div>
+          `;
+          const demoBtn = container.querySelector('#btn-demo-hoja-ruta');
+          if (demoBtn) {
+            demoBtn.onclick = () => {
+              const mockOrder = {
+                id: 'DEMO-991',
+                orderId: 'DEMO-1042',
+                status: 'accepted',
+                favorType: 'mandado',
+                isFavor: true,
+                userName: 'Juan Hidalgo',
+                userPhone: '2215550199',
+                comercioName: 'Verdulería "El Trébol"',
+                comercioAddress: 'Av. San Martín 450, Magdalena',
+                pickupAddress: 'Av. San Martín 450, Magdalena',
+                deliveryAddress: 'Brenan 1340, Magdalena',
+                subtotal: 3500,
+                deliveryCost: 8000,
+                total: 11500,
+                paymentMethod: 'efectivo',
+                details: '1kg papas, 1/2kg tomates, 1 verdeo',
+                verificationCode: '4829',
+                acceptedAt: new Date()
+              };
+              delete container.dataset.lastActiveFingerprint;
+              renderActiveTimeline([mockOrder], []);
+            };
+          }
           return;
         }
 
@@ -2005,6 +2198,21 @@ function loadTabContent(tab, container, user) {
                                   `;
                                 }).join('')}
                               </div>
+                              ${(() => {
+                                const o = stop.orders && stop.orders[0];
+                                if (o && o.estimatedReadyAt) {
+                                  const dateObj = o.estimatedReadyAt.toDate ? o.estimatedReadyAt.toDate() : new Date(o.estimatedReadyAt);
+                                  const hh = String(dateObj.getHours()).padStart(2, '0');
+                                  const mm = String(dateObj.getMinutes()).padStart(2, '0');
+                                  const readyTimeStr = `${hh}:${mm} hs`;
+                                  return `
+                                    <div style="margin-top:6px; background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.04)); border:1px solid rgba(245,158,11,0.25); color:#d97706; padding:5px 10px; border-radius:10px; font-size:10.5px; font-weight:900; display:inline-flex; align-items:center; gap:5px;">
+                                      ${icon('clock', 12)} 🍳 Listo en cocina a las ${readyTimeStr}
+                                    </div>
+                                  `;
+                                }
+                                return '';
+                              })()}
                             `;
                           })()}
                         </div>
@@ -2015,41 +2223,87 @@ function loadTabContent(tab, container, user) {
                         ` : ''}
                       </div>
                       
-                      <div style="font-size:13px; color:var(--color-text-secondary); margin-bottom:12px; display:flex; align-items:center; gap:8px; font-weight:700; opacity:0.9;">
+                      <div style="font-size:13px; color:var(--color-text-secondary); margin-bottom:8px; display:flex; align-items:center; gap:8px; font-weight:700; opacity:0.9;">
                         <div style="color:var(--color-primary); opacity:0.7;">${icon('mapPin', 16)}</div>
                         <span>${stop.address}</span>
                       </div>
-                      ${stop.type === 'DROP_OFF' ? `
-                        <div style="margin-top: -4px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
-                          ${stop.orders.map(o => `
-                            <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.03); border: 1.5px solid var(--color-border-light); padding: 12px; border-radius: 16px;">
-                              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12.5px; font-weight: 750;">
-                                <div style="display: flex; align-items: center; gap: 6px;">
-                                  <span style="color: var(--color-text-tertiary); font-size: 11px; text-transform: uppercase;">Pago:</span>
-                                  <span style="color: ${o.paymentMethod === 'mercadopago' ? '#009EE3' : '#22C55E'}; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 4px;">
-                                    ${o.paymentMethod === 'mercadopago' ? '💳 Transferencia' : '💵 Efectivo'}
+
+                      ${(() => {
+                        if (stop.type === 'DROP_OFF') {
+                          const totalCashToCollect = stop.orders.reduce((sum, o) => {
+                            return o.paymentMethod === 'mercadopago' ? sum : sum + (o.total || ((o.subtotal || 0) + (o.deliveryCost || 0)));
+                          }, 0);
+                          const isAllPaidOnline = stop.orders.every(o => o.paymentMethod === 'mercadopago');
+                          return `
+                            <!-- Hero Pill de Cobro al Cliente (Siempre Visible) -->
+                            <div style="margin-top:10px; margin-bottom:14px; padding:12px 14px; border-radius:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; ${isAllPaidOnline ? 'background:rgba(0,158,227,0.08); border:1.5px solid rgba(0,158,227,0.3); color:#0284c7;' : 'background:rgba(34,197,94,0.08); border:1.5px solid rgba(34,197,94,0.3); color:#15803d;'} box-shadow:0 4px 14px rgba(0,0,0,0.03);">
+                              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                                <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; ${isAllPaidOnline ? 'background:rgba(0,158,227,0.15); color:#009EE3;' : 'background:rgba(34,197,94,0.18); color:#16a34a;'} font-size:18px;">
+                                  ${isAllPaidOnline ? '💳' : '💵'}
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:1px; min-width:0;">
+                                  <span style="font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:0.06em; opacity:0.85;">
+                                    ${isAllPaidOnline ? 'Pago Online (MercadoPago)' : 'Cobrar en Efectivo'}
+                                  </span>
+                                  <span style="font-size:12px; font-weight:700; opacity:0.9; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+                                    ${isAllPaidOnline ? 'No solicitar dinero al cliente' : 'Cobro en el domicilio'}
                                   </span>
                                 </div>
-                                ${o.isScheduled ? `
-                                  <span style="background: rgba(139, 92, 246, 0.12); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 9.5px; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 2px;">
-                                    📅 ${o.scheduledTime}
-                                  </span>
-                                ` : ''}
                               </div>
-                              ${o.addressNotes ? `
-                                <div style="display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.4;">
-                                  <span style="color: var(--color-text-tertiary); font-size: 11px; text-transform: uppercase; margin-top: 2px;">Ref:</span>
-                                  <span style="background: var(--color-bg-secondary); padding: 4px 8px; border-radius: 8px; border: 1px solid var(--color-border-light); flex: 1;">
-                                    ${o.addressNotes}
+                              <div style="text-align:right; flex-shrink:0;">
+                                <span style="font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.05em; display:block; opacity:0.75;">Total a Cobrar</span>
+                                <span style="font-size:19px; font-weight:950; letter-spacing:-0.02em; line-height:1.1;">
+                                  ${isAllPaidOnline ? '$ 0' : formatPrice(totalCashToCollect)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div style="margin-top:-4px; margin-bottom:14px; display:flex; flex-direction:column; gap:8px;">
+                              ${stop.orders.map(o => `
+                                <div style="display:flex; flex-direction:column; gap:6px; background:rgba(var(--color-primary-rgb, 79, 70, 229), 0.03); border:1.5px solid var(--color-border-light); padding:10px 12px; border-radius:14px;">
+                                  ${o.addressNotes ? `
+                                    <div style="display:flex; align-items:flex-start; gap:6px; font-size:12.5px; color:var(--color-text-secondary); font-weight:600; line-height:1.4;">
+                                      <span style="color:var(--color-text-tertiary); font-size:11px; text-transform:uppercase; margin-top:2px;">Ref:</span>
+                                      <span style="background:var(--color-bg-secondary); padding:4px 8px; border-radius:8px; border:1px solid var(--color-border-light); flex:1;">
+                                        ${o.addressNotes}
+                                      </span>
+                                    </div>
+                                  ` : `
+                                    <div style="font-size:12px; color:var(--color-text-tertiary); font-style:italic; font-weight:600;">Sin referencia de ubicación</div>
+                                  `}
+                                </div>
+                              `).join('')}
+                            </div>
+                          `;
+                        } else {
+                          const isFavorCompra = stop.isFavor && stop.orders.some(o => o.type === 'compra' || o.favorType === 'compra' || o.favorType === 'mandado');
+                          const isAbonarLocal = stop.amountToPay > 0 || isFavorCompra;
+                          return `
+                            <!-- Hero Pill de Retiro en Comercio (Siempre Visible) -->
+                            <div style="margin-top:10px; margin-bottom:14px; padding:12px 14px; border-radius:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; ${isAbonarLocal ? 'background:rgba(124,58,237,0.08); border:1.5px solid rgba(124,58,237,0.3); color:#6d28d9;' : 'background:rgba(16,185,129,0.08); border:1.5px solid rgba(16,185,129,0.3); color:#047857;'} box-shadow:0 4px 14px rgba(0,0,0,0.03);">
+                              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                                <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; ${isAbonarLocal ? 'background:rgba(124,58,237,0.15); color:#7c3aed;' : 'background:rgba(16,185,129,0.18); color:#10b981;'} font-size:18px;">
+                                  ${isAbonarLocal ? '🏪' : '✅'}
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:1px; min-width:0;">
+                                  <span style="font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:0.06em; opacity:0.85;">
+                                    ${isAbonarLocal ? 'Abonar al Comercio' : 'Ya abonado en la App'}
+                                  </span>
+                                  <span style="font-size:12px; font-weight:700; opacity:0.9; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+                                    ${isAbonarLocal ? 'Pago de mercadería en local' : 'Retirar sin abonar'}
                                   </span>
                                 </div>
-                              ` : `
-                                <div style="font-size: 12.5px; color: var(--color-text-tertiary); font-style: italic; font-weight: 600;">Sin referencia de ubicación</div>
-                              `}
+                              </div>
+                              <div style="text-align:right; flex-shrink:0;">
+                                <span style="font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.05em; display:block; opacity:0.75;">A Abonar</span>
+                                <span style="font-size:17px; font-weight:950; letter-spacing:-0.02em; line-height:1.1;">
+                                  ${stop.amountToPay > 0 ? formatPrice(stop.amountToPay) : (isFavorCompra ? 'En caja' : '$ 0')}
+                                </span>
+                              </div>
                             </div>
-                          `).join('')}
-                        </div>
-                      ` : ''}
+                          `;
+                        }
+                      })()}
 
                       <!-- Collapsible Stop Details -->
                       ${stop.type === 'PICKUP' ? `
@@ -3640,11 +3894,20 @@ async function showModifyOrderModal(order) {
     btn.innerHTML = icon('loader', 20, 'animate-spin');
 
     try {
-      const diff = newTotal - order.total;
-      const subtotalDiff = diff; // Simple assumption for total change
+      const shippingFee = Number(order.shippingFee || order.deliveryFee || 0);
+      const serviceFee = Number(order.appUsageFee || order.serviceFee || 0);
+      const tip = Number(order.tip || 0);
+      const discount = Number(order.discount || 0);
+      const purchaseFee = Number(order.purchaseFee || 0);
+      const extraStopsFee = Number(order.extraStopsFee || 0);
+      
+      const newItemsCost = Math.max(0, newTotal - (shippingFee + serviceFee + tip + purchaseFee + extraStopsFee - discount));
 
       await updateDoc(doc(db, 'orders', order.id), {
         total: newTotal,
+        totalAmount: newTotal,
+        itemsCost: newItemsCost,
+        subtotal: newItemsCost,
         isModified: true,
         modifiedBy: 'delivery',
         modificationReason: reason,
@@ -3852,8 +4115,25 @@ async function saveFavorStorePrices(orderId, storePrices) {
   await updateDoc(fDoc(db, 'orders', orderId), {
     storePrices: storePrices,
     subtotal: val,
-    total: newTotal
+    total: newTotal,
+    updatedAt: serverTimestamp()
   });
+
+  // Send real-time notification banner to customer
+  if (freshOrder.userId) {
+    try {
+      await addDoc(collection(db, 'users', freshOrder.userId, 'notifications'), {
+        title: '💰 Precios cargados en tu pedido',
+        body: `El repartidor ingresó el valor de los productos (${formatPrice(val)}). Total a abonar: ${formatPrice(newTotal)}.`,
+        type: 'price_updated',
+        orderId: orderId,
+        status: 'unread',
+        createdAt: serverTimestamp()
+      });
+    } catch (notifErr) {
+      console.warn('Could not send price update notification to user:', notifErr);
+    }
+  }
 
   // Build detail message of stores
   const storeLines = Object.entries(storePrices)
@@ -3869,6 +4149,46 @@ async function saveFavorStorePrices(orderId, storePrices) {
     type: 'system'
   });
 }
+
+async function notifyAdminsOnDriverConnection(driverUser, action) {
+  try {
+    const { collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
+    
+    // Multi-query to cover both role == 'admin' and isAdmin == true to ensure kioscopaulos7@gmail.com and all admins get notified
+    const [roleSnap, isAdminSnap] = await Promise.all([
+      getDocs(query(collection(db, 'users'), where('role', '==', 'admin'))).catch(() => ({ docs: [] })),
+      getDocs(query(collection(db, 'users'), where('isAdmin', '==', true))).catch(() => ({ docs: [] }))
+    ]);
+
+    const adminIds = new Set();
+    [...roleSnap.docs, ...isAdminSnap.docs].forEach(d => adminIds.add(d.id));
+
+    const isConnect = action === 'connect';
+    const title = isConnect ? '🟢 Repartidor Conectado' : '🔴 Repartidor Desconectado';
+    const driverName = driverUser.displayName || driverUser.name || 'Repartidor';
+    const body = isConnect 
+      ? `SOPORTE GO: El repartidor ${driverName} se acaba de CONECTAR y está disponible para pedidos.` 
+      : `SOPORTE GO: El repartidor ${driverName} se acaba de DESCONECTAR.`;
+
+    for (const adminId of adminIds) {
+      try {
+        await addDoc(collection(db, 'users', adminId, 'notifications'), {
+          title,
+          body,
+          type: 'driver_status_change',
+          driverId: driverUser.uid || driverUser.id,
+          status: 'unread',
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.warn('Error notifying admin:', adminId, err);
+      }
+    }
+  } catch (err) {
+    console.error('Error in notifyAdminsOnDriverConnection:', err);
+  }
+}
+
 async function startSession(user) {
   const { getDoc, doc: fDoc } = await import('firebase/firestore');
   const userSnap = await getDoc(fDoc(db, 'users', user.uid));
@@ -3974,17 +4294,23 @@ async function startSession(user) {
   const updatedUser = { ...getState().user, isOnline: true, currentSessionId: sessionRef.id, lastActivityAt: new Date(), lastTripAcceptedAt: new Date() };
   setState('user', updatedUser);
   
+  const { deleteField } = await import('firebase/firestore');
   // Update Firestore in background
   await updateDoc(doc(db, 'users', user.uid), {
     isOnline: true,
     currentSessionId: sessionRef.id,
     lastActivityAt: serverTimestamp(),
     lastTripAcceptedAt: serverTimestamp(),
-    missedOffersCount: 0
+    missedOffersCount: 0,
+    cooldownUntil: deleteField(),
+    disconnectedReason: deleteField()
   });
   
   startInactivityCheck(updatedUser);
   startHeartbeat(updatedUser);
+  
+  // Notify all admins about driver connection
+  notifyAdminsOnDriverConnection(updatedUser, 'connect');
   
   showToast('¡Sesión iniciada! Ya podés recibir pedidos.', 'success');
   
@@ -4048,6 +4374,9 @@ async function endSession(user) {
   }
   stopHeartbeat();
 
+  // Notify all admins about driver disconnection
+  notifyAdminsOnDriverConnection(user, 'disconnect');
+
   showToast('Sesión finalizada. Hasta pronto.', 'info');
   
   // High-priority UI refresh
@@ -4099,53 +4428,8 @@ function stopHeartbeat() {
 
 function startInactivityCheck(user) {
   if (inactivityTimer) clearInterval(inactivityTimer);
-  
-  inactivityTimer = setInterval(async () => {
-    return; // Disabled 3-hour auto-disconnection as requested
-    const currentUser = getState().user || user;
-    if (!currentUser || !currentUser.isOnline) return;
-    
-    const lastActivityValue = currentUser.lastActivityAt;
-    let lastActivityDate;
-
-    if (lastActivityValue && typeof lastActivityValue.toDate === 'function') {
-      lastActivityDate = lastActivityValue.toDate();
-    } else if (lastActivityValue instanceof Date) {
-      lastActivityDate = lastActivityValue;
-    } else if (typeof lastActivityValue === 'number') {
-      lastActivityDate = new Date(lastActivityValue);
-    } else {
-      lastActivityDate = new Date();
-    }
-
-    // 1-hour trip/order inactivity check
-    const lastTripValue = currentUser.lastTripAcceptedAt;
-    let lastTripDate;
-    if (lastTripValue && typeof lastTripValue.toDate === 'function') {
-      lastTripDate = lastTripValue.toDate();
-    } else if (lastTripValue instanceof Date) {
-      lastTripDate = lastTripValue;
-    } else if (typeof lastTripValue === 'number') {
-      lastTripDate = new Date(lastTripValue);
-    } else {
-      lastTripDate = lastActivityDate; // fallback
-    }
-
-    const oneHour = 1 * 60 * 60 * 1000;
-    const threeHours = 3 * 60 * 60 * 1000;
-    
-    if (new Date() - lastTripDate > threeHours) {
-      console.log('Trip inactivity (3 hours) detected. Disconnecting...');
-      await endSession(currentUser);
-      renderDeliveryPanel();
-      showToast('Sesión cerrada por inactividad (3 horas sin tomar viajes)', 'warning');
-    } else if (new Date() - lastActivityDate > threeHours) {
-      console.log('Inactivity detected. Disconnecting...');
-      await endSession(currentUser);
-      renderDeliveryPanel();
-      showToast('Sesión cerrada por inactividad (3hs)', 'warning');
-    }
-  }, 60000); // Check every minute
+  inactivityTimer = null;
+  // Desconexión por inactividad deshabilitada del lado del cliente.
 }
 
 function renderFinancesCharts(orders) {
@@ -4876,6 +5160,7 @@ async function showBalanceHistoryModal(driverId) {
           ${transactions.map(t => {
             const isLiquidation = t.type === 'liquidation';
             const isCoupon = t.type === 'coupon_reimbursement';
+            const isCanon = t.type === 'canon_charge';
             const amount = t.amount || 0;
             const absAmount = Math.abs(amount);
 
@@ -4900,6 +5185,13 @@ async function showBalanceHistoryModal(driverId) {
               amountSign = '-';
               amountColor = '#a855f7';
               labelText = 'Reintegro Cupón';
+            } else if (isCanon) {
+              iconColor = '#e11d48';
+              iconBg = 'rgba(225,29,72,0.1)';
+              iconName = 'bike';
+              amountSign = '+';
+              amountColor = '#e11d48';
+              labelText = 'Canon Diario';
             }
             
             return `
@@ -4941,6 +5233,7 @@ async function showBalanceHistoryModal(driverId) {
 function renderStatusBar(user) {
   // Always use fresh state for rendering styles
   const latestUser = getState().user || user;
+  if (!latestUser) return '';
   const finalIsOnline = latestUser.isOnline === true;
   
   if (!document.getElementById('status-bar-styles')) {
@@ -5011,12 +5304,120 @@ function renderStatusBar(user) {
   `;
 }
 
+export async function ensureDriverPermissions() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+  const notifHelpText = isStandalone
+    ? (isIOS 
+        ? 'En tu iPhone: Abrí la app <b>Ajustes</b> ➔ <b>Notificaciones</b> ➔ Buscá <b>GoDelivery</b> ➔ Activá <b>Permitir notificaciones</b>.'
+        : 'En tu Android: Mantené presionado el icono de la App <b>GoDelivery</b> en tu pantalla de inicio ➔ <b>Información de la app (ⓘ)</b> ➔ <b>Permisos</b> ➔ <b>Notificaciones</b> ➔ Cambiá a <b>Permitir</b>.')
+    : 'Habilitá las notificaciones desde los ajustes de tu celular o el icono del navegador.';
+
+  const locationHelpText = isStandalone
+    ? (isIOS
+        ? 'En tu iPhone: Abrí <b>Ajustes</b> ➔ <b>Privacidad y seguridad</b> ➔ <b>Localización</b> ➔ Buscá <b>GoDelivery / Safari</b> ➔ Seleccioná <b>"Al usar la app"</b>.'
+        : 'En tu Android: Mantené presionado el icono de la App <b>GoDelivery</b> en tu pantalla de inicio ➔ <b>Información de la app (ⓘ)</b> ➔ <b>Permisos</b> ➔ <b>Ubicación</b> ➔ Cambiá a <b>Permitir solo con la app en uso</b>.')
+    : 'Permití el acceso a la ubicación GPS desde la configuración de tu celular o navegador.';
+
+  if ('Notification' in window) {
+    if (Notification.permission === 'default') {
+      try {
+        const { requestWebPushPermission } = await import('../utils/notifications.js');
+        const res = await requestWebPushPermission();
+        if (res !== 'granted') {
+          showToast('⚠️ Es obligatorio permitir las notificaciones para conectarte y recibir pedidos.', 'warning');
+          return false;
+        }
+      } catch (e) {
+        console.warn('Error requesting notifications:', e);
+      }
+    } else if (Notification.permission === 'denied') {
+      showModal({
+        title: '🔔 Permiso de Notificaciones Requerido',
+        content: `
+          <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+            <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center;">
+              ${icon('bell', 28)}
+            </div>
+            <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Notificaciones Desactivadas</h3>
+            <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
+              Las notificaciones son obligatorias para que te lleguen los avisos de pedidos a tu celular.<br><br>
+              ${notifHelpText}
+            </p>
+          </div>
+        `,
+        height: 'auto'
+      });
+      return false;
+    }
+  }
+
+  if ('geolocation' in navigator) {
+    try {
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3500, maximumAge: 10000, enableHighAccuracy: true });
+      });
+
+      if (pos && pos.coords && typeof pos.coords.accuracy === 'number' && pos.coords.accuracy > 100) {
+        const preciseHelpText = isStandalone
+          ? (isIOS
+              ? 'En tu iPhone: Abrí <b>Ajustes</b> ➔ <b>Privacidad y seguridad</b> ➔ <b>Localización</b> ➔ Buscá <b>GoDelivery / Safari</b> ➔ Activá el switch <b>"Ubicación precisa"</b>.'
+              : 'En tu Android: Mantené presionado el icono de <b>GoDelivery</b> en tu pantalla de inicio ➔ <b>Info de la app (ⓘ)</b> ➔ <b>Permisos</b> ➔ <b>Ubicación</b> ➔ Activá el switch <b>"Usar ubicación precisa"</b>.')
+          : 'Activá el switch "Ubicación precisa" en los permisos de ubicación de tu celular o navegador.';
+
+        showModal({
+          title: '📍 Ubicación Precisa Requerida',
+          content: `
+            <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+              <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(245, 158, 11, 0.12); color: #d97706; display: flex; align-items: center; justify-content: center;">
+                ${icon('mapPin', 28)}
+              </div>
+              <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Desactivá la Ubicación Aproximada</h3>
+              <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
+                Estás utilizando la opción de <b>Ubicación Aproximada</b> (precisión actual: ~${Math.round(pos.coords.accuracy)}m). Para conectarte y repartir en GoDelivery es obligatorio activar la <b>Ubicación Precisa</b>.<br><br>
+                ${preciseHelpText}
+              </p>
+            </div>
+          `,
+          height: 'auto'
+        });
+        return false;
+      }
+    } catch (err) {
+      if (err.code === 1 /* PERMISSION_DENIED */) {
+        showModal({
+          title: '📍 Permiso de Ubicación Requerido',
+          content: `
+            <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+              <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center;">
+                ${icon('mapPin', 28)}
+              </div>
+              <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Ubicación GPS Desactivada</h3>
+              <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
+                El acceso a tu ubicación GPS es obligatorio para asignarte pedidos cercanos y transmitir tu recorrido a los clientes.<br><br>
+                ${locationHelpText}
+              </p>
+            </div>
+          `,
+          height: 'auto'
+        });
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 function attachStatusBarListeners(user) {
   const btn = document.getElementById('session-toggle-btn');
-  if (!btn) return;
+  if (!btn || !user) return;
   
-  btn.onclick = () => {
-    if (user.isOnline) {
+  btn.onclick = async () => {
+    const currentUser = getState().user || user;
+    if (!currentUser) return;
+    if (currentUser.isOnline) {
       if (activeOrdersCount > 0) {
         showToast('⚠️ No podés desconectarte si tenés pedidos en curso', 'warning');
         return;
@@ -5025,52 +5426,143 @@ function attachStatusBarListeners(user) {
         title: '¿Desconectarse?',
         message: 'Dejarás de recibir notificaciones de nuevos pedidos.',
         confirmText: 'Sí, desconectar',
-        onConfirm: async () => {
-          try {
-            btn.disabled = true;
-            btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Desconectando...';
-            await endSession(user);
-          } catch (err) {
-            console.error('Logout error:', err);
-            showToast('Error al desconectar', 'error');
-            btn.disabled = false;
-            btn.innerHTML = icon('x', 14) + ' Desconectar';
-          } finally {
-            closeModal();
+        onConfirm: () => {
+          closeModal();
+          // Instant optimistic local state update (0ms, no spinner!)
+          setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
+          const bar = document.getElementById('session-status-bar-container');
+          const latest = getState().user;
+          if (bar) {
+            bar.innerHTML = renderStatusBar(latest);
+            attachStatusBarListeners(latest);
           }
+          endSession(user).catch(err => console.error('Background disconnection error:', err));
         }
       });
     } else {
-      showConfirm({
-        title: '¿Conectarse?',
-        message: 'Comenzarás a recibir pedidos disponibles en tu zona.',
-        confirmText: 'Sí, conectar',
-        onConfirm: async () => {
-          try {
-            btn.disabled = true;
-            btn.innerHTML = icon('loader', 14, 'animate-spin') + ' Conectando...';
-            await startSession(user);
-            
-            // Auto open functioning info sheet for the first 3 connections
-            const connKey = `gd_delivery_connect_count_${user.uid}`;
-            let connCount = parseInt(localStorage.getItem(connKey) || '0', 10);
-            if (connCount < 3) {
-              connCount += 1;
-              localStorage.setItem(connKey, connCount.toString());
-              setTimeout(() => {
-                document.getElementById('delivery-contact-support-btn')?.click();
-              }, 600);
-            }
-          } catch (err) {
-            console.error('Login error:', err);
-            showToast('Error al conectar', 'error');
-            btn.disabled = false;
-            btn.innerHTML = icon('power', 14) + ' Conectar';
-          } finally {
-            closeModal();
-          }
+      if (btn.disabled) return;
+      
+      const originalText = btn.innerHTML;
+
+      try {
+        // Mandatorio: alias de transferencia configurado para poder recibir pagos y conectarse
+        if (!user.transferAlias || !user.transferAlias.trim()) {
+          showToast('⚠️ Debes configurar tu ALIAS para recibir transferencias en tu Perfil antes de conectarte.', 'warning');
+          return;
         }
-      });
+
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const todayStr = `${year}-${month}-${day}`;
+
+        const isExempt = user.isCanonExempt === true;
+        const isFirstConnectionToday = !isExempt && user.lastCanonChargeDate !== todayStr;
+        const configuredCanonAmount = (window.gd_settings && window.gd_settings.canonAmount) || 2000;
+
+        const modalMessage = isFirstConnectionToday
+          ? `Comenzarás a recibir pedidos en tu zona. Se sumarán <b>$${configuredCanonAmount.toLocaleString('es-AR')}</b> de canon diario a tu saldo de comisiones.`
+          : 'Comenzarás a recibir pedidos disponibles en tu zona.';
+
+        // Show confirm modal INSTANTLY (0ms latency)
+        showConfirm({
+          title: '¿Conectarse?',
+          message: modalMessage,
+          confirmText: 'Sí, conectar',
+          onConfirm: () => {
+            closeModal();
+
+            // Instant optimistic local state update (0ms, no spinner/loader!)
+            const previousUser = getState().user;
+            setState('user', { ...previousUser, isOnline: true });
+            
+            const bar = document.getElementById('session-status-bar-container');
+            const latest = getState().user;
+            if (bar) {
+              bar.innerHTML = renderStatusBar(latest);
+              attachStatusBarListeners(latest);
+            }
+
+            // Process background checks & session start
+            (async () => {
+              try {
+                // Mandatorio: permisos de notificaciones y ubicación GPS autorizados
+                const okPermissions = await ensureDriverPermissions();
+                if (!okPermissions) {
+                  setState('user', { ...previousUser, isOnline: false });
+                  if (bar) {
+                    bar.innerHTML = renderStatusBar(getState().user);
+                    attachStatusBarListeners(getState().user);
+                  }
+                  return;
+                }
+
+                if (isFirstConnectionToday) {
+                  const { doc, setDoc, updateDoc, increment, serverTimestamp, collection } = await import('firebase/firestore');
+                  const { db } = await import('../firebase.js');
+
+                  const canonDocRef = doc(db, 'delivery_canon_payments', `${user.uid}_${todayStr}`);
+                  
+                  // 1. Record individual Canon transaction
+                  await setDoc(canonDocRef, {
+                    driverId: user.uid,
+                    driverName: user.displayName || user.name || 'Repartidor',
+                    dateStr: todayStr,
+                    amount: configuredCanonAmount,
+                    settled: false,
+                    createdAt: serverTimestamp()
+                  }, { merge: true });
+
+                  // 2. Record in delivery_transactions so it appears in the Driver's Balance History
+                  const transRef = doc(collection(db, 'delivery_transactions'));
+                  await setDoc(transRef, {
+                    driverId: user.uid,
+                    type: 'canon_charge',
+                    amount: configuredCanonAmount,
+                    description: `Canon Diario Jornada (${todayStr})`,
+                    createdAt: serverTimestamp()
+                  });
+
+                  // 3. Add canon amount to deliveryDebt and update lastCanonChargeDate
+                  await updateDoc(doc(db, 'users', user.uid), {
+                    deliveryDebt: increment(configuredCanonAmount),
+                    lastCanonChargeDate: todayStr
+                  });
+
+                  showToast(`🛵 Se registraron +$${configuredCanonAmount.toLocaleString('es-AR')} de canon diario en tu saldo de comisiones.`, 'info');
+                }
+
+                await startSession(user);
+                
+                // Auto open functioning info sheet for the first 3 connections
+                const connKey = `gd_delivery_connect_count_${user.uid}`;
+                let connCount = parseInt(localStorage.getItem(connKey) || '0', 10);
+                if (connCount < 3) {
+                  connCount += 1;
+                  localStorage.setItem(connKey, connCount.toString());
+                  setTimeout(() => {
+                    document.getElementById('delivery-contact-support-btn')?.click();
+                  }, 600);
+                }
+              } catch (err) {
+                console.error('Login error:', err);
+                showToast('Error al conectar', 'error');
+                setState('user', { ...previousUser, isOnline: false });
+                if (bar) {
+                  bar.innerHTML = renderStatusBar(getState().user);
+                  attachStatusBarListeners(getState().user);
+                }
+              }
+            })();
+          }
+        });
+      } catch (err) {
+        console.error('Error al conectar:', err);
+        showToast('Error al conectar repartidor', 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
     }
   };
 }
@@ -5249,7 +5741,7 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
           driverVehicleColor: userData.vehicleColor || '',
           driverVehiclePatent: userData.vehicleDetails || userData.patente || '',
           deliverySessionId: user.currentSessionId || null,
-          status: (o.isFavor || o.isTrip) ? 'confirmed' : o.status,
+          status: (o.isFavor || o.isTrip) ? 'confirmed' : 'accepted',
           acceptedAt: serverTimestamp(),
           estimatedDeliveryTime: estTime
         };
@@ -5268,17 +5760,81 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
         }
         transaction.update(ref, updateFields);
 
-        // Add real-time push/in-app notification to the client
-        if (o.isTrip) {
-          const notifRef = doc(collection(db, 'users', o.userId, 'notifications'));
-          transaction.set(notifRef, {
-            type: 'trip_taken',
-            title: '⚡ ¡Chofer asignado!',
-            body: `El chofer está yendo a tu ubicación. Patente: ${userData.vehicleDetails || userData.patente || '---'}`,
-            status: 'unread',
-            url: `#/pedido/${o.id}`,
-            createdAt: new Date()
-          });
+        // Bind new driver to chat channels
+        try {
+          const cdRef = doc(db, 'chats', `${o.id}_client-delivery`);
+          transaction.set(cdRef, {
+            orderId: o.id,
+            type: 'client-delivery',
+            driverId: user.uid,
+            driverName: user.displayName || user.name || 'Repartidor',
+            userId: o.userId || null,
+            participants: arrayUnion(...[user.uid, o.userId].filter(Boolean))
+          }, { merge: true });
+
+          if (o.comercioId) {
+            const comdRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
+            transaction.set(comdRef, {
+              orderId: o.id,
+              type: 'commerce-delivery',
+              driverId: user.uid,
+              driverName: user.displayName || user.name || 'Repartidor',
+              comercioId: o.comercioId,
+              participants: arrayUnion(...[user.uid, o.comercioId].filter(Boolean))
+            }, { merge: true });
+          }
+        } catch (e) {
+          console.warn('[takeBatch] Error updating chat doc in transaction:', e);
+        }
+
+        // Add real-time push/in-app notification to the client (if registered user)
+        if (o.userId) {
+          if (o.isTrip) {
+            const notifRef = doc(collection(db, 'users', o.userId, 'notifications'));
+            transaction.set(notifRef, {
+              type: 'trip_taken',
+              title: '⚡ ¡Chofer asignado!',
+              body: `El chofer está yendo a tu ubicación. Patente: ${userData.vehicleDetails || userData.patente || '---'}`,
+              status: 'unread',
+              url: `#/pedido/${o.id}`,
+              createdAt: new Date()
+            });
+
+            // Global push notification collection write
+            const pushRef = doc(collection(db, 'notifications'));
+            transaction.set(pushRef, {
+              userId: o.userId,
+              title: '⚡ ¡Chofer asignado!',
+              body: `El chofer está yendo a tu ubicación. Patente: ${userData.vehicleDetails || userData.patente || '---'}`,
+              type: 'trip_taken',
+              orderId: o.id,
+              createdAt: new Date(),
+              read: false
+            });
+          } else {
+            // Standard commerce order or favor
+            const notifRef = doc(collection(db, 'users', o.userId, 'notifications'));
+            transaction.set(notifRef, {
+              type: 'order_taken',
+              title: '🛵 ¡Repartidor asignado!',
+              body: `Tu pedido de ${o.comercioName || 'el comercio'} fue tomado por ${userData.displayName || userData.name || 'un repartidor'} y va en camino.`,
+              status: 'unread',
+              url: `#/pedido/${o.id}`,
+              createdAt: new Date()
+            });
+
+            // Global push notification collection write
+            const pushRef = doc(collection(db, 'notifications'));
+            transaction.set(pushRef, {
+              userId: o.userId,
+              title: '🛵 ¡Repartidor asignado!',
+              body: `Tu pedido de ${o.comercioName || 'el comercio'} fue tomado por ${userData.displayName || userData.name || 'un repartidor'} y va en camino.`,
+              type: 'order_taken',
+              orderId: o.id,
+              createdAt: new Date(),
+              read: false
+            });
+          }
         }
       });
 
@@ -5337,43 +5893,46 @@ export const takeOrder = takeBatch;
 
 export async function markAsPickedUp(orderIdOrIds) {
   const ids = Array.isArray(orderIdOrIds) ? orderIdOrIds : orderIdOrIds.split(',');
-  try {
-    let lat = null;
-    let lng = null;
-    if (window.lastRiderPos) {
-      lat = window.lastRiderPos.lat;
-      lng = window.lastRiderPos.lng;
-    } else if (navigator.geolocation) {
-      try {
-        const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1000, enableHighAccuracy: false });
-        });
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-        window.lastRiderPos = { lat, lng };
-      } catch (e) {
-        console.warn('Location fetch failed on pickup', e);
-      }
-    }
 
-    const updates = {
-      pickedUpAt: serverTimestamp(),
-      status: 'delivering'
-    };
+  // Optimistic UI response: Feedback is instant to the rider
+  showToast(ids.length > 1 ? 'Pedidos retirados con éxito 🚴' : 'Pedido retirado con éxito 🚴', 'success');
 
-    if (lat !== null && lng !== null) {
-      updates.driverLocation = { lat, lng, updatedAt: serverTimestamp() };
-    }
-
+  // Asynchronous background execution (does not block UI)
+  (async () => {
     try {
+      let lat = window.lastRiderPos?.lat || null;
+      let lng = window.lastRiderPos?.lng || null;
+
+      if (!lat && navigator.geolocation) {
+        try {
+          const pos = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1000, enableHighAccuracy: false });
+          });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+          window.lastRiderPos = { lat, lng };
+        } catch (e) {
+          console.warn('Location fetch failed on pickup', e);
+        }
+      }
+
+      const updates = {
+        pickedUpAt: serverTimestamp(),
+        status: 'delivering'
+      };
+
+      if (lat !== null && lng !== null) {
+        updates.driverLocation = { lat, lng, updatedAt: serverTimestamp() };
+      }
+
       const batch = writeBatch(db);
       ids.forEach(id => {
         batch.update(doc(db, 'orders', id), updates);
       });
       await batch.commit();
       
-      // Send real-time push/in-app notifications to the clients with their verification codes
-      for (const id of ids) {
+      // Background non-blocking notification to users
+      Promise.all(ids.map(async id => {
         try {
           const orderSnap = await getDoc(doc(db, 'orders', id));
           if (orderSnap.exists()) {
@@ -5394,17 +5953,11 @@ export async function markAsPickedUp(orderIdOrIds) {
         } catch (notifErr) {
           console.warn('Could not send pickup notification to user:', notifErr);
         }
-      }
-
-      showToast(ids.length > 1 ? 'Pedidos retirados con éxito' : 'Pedido retirado con éxito', 'success');
+      }));
     } catch (err) {
-      console.warn('Network issue, order marked picked up locally:', err);
-      showToast('Retiro guardado localmente (se sincronizará al recuperar señal)', 'info');
+      console.warn('Async pickup sync error:', err);
     }
-  } catch (err) {
-    console.error('markAsPickedUp error:', err);
-    showToast('Error al retirar el pedido', 'error');
-  }
+  })();
 }
 
 export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, orders, onConfirm }) {
@@ -5650,7 +6203,7 @@ export async function showSuccessCelebration(orders, onFinish) {
       
       <!-- Brand Logo Header -->
       <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 2px;">
-        <img src="/go! (2).png" alt="Go!" style="width: 86px; height: 86px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 6px 15px rgba(0, 0, 0, 0.15)); animation: bounceLogo 2.2s infinite ease-in-out;">
+        <img src="/logo-pwa.png" alt="Go! Delivery" onerror="this.onerror=null; this.src='/logo.png';" style="width: 86px; height: 86px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 6px 15px rgba(0, 0, 0, 0.15)); animation: bounceLogo 2.2s infinite ease-in-out;">
       </div>
 
       <div style="text-align: center; display: flex; flex-direction: column; gap: 6px;">
@@ -6099,220 +6652,501 @@ async function renderSubPage(tab, title) {
 
 export async function updateDispatchQueue(orderId) {
   try {
-    const now = Date.now();
-    
-    // Fetch order doc first to verify state
     const orderRef = doc(db, 'orders', orderId);
     const orderSnap = await getDoc(orderRef);
     if (!orderSnap.exists()) return;
     const o = orderSnap.data();
     if (o.driverId) return;
 
-    // Queue rotation is triggered strictly on timer expiration or queue assign necessity.
+    const prevTargetDriverId = o.queueTargetDriverId;
+    const rejected = [...(o.queueRejectedDrivers || [])];
+    if (prevTargetDriverId) {
+      rejected.push(prevTargetDriverId);
+    }
 
-    const rejected = o.queueRejectedDrivers || [];
-    if (o.queueTargetDriverId) {
-      rejected.push(o.queueTargetDriverId);
-      
-      // Auto-pause inactive driver (Ghost driver check) synchronously
-      try {
-        const driverRef = doc(db, 'users', o.queueTargetDriverId);
-        const dSnap = await getDoc(driverRef);
-        if (dSnap.exists()) {
-          const dData = dSnap.data();
-          const missedCount = (dData.missedOffersCount || 0) + 1;
-          if (missedCount >= 2) {
-            await updateDoc(driverRef, { isOnline: false, missedOffersCount: 0 });
-            showToast(`Repartidor ${dData.displayName || dData.name || ''} desconectado por inactividad.`, 'info');
-          } else {
-            await updateDoc(driverRef, { missedOffersCount: missedCount });
+    // Atomically clear target and add to rejections. Cloud Function will pick this up and calculate the next driver.
+    await runTransaction(db, async (transaction) => {
+      const freshSnap = await transaction.get(orderRef);
+      if (!freshSnap.exists()) return;
+      const fresh = freshSnap.data();
+      if (fresh.driverId || fresh.queueTargetDriverId !== prevTargetDriverId) {
+        throw new Error('already_rotated_or_assigned');
+      }
+
+      transaction.update(orderRef, {
+        queueTargetDriverId: null,
+        queueOfferedAt: null,
+        queueRejectedDrivers: rejected,
+        isPermanentOffer: null
+      });
+    });
+
+    console.log(`[Queue Client] Successfully released target for order ${orderId}. Delegating next match to backend.`);
+  } catch (txErr) {
+    if (txErr.message === 'already_rotated_or_assigned') {
+      console.log('[Queue transaction] Rotation bypassed: Already handled by another client.');
+    } else {
+      console.error('[Queue transaction error]', txErr);
+    }
+  }
+}
+
+export async function renderDailyEarningsWidget(user) {
+  if (!user?.uid) return;
+
+  let container = document.getElementById('delivery-earnings-widget');
+  if (!container) {
+    const tabPills = document.querySelector('.tab-pills');
+    if (tabPills && tabPills.parentNode) {
+      container = document.createElement('div');
+      container.id = 'delivery-earnings-widget';
+      tabPills.parentNode.insertBefore(container, tabPills);
+    } else {
+      const scrollArea = document.getElementById('delivery-scroll-area') || document.querySelector('.delivery-panel-page');
+      if (!scrollArea) return;
+      container = document.createElement('div');
+      container.id = 'delivery-earnings-widget';
+      scrollArea.prepend(container);
+    }
+  }
+
+  const state = getState();
+  const nightConfig = state.nightSurchargeConfig || { enabled: true, start: '00:00', end: '06:00', type: 'fixed', value: 0 };
+  const incentiveConfig = state.driverIncentiveConfig;
+
+  const isNightActive = isScheduleActive(nightConfig);
+  const isRainActive = state.isRaining === true;
+  const isIncentiveActive = isScheduleActive(incentiveConfig);
+
+  let activeBadgesHtml = '';
+  if (isNightActive) {
+    const start = nightConfig.start || '00:00';
+    const end = nightConfig.end || '06:00';
+    const val = nightConfig.type === 'percentage' ? `${nightConfig.value || 0}%` : `$${nightConfig.value || 0}`;
+    activeBadgesHtml += `
+      <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(99, 102, 241, 0.25); border:1px solid rgba(129, 140, 248, 0.5); color:#A5B4FC; padding:6px 12px; border-radius:12px; font-size:11.5px; font-weight:800;">
+        <span>🌙</span> Recargo Nocturno (${start} - ${end} hs) ${val !== '$0' && val !== '0%' ? `<span style="background:rgba(255,255,255,0.2); padding:1px 6px; border-radius:6px; font-size:10.5px; font-weight:900; color:white;">+${val}</span>` : ''}
+      </div>
+    `;
+  }
+  if (isRainActive) {
+    const rainVal = state.deliveryRainSurcharge || 300;
+    activeBadgesHtml += `
+      <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(14, 165, 233, 0.25); border:1px solid rgba(56, 189, 248, 0.5); color:#38BDF8; padding:6px 12px; border-radius:12px; font-size:11.5px; font-weight:800;">
+        <span>🌧️</span> Recargo Lluvia <span style="background:rgba(255,255,255,0.2); padding:1px 6px; border-radius:6px; font-size:10.5px; font-weight:900; color:white;">+${formatPrice(rainVal)}</span>
+      </div>
+    `;
+  }
+  if (isIncentiveActive) {
+    const incVal = incentiveConfig.type === 'percentage' ? `${incentiveConfig.value || 0}%` : `$${incentiveConfig.value || 0}`;
+    activeBadgesHtml += `
+      <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(245, 158, 11, 0.25); border:1px solid rgba(251, 191, 36, 0.5); color:#FBBF24; padding:6px 12px; border-radius:12px; font-size:11.5px; font-weight:800;">
+        <span>🚀</span> Incentivo Extra <span style="background:rgba(255,255,255,0.2); padding:1px 6px; border-radius:6px; font-size:10.5px; font-weight:900; color:white;">+${incVal}</span>
+      </div>
+    `;
+  }
+
+  const renderFrame = (todayTotal = 0, todayCount = 0) => {
+    const avgEarnings = todayCount > 0 ? (todayTotal / todayCount) : 0;
+    container.innerHTML = `
+      <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 20px; padding: 18px 20px; color: white; margin-bottom: 20px; box-shadow: 0 10px 25px rgba(15,23,42,0.15); border: 1px solid rgba(255,255,255,0.08); position: relative; overflow: hidden;">
+        <div style="position: absolute; right: -20px; top: -20px; width: 100px; height: 100px; background: rgba(34, 197, 94, 0.12); border-radius: 50%; blur: 20px; pointer-events: none;"></div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: rgba(34, 197, 94, 0.2); color: #22C55E; border-radius: 8px; font-size: 14px;">⚡</span>
+            <span style="font-size: 11.5px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; color: #94A3B8;">Jornada de Hoy</span>
+          </div>
+          <span style="font-size: 10.5px; font-weight: 800; background: rgba(34, 197, 94, 0.15); color: #4ADE80; padding: 3px 8px; border-radius: 20px; border: 1px solid rgba(74, 222, 128, 0.25);">
+            En Vivo
+          </span>
+        </div>
+
+        ${activeBadgesHtml ? `
+          <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.08);">
+            ${activeBadgesHtml}
+          </div>
+        ` : ''}
+
+        <div style="display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 12px; align-items: center;">
+          <div>
+            <div style="font-size: 11px; font-weight: 700; color: #94A3B8; margin-bottom: 2px;">Ganancia Hoy</div>
+            <div style="font-size: 22px; font-weight: 950; color: #22C55E; font-family: var(--font-display); letter-spacing: -0.02em;">
+              ${formatPrice(todayTotal)}
+            </div>
+          </div>
+          <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 12px;">
+            <div style="font-size: 11px; font-weight: 700; color: #94A3B8; margin-bottom: 2px;">Entregas</div>
+            <div style="font-size: 18px; font-weight: 900; color: #F8FAFC;">
+              ${todayCount} <span style="font-size: 11px; font-weight: 700; color: #64748B;">pedidos</span>
+            </div>
+          </div>
+          <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 12px;">
+            <div style="font-size: 11px; font-weight: 700; color: #94A3B8; margin-bottom: 2px;">Promedio</div>
+            <div style="font-size: 16px; font-weight: 900; color: #F8FAFC;">
+              ${formatPrice(avgEarnings)}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  renderFrame(0, 0);
+
+  try {
+    const { collection, query, where, getDocs } = await import('firebase/firestore');
+    const { db } = await import('../firebase.js');
+
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+
+    const q = query(
+      collection(db, 'orders'),
+      where('driverId', '==', user.uid)
+    );
+
+    const snap = await getDocs(q);
+    let todayTotal = 0;
+    let todayCount = 0;
+
+    snap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.status === 'delivered' || data.status === 'completed') {
+        const timestamp = data.deliveredAt || data.completedAt || data.createdAt;
+        if (timestamp) {
+          const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+          if (date >= startOfDay) {
+            todayCount++;
+            todayTotal += (getOrderDriverEarnings(data) || 0);
           }
         }
-      } catch (de) {
-        console.error('[Ghost check error]', de);
-      }
-    }
-
-    // Fetch query snapshots OUTSIDE to avoid failed precondition errors
-    const driversSnap = await getDocs(query(collection(db, 'users'), where('isOnline', '==', true)));
-    const allDrivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.role === 'delivery' || d.isDelivery === true);
-
-    const activeOrdersSnap = await getDocs(query(collection(db, 'orders'), where('status', 'in', ['accepted', 'preparing', 'ready', 'picked_up', 'at_door'])));
-    
-    // Group active orders by driver ID to validate capping limits
-    const activeOrdersByDriver = {};
-    activeOrdersSnap.docs.forEach(docSnap => {
-      const ord = docSnap.data();
-      if (ord.driverId) {
-        if (!activeOrdersByDriver[ord.driverId]) {
-          activeOrdersByDriver[ord.driverId] = [];
-        }
-        activeOrdersByDriver[ord.driverId].push({ id: docSnap.id, ...ord });
       }
     });
 
-    const canDriverTakeOrder = (driverId, orderComercioId) => {
-      const driverActiveOrders = activeOrdersByDriver[driverId] || [];
-      const activeCount = driverActiveOrders.length;
-      
-      // If no active orders, they can always take it
-      if (activeCount === 0) return true;
-      
-      // Check if all active orders belong to the same commerce local
-      const allActiveFromSameCommerce = driverActiveOrders.every(x => x.comercioId && x.comercioId === driverActiveOrders[0].comercioId);
-      const activeCommerceId = driverActiveOrders[0]?.comercioId;
-      
-      // If the new order is from the same commerce
-      const isSameCommerce = activeCommerceId && activeCommerceId === orderComercioId;
-      
-      if (activeCount >= 2) {
-        // Can only take if all are from same commerce AND total <= 3
-        return allActiveFromSameCommerce && isSameCommerce && (activeCount + 1 <= 3);
-      }
-      
-      if (activeCount === 1) {
-        if (isSameCommerce) {
-          return (activeCount + 1 <= 3); // max 3 from same commerce
-        } else {
-          return (activeCount + 1 <= 2); // max 2 from different commerce
-        }
-      }
-      
-      return false;
-    };
-
-    let targetDriverId = null;
-    let targetDriverName = null;
-
-    // Filter eligible drivers: exclude if they have rejected 3 or more times or exceed capping limits
-    const eligibleDrivers = allDrivers.filter(d => {
-      const occurrences = rejected.filter(id => id === d.id).length;
-      if (occurrences >= 3) return false;
-      
-      // Enforce smart dynamic caps for simultaneous orders
-      if (!canDriverTakeOrder(d.id, o.comercioId)) return false;
-      
-      if (d.cooldownUntil && (d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime()) > now) {
-        return false;
-      }
-
-      const mode = d.deliveryMode || 'both';
-      if (mode === 'trip' && !o.isTrip) return false;
-      if (mode === 'delivery' && o.isTrip) return false;
-
-      return true;
-    });
-
-    if (eligibleDrivers.length > 0) {
-      // Sort: 
-      // 1. Prioritize drivers with fewer rejection occurrences
-      // 2. Then by completed orders today
-      eligibleDrivers.sort((a, b) => {
-        const occurrencesA = rejected.filter(id => id === a.id).length;
-        const occurrencesB = rejected.filter(id => id === b.id).length;
-        if (occurrencesA !== occurrencesB) {
-          return occurrencesA - occurrencesB;
-        }
-        return (a.completedOrdersToday || 0) - (b.completedOrdersToday || 0);
-      });
-
-      // Find co-pickup driver if any among the eligible ones
-      const coPickupDriver = eligibleDrivers.find(d => {
-        return activeOrdersSnap.docs.some(docSnap => {
-          const ord = docSnap.data();
-          return ord.driverId === d.id && ord.comercioId === o.comercioId && !ord.pickedUpAt;
-        });
-      });
-
-      const chosenDriver = coPickupDriver || eligibleDrivers[0];
-      targetDriverId = chosenDriver.id;
-      targetDriverName = chosenDriver.displayName || chosenDriver.name || 'Repartidor';
-
-      await updateDoc(orderRef, {
-        queueTargetDriverId: targetDriverId,
-        queueTargetDriverName: targetDriverName,
-        queueOfferedAt: Date.now(),
-        queueRejectedDrivers: rejected
-      });
-
-      // Send push notification to the newly targeted driver
-      if (targetDriverId) {
-        try {
-          await addDoc(collection(db, 'notifications'), {
-            userId: targetDriverId,
-            title: '¡Nueva Oferta Exclusiva!',
-            body: `Tenés un nuevo pedido disponible para aceptar de ${o.comercioName || 'Comercio'}. [Ref: ${Date.now().toString().slice(-4)}]`,
-            type: 'new_exclusive_offer',
-            orderId: orderId,
-            createdAt: new Date(),
-            read: false
-          });
-        } catch (ne) {
-          console.error('[Notification send error for driver]', ne);
-        }
-      }
-    } else {
-      // Exhausted all online drivers or no drivers online! Cancel the order!
-      await updateDoc(orderRef, {
-        status: 'cancelled',
-        cancelledAt: serverTimestamp(),
-        cancelledBy: 'system',
-        cancelReason: 'No hay repartidores disponibles en la zona',
-        queueTargetDriverId: null,
-        queueTargetDriverName: null,
-        queueRejectedDrivers: rejected
-      });
-
-      // Send push notification to the client
-      if (o.userId) {
-        try {
-          await addDoc(collection(db, 'notifications'), {
-            userId: o.userId,
-            title: 'Pedido Cancelado',
-            body: `Lo sentimos, tu pedido #${o.orderId || ''} ha sido cancelado porque no encontramos repartidores disponibles en tu zona.`,
-            type: 'order_cancelled',
-            orderId: orderId,
-            createdAt: new Date(),
-            read: false
-          });
-        } catch (ne) {
-          console.error('[Notification send error]', ne);
-        }
-      }
-
-      // Refund user points if applicable
-      if (o.pointsRedeemed > 0 && o.userId) {
-        try {
-          const userRef = doc(db, 'users', o.userId);
-          await updateDoc(userRef, {
-            points: increment(o.pointsRedeemed)
-          });
-        } catch (pe) {
-          console.error('[Points refund error]', pe);
-        }
-      }
-    }
+    renderFrame(todayTotal, todayCount);
   } catch (err) {
-    console.error('Error in updateDispatchQueue:', err);
+    console.warn('Error loading daily earnings widget:', err);
   }
+}
+
+let exclusiveModalCountdownInterval = null;
+
+export function hideExclusiveOfferOverlay() {
+  const existing = document.getElementById('exclusive-offer-fullscreen-overlay');
+  if (existing) {
+    existing.remove();
+  }
+  if (exclusiveModalCountdownInterval) {
+    clearInterval(exclusiveModalCountdownInterval);
+    exclusiveModalCountdownInterval = null;
+  }
+}
+
+export function showExclusiveOfferOverlay(batch, user) {
+  if (document.getElementById('exclusive-offer-fullscreen-overlay')) {
+    return;
+  }
+
+  const orderObj = batch.isBundle ? batch.orders[0] : batch.order;
+  if (!orderObj) return;
+
+  const isFavor = batch.order?.isFavor;
+  const isTrip = batch.order?.isTrip;
+  
+  let originTitle = batch.isBundle ? (batch.comercioName || 'Comercio') : (isTrip ? 'Pasajero / Punto de Inicio' : (isFavor ? (batch.order.favorTypeLabel || 'Favor') : (batch.order.comercioName || 'Comercio')));
+  let destAddress = batch.isBundle ? batch.orders.map(o => o.destinationAddress || o.address || o.deliveryAddress).join(' • ') : (batch.order.destinationAddress || batch.order.address || batch.order.deliveryAddress || 'Dirección de entrega');
+  let driverEarnings = getOrderDriverEarnings(batch);
+  let totalToCollect = batch.total || 0;
+
+  const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (Date.now() + (getState().serverTimeOffset || 0));
+  const calcRemaining = () => {
+    const now = Date.now() + (getState().serverTimeOffset || 0);
+    const elapsed = Math.floor((now - offeredAt) / 1000);
+    return Math.max(0, 60 - elapsed);
+  };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'exclusive-offer-fullscreen-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: #F8FAFC;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding-top: max(24px, env(safe-area-inset-top));
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow-y: auto;
+    box-sizing: border-box;
+  `;
+
+  overlay.innerHTML = `
+    <!-- Top Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px; background: rgba(227, 0, 27, 0.08); border: 1.5px solid rgba(227, 0, 27, 0.25); padding: 8px 16px; border-radius: 99px;">
+        <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #E3001B; box-shadow: 0 0 10px rgba(227, 0, 27, 0.5);"></span>
+        <span style="font-size: 12.5px; font-weight: 900; color: #E3001B; text-transform: uppercase; letter-spacing: 0.05em;">🚨 ¡NUEVO PEDIDO EXCLUSIVO!</span>
+      </div>
+      
+      <div style="background: #0F172A; color: white; border: 1px solid #1E293B; padding: 8px 16px; border-radius: 99px; font-weight: 900; font-size: 15px; font-variant-numeric: tabular-nums; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);">
+        ⏳ <span id="exclusive-modal-countdown">${calcRemaining()}</span>s
+      </div>
+    </div>
+
+    <!-- Main Content Body -->
+    <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 16px; width: 100%; flex: 1; justify-content: center;">
+      
+      <!-- Earnings Card -->
+      <div style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); border-radius: 28px; padding: 24px; text-align: center; color: white; box-shadow: 0 14px 35px rgba(16, 185, 129, 0.3);">
+        <div style="font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.9; margin-bottom: 4px;">Tu Ganancia Estimada</div>
+        <div style="font-size: 44px; font-weight: 950; letter-spacing: -1.5px; text-shadow: 0 2px 8px rgba(0,0,0,0.12);">${formatPrice(driverEarnings)}</div>
+        <div style="font-size: 13px; opacity: 0.92; margin-top: 6px; font-weight: 700;">Cobro total al cliente: ${formatPrice(totalToCollect)}</div>
+      </div>
+
+      <!-- Route Info Card -->
+      <div style="background: #FFFFFF; border: 1.5px solid #E2E8F0; border-radius: 26px; padding: 20px; color: #0F172A; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 8px 25px rgba(0, 0, 0, 0.04);">
+        <!-- Origin -->
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <div style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 16px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #2563EB; font-size: 22px; flex-shrink: 0;">🏬</div>
+          <div style="flex: 1;">
+            <div style="font-size: 11px; font-weight: 850; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em;">Retiro (Origen)</div>
+            <div style="font-size: 17px; font-weight: 900; color: #0F172A; margin-top: 2px; line-height: 1.25;">${originTitle}</div>
+          </div>
+        </div>
+
+        <div style="width: 100%; height: 1px; background: #F1F5F9;"></div>
+
+        <!-- Destination -->
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <div style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.25); border-radius: 16px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #16A34A; font-size: 22px; flex-shrink: 0;">📍</div>
+          <div style="flex: 1;">
+            <div style="font-size: 11px; font-weight: 850; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em;">Entrega (Destino)</div>
+            <div style="font-size: 15.5px; font-weight: 850; color: #1E293B; margin-top: 2px; line-height: 1.35;">${destAddress}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Actions -->
+    <div style="display: flex; flex-direction: column; gap: 12px; width: 100%; margin-top: 12px;">
+      <button id="fullscreen-accept-offer-btn" style="width: 100%; height: 64px; border-radius: 22px; background: #22C55E; color: white; font-size: 19px; font-weight: 950; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 10px 30px rgba(34, 197, 94, 0.4); letter-spacing: 0.02em;">
+        ⚡ ACEPTAR PEDIDO AHORA
+      </button>
+      
+      <button id="fullscreen-reject-offer-btn" style="width: 100%; height: 48px; border-radius: 18px; background: #F1F5F9; color: #475569; font-size: 14px; font-weight: 850; border: 1.5px solid #E2E8F0; cursor: pointer;">
+        Silenciar / Ignorar
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  if (exclusiveModalCountdownInterval) clearInterval(exclusiveModalCountdownInterval);
+  exclusiveModalCountdownInterval = setInterval(() => {
+    const rem = calcRemaining();
+    const cdEl = document.getElementById('exclusive-modal-countdown');
+    if (cdEl) cdEl.textContent = rem;
+    if (rem <= 0) {
+      hideExclusiveOfferOverlay();
+      stopExclusiveOfferAlert();
+    }
+  }, 1000);
+
+  const acceptBtn = overlay.querySelector('#fullscreen-accept-offer-btn');
+  if (acceptBtn) {
+    acceptBtn.onclick = async () => {
+      // Show professional fullscreen loading animation over the modal
+      let loader = overlay.querySelector('#offer-accept-loader-screen');
+      if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'offer-accept-loader-screen';
+        loader.style.cssText = `
+          position: absolute;
+          inset: 0;
+          background: rgba(255, 255, 255, 0.97);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          z-index: 100;
+          padding: 24px;
+          text-align: center;
+        `;
+        loader.innerHTML = `
+          <div style="width: 60px; height: 60px; border: 5px solid #E2E8F0; border-top-color: #22C55E; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 20px;"></div>
+          <h3 style="font-size: 21px; font-weight: 950; color: #0F172A; margin: 0 0 6px 0;">¡Asignando Pedido!</h3>
+          <p style="font-size: 14px; color: #64748B; margin: 0; font-weight: 600;">Cargando tu hoja de ruta y mapa de entrega...</p>
+        `;
+        overlay.appendChild(loader);
+      }
+
+      try {
+        await takeBatch(batch.id, user, batch, acceptBtn);
+      } catch (err) {
+        console.error('[Accept batch error]', err);
+        if (loader) loader.remove();
+        showToast(err.message || 'No se pudo aceptar el pedido.', 'error');
+        return;
+      }
+
+      // Hide alert & overlay only once assignment is completed and active order route is loaded
+      stopExclusiveOfferAlert();
+      hideExclusiveOfferOverlay();
+    };
+  }
+
+  const rejectBtn = overlay.querySelector('#fullscreen-reject-offer-btn');
+  if (rejectBtn) {
+    rejectBtn.onclick = () => {
+      stopExclusiveOfferAlert();
+      hideExclusiveOfferOverlay();
+    };
+  }
+}
+
+export function showPausedSessionModal(user) {
+  if (document.getElementById('paused-session-modal-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'paused-session-modal-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    box-sizing: border-box;
+  `;
+
+  overlay.innerHTML = `
+    <div style="background: var(--color-bg-card, #1e293b); border: 2px solid #ef4444; border-radius: 32px; padding: 32px 24px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(239, 68, 68, 0.35);">
+      <div style="font-size: 56px; margin-bottom: 12px;">🔕</div>
+      <h2 style="font-size: 22px; font-weight: 950; color: var(--color-text-primary, #ffffff); margin-bottom: 10px; letter-spacing: -0.5px;">Sesión Pausada por Inactividad</h2>
+      <p style="font-size: 14px; color: var(--color-text-secondary, #94a3b8); line-height: 1.55; margin-bottom: 26px;">
+        Se pausó tu conexión automáticamente porque ignoraste 2 ofertas consecutivas de pedido.<br><br>
+        Tocá a continuación para reanudar tu sesión y volver a recibir ofertas inmediatamente.
+      </p>
+      <button id="paused-session-reconnect-btn" style="width: 100%; height: 58px; border-radius: 20px; background: #22c55e; color: white; font-size: 17px; font-weight: 950; border: none; cursor: pointer; box-shadow: 0 10px 25px rgba(34, 197, 94, 0.35); text-transform: uppercase; letter-spacing: 0.03em;">
+        ⚡ VOLVER A CONECTARME
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const btn = overlay.querySelector('#paused-session-reconnect-btn');
+  if (btn) {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ CONECTANDO...';
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          isOnline: true,
+          missedOffersCount: 0,
+          disconnectedReason: null
+        });
+        setState('user', { ...getState().user, isOnline: true, missedOffersCount: 0, disconnectedReason: null });
+        overlay.remove();
+        showToast('¡Sesión reanudada con éxito!', 'success');
+      } catch (err) {
+        console.error('Error re-connecting:', err);
+        btn.disabled = false;
+        btn.innerHTML = '⚡ VOLVER A CONECTARME';
+        showToast('Error al reconectar. Reintenta.', 'error');
+      }
+    };
+  }
+}
+
+export function hidePausedSessionModal() {
+  const el = document.getElementById('paused-session-modal-overlay');
+  if (el) el.remove();
 }
 
 export function playExclusiveOfferAlert() {
   if (window.exclusiveAlertInterval) return;
 
+  const soundUrl = 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3';
+
+  // Use the AudioManager to start a loop of the alert sound
+  import('../utils/audio-manager.js').then(({ AudioManager }) => {
+    AudioManager.startLoop(soundUrl, 1.0);
+    AudioManager.startLoop('/assets/sounds/notification.mp3', 1.0);
+  }).catch(err => console.warn('Could not start loop sound:', err));
+
+  // Perform immediate initial strong vibration
   if (navigator.vibrate) {
-    navigator.vibrate([300, 100, 300]);
+    navigator.vibrate([600, 200, 600, 200, 600]);
   }
+
+  // Vibrate strongly every 2.5 seconds
   window.exclusiveAlertInterval = setInterval(() => {
     if (navigator.vibrate) {
-      navigator.vibrate([300, 100, 300]);
+      navigator.vibrate([600, 200, 600, 200, 600]);
     }
-  }, 1600);
+  }, 2500);
 }
 
 export function stopExclusiveOfferAlert() {
+  const soundUrl = 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3';
+
+  // Stop the audio loop
+  import('../utils/audio-manager.js').then(({ AudioManager }) => {
+    AudioManager.stopLoop(soundUrl);
+    AudioManager.stopLoop('/assets/sounds/notification.mp3');
+  }).catch(err => console.warn('Could not stop loop sound:', err));
+
+  // Clear vibration interval
   if (window.exclusiveAlertInterval) {
     clearInterval(window.exclusiveAlertInterval);
     window.exclusiveAlertInterval = null;
   }
+  
+  // Stop active vibrations
+  if (navigator.vibrate) {
+    navigator.vibrate(0);
+  }
+}
+
+export function showCanonPaymentModal(user, dateStr) {
+  import('../components/modal.js').then(({ showModal, closeModal }) => {
+    const adminPhone = (window.gd_settings && window.gd_settings.whatsappPayments) || '5491123456789';
+    const wpMessage = encodeURIComponent(`Hola! Soy ${user.displayName || 'repartidor'} (${user.uid}). Quisiera abonar/confirmar el canon diario de la jornada ${dateStr} ($2.000) para que me habiliten ONLINE.`);
+    const wpUrl = `https://wa.me/${adminPhone}?text=${wpMessage}`;
+
+    showModal({
+      title: '🛵 Jornada No Habilitada',
+      hideHeader: false,
+      content: `
+        <div style="padding:16px; font-family:var(--font-body); text-align:center;">
+          <div style="font-size:42px; margin-bottom:12px;">⚠️</div>
+          <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin-bottom:8px; color:var(--color-text-primary);">
+            Canon Diario Pendiente (${dateStr})
+          </h3>
+          <p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:20px;">
+            Tu jornada de hoy no se encuentra habilitada aún por administración. Aboná el canon diario de <strong>$2.000</strong> o enviá el comprobante a soporte para activarla.
+          </p>
+          <div style="background:rgba(225,29,72,0.06); border:1px solid rgba(225,29,72,0.15); border-radius:14px; padding:12px; margin-bottom:20px; font-size:12.5px; color:var(--color-primary); font-weight:700;">
+            💬 Contactate con el administrador por WhatsApp para confirmar tu pago y comenzar a recibir pedidos.
+          </div>
+          <a href="${wpUrl}" target="_blank" class="btn btn-primary btn-block" style="height:52px; border-radius:16px; font-weight:900; font-size:15px; background:#25D366; border:none; color:white; box-shadow:0 6px 20px rgba(37,211,102,0.3); display:flex; align-items:center; justify-content:center; gap:10px; text-decoration:none;">
+            <span>Contactar Soporte por WhatsApp</span>
+          </a>
+        </div>
+      `
+    });
+  });
 }

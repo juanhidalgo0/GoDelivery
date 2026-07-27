@@ -1,6 +1,6 @@
 // GoDelivery — Chat Notification System (Client-Side Real-Time)
 import { db } from '../firebase.js';
-import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, doc, getDoc } from 'firebase/firestore';
 import { getState, subscribe } from '../state.js';
 import { sendLocalNotification } from '../utils/notifications.js';
 import { setBanner, clearBanner } from './banner-manager.js';
@@ -30,76 +30,58 @@ export function initChatNotifier() {
     }
   }, { once: true });
 
-  // 1. Listen as Client
-  const ordersQ = query(collection(db, 'orders'), where('userId', '==', user.uid), where('status', 'in', ['pending', 'accepted', 'preparing', 'ready', 'delivering']));
-  const orderUnsub = onSnapshot(ordersQ, (snap) => {
-    snap.docs.forEach(orderDoc => {
-      const order = { id: orderDoc.id, ...orderDoc.data() };
-      listenToChat(`${order.id}_client-commerce`, user.uid, order.comercioName || 'Comercio', order);
-      if (order.driverId) {
-        listenToChat(`${order.id}_client-delivery`, user.uid, order.driverName || 'Repartidor', order);
-      }
+  // Listen to all chats where the user is a participant
+  const chatsQ = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid));
+  const chatsUnsub = onSnapshot(chatsQ, (snap) => {
+    snap.docs.forEach(chatDoc => {
+      const chat = { id: chatDoc.id, ...chatDoc.data() };
+      listenToChat(chat.id, user.uid, chat);
     });
   });
-  activeListeners.push(orderUnsub);
-
-  // 2. Listen as Commerce/Delivery
-  listenAsCommerceOrDelivery(user);
+  activeListeners.push(chatsUnsub);
 }
 
-function listenAsCommerceOrDelivery(user) {
-  const comerciosQ = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
-  const comercioUnsub = onSnapshot(comerciosQ, (snap) => {
-    snap.docs.forEach(comercioDoc => {
-      // Only listen to active orders to prevent memory leak
-      const ordersQ = query(
-        collection(db, 'orders'), 
-        where('comercioId', '==', comercioDoc.id),
-        where('status', 'in', ['pending', 'accepted', 'preparing', 'ready', 'delivering'])
-      );
-      const orderUnsub = onSnapshot(ordersQ, (orderSnap) => {
-        orderSnap.docs.forEach(orderDoc => {
-          const order = { id: orderDoc.id, ...orderDoc.data() };
-          listenToChat(`${order.id}_client-commerce`, user.uid, order.userName || 'Cliente', order);
-        });
-      });
-      activeListeners.push(orderUnsub);
-    });
-  });
-  activeListeners.push(comercioUnsub);
-
-  if (user.isDelivery || user.role === 'delivery') {
-    const deliveryOrdersQ = query(
-      collection(db, 'orders'), 
-      where('driverId', '==', user.uid),
-      where('status', 'in', ['pending', 'accepted', 'preparing', 'ready', 'delivering'])
-    );
-    const deliveryUnsub = onSnapshot(deliveryOrdersQ, (snap) => {
-      snap.docs.forEach(orderDoc => {
-        const order = { id: orderDoc.id, ...orderDoc.data() };
-        listenToChat(`${order.id}_client-delivery`, user.uid, order.userName || 'Cliente', order);
-      });
-    });
-    activeListeners.push(deliveryUnsub);
-  }
-}
-
-function listenToChat(chatId, userId, otherName, order) {
+function listenToChat(chatId, userId, chatData) {
   if (unreadCounts[chatId] !== undefined) return;
   unreadCounts[chatId] = 0;
 
   const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('timestamp', 'desc'), limit(20));
-  const unsub = onSnapshot(q, (snap) => {
+  let isInitialLoad = true;
+  const unsub = onSnapshot(q, async (snap) => {
     let unread = 0;
+
+    // Resolve otherName and order details dynamically
+    let otherName = 'Mensaje';
+    let order = null;
+    if (chatData.orderId) {
+      try {
+        const orderSnap = await getDoc(doc(db, 'orders', chatData.orderId));
+        if (orderSnap.exists()) {
+          order = { id: orderSnap.id, ...orderSnap.data() };
+          if (chatData.type === 'client-commerce') {
+            otherName = userId === order.userId ? (order.comercioName || 'Comercio') : (order.userName || 'Cliente');
+          } else if (chatData.type === 'client-delivery') {
+            otherName = userId === order.userId ? (order.driverName || 'Repartidor') : (order.userName || 'Cliente');
+          } else if (chatData.type === 'commerce-delivery') {
+            otherName = userId === order.comercioId ? (order.driverName || 'Repartidor') : (order.comercioName || 'Comercio');
+          }
+        }
+      } catch (err) {
+        console.warn('Error resolving order for notifier:', err);
+      }
+    } else if (chatData.isMarketplace) {
+      otherName = userId === chatData.buyerId ? chatData.sellerName : chatData.buyerName;
+    } else {
+      otherName = 'Soporte';
+    }
+
     snap.docs.forEach(d => {
       const msg = d.data();
       if (msg.senderId !== userId && !msg.read) {
         unread++;
         const msgKey = `${chatId}_${d.id}`;
-        if (!notifiedMessages.has(msgKey) && msg.timestamp) {
-          const msgTime = msg.timestamp.toDate ? msg.timestamp.toDate() : new Date(msg.timestamp);
-          const now = new Date();
-          if (Math.abs(now - msgTime) < 60000) {
+        if (!notifiedMessages.has(msgKey)) {
+          if (!isInitialLoad) {
             notifiedMessages.add(msgKey);
             
             // Play sound alert
@@ -109,21 +91,25 @@ function listenToChat(chatId, userId, otherName, order) {
               console.warn('AudioManager sound play failed:', soundErr);
             }
 
-            const isCommerceOrDelivery = order.userId !== userId;
-            const clickUrl = isCommerceOrDelivery 
-              ? (order.driverId === userId ? `#/delivery-panel` : `#/comercio-panel/orders?id=${order.comercioId}`)
-              : `#/pedido/${order.id}`;
+            const clickUrl = order 
+              ? (order.userId !== userId 
+                  ? (order.driverId === userId ? `#/delivery-panel?chatOrder=${order.id}` : `#/comercio-panel/orders?id=${order.comercioId}&chatOrder=${order.id}`)
+                  : `#/pedido/${order.id}`)
+              : `#/mis-chats`;
 
             sendLocalNotification(`💬 ${msg.senderName || otherName}`, msg.text, {
               tag: `chat-${chatId}`,
               url: clickUrl,
               type: 'chat'
             });
-            showGlobalMessageBanner(msg.senderName || otherName, msg.text, order.id, chatId, isCommerceOrDelivery, order);
+            showGlobalMessageBanner(msg.senderName || otherName, msg.text, chatData.orderId || '', chatId, order ? (order.userId !== userId) : false, order);
+          } else {
+            notifiedMessages.add(msgKey);
           }
         }
       }
     });
+    isInitialLoad = false;
     unreadCounts[chatId] = unread;
     notifyUnreadChange();
   });
@@ -258,7 +244,11 @@ function updateGlobalFAB() {
 }
 
 function showGlobalMessageBanner(sender, text, orderId, chatId, isCommerceOrDelivery = false, order = null) {
-  if (window.location.hash.includes(orderId) && window.location.hash.includes('chat')) return;
+  // Only skip if the chat modal for this specific chatId is currently open in the DOM
+  const chatContainer = document.querySelector('.chat-container');
+  if (chatContainer && document.getElementById(`chat-messages-${chatId}`)) {
+    return;
+  }
   
   setBanner('message', {
     duration: 10000,

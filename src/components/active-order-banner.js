@@ -110,6 +110,7 @@ function updateBannerState(order, allOrders = []) {
   // Final statuses - clear and return
   if (['completed', 'cancelled'].includes(order.status)) {
     clearOrderIndicator();
+    clearCustomerSystemNotifications(order.id);
     if (order.status === 'completed' && lastStatuses[order.id] !== 'completed') {
       setTimeout(async () => {
         const { showDeliveryRating } = await import('./delivery-rating.js');
@@ -135,6 +136,10 @@ function updateBannerState(order, allOrders = []) {
         color1 = '#EF4444'; color2 = '#DC2626'; // Bright Red!
         title = 'Chofer en camino';
         iconName = 'car';
+      } else if (order.isFavor) {
+        color1 = '#0284c7'; color2 = '#0369a1';
+        title = order.driverId ? 'Yendo a buscar pedido' : 'Buscando repartidor';
+        iconName = 'bike';
       } else {
         color1 = '#0284c7'; color2 = '#0369a1';
         title = 'Preparando pedido';
@@ -145,6 +150,10 @@ function updateBannerState(order, allOrders = []) {
         color1 = '#EF4444'; color2 = '#DC2626';
         title = 'Chofer en camino';
         iconName = 'car';
+      } else if (order.isFavor) {
+        color1 = '#7c3aed'; color2 = '#5b21b6';
+        title = 'Yendo a buscar pedido';
+        iconName = 'bike';
       } else {
         color1 = '#7c3aed'; color2 = '#5b21b6';
         title = '¡Pedido listo!';
@@ -182,6 +191,18 @@ function updateBannerState(order, allOrders = []) {
         statusDesc = 'El viaje ha iniciado. Pasajero a bordo.';
       } else {
         statusDesc = `Tu viaje cambió al estado: ${order.status}`;
+      }
+    } else if (order.isFavor) {
+      switch (order.status) {
+        case 'confirmed':
+        case 'ready':
+          statusDesc = 'El repartidor aceptó tu GoFavor y está yendo a buscar tu pedido.';
+          break;
+        case 'delivering':
+          statusDesc = `El repartidor retiró tu pedido y está en camino a entregarlo. Código de entrega: ${order.verificationCode || '----'}`;
+          break;
+        default:
+          statusDesc = `Tu GoFavor cambió al estado: ${order.status}`;
       }
     } else {
       switch (order.status) {
@@ -327,6 +348,20 @@ function clearOrderIndicator() {
       fab.remove();
       FABStack.reposition();
     }, 500);
+  }
+}
+
+function clearCustomerSystemNotifications(orderId = '') {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.getNotifications().then(notifications => {
+        notifications.forEach(n => {
+          if (n.tag && (n.tag.includes(`order-${orderId}`) || (orderId && n.tag.includes(orderId)))) {
+            n.close();
+          }
+        });
+      });
+    }).catch(e => console.warn('Error clearing customer system notifications:', e));
   }
 }
 

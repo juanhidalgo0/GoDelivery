@@ -1,13 +1,16 @@
 {
   "name": "godelivery",
-  "version": "1.5.0",
+  "version": "1.5.8",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:testing": "vite --mode testing",
     "build": "vite build && node post-build.js",
+    "build:testing": "vite build --mode testing && node post-build.js",
     "preview": "vite preview",
-    "deploy": "firebase deploy"
+    "deploy": "firebase deploy",
+    "deploy:testing": "firebase deploy --project testing"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",

@@ -80,27 +80,42 @@ export async function renderComercio(content) {
     const docRef = firestoreDoc(db, 'comercios', resolvedComercioId);
     unsubComercios = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
+        const prevPaused = currentComercio?.isPaused;
         const freshData = snap.data();
         comercio = { id: snap.id, ...freshData };
         
         // Update DOM elements in real time
         const logoImg = document.querySelector('.comercio-detail-logo');
-        if (logoImg) {
-          if (logoImg.tagName === 'IMG') {
-            logoImg.src = comercio.logo || '/logo.png';
-          }
-        }
+        if (logoImg && logoImg.tagName === 'IMG') logoImg.src = comercio.logo || '/logo.png';
         const bannerImg = document.querySelector('.comercio-header img');
-        if (bannerImg && bannerImg.tagName === 'IMG') {
-          bannerImg.src = comercio.banner || '/logo.png';
-        }
+        if (bannerImg && bannerImg.tagName === 'IMG') bannerImg.src = comercio.banner || '/logo.png';
         const nameEl = document.querySelector('.comercio-info-text h1');
-        if (nameEl) {
-          nameEl.textContent = comercio.name;
-        }
+        if (nameEl) nameEl.textContent = comercio.name;
         const descEl = document.querySelector('.comercio-description');
-        if (descEl) {
-          descEl.textContent = comercio.description || '';
+        if (descEl) descEl.textContent = comercio.description || '';
+
+        // Real-time isPaused update: update badge + pause banner + product buttons
+        if (freshData.isPaused !== prevPaused) {
+          // Update open/closed badge
+          const statusBadge = document.getElementById('comercio-status-badge');
+          if (statusBadge) {
+            const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+            const badgeText = comercio.isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
+            const badgeBg = comercio.isPaused ? '#f59e0b' : (isOpen ? '#10b981' : '#64748b');
+            statusBadge.style.background = badgeBg;
+            statusBadge.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:white;display:inline-block;${!comercio.isPaused && isOpen ? 'animation:pulse 1.8s infinite;' : ''}"></span> ${badgeText}`;
+          }
+          // Show/hide paused banner
+          const pauseBanner = document.getElementById('comercio-pause-banner');
+          if (pauseBanner) pauseBanner.style.display = comercio.isPaused ? 'flex' : 'none';
+          // Disable/enable all add-to-cart buttons
+          document.querySelectorAll('.product-card-add').forEach(btn => {
+            btn.style.display = comercio.isPaused ? 'none' : '';
+          });
+          // Show/hide paused pill on product cards
+          document.querySelectorAll('.product-paused-pill').forEach(el => {
+            el.style.display = comercio.isPaused ? '' : 'none';
+          });
         }
 
         // Update local storage cache
@@ -417,7 +432,7 @@ export async function renderComercio(content) {
 
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
       smoothScrollToProductsTop();
-      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
+      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
     // Subcategory filter handler (delegated click event)
@@ -447,7 +462,7 @@ export async function renderComercio(content) {
 
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
       smoothScrollToProductsTop();
-      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
+      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
     // Brand filter handler
@@ -456,7 +471,7 @@ export async function renderComercio(content) {
         activeBrand = e.target.value;
         const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
         smoothScrollToProductsTop();
-        renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
+        renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
       }
     });
 
@@ -465,7 +480,7 @@ export async function renderComercio(content) {
       activeSort = e.target.value;
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
       smoothScrollToProductsTop();
-      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
+      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
     // Search input handler
@@ -476,7 +491,7 @@ export async function renderComercio(content) {
         clearBtn.style.display = activeSearch ? 'flex' : 'none';
       }
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
-      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
+      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
     document.getElementById('clear-search-btn')?.addEventListener('click', () => {
@@ -486,7 +501,7 @@ export async function renderComercio(content) {
       const clearBtn = document.getElementById('clear-search-btn');
       if (clearBtn) clearBtn.style.display = 'none';
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
-      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories);
+      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
     // Product interaction handler (Delegated to container)
@@ -514,6 +529,11 @@ export async function renderComercio(content) {
 
           if (!isOpen) {
             showToast('El comercio está cerrado. No se pueden agregar productos al carrito.', 'warning');
+            return;
+          }
+
+          if (currentComercio?.isPaused) {
+            showToast('Este comercio está cerrado temporalmente. Volvé a intentar más tarde.', 'warning');
             return;
           }
 
@@ -676,10 +696,13 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
         <div class="comercio-info-card" style="background: var(--color-surface); border-radius: 24px; padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); position: relative;">
           ${(() => {
             const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+            const isPausedNow = comercio.isPaused === true;
+            const badgeText = isPausedNow ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
+            const badgeBg = isPausedNow ? '#f59e0b' : (isOpen ? '#10b981' : '#64748b');
             return `
-              <div style="position: absolute; top: -16px; right: 24px; font-size: 11px; font-weight: 900; padding: 6px 14px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; background: ${isOpen ? '#10b981' : '#64748b'}; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
-                <span style="width: 6px; height: 6px; border-radius: 50%; background: white; display: inline-block; ${isOpen ? 'animation: pulse 1.8s infinite;' : ''}"></span>
-                ${isOpen ? 'Abierto' : 'Cerrado'}
+              <div id="comercio-status-badge" style="position: absolute; top: -16px; right: 24px; font-size: 11px; font-weight: 900; padding: 6px 14px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; background: ${badgeBg}; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: white; display: inline-block; ${!isPausedNow && isOpen ? 'animation: pulse 1.8s infinite;' : ''}"></span>
+                ${badgeText}
               </div>
             `;
           })()}
@@ -779,6 +802,15 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
         </div>
       </div>
 
+      <!-- Paused Banner (shown only when commerce is paused) -->
+      <div id="comercio-pause-banner" style="display:${comercio.isPaused ? 'flex' : 'none'}; margin: 0 16px 16px; padding: 16px 18px; background: linear-gradient(135deg, rgba(245,158,11,0.12), rgba(234,88,12,0.08)); border: 1.5px solid rgba(245,158,11,0.35); border-radius: 18px; align-items: center; gap: 14px;">
+        <span style="font-size: 26px; flex-shrink:0;">🔒</span>
+        <div>
+          <div style="font-size: 14px; font-weight: 900; color: #92400e;">Comercio cerrado temporalmente</div>
+          <div style="font-size: 12px; color: #b45309; font-weight: 600; margin-top: 3px;">Este comercio pausó sus ventas. Volvé a intentar más tarde.</div>
+        </div>
+      </div>
+
       <!-- Cart FAB -->
       <div id="cart-fab-container"></div>
       
@@ -787,7 +819,8 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
   `;
 
   const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
-  renderProducts(products, activeCategory, activeOffers, activeSort, '', comercio.id, isOpen, activeBrand, activeSubCategory, categories);
+  const isPausedNow = comercio.isPaused === true;
+  renderProducts(products, activeCategory, activeOffers, activeSort, '', comercio.id, isOpen, activeBrand, activeSubCategory, categories, isPausedNow);
   updateFAB();
 
   // Bind rating button click
@@ -971,7 +1004,7 @@ let allFilteredProducts = [];
 let displayedCount = 20;
 let infiniteScrollObserver = null;
 
-function renderProducts(products, categoryId, activeOffers = [], sortBy = 'default', searchQuery = '', comercioId = '', isOpen = true, activeBrand = 'all', activeSubCategory = 'all', categories = []) {
+function renderProducts(products, categoryId, activeOffers = [], sortBy = 'default', searchQuery = '', comercioId = '', isOpen = true, activeBrand = 'all', activeSubCategory = 'all', categories = [], isPaused = false) {
   const grid = document.getElementById('comercio-products');
   if (!grid) return;
 
@@ -1174,8 +1207,8 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
               <div style="position:absolute; top:6px; left:6px; background:var(--color-primary); color:white; font-size:9px; font-weight:900; padding:3px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.02em; box-shadow:0 3px 8px rgba(225,29,72,0.35); z-index:10; border: 1px solid rgba(255,255,255,0.15); font-family:var(--font-display);">${offer.type === 'percentage' ? `${offer.value}% OFF` : '2x1'}</div>
             ` : ''}
             
-            ${!isOpen ? `
-              <div style="position:absolute; bottom:6px; right:6px; background:var(--color-text-tertiary); color:white; font-size:9.5px; font-weight:850; padding:4px 10px; border-radius:12px; text-transform:uppercase; letter-spacing:0.05em; z-index:10; border: 1.5px solid white;">Cerrado</div>
+            ${(!isOpen || isPaused) ? `
+              <div style="position:absolute; bottom:6px; right:6px; background:${isPaused ? '#f59e0b' : 'var(--color-text-tertiary)'}; color:white; font-size:9.5px; font-weight:850; padding:4px 10px; border-radius:12px; text-transform:uppercase; letter-spacing:0.05em; z-index:10; border: 1.5px solid white;">${isPaused ? 'Pausado' : 'Cerrado'}</div>
             ` : !isUnavailable ? `
               <button class="product-card-add" data-product-id="${p.id}" title="Agregar al carrito" style="position:absolute; bottom:-6px; right:-6px; width:32px; height:32px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; border:2px solid var(--color-surface); box-shadow:0 4px 10px rgba(0,0,0,0.15); cursor:pointer; transition:all 0.2s ease; border:2px solid white;">
                 ${icon('plus', 16)}

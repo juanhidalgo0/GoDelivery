@@ -1,10 +1,11 @@
-// GoDelivery — Admin Comercios Management
 import { db } from '../../firebase.js';
 import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
 import { openCropper } from '../../utils/cropper.js';
+import { formatPrice } from '../../utils/format.js';
+import { getState } from '../../state.js';
 
 export async function renderAdminComercios() {
   const content = document.getElementById('app-content');
@@ -12,109 +13,377 @@ export async function renderAdminComercios() {
 
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
-      <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
-        
-        <button onclick="location.hash='#/admin'" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2;">
-          ${icon('chevronLeft', 24)}
-        </button>
-        <div style="flex:1; position:relative; z-index:2;">
-          <h1 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; letter-spacing:-0.03em;">Gestión de Comercios</h1>
-          <p style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:0.1em; margin-top:2px;">Control total de perfiles y catálogos</p>
+      <!-- Minimalist 1-Row Header (sticky, identical to Repartidores) -->
+      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+          <a href="#/admin" style="width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; flex-shrink:0; transition:all 0.2s;">
+            ${icon('chevronLeft', 20)}
+          </a>
+          <div style="display:flex; align-items:center; gap:8px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            <h1 style="font-family:var(--font-display); font-weight:900; font-size:16px; color:white; margin:0; letter-spacing:-0.02em; text-transform:uppercase;">COMERCIOS</h1>
+            <span style="color:rgba(255,255,255,0.3); font-size:12px;">•</span>
+            <span style="font-size:11px; color:rgba(255,255,255,0.65); font-weight:700; overflow:hidden; text-overflow:ellipsis;">Control & Liquidación</span>
+          </div>
         </div>
       </div>
 
-      <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column; background:var(--color-bg);">
-        <div style="background:var(--color-surface); padding:12px 20px 20px; border-bottom:1px solid var(--color-border); flex-shrink:0;">
-          <div style="background:var(--color-bg-secondary); border-radius:16px; height:50px; display:flex; align-items:center; padding:0 16px; gap:12px; border:1px solid var(--color-border); box-shadow:inset 0 2px 4px rgba(0,0,0,0.02);">
-            <span style="color:var(--color-text-tertiary);">${icon('search', 20)}</span>
-            <input type="text" id="admin-comercio-search" placeholder="Buscar comercio por nombre..." style="flex:1; border:none; background:transparent; font-size:15px; font-weight:600; outline:none; color:var(--color-text);" />
+      <!-- Sticky Search + Filter Bar (identical layout to Repartidores) -->
+      <div id="comercios-search-bar" style="background:var(--color-bg); border-bottom:1px solid var(--color-border-light); padding:10px 16px; display:flex; flex-direction:column; gap:8px; flex-shrink:0; z-index:50;">
+        <div style="position:relative; width:100%;">
+          <input type="text" id="comercio-search-input-sticky" placeholder="🔍 Buscar por nombre o rubro..." style="width:100%; height:44px; border-radius:14px; padding:0 16px 0 42px; font-weight:700; font-size:13px; background:var(--color-surface); border:1.5px solid var(--color-border); color:var(--color-text); outline:none; box-sizing:border-box; box-shadow:var(--shadow-sm);" />
+          <div style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); display:flex;">
+            ${icon('search', 18)}
           </div>
         </div>
+        <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; -webkit-overflow-scrolling:touch; scrollbar-width:none;">
+          <button class="comercio-filter-sticky" data-filter="all" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-primary); color:white;">Todos</button>
+          <button class="comercio-filter-sticky" data-filter="debt" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">⚠️ Con Deuda</button>
+          <button class="comercio-filter-sticky" data-filter="clean" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">✅ Al Día</button>
+          <button class="comercio-filter-sticky" data-filter="pending" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">⏳ Pendientes</button>
+        </div>
+      </div>
 
-        <div style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:16px; -webkit-overflow-scrolling:touch;">
-          <div id="comercios-list">
-            <div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>
-          </div>
-        </div>
+      <!-- Main Container -->
+      <div id="comercios-panel-body" style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:16px; -webkit-overflow-scrolling:touch; padding-bottom:40px;">
+        <div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>
       </div>
     </div>
   `;
 
   let allComercios = [];
+  let allOrders = [];
+  let searchQuery = '';
+  let filterStatus = 'all';
 
-  const loadAndFilter = (searchQuery = '') => {
-    const container = document.getElementById('comercios-list');
-    if (!container) return;
+  const renderComerciosList = () => {
+    const body = document.getElementById('comercios-panel-body');
+    if (!body) return;
 
-    const filtered = allComercios.filter(c => {
-      const isGoMarket = (c.name || '').toLowerCase().includes('go!') && (c.name || '').toLowerCase().includes('market');
-      if (isGoMarket) return false;
-      return (c.name || '').toLowerCase().includes(searchQuery.toLowerCase());
+    // Filter out internal system market
+    const activeComercios = allComercios.filter(c => {
+      const name = (c.name || '').toLowerCase();
+      return !(name.includes('go!') && name.includes('market'));
     });
 
-    if (filtered.length === 0) {
-      container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--color-text-tertiary); font-weight:600;">No se encontraron comercios${searchQuery ? ' para "' + searchQuery + '"' : ''}</div>`;
-      return;
-    }
+    // Map commerce debt and stats from orders
+    const comercioStatsMap = {};
+    activeComercios.forEach(c => {
+      comercioStatsMap[c.id] = {
+        unsettledOrders: [],
+        unsettledCommission: 0,
+        totalSales: 0,
+        ordersCount: 0
+      };
+    });
 
-    container.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        ${filtered.map(c => `
-          <div class="admin-comercio-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:16px; display:flex; align-items:center; gap:14px; transition:all 0.2s; position:relative;">
-            <div style="width:52px; height:52px; border-radius:50%; overflow:hidden; border:1px solid var(--color-border-light); background:white; flex-shrink:0; padding:2px;">
-              <img src="${c.logo || '/logo.png'}" style="width:100%; height:100%; object-fit:cover;" />
-            </div>
-            <div style="flex:1; min-width:0;">
-              <div style="font-weight:800; font-size:16px; color:var(--color-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:8px;">
-                ${c.name}
-                ${c.approvedByAdmin === false ? `
-                  <span style="font-size:10px; font-weight:800; background:#f59e0b; color:white; padding:2px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.03em;">Pendiente</span>
-                ` : ''}
-              </div>
-              <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; display:flex; align-items:center; gap:4px;">
-                ${icon('tag', 12)} ${c.category || 'Sin categoría'}
-              </div>
-            </div>
-            <div style="display:flex; gap:8px;">
-              <button class="admin-edit-com-btn" data-id="${c.id}" style="width:42px; height:42px; border-radius:12px; border:none; background:var(--color-bg-secondary); color:var(--color-text); display:flex; align-items:center; justify-content:center; cursor:pointer;">
-                ${icon('settings', 20)}
-              </button>
-              <a href="#/mi-comercio/${c.id}/orders" style="width:42px; height:42px; border-radius:12px; border:none; background:var(--color-primary-lighter); color:var(--color-primary); display:flex; align-items:center; justify-content:center; text-decoration:none;">
-                ${icon('package', 20)}
-              </a>
-            </div>
+    allOrders.forEach(o => {
+      if (o.status === 'cancelled') return;
+      const cId = o.comercioId;
+      if (!cId || !comercioStatsMap[cId]) return;
+
+      comercioStatsMap[cId].ordersCount++;
+      comercioStatsMap[cId].totalSales += Number(o.total || 0);
+
+      if (!o.isSettled) {
+        const commAmt = Number(o.commissionAmount || 0);
+        comercioStatsMap[cId].unsettledCommission += commAmt;
+        comercioStatsMap[cId].unsettledOrders.push(o);
+      }
+    });
+
+    let totalDebtSum = 0;
+    let debtCount = 0;
+    let cleanCount = 0;
+    let pendingCount = 0;
+
+    activeComercios.forEach(c => {
+      const stats = comercioStatsMap[c.id] || { unsettledCommission: 0 };
+      const debt = stats.unsettledCommission;
+      totalDebtSum += debt;
+      if (c.approvedByAdmin === false) pendingCount++;
+      if (debt > 0) debtCount++;
+      else cleanCount++;
+    });
+
+    // Filter by search & status
+    const filtered = activeComercios.filter(c => {
+      const name = (c.name || '').toLowerCase();
+      const cat = (c.category || '').toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch = !q || name.includes(q) || cat.includes(q);
+
+      if (!matchesSearch) return false;
+
+      const stats = comercioStatsMap[c.id] || { unsettledCommission: 0 };
+      const debt = stats.unsettledCommission;
+
+      if (filterStatus === 'debt') return debt > 0;
+      if (filterStatus === 'clean') return debt <= 0;
+      if (filterStatus === 'pending') return c.approvedByAdmin === false;
+
+      return true;
+    });
+
+    body.innerHTML = `
+      <!-- KPI Summary Header Card (identical to Repartidores) -->
+      <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); color: white;">
+        <div style="font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 1px;">Comisiones Pendientes por Cobrar (Comercios)</div>
+        <div style="font-size: 34px; font-weight: 950; letter-spacing: -1.5px; margin: 4px 0 16px; color: #ef4444;">${formatPrice(totalDebtSum)}</div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 14px; text-align: center;">
+            <div style="font-size: 8.5px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase;">Total</div>
+            <div style="font-size: 15px; font-weight: 900; margin-top: 2px;">${activeComercios.length}</div>
           </div>
-        `).join('')}
+          <div style="background: rgba(239,68,68,0.12); padding: 8px; border-radius: 14px; text-align: center; border: 1px solid rgba(239,68,68,0.25);">
+            <div style="font-size: 8.5px; font-weight: 800; color: #ef4444; text-transform: uppercase;">Con Deuda</div>
+            <div style="font-size: 15px; font-weight: 900; color: #ef4444; margin-top: 2px;">${debtCount}</div>
+          </div>
+          <div style="background: rgba(34,197,94,0.12); padding: 8px; border-radius: 14px; text-align: center; border: 1px solid rgba(34,197,94,0.25);">
+            <div style="font-size: 8.5px; font-weight: 800; color: #22c55e; text-transform: uppercase;">Al Día</div>
+            <div style="font-size: 15px; font-weight: 900; color: #22c55e; margin-top: 2px;">${cleanCount}</div>
+          </div>
+          <div style="background: rgba(245,158,11,0.1); padding: 8px; border-radius: 14px; text-align: center; border: 1px solid rgba(245,158,11,0.2);">
+            <div style="font-size: 8.5px; font-weight: 800; color: #f59e0b; text-transform: uppercase;">Pendientes</div>
+            <div style="font-size: 15px; font-weight: 900; color: #f59e0b; margin-top: 2px;">${pendingCount}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comercios Cards List -->
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <h3 style="font-family:var(--font-display); font-size:14px; font-weight:900; margin:0; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Resultados (${filtered.length})</h3>
+        </div>
+
+        ${filtered.length === 0 ? `
+          <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary); background:var(--color-surface); border-radius:20px; border:1px dashed var(--color-border-light);">
+            ${icon('search', 32)}
+            <p style="margin-top:12px; font-weight:700;">No se encontraron comercios con los criterios de búsqueda.</p>
+          </div>
+        ` : filtered.map(c => {
+          const stats = comercioStatsMap[c.id] || { unsettledCommission: 0, unsettledOrders: [], totalSales: 0 };
+          const debt = stats.unsettledCommission;
+          const isPendingApproval = c.approvedByAdmin === false;
+          const isClean = debt <= 0;
+          const logo = c.logo || '/logo.png';
+
+          return `
+            <div class="admin-card-v2" style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:24px; padding:18px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--shadow-sm); transition:all 0.2s;">
+              
+              <!-- Card Header -->
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                  <div style="width:48px; height:48px; border-radius:50%; overflow:hidden; border:2px solid var(--color-bg-secondary); background:white; flex-shrink:0; padding:2px; box-shadow:0 4px 10px rgba(0,0,0,0.06);">
+                    <img src="${logo}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" />
+                  </div>
+                  <div style="min-width:0;">
+                    <div style="font-weight:900; font-size:16px; color:var(--color-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-0.01em;">${c.name}</div>
+                    <div style="font-size:12px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">
+                      ${icon('tag', 12)} ${c.category || 'Comercio'} • ${c.phone || c.whatsapp || 'Sin Tel.'}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Badges -->
+                <div style="flex-shrink:0;">
+                  ${isPendingApproval ? `
+                    <span style="background:rgba(245,158,11,0.1); color:#f59e0b; font-size:10.5px; font-weight:900; padding:5px 10px; border-radius:10px; border:1px solid rgba(245,158,11,0.2);">⏳ Pendiente</span>
+                  ` : isClean ? `
+                    <span style="background:rgba(34,197,94,0.1); color:#22c55e; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(34,197,94,0.2);">✅ Al Día</span>
+                  ` : `
+                    <span style="background:rgba(239,68,68,0.1); color:#ef4444; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(239,68,68,0.2);">⚠️ Debe Comisión</span>
+                  `}
+                </div>
+              </div>
+
+              <!-- Debt & Sales Info -->
+              <div style="background:${debt > 0 ? 'linear-gradient(135deg, rgba(239,68,68,0.04) 0%, rgba(239,68,68,0.08) 100%)' : 'linear-gradient(135deg, rgba(34,197,94,0.04) 0%, rgba(34,197,94,0.08) 100%)'}; border:1px solid ${debt > 0 ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)'}; border-radius:18px; padding:14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                  <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Comisión Pendiente (${stats.unsettledOrders.length} ped.)</div>
+                  <div style="font-size:22px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#22c55e'}; letter-spacing:-0.5px; margin-top:2px;">${formatPrice(debt)}</div>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Ventas Totales</div>
+                  <div style="font-size:14px; font-weight:800; color:var(--color-text-secondary); margin-top:2px;">${formatPrice(stats.totalSales)}</div>
+                </div>
+              </div>
+
+              <!-- Primary Action Buttons -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <button data-wsp-comercio="${c.id}" style="height:46px; border-radius:16px; background:linear-gradient(135deg, #25D366 0%, #128C7E 100%); color:white; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:0 6px 16px rgba(37,211,102,0.25);">
+                  ${icon('whatsappLogo', 18)} WhatsApp Cobro
+                </button>
+                <button data-settle-comercio="${c.id}" style="height:46px; border-radius:16px; background:${debt > 0 ? 'linear-gradient(135deg, #E11D48 0%, #BE123C 100%)' : 'var(--color-bg-secondary)'}; color:${debt > 0 ? 'white' : 'var(--color-text-tertiary)'}; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:${debt > 0 ? '0 6px 16px rgba(225,29,72,0.25)' : 'none'}; opacity:${debt > 0 ? '1' : '0.6'};">
+                  ${icon('bank', 18)} Liquidar Comercio
+                </button>
+              </div>
+
+              <!-- Secondary Controls (Editar / Pedidos) -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; border-top:1px dashed var(--color-border-light); padding-top:12px;">
+                <button class="admin-edit-com-btn" data-id="${c.id}" style="height:38px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text); font-weight:800; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                  ${icon('settings', 16)} Editar Perfil
+                </button>
+                <a href="#/mi-comercio/${c.id}/orders" style="height:38px; border-radius:12px; border:none; background:var(--color-primary-lighter); color:var(--color-primary); font-weight:800; font-size:12px; display:flex; align-items:center; justify-content:center; gap:6px; text-decoration:none;">
+                  ${icon('package', 16)} Ver Pedidos
+                </a>
+              </div>
+
+            </div>
+          `;
+        }).join('')}
       </div>
     `;
 
-    container.querySelectorAll('.admin-edit-com-btn').forEach(btn => {
+    // Attach Listeners
+    body.querySelectorAll('.comercio-filter-sticky').forEach(btn => {
+      btn.onclick = () => {
+        filterStatus = btn.dataset.filter;
+        renderComerciosList();
+      };
+    });
+
+    body.querySelectorAll('[data-wsp-comercio]').forEach(btn => {
+      btn.onclick = () => {
+        const cId = btn.dataset.wspComercio;
+        const comercio = allComercios.find(c => c.id === cId);
+        if (!comercio) return;
+        const phone = (comercio.phone || comercio.whatsapp || '').replace(/\D/g, '');
+        if (!phone) {
+          showToast('El comercio no tiene número de teléfono registrado.', 'error');
+          return;
+        }
+        const stats = comercioStatsMap[cId] || { unsettledCommission: 0 };
+        const debt = stats.unsettledCommission;
+        const bankAlias = getState().bankAlias || getState().whatsappPayments || 'godelivery.oficial';
+        const text = `Hola *${comercio.name}*! Te escribimos de GoDelivery para recordarte la rendición de comisiones de tus pedidos:
+
+📌 Comisión Pendiente: ${formatPrice(debt)}
+
+Podés realizar el pago al Alias oficial:
+💳 ALIAS: ${bankAlias}
+
+Por favor, enviá el comprobante de transferencia por este medio una vez realizado. ¡Muchas gracias!`;
+
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+      };
+    });
+
+    body.querySelectorAll('[data-settle-comercio]').forEach(btn => {
+      btn.onclick = () => {
+        const cId = btn.dataset.settleComercio;
+        const comercio = allComercios.find(c => c.id === cId);
+        const stats = comercioStatsMap[cId];
+        if (!comercio || !stats) return;
+
+        openComercioSettleModal(comercio, stats.unsettledOrders, stats.unsettledCommission, refreshData);
+      };
+    });
+
+    body.querySelectorAll('.admin-edit-com-btn').forEach(btn => {
       btn.onclick = () => openComercioEditor(allComercios.find(c => c.id === btn.dataset.id), () => refreshData());
     });
   };
 
   const refreshData = async () => {
     try {
-      const snap = await getDocs(collection(db, 'comercios'));
-      allComercios = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const [comerciosSnap, ordersSnap] = await Promise.all([
+        getDocs(collection(db, 'comercios')),
+        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc')))
+      ]);
+      allComercios = comerciosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       allComercios.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      loadAndFilter(document.getElementById('admin-comercio-search')?.value || '');
+      allOrders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      renderComerciosList();
     } catch (err) {
-      console.error('Error loading comercios:', err);
+      console.error('Error loading comercios data:', err);
     }
   };
 
   // Initial load
   await refreshData();
 
-  // Bind search input
-  const searchInput = document.getElementById('admin-comercio-search');
-  if (searchInput) {
-    searchInput.oninput = (e) => loadAndFilter(e.target.value);
+  // Bind sticky search input
+  const stickySearchInput = document.getElementById('comercio-search-input-sticky');
+  if (stickySearchInput) {
+    stickySearchInput.oninput = (e) => {
+      searchQuery = e.target.value;
+      renderComerciosList();
+    };
   }
+}
+
+async function openComercioSettleModal(comercio, unsettledOrders, unsettledCommission, onSettled) {
+  if (!unsettledOrders || unsettledOrders.length === 0 || unsettledCommission <= 0) {
+    showToast('Este comercio no registra comisiones pendientes por liquidar.', 'info');
+    return;
+  }
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'padding:20px; display:flex; flex-direction:column; gap:16px;';
+  modalContent.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Comercio</div>
+      <div style="font-family:var(--font-display); font-size:18px; font-weight:900; color:var(--color-text); margin-top:2px;">${comercio.name}</div>
+      <div style="font-size:24px; font-weight:950; color:#ef4444; margin-top:6px;">${formatPrice(unsettledCommission)}</div>
+      <div style="font-size:12px; color:var(--color-text-secondary); font-weight:700; margin-top:4px;">${unsettledOrders.length} pedido(s) sin liquidar</div>
+    </div>
+
+    <div>
+      <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Método de Cobro / Rendición</label>
+      <select id="comercio-settle-method-select" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:14px; background:var(--color-bg); border:1px solid var(--color-border); color:var(--color-text);">
+        <option value="transferencia">🏦 Transferencia Bancaria</option>
+        <option value="efectivo">💵 Efectivo</option>
+      </select>
+    </div>
+
+    <button id="confirm-comercio-settle-btn" style="height:54px; border-radius:18px; background:#22c55e; color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 20px rgba(34,197,94,0.25); margin-top:8px;">
+      ${icon('checkCircle', 20)} Confirmar Liquidación de Comercio
+    </button>
+  `;
+
+  showModal({ title: 'Liquidar Comercio', content: modalContent, height: 'auto' });
+
+  modalContent.querySelector('#confirm-comercio-settle-btn').onclick = async () => {
+    const btn = modalContent.querySelector('#confirm-comercio-settle-btn');
+    btn.disabled = true;
+    btn.innerHTML = 'Procesando...';
+
+    try {
+      const { addDoc, writeBatch, serverTimestamp } = await import('firebase/firestore');
+
+      // 1. Add settlement record
+      await addDoc(collection(db, 'settlements'), {
+        type: 'commerce_settlement',
+        comercioId: comercio.id,
+        comercioName: comercio.name,
+        amountCollected: unsettledCommission,
+        orderIds: unsettledOrders.map(o => o.id),
+        orderCount: unsettledOrders.length,
+        createdAt: serverTimestamp(),
+        adminEmail: getState().user?.email || 'Admin'
+      });
+
+      // 2. Mark orders as settled
+      const batch = writeBatch(db);
+      unsettledOrders.forEach(o => {
+        batch.update(doc(db, 'orders', o.id), {
+          isSettled: true,
+          settledAt: serverTimestamp()
+        });
+      });
+      await batch.commit();
+
+      closeModal();
+      showToast('Liquidación de comercio completada con éxito', 'success');
+      if (onSettled) onSettled();
+    } catch (err) {
+      console.error('Error liquidando comercio:', err);
+      showToast('Error al liquidar comercio', 'error');
+      btn.disabled = false;
+      btn.innerHTML = `${icon('checkCircle', 20)} Confirmar Liquidación de Comercio`;
+    }
+  };
 }
 
 async function openComercioEditor(comercio, onSaved) {
@@ -274,18 +543,36 @@ async function openComercioEditor(comercio, onSaved) {
 
         if (suggestionsDropdown) {
           suggestionsDropdown.innerHTML = suggestions.map(s => `
-            <div class="suggestion-item" data-lat="${s.lat}" data-lng="${s.lng}" data-addr="${s.address}" style="padding:12px 16px; font-size:13px; font-weight:600; color:var(--color-text-primary); cursor:pointer; border-bottom:1px solid var(--color-border-light);">
+            <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="padding:12px 16px; font-size:13px; font-weight:600; color:var(--color-text-primary); cursor:pointer; border-bottom:1px solid var(--color-border-light);">
               ${s.address}
             </div>
           `).join('');
           suggestionsDropdown.style.display = 'block';
 
           suggestionsDropdown.querySelectorAll('.suggestion-item').forEach(item => {
-            item.onclick = () => {
-              const lat = parseFloat(item.dataset.lat);
-              const lng = parseFloat(item.dataset.lng);
+            item.onclick = async () => {
+              let lat = parseFloat(item.dataset.lat);
+              let lng = parseFloat(item.dataset.lng);
+              const placeId = item.dataset.placeid;
               const addr = item.dataset.addr;
-              selectLocation({ lat, lng }, addr);
+
+              if (isNaN(lat) || isNaN(lng)) {
+                if (placeId) {
+                  try {
+                    const { geocodePlaceId } = await import('../../utils/geo.js');
+                    const coords = await geocodePlaceId(placeId);
+                    if (coords) {
+                      selectLocation({ lat: coords.lat, lng: coords.lng }, addr);
+                    } else {
+                      console.error('Failed to geocode suggestion place ID');
+                    }
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }
+              } else {
+                selectLocation({ lat, lng }, addr);
+              }
             };
           });
         }

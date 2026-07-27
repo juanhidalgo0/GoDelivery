@@ -1,6 +1,6 @@
 import { showToast } from '../components/toast.js';
 
-let isUnlocked = false;
+let isUnlocked = true;
 let audioCtx = null;
 const audioCache = new Map();
 

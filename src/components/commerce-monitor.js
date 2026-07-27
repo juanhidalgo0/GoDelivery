@@ -127,6 +127,7 @@ function startOrdersListener() {
     lastKnownPendingIds = new Set([...lastKnownPendingIds].filter(id => currentIds.has(id)));
 
     updateBannerState();
+    updateMutePill(orders.length > 0 && !isMutedGlobally);
   });
 }
 
@@ -134,6 +135,7 @@ function stopOrdersListener() {
   if (commerceUnsub) commerceUnsub();
   commerceUnsub = null;
   AudioManager.stopLoop(SOUND_URL);
+  updateMutePill(false);
 }
 
 function stopAllMonitoring() {
@@ -143,6 +145,7 @@ function stopAllMonitoring() {
   currentPendingOrders = [];
   clearBanner('commerce');
   AudioManager.stopLoop(SOUND_URL);
+  updateMutePill(false);
 }
 
 function playAlertSound() {
@@ -240,5 +243,67 @@ function clearCommerceIndicator() {
       fab.remove();
       FABStack.reposition();
     }, 500);
+  }
+}
+
+function updateMutePill(show) {
+  let pill = document.getElementById('comercio-mute-alarm-pill');
+  if (show) {
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'comercio-mute-alarm-pill';
+      pill.style.cssText = `
+        position: fixed;
+        bottom: 84px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1.5px solid rgba(225, 29, 72, 0.35);
+        border-radius: 30px;
+        padding: 12px 24px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        z-index: 999999999;
+        cursor: pointer;
+        color: white;
+        font-family: var(--font-display);
+        font-weight: 900;
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        box-shadow: 0 10px 30px rgba(225, 29, 72, 0.35);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        opacity: 0;
+      `;
+      document.body.appendChild(pill);
+
+      pill.onclick = () => {
+        AudioManager.hapticLight();
+        isMutedGlobally = true;
+        AudioManager.stopLoop(SOUND_URL);
+        updateMutePill(false);
+      };
+    }
+
+    pill.innerHTML = `
+      <span class="animate-pulse" style="display:inline-block; width:8px; height:8px; background:#e11d48; border-radius:50%; box-shadow:0 0 10px #e11d48;"></span>
+      <span style="font-size:16px; display:inline-flex; align-items:center;">🔔</span>
+      <span>SILENCIAR ALARMA PENDIENTE</span>
+    `;
+
+    requestAnimationFrame(() => {
+      pill.style.transform = 'translateX(-50%) translateY(0)';
+      pill.style.opacity = '1';
+    });
+  } else {
+    if (pill) {
+      pill.style.transform = 'translateX(-50%) translateY(20px)';
+      pill.style.opacity = '0';
+      setTimeout(() => {
+        pill.remove();
+      }, 400);
+    }
   }
 }

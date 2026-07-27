@@ -7,6 +7,9 @@ import { AudioManager } from './utils/audio-manager.js';
 import { db } from './firebase.js';
 import { icon } from './utils/icons.js';
 import { initScrollAnimations } from './utils/scroll-animations.js';
+if (import.meta.env.VITE_FIREBASE_ENV === 'testing') {
+  import('./utils/sync-catalog.js');
+}
 
 // Initialize audio system
 AudioManager.init();
@@ -14,9 +17,16 @@ AudioManager.init();
 async function init() {
   // Restore last route hash on startup to handle Android activity destruction recovery
   try {
+    const isNewSession = !sessionStorage.getItem('gd_session_active');
+    sessionStorage.setItem('gd_session_active', 'true');
+    if (isNewSession) {
+      localStorage.removeItem('gd_last_hash');
+    }
     const lastHash = localStorage.getItem('gd_last_hash');
     if (lastHash && lastHash !== '#/' && lastHash !== '#') {
       window.location.hash = lastHash;
+    } else {
+      window.location.hash = '#/';
     }
     window.addEventListener('hashchange', () => {
       const h = window.location.hash;
@@ -30,22 +40,26 @@ async function init() {
     document.body.classList.add('platform-capacitor');
     
     // Hide native splash screen immediately to transition to the animated HTML splash / login wall
+    // Hide native splash screen immediately to transition to the animated HTML splash / login wall
     import('@capacitor/splash-screen').then(({ SplashScreen }) => {
+      // Instant native load: Hide native splash screen immediately
       SplashScreen.hide();
     }).catch(err => console.warn('GoDelivery: Failed to hide native splash screen:', err));
     
-    // Check for App Updates in Play Store (Android)
-    import('@capawesome/capacitor-app-update').then(async ({ AppUpdate }) => {
-      try {
-        const result = await AppUpdate.getAppUpdateInfo();
-        if (result.updateAvailability === 2) { // 2 = UPDATE_AVAILABLE
-          console.log('[Version] Mandatory update found on Play Store. Forcing update...');
-          await AppUpdate.performImmediateUpdate();
+    // Check for App Updates in Play Store (Android) asynchronously without blocking startup
+    setTimeout(() => {
+      import('@capawesome/capacitor-app-update').then(async ({ AppUpdate }) => {
+        try {
+          const result = await AppUpdate.getAppUpdateInfo();
+          if (result.updateAvailability === 2) { // 2 = UPDATE_AVAILABLE
+            console.log('[Version] Mandatory update found on Play Store. Forcing update...');
+            await AppUpdate.performImmediateUpdate();
+          }
+        } catch (err) {
+          console.warn('GoDelivery: Failed to check for Play Store updates:', err);
         }
-      } catch (err) {
-        console.warn('GoDelivery: Failed to check for Play Store updates:', err);
-      }
-    }).catch(err => console.warn('Failed to load AppUpdate plugin:', err));
+      }).catch(err => console.warn('Failed to load AppUpdate plugin:', err));
+    }, 2000);
 
     import('@capacitor/app').then(({ App }) => {
       App.addListener('backButton', () => {
@@ -97,55 +111,46 @@ async function init() {
     console.error('Error removing Pizzería category:', err);
   }
 
-  // Force-update check against version.json
-  try {
-    const vRes = await fetch('/version.json?cb=' + Date.now());
-    if (vRes.ok) {
-      const vData = await vRes.json();
-      const currentVer = localStorage.getItem('gd_app_version');
-      if (currentVer && currentVer !== String(vData.version)) {
-        console.log('[Version] New version detected:', vData.version, '. Clearing app caches and reloading...');
-        
-        // Clear Firestore cache
-        try {
-          const { terminate, clearIndexedDbPersistence } = await import('firebase/firestore');
-          const { db: firestoreDb } = await import('./firebase.js');
-          await terminate(firestoreDb);
-          await clearIndexedDbPersistence(firestoreDb);
-          console.log('[Version] Firestore IndexedDb cache cleared successfully.');
-        } catch (dbErr) {
-          console.warn('[Version] Failed to clear Firestore IndexedDb:', dbErr);
-        }
-
-        // Unregister service workers
-        if ('serviceWorker' in navigator) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          for (const r of regs) {
-            await r.unregister();
+  // Force-update check against version.json (Deferred to run post-load to bypass blocking startup)
+  setTimeout(async () => {
+    try {
+      const vRes = await fetch('/version.json?cb=' + Date.now());
+      if (vRes.ok) {
+        const vData = await vRes.json();
+        const currentVer = localStorage.getItem('gd_app_version');
+        if (currentVer && currentVer !== String(vData.version)) {
+          console.log('[Version] New version detected:', vData.version, '. Clearing app caches and reloading...');
+          
+          // Unregister service workers
+          if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const r of regs) {
+              await r.unregister();
+            }
           }
-        }
-        
-        // Clear all caches
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          for (const key of keys) {
-            await caches.delete(key);
+          
+          // Clear all caches
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            for (const key of keys) {
+              await caches.delete(key);
+            }
           }
-        }
 
-        // Update version in localStorage (do NOT clear localStorage/sessionStorage to preserve session and state)
-        localStorage.setItem('gd_app_version', String(vData.version));
-        
-        // Force reload bypassing HTTP cache
-        window.location.reload();
-        return;
-      } else if (!currentVer) {
-        localStorage.setItem('gd_app_version', String(vData.version));
+          // Update version in localStorage (do NOT clear localStorage/sessionStorage to preserve session and state)
+          localStorage.setItem('gd_app_version', String(vData.version));
+          
+          // Force reload bypassing HTTP cache
+          window.location.reload();
+          return;
+        } else if (!currentVer) {
+          localStorage.setItem('gd_app_version', String(vData.version));
+        }
       }
+    } catch (err) {
+      console.warn('[Version] Check failed:', err);
     }
-  } catch (err) {
-    console.warn('[Version] Check failed:', err);
-  }
+  }, 3000);
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
   const urlParams = new URLSearchParams(window.location.search);
@@ -495,8 +500,12 @@ async function init() {
     '/admin/support-chats': (c) => import('./pages/admin/support-chats.js').then(m => m.renderAdminSupportChats(c)),
     '/admin/orders': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
     '/admin/orders/:orderId': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
-    '/admin/commissions': (c) => import('./pages/admin/commissions.js').then(m => m.renderAdminCommissions(c)),
+    '/admin/commissions': (c) => import('./pages/admin/comercios.js').then(m => m.renderAdminComercios(c)),
+    '/admin/expenses': (c) => import('./pages/admin/expenses.js').then(m => m.renderAdminExpenses(c)),
+    '/admin/deliveries': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminDeliveriesSettings(c)),
     '/admin/settings': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminSettings(c)),
+    '/admin/settings/kiosk-paulos': (c) => import('./pages/admin/kiosk-paulos.js').then(m => m.renderAdminKioskPaulos(c)),
+    '/admin/settings/deliveries': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminDeliveriesSettings(c)),
     '/admin/settings/logistics': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminLogisticsSettings(c)),
     '/admin/settings/economy': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminEconomySettings(c)),
     '/admin/settings/dynamic': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminDynamicSettings(c)),
@@ -671,6 +680,26 @@ async function init() {
   // Init router
   initRouter();
 
+  // Unified Splash Screen dismissal
+  window.dismissSplashScreen = function() {
+    const splash = document.getElementById('splash-screen');
+    if (splash && !splash.dataset.dismissed) {
+      splash.dataset.dismissed = 'true';
+      splash.classList.add('fade-out');
+      document.getElementById('app')?.classList.add('ready');
+      setTimeout(() => {
+        if (splash && splash.parentNode) splash.remove();
+      }, 400);
+    }
+  };
+
+  const initialSplash = document.getElementById('splash-screen');
+  if (initialSplash) {
+    setTimeout(() => {
+      window.dismissSplashScreen();
+    }, 600);
+  }
+
   // Init auth
   initAuth(async (user) => {
     try {
@@ -731,24 +760,22 @@ async function init() {
                   <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                 </svg>
                 <span style="font-weight:700; color:#374151; font-size:15px;">Continuar con Google</span>
-              </button>
-
-              <button id="apple-login-btn" style="width:100%; height:56px; background:black; border:none; border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
-                <svg width="18" height="22" viewBox="0 0 18 22" fill="white">
-                  <path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89(3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/>
+                        <button id="apple-login-btn" style="width:100%; height:56px; background:black; border:none; border-radius:100px; display:none; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
+                <svg width="18" height="22" viewBox="0 0 170 170" fill="white">
+                  <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.72.13-9.56-1.92-14.53-6.15-3.12-2.65-7-7.23-11.64-13.74-6.47-9.06-11.64-19.19-15.51-30.39-3.87-11.2-5.81-22.13-5.81-32.79 0-14.8 3.73-27.14 11.19-37.01 7.46-9.87 16.89-14.98 28.3-15.34 4.85 0 10.14 1.18 15.86 3.55 5.72 2.37 9.5 3.56 11.34 3.56 1.48 0 5.43-1.24 11.86-3.73 6.43-2.49 11.97-3.61 16.62-3.37 12.3.62 22.37 5.14 30.2 13.56-10.97 6.64-16.32 15.8-16.06 27.48.26 9.17 3.86 16.84 10.8 23 6.94 6.16 15.17 9.49 24.69 9.99-2.58 7.57-6.02 15.42-10.33 23.57zM119.22 31.78c0-7.3 2.66-14.37 7.98-21.2 5.32-6.83 12.01-10.58 20.08-11.25.13.9.2 1.74.2 2.52 0 7.17-2.73 14.32-8.19 21.45-5.46 7.13-12.18 10.99-20.17 11.58-.04-1.04-.07-1.89-.07-2.55z"/>
                 </svg>
                 <span style="font-weight:700; color:white; font-size:15px;">Continuar con Apple</span>
               </button>
 
-              <button id="guest-login-btn" style="width:100%; height:56px; background:transparent; border:2.5px solid var(--color-primary); border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
-                <span style="font-weight:700; color:var(--color-primary); font-size:15px;">Explorar como Invitado</span>
+              <button id="guest-login-btn" style="width:100%; height:56px; background:#F3F4F6; border:1px solid #E5E7EB; border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
+                <span style="font-weight:700; color:#4B5563; font-size:15px;">Explorar como Invitado</span>
               </button>
 
-              <div style="margin-top: 24px; text-align: center;">
-                <button id="reviewer-login-btn" style="background: none; border: none; color: #6B7280; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; opacity: 0.8;">
+              <div style="margin-top: 20px; text-align: center;">
+                <button id="reviewer-login-btn" style="background: none; border: none; color: #6B7280; font-size: 13px; font-weight: 700; text-decoration: underline; cursor: pointer; opacity: 0.8;">
                   Acceso de prueba (Revisores)
                 </button>
-              </div>
+              </div>         </div>
             </div>
           </div>
           <style>
@@ -819,6 +846,24 @@ async function init() {
           
           signInWithGoogle().then((user) => {
             if (user) {
+              const loginWall = document.getElementById('login-wall');
+              if (loginWall) loginWall.remove();
+
+              const splash = document.getElementById('splash-screen');
+              if (splash) splash.classList.add('fade-out');
+              document.getElementById('app')?.classList.add('ready');
+
+              const header = document.getElementById('app-header');
+              const navbar = document.getElementById('app-navbar');
+              if (header) {
+                header.style.display = 'flex';
+                header.style.opacity = '1';
+              }
+              if (navbar) {
+                navbar.style.display = 'flex';
+                navbar.style.opacity = '1';
+              }
+
               // Clean up the URL query params so ref code is not persisted in address bar
               const url = new URL(window.location.href);
               url.searchParams.delete('ref');
@@ -842,6 +887,11 @@ async function init() {
         });
 
         const appleLoginBtn = document.getElementById('apple-login-btn');
+        const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) || (window.Capacitor && window.Capacitor.getPlatform() === 'ios');
+        if (appleLoginBtn && isAppleDevice) {
+          appleLoginBtn.style.display = 'flex';
+        }
+
         appleLoginBtn?.addEventListener('click', () => {
           appleLoginBtn.disabled = true;
           appleLoginBtn.style.opacity = '0.7';
@@ -898,42 +948,51 @@ async function init() {
       const loginWall = document.getElementById('login-wall');
       if (loginWall) {
         loginWall.remove();
-        
-        // Show the splash screen after Google Sign-In
-        const splash = document.getElementById('splash-screen');
-        if (splash) {
-          splash.classList.remove('fade-out');
-          document.getElementById('app')?.classList.remove('ready');
-          
-          // Reset progress values
-          const txtEl = document.getElementById('splash-progress-text');
-          const barEl = document.getElementById('splash-progress-bar');
-          if (txtEl) txtEl.textContent = '0%';
-          if (barEl) barEl.style.width = '0%';
-          
-          // Force CSS animations to replay by cloning and replacing the element
-          const newSplash = splash.cloneNode(true);
-          splash.parentNode.replaceChild(newSplash, splash);
-          
-          if (window.setSplashProgress) {
-            window.setSplashProgress(0);
-            window.setSplashProgress(100);
-          }
-          
-          const checkEnd = setInterval(() => {
-            const currentTxt = document.getElementById('splash-progress-text');
-            if (currentTxt && currentTxt.textContent.trim() === '100%') {
-              clearInterval(checkEnd);
-              setTimeout(() => {
-                newSplash.classList.add('fade-out');
-                document.getElementById('app')?.classList.add('ready');
-              }, 50);
-            }
-          }, 30);
-        }
       }
 
+      const splash = document.getElementById('splash-screen');
+      const isDeliveryTarget = window.location.hash.includes('delivery') || window.location.search.includes('redirect=delivery');
+
+      if (splash) {
+        if (isDeliveryTarget) {
+          splash.remove(); // Instant removal for fast push notification response
+        } else {
+          splash.classList.add('fade-out');
+        }
+      }
+      document.getElementById('app')?.classList.add('ready');
+
       const isPreview = window.location.hash.includes('preview=true') || window.location.search.includes('preview=true');
+
+      // Check for pending notification deep-link redirection first (Instant push bypass)
+      const pendingUrl = localStorage.getItem('gd_pending_notification_url');
+      if (pendingUrl && !isPreview) {
+        localStorage.removeItem('gd_pending_notification_url');
+        console.log('[Push] Redirecting immediately to pending notification URL:', pendingUrl);
+        window.location.hash = pendingUrl;
+        
+        // Fast-path imports for delivery notifications
+        if (pendingUrl.includes('delivery')) {
+          if (splash) splash.remove();
+          import('./pages/delivery-panel.js').then(m => {
+            m.renderDeliveryPanel();
+            document.getElementById('app')?.classList.add('ready');
+          });
+        } else if (pendingUrl.includes('admin/orders')) {
+          import('./pages/admin/orders.js').then(m => {
+            m.renderAdminOrders();
+            if (splash) splash.classList.add('fade-out');
+            document.getElementById('app')?.classList.add('ready');
+          });
+        } else if (pendingUrl.includes('pedido')) {
+          const pedId = pendingUrl.split('/').pop();
+          import('./pages/order-tracking.js').then(m => {
+            m.renderOrderTracking(pedId);
+            if (splash) splash.classList.add('fade-out');
+            document.getElementById('app')?.classList.add('ready');
+          });
+        }
+      }
 
       // USER IS LOGGED IN -> Initialize UI
       import('./components/header.js').then(m => m.initHeader());
@@ -948,14 +1007,6 @@ async function init() {
         
         // Initialize floating support chatbot dynamically
         import('./components/support-bot.js').then(m => m.initSupportBot()).catch(err => console.warn('Failed to load support bot:', err));
-
-        // Check for pending notification deep-link redirection
-        const pendingUrl = localStorage.getItem('gd_pending_notification_url');
-        if (pendingUrl) {
-          localStorage.removeItem('gd_pending_notification_url');
-          console.log('[Push] Redirecting to pending notification URL:', pendingUrl);
-          window.location.hash = pendingUrl;
-        }
       }
 
       const header = document.getElementById('app-header');
@@ -1023,7 +1074,8 @@ async function init() {
           try {
             const userRef = doc(db, 'users', user.uid);
             const uSnap = await getDoc(userRef);
-            if (uSnap.exists() && uSnap.data().role !== 'admin') {
+            const currentRole = uSnap.data().role;
+            if (uSnap.exists() && (currentRole === 'user' || !currentRole)) {
               await updateDoc(userRef, { role: 'admin' });
               user.role = 'admin';
               console.log('[Auth] Database role updated to admin');
@@ -1096,6 +1148,9 @@ async function init() {
 
         const continueAfterGuide = () => {
               initPushNotifications();
+              if ('Notification' in window && Notification.permission === 'default') {
+                import('./components/notification-prompt.js').then(m => m.showNotificationPrompt()).catch(() => {});
+              }
               checkAppUpdate();
               if (user && !getState().deliveryAddress) {
                 import('./components/address-modal.js').then(m => {
@@ -1301,20 +1356,11 @@ async function init() {
       routerReady();
       const splash = document.getElementById('splash-screen');
       if (splash) {
-        if (window.setSplashProgress) {
-          window.setSplashProgress(100);
-        }
-        
-        const checkEnd = setInterval(() => {
-          const txtEl = document.getElementById('splash-progress-text');
-          if (txtEl && txtEl.textContent.trim() === '100%') {
-            clearInterval(checkEnd);
-            setTimeout(() => {
-              splash.classList.add('fade-out');
-              document.getElementById('app')?.classList.add('ready');
-            }, 50); // Snappy exit after 100% reached
-          }
-        }, 30);
+        // PedidosYa instant shell visibility: force immediate fadeout in 50ms
+        setTimeout(() => {
+          splash.classList.add('fade-out');
+          document.getElementById('app')?.classList.add('ready');
+        }, 50);
       }
     }
   });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'godelivery-v1.0.2'; // Change this only when you want to force a full cache clear
+const CACHE_NAME = 'godelivery-v1.5.3'; // Force update
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

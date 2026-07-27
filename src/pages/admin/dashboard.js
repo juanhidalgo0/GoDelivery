@@ -59,11 +59,11 @@ export async function renderAdminDashboard() {
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>
 
-            <a href="#/admin/commissions" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#d1fae5,#a7f3d0); color:#059669; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('bank', 24)}</div>
+            <a href="#/admin/expenses" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
+              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fee2e2,#fca5a5); color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">💸</div>
               <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Economía</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Comisiones y liquidaciones</div>
+                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Gastos y Contabilidad</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Registro de egresos y facturas</div>
               </div>
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>
@@ -80,11 +80,20 @@ export async function renderAdminDashboard() {
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>
 
+            <a href="#/admin/deliveries" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
+              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fee2e2,#fca5a5); color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('bike', 24)}</div>
+              <div style="flex:1;">
+                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Repartidores</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Control total, deudas, cuota diaria y liquidaciones</div>
+              </div>
+              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
+            </a>
+
             <a href="#/admin/comercios" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
               <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fef3c7,#fde68a); color:#d97706; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('store', 24)}</div>
               <div style="flex:1;">
                 <div style="font-weight:800; font-size:16px; color:var(--color-text);">Comercios</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Gestión de perfiles y catálogos</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Control total, deudas y liquidaciones</div>
               </div>
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>

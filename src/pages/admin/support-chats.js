@@ -649,6 +649,25 @@ export async function renderAdminSupportChats() {
         lastMessageTime: serverTimestamp(),
         messages: arrayUnion(responseMessage)
       });
+
+      // Send push / internal notification to target user
+      const chatDoc = allChats.find(c => c.id === selectedChatId);
+      const targetUserId = (chatDoc && chatDoc.userId) ? chatDoc.userId : (selectedChatId.startsWith('ticket_') ? null : selectedChatId);
+      if (targetUserId) {
+        try {
+          const { addDoc, collection: fCollection } = await import('firebase/firestore');
+          await addDoc(fCollection(db, 'users', targetUserId, 'notifications'), {
+            title: '💬 Respuesta de Soporte Técnico',
+            body: text.length > 80 ? text.substring(0, 80) + '...' : text,
+            type: 'support_message',
+            url: '#/mis-chats',
+            status: 'unread',
+            createdAt: serverTimestamp()
+          });
+        } catch (notifErr) {
+          console.warn('Failed to dispatch user support notification:', notifErr);
+        }
+      }
     } catch (err) {
       console.error('Error sending support response:', err);
       showToast('Error al enviar la respuesta', 'danger');

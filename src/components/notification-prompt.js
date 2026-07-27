@@ -1,11 +1,13 @@
 import { icon } from '../utils/icons.js';
+import { requestWebPushPermission } from '../utils/notifications.js';
+import { showToast } from './toast.js';
 
 /**
  * Smart Notification Prompt
  * Shows a beautiful banner to explain the value of notifications before requesting permission.
  */
 export function showNotificationPrompt(onAccept) {
-  if (Notification.permission !== 'default') return;
+  if (!('Notification' in window) || Notification.permission !== 'default') return;
 
   // Require user gesture for all notification requests to avoid browser blocking
   // 1. Don't show if the install lock or onboarding is active
@@ -75,9 +77,10 @@ export function showNotificationPrompt(onAccept) {
   document.getElementById('n-prompt-later').onclick = close;
   document.getElementById('n-prompt-ok').onclick = async () => {
     close();
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted' && onAccept) {
-      onAccept();
+    const permission = await requestWebPushPermission();
+    if (permission === 'granted') {
+      showToast('¡Notificaciones activadas con éxito!', 'success');
+      if (onAccept) onAccept();
     }
   };
 }

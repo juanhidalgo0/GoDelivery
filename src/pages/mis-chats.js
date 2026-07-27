@@ -11,13 +11,15 @@ let unsubMarketplace = null;
 let currentSupportChats = [];
 let currentOrderChats = [];
 let currentMarketplaceChats = [];
+let pendingAutoOpenChatId = null;
+let pendingAutoOpenAttempts = 0;
 
-const userPhotoCache = {};
-async function getOrFetchUserPhoto(userId) {
+const userDetailCache = {};
+async function getOrFetchUserDetail(userId) {
   if (!userId) return null;
-  if (userPhotoCache[userId] !== undefined) return userPhotoCache[userId];
+  if (userDetailCache[userId] !== undefined) return userDetailCache[userId];
   
-  userPhotoCache[userId] = null;
+  userDetailCache[userId] = null;
   try {
     const { doc, getDoc } = await import('firebase/firestore');
     const userSnap = await getDoc(doc(db, 'users', userId));
@@ -29,16 +31,37 @@ async function getOrFetchUserPhoto(userId) {
         const comSnap = await getDoc(doc(db, 'comercios', userId));
         if (comSnap.exists()) {
           const comData = comSnap.data();
-          photo = comData.logo || comData.image || photo;
+          photo = comData.logoUrl || comData.logo || comData.image || photo;
         }
       }
-      userPhotoCache[userId] = photo;
-      return photo;
+      userDetailCache[userId] = {
+        photo,
+        goId: data.goId || userId.slice(0, 6).toUpperCase()
+      };
+      return userDetailCache[userId];
     }
   } catch (e) {
-    console.error('[MisChats] Error fetching user photo:', userId, e);
+    console.error('[MisChats] Error fetching user detail:', userId, e);
   }
   return null;
+}
+
+const commerceLogoCache = {};
+async function getOrFetchCommerceLogo(comercioId) {
+  if (!comercioId) return null;
+  if (commerceLogoCache[comercioId] !== undefined) return commerceLogoCache[comercioId];
+  commerceLogoCache[comercioId] = null;
+  try {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const snap = await getDoc(doc(db, 'comercios', comercioId));
+    if (snap.exists()) {
+      const data = snap.data();
+      commerceLogoCache[comercioId] = data.logoUrl || data.logo || data.image || '/logo.png';
+    }
+  } catch (e) {
+    console.error('[MisChats] Error fetching commerce logo:', comercioId, e);
+  }
+  return commerceLogoCache[comercioId];
 }
 
 export async function renderMisChats(content) {
@@ -132,6 +155,14 @@ export async function renderMisChats(content) {
 
   const container = document.getElementById('chats-list-container');
   startChatsListener(container, user);
+
+  // Auto-open targeted chatId if specified in hash params
+  const initialHash = window.location.hash;
+  const chatMatch = initialHash.match(/chatId=([^&]+)/);
+  if (chatMatch && chatMatch[1]) {
+    pendingAutoOpenChatId = chatMatch[1];
+    pendingAutoOpenAttempts = 0;
+  }
 
   const btnDeleteAll = content.querySelector('#btn-delete-all-chats');
   if (btnDeleteAll) {
@@ -315,15 +346,18 @@ function renderChats(container, user) {
       const lastMsg = chat.lastMessage || 'Conversación iniciada';
       const time = chat.lastMessageAt ? formatTime(chat.lastMessageAt) : '';
 
-      const cachedPhoto = userPhotoCache[otherId];
-      if (cachedPhoto === undefined) {
-        getOrFetchUserPhoto(otherId).then(() => {
-          renderChats(container, user);
-        });
+      let cachedUser = null;
+      if (otherId) {
+        cachedUser = userDetailCache[otherId];
+        if (cachedUser === undefined) {
+          getOrFetchUserDetail(otherId).then(() => {
+            renderChats(container, user);
+          });
+        }
       }
 
-      const avatarHtml = cachedPhoto ? `
-        <img src="${cachedPhoto}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
+      const avatarHtml = (cachedUser && cachedUser.photo) ? `
+        <img src="${cachedUser.photo}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
       ` : icon('shoppingBag', 22);
 
       html += `
@@ -359,7 +393,14 @@ function renderChats(container, user) {
         if (chat.type === 'client-commerce') {
           otherName = order.comercioName || 'Comercio';
           avatarIcon = 'store';
-          logoUrl = getState().comerciosData?.[order.comercioId] || null;
+          logoUrl = commerceLogoCache[order.comercioId] || getState().comerciosData?.[order.comercioId] || null;
+          if (!logoUrl && order.comercioId) {
+            if (commerceLogoCache[order.comercioId] === undefined) {
+              getOrFetchCommerceLogo(order.comercioId).then(() => {
+                renderChats(container, user);
+              });
+            }
+          }
         } else if (chat.type === 'client-delivery') {
           otherName = order.driverName || 'Repartidor';
           avatarIcon = 'bike';
@@ -383,7 +424,14 @@ function renderChats(container, user) {
         } else if (chat.type === 'commerce-delivery') {
           otherName = order.comercioName || 'Comercio';
           avatarIcon = 'store';
-          logoUrl = getState().comerciosData?.[order.comercioId] || null;
+          logoUrl = commerceLogoCache[order.comercioId] || getState().comerciosData?.[order.comercioId] || null;
+          if (!logoUrl && order.comercioId) {
+            if (commerceLogoCache[order.comercioId] === undefined) {
+              getOrFetchCommerceLogo(order.comercioId).then(() => {
+                renderChats(container, user);
+              });
+            }
+          }
         }
       }
 
@@ -392,7 +440,14 @@ function renderChats(container, user) {
         if (chat.type === 'client-commerce') {
           otherName = order.userName || 'Cliente';
           otherId = order.userId;
-          logoUrl = getState().comerciosData?.[order.comercioId] || null;
+          logoUrl = commerceLogoCache[order.comercioId] || getState().comerciosData?.[order.comercioId] || null;
+          if (!logoUrl && order.comercioId) {
+            if (commerceLogoCache[order.comercioId] === undefined) {
+              getOrFetchCommerceLogo(order.comercioId).then(() => {
+                renderChats(container, user);
+              });
+            }
+          }
         } else if (chat.type === 'client-delivery') {
           otherName = order.driverName || 'Repartidor';
           otherId = order.driverId;
@@ -402,13 +457,16 @@ function renderChats(container, user) {
         }
       }
 
-      let cachedPhoto = null;
+      let cachedUser = null;
+      let displayGoId = '';
       if (otherId) {
-        cachedPhoto = userPhotoCache[otherId];
-        if (cachedPhoto === undefined) {
-          getOrFetchUserPhoto(otherId).then(() => {
+        cachedUser = userDetailCache[otherId];
+        if (cachedUser === undefined) {
+          getOrFetchUserDetail(otherId).then(() => {
             renderChats(container, user);
           });
+        } else if (cachedUser) {
+          displayGoId = cachedUser.goId ? `ID: ${cachedUser.goId}` : '';
         }
       }
 
@@ -427,11 +485,12 @@ function renderChats(container, user) {
 
       const avatarHtml = logoUrl ? `
         <img src="${logoUrl}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
-      ` : (cachedPhoto ? `
-        <img src="${cachedPhoto}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
+      ` : ((cachedUser && cachedUser.photo) ? `
+        <img src="${cachedUser.photo}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
       ` : initialAvatarHtml);
 
-      const isUnread = chat.unread && chat.unread[user.uid] === true;
+      const unreadCount = chat.unread ? (parseInt(chat.unread[user.uid]) || 0) : 0;
+      const isUnread = unreadCount > 0;
       const lastMsg = chat.lastMessage || 'Conversación iniciada';
       const isCompleted = order.status === 'completed' || order.status === 'cancelled';
       const realOrderNum = order.orderId || chat.orderId.slice(0, 6).toUpperCase();
@@ -446,18 +505,19 @@ function renderChats(container, user) {
               <span style="font-family: var(--font-display); font-size: 14.5px; font-weight: 850; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;">${otherName}</span>
               <span style="font-size: 11px; color: var(--color-text-tertiary); font-weight: 700;">${time}</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
               <span style="font-size: 10px; font-weight: 800; background: var(--color-primary-light); color: var(--color-primary); padding: 1px 6px; border-radius: 4px;">Pedido #${realOrderNum}</span>
               ${isCompleted ? `
                 <span style="font-size: 10px; font-weight: 800; background: #e2e8f0; color: #64748b; padding: 1px 6px; border-radius: 4px;">${icon('lock', 8)} Finalizado</span>
               ` : `
                 <span style="font-size: 10px; font-weight: 800; background: #dcfce7; color: #15803d; padding: 1px 6px; border-radius: 4px;">Activo</span>
               `}
+              ${displayGoId ? `<span style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); margin-left: 2px;">${displayGoId}</span>` : ''}
             </div>
             <p style="margin: 0; font-size: 12px; color: var(--color-text-secondary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${lastMsg}</p>
           </div>
-          ${isUnread ? `
-            <span style="width: 10px; height: 10px; border-radius: 50%; background: var(--color-primary); position: absolute; right: 14px; bottom: 14px;"></span>
+          ${unreadCount > 0 ? `
+            <span style="min-width: 18px; height: 18px; border-radius: 9px; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; padding: 0 5px; box-sizing: border-box; box-shadow: 0 2px 8px rgba(225, 29, 72, 0.3); margin-left: auto; flex-shrink: 0; position: absolute; right: 14px; bottom: 14px;">${unreadCount}</span>
           ` : ''}
         </div>
       `;
@@ -465,6 +525,24 @@ function renderChats(container, user) {
   });
 
   container.innerHTML = html;
+
+  // Auto-open pending chat from notification deep link
+  if (pendingAutoOpenChatId) {
+    const card = container.querySelector(`.chat-list-card[data-chat-id="${pendingAutoOpenChatId}"]`);
+    if (card) {
+      pendingAutoOpenChatId = null;
+      pendingAutoOpenAttempts = 0;
+      window.location.hash = '#/mis-chats';
+      setTimeout(() => card.click(), 80);
+    } else {
+      pendingAutoOpenAttempts++;
+      if (pendingAutoOpenAttempts > 10) {
+        // Give up after 10 render cycles (~10s)
+        pendingAutoOpenChatId = null;
+        pendingAutoOpenAttempts = 0;
+      }
+    }
+  }
 
   // 1. Attach click listeners to Order Chats
   const orderItems = container.querySelectorAll('.order-chat-card');

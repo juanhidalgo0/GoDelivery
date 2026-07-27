@@ -286,35 +286,7 @@ export function showAppGuide(onComplete, isReplay = false) {
 // ── Floating Action Button ──
 
 export function showGuideFab() {
-  // Remove existing FAB if any
   document.getElementById('app-guide-fab')?.remove();
-
-  const fab = document.createElement('button');
-  fab.id = 'app-guide-fab';
-  fab.className = 'app-guide-fab attention';
-  fab.title = 'Guía de la App';
-  fab.innerHTML = icon('info', 24);
-
-  fab.onclick = () => {
-    // Re-show the guide in replay mode
-    document.getElementById('app-guide-fab')?.remove();
-    showAppGuide(null, true);
-  };
-
-  document.body.appendChild(fab);
-
-  // Initial visibility check (must be visible only on the home page '/')
-  const currentHash = window.location.hash.slice(1).split('?')[0] || '/';
-  if (currentHash === '/' || currentHash === '') {
-    fab.style.display = 'flex';
-  } else {
-    fab.style.display = 'none';
-  }
-
-  // Remove the attention pulse after 6 seconds
-  setTimeout(() => {
-    fab.classList.remove('attention');
-  }, 6000);
 }
 
 // Global listener to toggle FAB visibility based on the active page

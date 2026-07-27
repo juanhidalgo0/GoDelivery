@@ -61,6 +61,21 @@ export function renderHeader() {
   }
   
   const unreadCount = getState().unreadNotifications || 0;
+  const user = getState().user;
+
+  const currentFingerprint = JSON.stringify({
+    userId: user?.uid || null,
+    userPhoto: user?.photoURL || null,
+    role: user?.role || null,
+    unreadCount,
+    displayAddress,
+    hash
+  });
+
+  if (header.dataset.lastHeaderFingerprint === currentFingerprint && header.innerHTML.trim().length > 0) {
+    return;
+  }
+  header.dataset.lastHeaderFingerprint = currentFingerprint;
 
   const isOwner = isComercio();
   const isRider = isDelivery();
@@ -237,14 +252,19 @@ export function renderHeader() {
           </div>
 
           <!-- Action Buttons -->
-          <div style="display: flex; align-items: center;">
-            <a href="#/notifications" style="color: white; display: flex; position: relative; background: rgba(255,255,255,0.2); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <!-- Info Icon Button -->
+            <button id="header-info-btn" title="Información" style="color: white; border: none; display: flex; position: relative; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); cursor: pointer; transition: all 0.2s;">
+              ${icon('info', 20)}
+            </button>
+            <!-- Modern Social-Style Notification Bell -->
+            <a href="#/notifications" title="Notificaciones" style="color: white; display: flex; position: relative; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.2s;">
               ${icon('bell', 20)}
               ${(getState().unreadNotifications || 0) > 0 ? `
-                <span style="position: absolute; top: -2px; right: -2px; background: #FF4757; width: 12px; height: 12px; border: 2px solid var(--color-primary); border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></span>
+                <span style="position: absolute; top: 2px; right: 2px; background: #E11D48; color: white; font-size: 10px; font-weight: 900; min-width: 16px; height: 16px; border-radius: 8px; border: 2px solid var(--color-primary); display: flex; align-items: center; justify-content: center; padding: 0 3px; box-sizing: border-box; animation: badgePulse 2s infinite;">${getState().unreadNotifications}</span>
               ` : ''}
             </a>
-            <a href="#/profile" style="color: white; display: flex; background: rgba(255,255,255,0.2); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(8px); margin-left: 12px;">
+            <a href="#/profile" style="color: white; display: flex; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
               ${icon('user', 20)}
             </a>
             <button id="header-search-expand-btn" class="header-action-btn" style="color: white; background: rgba(255,255,255,0.2); border: none; height: 38px; width: 0px; margin-left: 0px; opacity: 0; transform: scale(0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); cursor:pointer; overflow: hidden; padding: 0;">
@@ -379,6 +399,7 @@ export function renderHeader() {
        title = decodeURIComponent(hash.split('/').pop());
     } else if (hash.startsWith('#/cart')) title = 'Mi Carrito';
     else if (hash.startsWith('#/admin/support-chats')) title = 'Mesa de Ayuda';
+    else if (hash.startsWith('#/admin/expenses')) title = 'Gastos y Contabilidad';
 
     header.innerHTML = `
       ${desktopHeaderHTML}
@@ -412,6 +433,17 @@ export function renderHeader() {
         }
       </style>
     `;
+  }
+
+  // Bind info icon button click to show interactive app guide tutorial
+  const infoBtn = document.getElementById('header-info-btn');
+  if (infoBtn) {
+    infoBtn.onclick = (e) => {
+      e.stopPropagation();
+      import('./app-guide.js').then(m => {
+        m.showAppGuide(null, true);
+      }).catch(err => console.warn('Failed to load app guide:', err));
+    };
   }
 
   // Desktop Header event bindings

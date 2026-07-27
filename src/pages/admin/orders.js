@@ -80,6 +80,8 @@ let ordersUnsubscribe = null;
 const STATUS_CONFIG = {
   pending: { label: 'PENDIENTE', color: '#FFA500', bg: 'rgba(255, 165, 0, 0.1)' },
   confirmed: { label: 'PREPARANDO', color: '#3498DB', bg: 'rgba(52, 152, 219, 0.1)' },
+  ready: { label: 'LISTO (ESPERANDO REPARTIDOR)', color: '#0d9488', bg: 'rgba(13, 148, 136, 0.1)' },
+  accepted: { label: 'ACEPTADO', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.1)' },
   delivering: { label: 'EN CAMINO', color: '#9B59B6', bg: 'rgba(155, 89, 182, 0.1)' },
   completed: { label: 'ENTREGADO', color: '#27AE60', bg: 'rgba(39, 174, 96, 0.1)' },
   cancelled: { label: 'CANCELADO', color: '#E74C3C', bg: 'rgba(231, 76, 60, 0.1)' }
@@ -150,8 +152,8 @@ export async function renderAdminOrders() {
         <a href="#/admin/support-chats" id="orders-support-chats-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s; position:relative; z-index:2; margin-right:4px;" title="Mesa de Ayuda">
           ${icon('chatBubble', 22)}
         </a>
-        <button id="refresh-orders-btn" style="background:rgba(255,255,255,0.15); border:none; width:40px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; transition:all 0.2s; position:relative; z-index:2;">
-          ${icon('history', 22)}
+        <button id="refresh-orders-btn" style="background:rgba(255,255,255,0.15); border:none; width:40px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; transition:all 0.2s; position:relative; z-index:2;" title="Recargar página">
+          ${icon('refresh', 22)}
         </button>
       </div>
 
@@ -356,7 +358,7 @@ function setupEventListeners() {
   document.getElementById('filter-date-start')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('filter-date-end')?.addEventListener('change', () => renderOrdersList());
   const refreshBtn = document.getElementById('refresh-orders-btn');
-  if (refreshBtn) refreshBtn.onclick = () => loadAllOrders();
+  if (refreshBtn) refreshBtn.onclick = () => window.location.reload();
 
   // Collapsible Filters Toggle
   const toggleBtn = document.getElementById('toggle-filters-btn');
@@ -685,7 +687,7 @@ function renderOrdersList() {
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px; width:100%; padding-top:14px; border-top:1px solid var(--color-border-light);">
-          <!-- Repartidor -->
+          <!-- Repartidor / Estado Asignación -->
           ${o.driverId ? `
             <div style="display:flex; align-items:center; gap:8px;">
               ${driverPhoto ? `
@@ -694,6 +696,21 @@ function renderOrdersList() {
                 <div style="width:22px; height:22px; border-radius:50%; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:var(--color-text-tertiary); font-size:10px; font-weight:800; border:1px solid var(--color-border-light);">R</div>
               `}
               <span style="font-size:12px; font-weight:800; color:var(--color-text-secondary);"><span style="color:var(--color-text-tertiary); font-weight:700;">Repartidor:</span> ${o.driverName || 'Repartidor'} (ID: ${driverDlId})</span>
+            </div>
+          ` : (o.status === 'ready' || o.status === 'confirmed' || o.status === 'preparing' || o.status === 'pending') ? `
+            <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:6px 10px; border-radius:10px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); font-size:11.5px; font-weight:800; color:#d97706;">
+              <span>
+                ${o.queueTargetDriverName ? `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong>` : (
+                  (o.status === 'confirmed' || o.status === 'preparing') ? `🍳 En preparación` : (
+                    o.status === 'pending' ? `⏳ Esperando confirmación` : `🔍 Buscando repartidor en tiempo real...`
+                  )
+                )}
+              </span>
+              ${o.queueOfferedAt ? `
+                <span class="admin-queue-timer" data-expiry="${(o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 60000}" style="font-size:11px; background:rgba(245,158,11,0.2); padding:2px 6px; border-radius:6px; font-weight:900;">
+                  ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 60000 - (Date.now() + (getState().serverTimeOffset || 0))) / 1000))}s
+                </span>
+              ` : ''}
             </div>
           ` : ''}
 
@@ -711,6 +728,37 @@ function renderOrdersList() {
               ${o.paymentMethod === 'mercadopago' ? 'Transferencia' : 'Efectivo'}
             </div>
           </div>
+          <!-- Cancellation reason banner -->
+          ${(o.status === 'cancelled' || o.status?.includes('cancel')) ? (() => {
+            const cancelledByMap = {
+              'client':   { label: 'Cancelado por el Cliente',     icon: '👤', color: '#EF4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
+              'comercio': { label: 'Cancelado por el Comercio',    icon: '🏪', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)' },
+              'admin':    { label: 'Cancelado por Admin',          icon: '🛡️', color: '#8b5cf6', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.2)' },
+              'system':   { label: 'Cancelado automáticamente',   icon: '🤖', color: '#64748b', bg: 'rgba(100,116,139,0.08)', border: 'rgba(100,116,139,0.2)' },
+            };
+            const actor = cancelledByMap[o.cancelledBy] || { label: o.cancelledBy ? `Por: ${o.cancelledBy}` : 'Motivo desconocido', icon: '❌', color: '#EF4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' };
+            let cancelTimeStr = '';
+            if (o.cancelledAt) {
+              try {
+                const d = o.cancelledAt.toDate ? o.cancelledAt.toDate() : new Date(o.cancelledAt);
+                cancelTimeStr = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+              } catch(e) {}
+            }
+            return `
+              <div style="display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:10px; background:${actor.bg}; border:1px solid ${actor.border}; font-size:11.5px; font-weight:800; color:${actor.color}; width:100%;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span>${actor.icon}</span>
+                  <span>${actor.label}</span>
+                  ${cancelTimeStr ? `<span style="margin-left:auto; font-size:10.5px; opacity:0.7; font-weight:700;">${cancelTimeStr}</span>` : ''}
+                </div>
+                ${o.cancelReason ? `
+                  <div style="font-size:11px; font-weight:600; color:var(--color-text-secondary); opacity:0.9; margin-left:22px; font-style:italic;">
+                    "${o.cancelReason}"
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          })() : ''}
         </div>
       </div>
     `;
@@ -721,6 +769,27 @@ function renderOrdersList() {
       ${filtered.length >= currentLimit ? '<div class="loader-dots" style="margin: 5px auto;"><span></span><span></span><span></span></div>' : '— Fin del registro de ventas —'}
     </div>
   `;
+
+  // Live Timer Interval for Admin Queue Timers
+  if (window._adminTimerInterval) clearInterval(window._adminTimerInterval);
+  window._adminTimerInterval = setInterval(() => {
+    const timerEls = container.querySelectorAll('.admin-queue-timer');
+    if (!timerEls.length) return;
+    const now = Date.now() + (getState().serverTimeOffset || 0);
+    timerEls.forEach(el => {
+      const expiry = parseInt(el.dataset.expiry);
+      const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
+      el.textContent = `${remaining}s`;
+      if (remaining <= 0 && el.dataset.rotated !== 'true') {
+        el.dataset.rotated = 'true';
+        const card = el.closest('.order-card-v4');
+        const orderId = card?.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+        if (orderId) {
+          import('../delivery-panel.js').then(m => m.updateDispatchQueue(orderId)).catch(e => console.warn('Admin rotation call error:', e));
+        }
+      }
+    });
+  }, 1000);
 
   // Setup infinite scroll IntersectionObserver
   if (infiniteObserver) {
@@ -748,8 +817,10 @@ function getStatusKey(status) {
   const s = (status || '').toLowerCase();
   if (s.includes('pend')) return 'pending';
   if (s.includes('confir') || s.includes('prepar')) return 'confirmed';
+  if (s.includes('ready')) return 'ready';
+  if (s.includes('accept')) return 'accepted';
   if (s.includes('camino') || s.includes('delivering')) return 'delivering';
-  if (s.includes('entreg') || s.includes('complet') || s.includes('ready')) return 'completed';
+  if (s.includes('entreg') || s.includes('complet')) return 'completed';
   if (s.includes('cancel')) return 'cancelled';
   return 'pending';
 }
@@ -794,7 +865,20 @@ window.showOrderDetail = async (idOrObject) => {
   steps.push({ label: 'Entregado con Éxito', time: formatTime(o.deliveredAt || o.completedAt), icon: 'check', color: '#10B981', bg: 'rgba(16, 185, 129, 0.1)' });
 
   if (o.status === 'cancelled' || o.cancelledAt) {
-    steps.push({ label: 'Pedido Cancelado', time: formatTime(o.cancelledAt), icon: 'xCircle', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.1)' });
+    const cancelledByMap = {
+      'client':   { label: 'Cancelado por el Cliente',     emoji: '👤' },
+      'comercio': { label: 'Cancelado por el Comercio',    emoji: '🏪' },
+      'admin':    { label: 'Cancelado por el Admin',       emoji: '🛡️' },
+      'system':   { label: 'Cancelado automáticamente',   emoji: '🤖' },
+    };
+    const cancelActor = cancelledByMap[o.cancelledBy] || { label: o.cancelledBy ? `Cancelado por: ${o.cancelledBy}` : 'Cancelado (motivo desconocido)', emoji: '❌' };
+    steps.push({
+      label: `${cancelActor.emoji} ${cancelActor.label}`,
+      time: formatTime(o.cancelledAt),
+      icon: 'xCircle',
+      color: '#EF4444',
+      bg: 'rgba(239, 68, 68, 0.1)'
+    });
   }
 
   const timelineHtml = `
@@ -894,8 +978,14 @@ window.showOrderDetail = async (idOrObject) => {
          ` : ''}
          <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
            <span>Costo de Envío</span>
-           <span style="color:var(--color-success);">${formatPrice(o.deliveryCost || 0)}</span>
+           <span style="color:var(--color-success);">${formatPrice((o.deliveryCost || 0) - (o.rainSurcharge || 0))}</span>
          </div>
+         ${(o.rainSurcharge || 0) > 0 ? `
+           <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#009EE3;">
+             <span>Recargo por Lluvia 🌧️</span>
+             <span style="font-weight:800;">+${formatPrice(o.rainSurcharge)}</span>
+           </div>
+         ` : ''}
          ${o.isFavor ? `
            <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--color-text-tertiary);">
              <span>Tarifa de Gestión (Mandado)</span>
@@ -978,18 +1068,25 @@ window.showOrderDetail = async (idOrObject) => {
            <div style="width:40px; height:40px; border-radius:50%; background:var(--color-bg-secondary); overflow:hidden; border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
              <img id="audit-driver-img" style="width:100%; height:100%; object-fit:cover; display:none;" />
              <div id="audit-driver-placeholder" style="font-weight:900; font-size:16px; color:var(--color-text-tertiary); display:block;">
-               ${o.driverId ? (o.driverName || 'R')[0].toUpperCase() : '?'}
+               ${(o.driverId || o.queueTargetDriverId) ? ((o.driverName || o.queueTargetDriverName || 'R')[0].toUpperCase()) : '?'}
              </div>
            </div>
            <div style="min-width:0; flex:1;">
              <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Repartidor</div>
-             <div style="font-weight:900; font-size:15px; color:var(--color-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${o.driverName || 'Sin asignar'}</div>
+             <div style="font-weight:900; font-size:15px; color:var(--color-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+               ${o.driverName || (o.queueTargetDriverName ? `⏳ Ofrecido: ${o.queueTargetDriverName}` : 'Sin asignar')}
+             </div>
              <div id="audit-driver-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
            </div>
          </div>
-         <div style="flex-shrink:0;">
+         <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+           ${(o.driverId || o.queueTargetDriverId) && o.status !== 'delivered' && o.status !== 'completed' && o.status !== 'cancelled' ? `
+             <button id="admin-release-driver-btn" data-order-id="${o.id}" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:12px; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.25); font-size:12px; font-weight:900; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.2)'" onmouseout="this.style.background='rgba(239,68,68,0.1)'">
+               🔓 Liberar
+             </button>
+           ` : ''}
            ${o.driverId ? `
-             <button id="btn-msg-support-driver" style="display:flex; align-items:center; gap:6px; padding:8px 16px; border-radius:12px; background:rgba(225,29,72,0.08); color:var(--color-primary); border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; box-shadow:0 4px 12px rgba(225,29,72,0.15);" onmouseover="this.style.transform='translateY(-1px)';" onmouseout="this.style.transform='none';">
+             <button id="btn-msg-support-driver" style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:12px; background:rgba(225,29,72,0.08); color:var(--color-primary); border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; box-shadow:0 4px 12px rgba(225,29,72,0.15);" onmouseover="this.style.transform='translateY(-1px)';" onmouseout="this.style.transform='none';">
                ${icon('send', 14)} Chat
              </button>
            ` : ''}
@@ -1036,17 +1133,31 @@ window.showOrderDetail = async (idOrObject) => {
     content: detailHtml,
     footer: `
       <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
-        ${o.status !== 'cancelled' ? `
+        <button id="admin-live-tracking-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 15px rgba(37,99,235,0.3);">
+          ${icon('navigationArrow', 20)} SEGUIMIENTO EN TIEMPO REAL (GPS)
+        </button>
+        ${o.status !== 'cancelled' && o.status !== 'completed' && o.status !== 'entregado' ? `
           <button id="admin-cancel-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#E74C3C; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
             ${icon('xCircle', 20)} CANCELAR PEDIDO
           </button>
         ` : ''}
+        <button id="admin-delete-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:linear-gradient(135deg, #111827, #1f2937); color:#EF4444; border:1px solid #EF4444; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+          ${icon('trash', 20)} ELIMINAR PEDIDO (BORRAR DB)
+        </button>
         <button id="close-audit-modal" class="btn btn-primary" style="width:100%; height:54px; border-radius:18px; font-weight:900;">
           CERRAR AUDITORÍA
         </button>
       </div>
     `,
     onOpen: () => {
+      // Live tracking button handler
+      const trackingBtn = document.getElementById('admin-live-tracking-btn');
+      if (trackingBtn) {
+        trackingBtn.onclick = async () => {
+          const { showDeliveryMapModal } = await import('../../components/delivery-map-modal.js');
+          showDeliveryMapModal(o);
+        };
+      }
       // Load client profile
       if (o.userId) {
         getOrFetchUserProfile(o.userId).then((profile) => {
@@ -1081,51 +1192,207 @@ window.showOrderDetail = async (idOrObject) => {
         });
       }
 
+      // Release driver button handler
+      const releaseBtn = document.getElementById('admin-release-driver-btn');
+      if (releaseBtn) {
+        releaseBtn.addEventListener('click', async () => {
+          const { showConfirm } = await import('../../components/modal.js');
+          const { showToast } = await import('../../components/toast.js');
+          showConfirm({
+            title: '🔓 Liberar y Reasignar Pedido',
+            message: `¿Estás seguro de que deseas liberar este pedido? El repartidor actual se desvinculará y el pedido volverá a enviarse en rotación a otros choferes disponibles.`,
+            danger: true,
+            onConfirm: async () => {
+              try {
+                const { doc, getDoc, updateDoc } = await import('firebase/firestore');
+                const { db } = await import('../../firebase.js');
+                const oldDriverId = o.driverId;
+                await updateDoc(doc(db, 'orders', o.id), {
+                  driverId: null,
+                  driverName: null,
+                  driverPhoto: null,
+                  driverPhone: null,
+                  queueTargetDriverId: null,
+                  queueTargetDriverName: null,
+                  queueOfferedAt: null,
+                  status: 'ready'
+                });
+
+                try {
+                  const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
+                  const cdSnap = await getDoc(clientChatRef);
+                  if (cdSnap.exists()) {
+                    const cdData = cdSnap.data();
+                    const prevDriver = cdData.driverId || oldDriverId;
+                    const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+                    await updateDoc(clientChatRef, {
+                      driverId: null,
+                      driverName: null,
+                      participants: newParts
+                    });
+                  }
+                  const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
+                  const comSnap = await getDoc(comChatRef);
+                  if (comSnap.exists()) {
+                    const comData = comSnap.data();
+                    const prevDriver = comData.driverId || oldDriverId;
+                    const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+                    await updateDoc(comChatRef, {
+                      driverId: null,
+                      driverName: null,
+                      participants: newParts
+                    });
+                  }
+                } catch (e) {
+                  console.warn('[Admin Release] Error resetting chat references:', e);
+                }
+
+                closeModal();
+                showToast('🔓 Pedido liberado con éxito. Se volvió a ofertar en rotación.', 'success');
+                const { updateDispatchQueue } = await import('../delivery-panel.js');
+                updateDispatchQueue(o.id);
+              } catch (err) {
+                console.error('[Admin Release] Error:', err);
+                showToast('Error al liberar pedido: ' + err, 'danger');
+              }
+            }
+          });
+        });
+      }
+
       // Close modal handler inside onOpen
       const closeBtn = document.getElementById('close-audit-modal');
       if (closeBtn) closeBtn.onclick = () => closeModal();
+
+      // Delete button handler (Erases order completely from DB)
+      const deleteBtn = document.getElementById('admin-delete-order-btn');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async () => {
+          const { showConfirm } = await import('../../components/modal.js');
+          showConfirm({
+            title: '⚠️ ¿ELIMINAR PEDIDO POR COMPLETO? (DB)',
+            message: `¿Estás completamente seguro de que deseas ELIMINAR permanentemente el pedido #${o.orderId || '---'}? Se borrará de la base de datos y no computará en los montos facturados, desapareciendo como si nunca hubiera existido. Esta acción no se puede deshacer.`,
+            danger: true,
+            onConfirm: async () => {
+              const { showToast } = await import('../../components/toast.js');
+              try {
+                const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
+                await deleteDoc(fDoc(db, 'orders', o.id));
+                closeModal();
+                showToast('Pedido eliminado definitivamente de la base de datos.', 'success');
+                // Refresh list
+                location.reload();
+              } catch (err) {
+                console.error('[Admin Delete] Error:', err);
+                showToast('Error al eliminar el pedido: ' + err, 'danger');
+              }
+            }
+          });
+        });
+      }
 
       // Cancel button handler inside onOpen
       const cancelBtn = document.getElementById('admin-cancel-order-btn');
       if (cancelBtn) {
         cancelBtn.addEventListener('click', async () => {
-          const { showConfirm } = await import('../../components/modal.js');
-          showConfirm({
-            title: '🚨 Cancelar Pedido (Admin)',
-            message: `¿Estás seguro de que deseas cancelar el pedido #${o.orderId || '---'} de forma forzada? Esta acción devolverá los puntos al cliente (si aplica) y marcará el pedido como cancelado globalmente.`,
-            danger: true,
-            onConfirm: async () => {
-              const { showToast } = await import('../../components/toast.js');
-              try {
-                const { getDoc, updateDoc, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
-                
-                const orderRef = fDoc(db, 'orders', o.id);
-                const orderSnap = await getDoc(orderRef);
-                if (!orderSnap.exists()) throw "El pedido no existe.";
+          const { showModal, closeModal: closeCancelModal } = await import('../../components/modal.js');
+          const { showToast } = await import('../../components/toast.js');
+          
+          const modalDiv = document.createElement('div');
+          modalDiv.style.cssText = 'padding:24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg); border-radius:24px;';
+          modalDiv.innerHTML = `
+            <div style="text-align:center;">
+              <div style="font-size:32px; margin-bottom:8px;">🚨</div>
+              <h3 style="font-size:18px; font-weight:900; color:var(--color-text-primary); margin:0;">Cancelar Pedido #${o.orderId || '---'}</h3>
+              <p style="font-size:13px; color:var(--color-text-tertiary); margin:6px 0 0;">Ingresá el motivo de la cancelación. Se le enviará esta explicación al cliente junto a su notificación.</p>
+            </div>
 
-                const orderData = orderSnap.data();
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Motivo de cancelación (Obligatorio)</label>
+              <textarea id="admin-cancel-reason-input" placeholder="Ej: El local se encuentra sin stock del producto seleccionado..." style="width:100%; height:90px; border-radius:14px; border:1.5px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:12px; font-size:13px; font-weight:600; outline:none; resize:none; font-family:inherit;"></textarea>
+            </div>
 
-                await updateDoc(orderRef, {
-                  status: 'cancelled',
-                  cancelledAt: serverTimestamp(),
-                  cancelledBy: 'admin'
-                });
+            <div style="display:flex; gap:10px; width:100%; margin-top:8px;">
+              <button id="cancel-reason-abort-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:14px; font-weight:800; font-size:13px;">Volver</button>
+              <button id="cancel-reason-confirm-btn" class="btn btn-danger" style="flex:1.5; height:48px; border-radius:14px; font-weight:900; font-size:13px; background:#EF4444; color:white; border:none; box-shadow:0 6px 18px rgba(239,68,68,0.35);">Confirmar Cancelación</button>
+            </div>
+          `;
 
-                if (orderData.pointsRedeemed > 0 && orderData.userId) {
-                  const userRef = fDoc(db, 'users', orderData.userId);
-                  await updateDoc(userRef, {
-                    points: increment(orderData.pointsRedeemed)
-                  });
-                }
+          showModal({
+            title: 'Motivo de Cancelación',
+            content: modalDiv,
+            hideHeader: true,
+            height: 'auto'
+          });
 
-                closeModal();
-                showToast('Pedido cancelado correctamente por el Administrador', 'success');
-              } catch (err) {
-                console.error('[Admin Cancel] Error:', err);
-                showToast('Error al cancelar el pedido: ' + err, 'danger');
+          document.getElementById('cancel-reason-abort-btn').onclick = () => closeCancelModal();
+
+          document.getElementById('cancel-reason-confirm-btn').onclick = async () => {
+            const reasonInput = document.getElementById('admin-cancel-reason-input');
+            const reason = reasonInput ? reasonInput.value.trim() : '';
+
+            if (!reason) {
+              if (reasonInput) {
+                reasonInput.style.borderColor = '#EF4444';
+                reasonInput.focus();
+              }
+              showToast('Por favor explicá el motivo de la cancelación.', 'warning');
+              return;
+            }
+
+            const confirmBtnEl = document.getElementById('cancel-reason-confirm-btn');
+            confirmBtnEl.disabled = true;
+            confirmBtnEl.innerHTML = 'Cancelando...';
+
+            try {
+              const { getDoc, updateDoc, addDoc, collection, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
+              
+              const orderRef = fDoc(db, 'orders', o.id);
+              const orderSnap = await getDoc(orderRef);
+              if (!orderSnap.exists()) throw "El pedido no existe.";
+
+              const orderData = orderSnap.data();
+
+              // 1. Update order status and cancel reason
+              await updateDoc(orderRef, {
+                status: 'cancelled',
+                cancelledAt: serverTimestamp(),
+                cancelledBy: 'admin',
+                cancelReason: reason
+              });
+
+              // 2. Restore points if redeemed
+              if (orderData.pointsRedeemed > 0 && orderData.userId) {
+                const userRef = fDoc(db, 'users', orderData.userId);
+                await updateDoc(userRef, {
+                  points: increment(orderData.pointsRedeemed)
+                }).catch(e => console.warn('Error restoring points:', e));
+              }
+
+              // 3. Dispatch notification to customer with explicit cancel reason
+              if (orderData.userId) {
+                await addDoc(collection(db, 'users', orderData.userId, 'notifications'), {
+                  title: '❌ Tu pedido fue cancelado',
+                  body: `Motivo: ${reason}`,
+                  type: 'order_cancelled',
+                  orderId: o.id,
+                  status: 'unread',
+                  createdAt: serverTimestamp()
+                }).catch(e => console.warn('Error sending user cancel notification:', e));
+              }
+
+              closeCancelModal();
+              closeModal();
+              showToast('Pedido cancelado y cliente notificado.', 'success');
+            } catch (err) {
+              console.error('[Admin Cancel] Error:', err);
+              showToast('Error al cancelar el pedido: ' + err, 'danger');
+              if (confirmBtnEl) {
+                confirmBtnEl.disabled = false;
+                confirmBtnEl.innerHTML = 'Confirmar Cancelación';
               }
             }
-          });
+          };
         });
       }
     }

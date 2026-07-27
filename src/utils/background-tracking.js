@@ -77,9 +77,12 @@ function setupOrdersListener(user) {
     collection(db, 'orders'),
     where('driverId', '==', user.uid),
     where('status', 'in', [
+      'accepted', 'aceptado',
       'confirmed', 'confirmado',
       'preparing', 'preparando',
       'ready', 'listo',
+      'picked_up', 'retirado',
+      'at_door', 'en puerta',
       'delivering', 'en camino'
     ])
   );
@@ -121,6 +124,11 @@ let lastFirestoreWriteTime = 0;
 let lastFirestoreWriteCoords = null;
 
 async function handleLocationUpdate(pos) {
+  if (pos && pos.coords && typeof pos.coords.accuracy === 'number' && pos.coords.accuracy > 100) {
+    console.warn(`[Background Tracking] Ignoring location update with low precision (~${Math.round(pos.coords.accuracy)}m). High accuracy is required for delivery.`);
+    return;
+  }
+
   const { latitude, longitude } = pos.coords;
   lastLocationUpdateTime = Date.now();
   
@@ -203,17 +211,14 @@ async function handleLocationUpdate(pos) {
     }
   }
 
-  // Throttling logic based on distance
+  // High-precision real-time tracking (Uber / PedidosYa grade)
   const now = Date.now();
-  let timeThreshold = 10000; // 10s default if close
-  let distanceThreshold = 10; // 10m default if close
+  let timeThreshold = 1500; // 1.5 seconds for instant real-time updates
+  let distanceThreshold = 2.0; // 2 meters for micro-movements
 
-  if (minDist > 1500) {
-    timeThreshold = 90000; // 90s if far
-    distanceThreshold = 150; // 150m if far
-  } else if (minDist > 500) {
-    timeThreshold = 45000; // 45s
-    distanceThreshold = 50; // 50m
+  if (minDist > 5000) {
+    timeThreshold = 4000;
+    distanceThreshold = 6.0;
   }
 
   let shouldUpdate = false;
@@ -225,9 +230,9 @@ async function handleLocationUpdate(pos) {
     const distMoved = getHaversineDistance(latitude, longitude, lastFirestoreWriteCoords.lat, lastFirestoreWriteCoords.lng);
     if (timeElapsed >= timeThreshold && distMoved >= distanceThreshold) {
       shouldUpdate = true;
-    } else if (distMoved > 250) {
+    } else if (distMoved > 10) {
       shouldUpdate = true;
-    } else if (timeElapsed > timeThreshold * 2) {
+    } else if (timeElapsed >= 3000) {
       shouldUpdate = true;
     }
   }
@@ -236,7 +241,7 @@ async function handleLocationUpdate(pos) {
     return;
   }
 
-  console.log(`Background Tracking: Updating order locations in Firestore: [${latitude}, ${longitude}]. Dist to target: ${minDist.toFixed(1)}m.`);
+  console.log(`Background Tracking: Updating order & driver locations in Firestore: [${latitude}, ${longitude}]. Dist to target: ${minDist.toFixed(1)}m.`);
   lastFirestoreWriteTime = now;
   lastFirestoreWriteCoords = { lat: latitude, lng: longitude };
 
@@ -250,6 +255,18 @@ async function handleLocationUpdate(pos) {
     });
   });
 
+  // Also update driver user profile currentLocation
+  const currentUser = getState().user;
+  if (currentUser && currentUser.uid) {
+    updates.push(updateDoc(doc(db, 'users', currentUser.uid), {
+      currentLocation: {
+        lat: latitude,
+        lng: longitude,
+        updatedAt: serverTimestamp()
+      }
+    }).catch(err => console.warn('Failed to update driver user location:', err)));
+  }
+
   try {
     await Promise.all(updates);
   } catch (err) {
@@ -257,8 +274,52 @@ async function handleLocationUpdate(pos) {
   }
 }
 
+// Silent Audio Keep-Alive for iOS Safari / PWA background GPS tracking
+let silentAudioEl = null;
+
+function startSilentAudioKeepAlive() {
+  try {
+    if (!silentAudioEl) {
+      const silentMp3Uri = 'data:audio/mp3;base64,SUQ3BAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//5AwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGFydGlzdAAAAAAAAGFscnVtAAAAAAAAdGl0bGUAAAAAAABjb21tZW50AAAAAAAA//5AwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      silentAudioEl = new Audio(silentMp3Uri);
+      silentAudioEl.loop = true;
+      silentAudioEl.volume = 0.01;
+    }
+    
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'GO! Repartidor Activo',
+        artist: 'Ubicación en tiempo real',
+        album: 'GO Delivery'
+      });
+    }
+
+    const promise = silentAudioEl.play();
+    if (promise !== undefined) {
+      promise.then(() => {
+        console.log('Background Tracking: Silent audio keep-alive active for iOS PWA background GPS tracking.');
+      }).catch(err => {
+        console.warn('Background Tracking: Silent audio play deferred until interaction:', err);
+      });
+    }
+  } catch (err) {
+    console.warn('Background Tracking: Silent audio setup error:', err);
+  }
+}
+
+function stopSilentAudioKeepAlive() {
+  if (silentAudioEl) {
+    try {
+      silentAudioEl.pause();
+      silentAudioEl.currentTime = 0;
+    } catch (e) {}
+    silentAudioEl = null;
+  }
+}
+
 async function startWatching() {
   if (locationWatchId || nativeWatcherId) return; // Already tracking
+  startSilentAudioKeepAlive();
 
   if (Capacitor.isNativePlatform() && BackgroundGeolocation) {
     console.log('Background Tracking: Starting NATIVE background geolocation watcher...');
@@ -274,7 +335,7 @@ async function startWatching() {
         backgroundTitle: "GO! Repartidor Activo",
         requestPermissions: true,
         stale: false,
-        distanceFilter: 20
+        distanceFilter: 2
       }, async (location, error) => {
         if (error) {
           console.error('Background Tracking Native Error:', error);
@@ -303,8 +364,8 @@ async function startWatching() {
   
   const geoOptions = {
     enableHighAccuracy: true,
-    maximumAge: 10000, // 10 seconds cache to save massive battery drain
-    timeout: 15000
+    maximumAge: 0, // Force instant fresh GPS hardware reading
+    timeout: 10000
   };
 
   const onGeoSuccess = handleLocationUpdate;
@@ -353,6 +414,7 @@ function restartWatching() {
 
 function stopWatching() {
   console.log('Background Tracking: Deactivating active geolocation sensors and timers...');
+  stopSilentAudioKeepAlive();
   if (locationWatchId) {
     navigator.geolocation.clearWatch(locationWatchId);
     locationWatchId = null;

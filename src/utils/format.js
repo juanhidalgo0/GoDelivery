@@ -25,9 +25,22 @@ export function truncateText(text, maxLength = 60) {
 
 export function getArgentinaTime() {
   const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const artOffset = -3;
-  return new Date(utc + (3600000 * artOffset));
+  try {
+    const options = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    const parts = formatter.formatToParts(now);
+    const map = {};
+    parts.forEach(p => { if (p.type !== 'literal') map[p.type] = parseInt(p.value, 10); });
+    const hours = (map.hour || 0) % 24;
+    const minutes = map.minute || 0;
+    const day = map.day || 1;
+    const month = (map.month || 1) - 1;
+    const year = map.year || 2026;
+    return new Date(year, month, day, hours, minutes, map.second || 0);
+  } catch (e) {
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    return new Date(utc + (3600000 * -3));
+  }
 }
 
 export function isShopOpen(schedules, daysOpen) {
@@ -95,8 +108,8 @@ export function isScheduleActive(config) {
   const currentTime = now.getHours() * 60 + now.getMinutes();
 
   try {
-    const [startH, startM] = config.start.split(':').map(Number);
-    const [endH, endM] = config.end.split(':').map(Number);
+    const [startH, startM] = (config.start || '00:00').split(':').map(Number);
+    const [endH, endM] = (config.end || '06:00').split(':').map(Number);
     
     if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return false;
 
@@ -106,6 +119,8 @@ export function isScheduleActive(config) {
     if (endMinutes < startMinutes) {
       // Overnight schedule, e.g. 23:00 to 06:00
       return currentTime >= startMinutes || currentTime <= endMinutes;
+    } else if (startMinutes === endMinutes) {
+      return true;
     } else {
       // Normal schedule, e.g. 12:00 to 15:00
       return currentTime >= startMinutes && currentTime <= endMinutes;

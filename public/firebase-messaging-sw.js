@@ -68,13 +68,17 @@ self.addEventListener('push', (event) => {
           tag: tag
         });
       }
-      // 2. Display native notification ONLY if app is in the background
-      if (!isForeground) {
+      const isSupportAlert = (fcmData.type === 'admin_support_alert' || nestedData.type === 'admin_support_alert');
+
+      // 2. Display native notification if app is in background OR if it's an admin support alert
+      if (!isForeground || isSupportAlert) {
+        const isExclusiveOffer = (fcmData.type === 'exclusive_offer' || nestedData.type === 'exclusive_offer');
+
         const options = {
           body: body,
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
           badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
-          vibrate: [300, 100, 300, 100, 300], // Indispensable for Heads-up on Android
+          vibrate: isExclusiveOffer ? [500, 150, 500, 150, 500, 150, 800] : [400, 150, 400, 150, 600],
           requireInteraction: true, // High importance
           renotify: true, // Forces wakeup/vibration even on same tag
           silent: false, // Explicitly loud for Android heads-up
@@ -87,11 +91,17 @@ self.addEventListener('push', (event) => {
           }
         };
         
+        if (isExclusiveOffer) {
+          options.actions = [
+            { action: 'open_app', title: '⚡ ACEPTAR / VER EN APP' }
+          ];
+        }
+
         if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
           options.image = imageUrl;
         }
         
-        console.log('[SW] Displaying premium background heads-up notification:', options);
+        console.log('[SW] Displaying premium background/support heads-up notification:', options);
         await self.registration.showNotification(title, options);
       } else {
         console.log('[SW] Suppressing native notification since PWA is in foreground.');
@@ -128,7 +138,7 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // PWA: Cache Configuration (Bump version to force update)
-const CACHE_NAME = 'godelivery-v1.4.17';
+const CACHE_NAME = 'godelivery-v1.5.3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

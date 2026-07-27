@@ -6,7 +6,7 @@ const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
 
-setGlobalOptions({ maxInstances: 2, memory: "256Mi", region: "us-central1" });
+setGlobalOptions({ maxInstances: 1, memory: "256Mi", region: "us-central1" });
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -119,12 +119,119 @@ exports.mercadopagoConnect = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
+exports.createDeliveryCanonPreference = onRequest({ cors: true }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).send("");
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  const { driverId, dateStr } = req.body; // dateStr: YYYY-MM-DD
+  if (!driverId || !dateStr) {
+    return res.status(400).json({ error: "Faltan parámetros requeridos (driverId, dateStr)" });
+  }
+
+  try {
+    // Read global canon settings from system config or default to $2000
+    const configDoc = await db.collection("system_config").doc("canon_config").get();
+    const configData = configDoc.exists ? configDoc.data() : {};
+    const canonAmount = configData.canonAmount || 2000;
+    const mpAccessToken = configData.mpAccessToken || process.env.MP_ACCESS_TOKEN || "APP_USR-7809623696860010-051512-42171c77bb506b3a2bbbb695123d463e-242686767";
+
+    const driverDoc = await db.collection("users").doc(driverId).get();
+    const driverData = driverDoc.exists ? driverDoc.data() : {};
+    const driverName = driverData.name || driverData.displayName || "Repartidor GO";
+
+    const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
+    const preferenceInstance = new Preference(client);
+
+    const externalRef = `CANON_${driverId}_${dateStr}`;
+
+    const response = await preferenceInstance.create({
+      body: {
+        items: [{
+          title: `Canon Diario Repartidor GO! (${dateStr})`,
+          unit_price: Number(canonAmount),
+          quantity: 1,
+          currency_id: "ARS"
+        }],
+        external_reference: externalRef,
+        notification_url: `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/mercadopagoWebhook?type=delivery_canon`,
+        back_urls: {
+          success: `https://${process.env.GCLOUD_PROJECT}.web.app/#/delivery?canon_status=success`,
+          failure: `https://${process.env.GCLOUD_PROJECT}.web.app/#/delivery?canon_status=failure`,
+          pending: `https://${process.env.GCLOUD_PROJECT}.web.app/#/delivery?canon_status=pending`
+        },
+        auto_return: "approved"
+      }
+    });
+
+    res.status(200).json({
+      id: response.id,
+      init_point: response.init_point,
+      sandbox_init_point: response.sandbox_init_point
+    });
+  } catch (err) {
+    logger.error("Error generating delivery canon preference:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 exports.mercadopagoWebhook = onRequest(async (req, res) => {
   const { query, body } = req;
   const topic = query.topic || query.type || (body && body.type) || (body && body.action && body.action.split('.')[0]);
   const commerceId = query.comercioId;
+  const isCanon = query.type === "delivery_canon" || (body && body.data && body.data.id && !commerceId);
 
-  if (topic === "payment" && commerceId) {
+  if (topic === "payment" && isCanon) {
+    const paymentId = query.id || query["data.id"] || (body && body.data && body.data.id) || (body && body.id);
+    try {
+      const configDoc = await db.collection("system_config").doc("canon_config").get();
+      const configData = configDoc.exists ? configDoc.data() : {};
+      const mpAccessToken = configData.mpAccessToken || process.env.MP_ACCESS_TOKEN || "APP_USR-7809623696860010-051512-42171c77bb506b3a2bbbb695123d463e-242686767";
+
+      const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
+      const paymentInstance = new Payment(client);
+      const payment = await paymentInstance.get({ id: paymentId });
+
+      if (payment.status === "approved" && payment.external_reference && payment.external_reference.startsWith("CANON_")) {
+        const parts = payment.external_reference.split("_");
+        const driverId = parts[1];
+        const dateStr = parts[2];
+
+        if (driverId && dateStr) {
+          const canonDocRef = db.collection("delivery_canon_payments").doc(`${driverId}_${dateStr}`);
+          await canonDocRef.set({
+            driverId: driverId,
+            dateStr: dateStr,
+            amount: payment.transaction_amount || 2000,
+            status: "approved",
+            mpPaymentId: paymentId,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          logger.info(`Webhook: Delivery Canon for driver ${driverId} on ${dateStr} marked as APPROVED.`);
+
+          // Notify driver that their day is active and ready
+          const dTokens = await getUserTokens(driverId);
+          if (dTokens.length > 0) {
+            await sendPush(dTokens, {
+              title: "✅ ¡Jornada Habilitada!",
+              body: "Se acreditó tu pago de canon diario. Ya podés ponerte ONLINE para recibir ofertas de pedidos."
+            }, { tag: `canon-approved-${dateStr}`, url: "#/delivery" });
+          }
+        }
+      }
+    } catch (err) {
+      logger.error("Error processing delivery canon webhook:", err);
+    }
+  } else if (topic === "payment" && commerceId) {
     const paymentId = query.id || query["data.id"] || (body && body.data && body.data.id) || (body && body.id);
     
     try {
@@ -196,15 +303,17 @@ async function sendPush(tokens, notification, data = {}) {
   }
 
   // Ensure absolute HTTPS URL for the deep links to bypass relative SW resolution bugs
+  const projectId = process.env.GCLOUD_PROJECT || "godelivery-magdalena";
+  const baseUrl = `https://${projectId}.web.app/`;
   let targetUrl = data.url || "/#/";
   if (targetUrl.startsWith('#') || targetUrl.startsWith('/#')) {
-    targetUrl = "https://godelivery-magdalena.web.app/" + targetUrl.replace(/^\//, "");
+    targetUrl = baseUrl + targetUrl.replace(/^\//, "");
   } else if (targetUrl.startsWith('/')) {
-    targetUrl = "https://godelivery-magdalena.web.app" + targetUrl;
+    targetUrl = `https://${projectId}.web.app` + targetUrl;
   }
 
-  const finalTitle = "Go Delivery";
-  const finalBody = notification.title ? `${notification.title}\n${notification.body}` : notification.body;
+  const displayTitle = notification.title || "Go Delivery";
+  const displayBody = notification.body || "";
 
   let totalSuccess = 0;
   let totalFailure = 0;
@@ -212,15 +321,17 @@ async function sendPush(tokens, notification, data = {}) {
   for (const chunk of tokenChunks) {
     const message = {
       notification: {
-        title: "Go Delivery",
-        body: finalBody
+        title: displayTitle,
+        body: displayBody,
+        image: notification.image || ""
       },
       data: {
         ...data,
-        title: "Go Delivery",
-        body: finalBody,
+        title: displayTitle,
+        body: displayBody,
         icon: "/logo-pwa.png",
         badge: "/badge-icon.png",
+        image: notification.image || "",
         url: targetUrl
       },
       android: {
@@ -235,13 +346,15 @@ async function sendPush(tokens, notification, data = {}) {
         }
       },
       apns: {
+        headers: {
+          "apns-priority": "10"
+        },
         payload: {
           aps: {
             sound: "default",
             badge: 1,
             contentAvailable: true,
-            mutableContent: true,
-            priority: 10
+            mutableContent: true
           }
         }
       },
@@ -251,7 +364,7 @@ async function sendPush(tokens, notification, data = {}) {
         },
         notification: {
           title: "Go Delivery",
-          body: finalBody,
+          body: displayBody,
           icon: "https://godelivery-magdalena.web.app/logo-pwa.png",
           badge: "https://godelivery-magdalena.web.app/badge-icon.png",
           vibrate: [200, 100, 200, 100, 200],
@@ -357,16 +470,284 @@ async function getOnlineDeliveryTokens() {
  */
 async function getAdminTokens() {
   try {
-    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+    // Query both role:'admin' AND isAdmin:true to cover all admin variants
+    const [byRoleSnap, byFlagSnap] = await Promise.all([
+      db.collection("users").where("role", "==", "admin").get(),
+      db.collection("users").where("isAdmin", "==", true).get()
+    ]);
+    const seenIds = new Set();
+    const allAdminDocs = [];
+    for (const snap of [byRoleSnap, byFlagSnap]) {
+      for (const d of snap.docs) {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          allAdminDocs.push(d);
+        }
+      }
+    }
     let tokens = [];
-    for (const doc of adminsSnap.docs) {
+    for (const doc of allAdminDocs) {
       const userTokens = await getUserTokens(doc.id);
       tokens = tokens.concat(userTokens);
+      // Fallback: If fcmTokens subcollection is empty, check root document mirrored token
+      if (userTokens.length === 0) {
+        const uData = doc.data();
+        if (uData && uData.lastFcmToken) {
+          tokens.push(uData.lastFcmToken);
+        }
+      }
     }
-    return [...new Set(tokens)];
+    return [...new Set(tokens)].filter(Boolean);
   } catch (err) {
     logger.error("Error getting admin tokens:", err);
     return [];
+  }
+}
+
+/**
+ * Helper: Server-side dispatch queue — selects the best eligible driver
+ * and atomically assigns them to the order. Used for favor/trip orders on
+ * creation and for regular orders when they become 'ready'.
+ */
+async function serverSideDispatch(orderId, order) {
+  try {
+    // 0. Auto-cancel if order is older than 30 minutes ONLY for pending orders or unassigned favors/trips
+    const createdAt = order.createdAt ? (order.createdAt.toMillis ? order.createdAt.toMillis() : new Date(order.createdAt).getTime()) : Date.now();
+    const ageMinutes = (Date.now() - createdAt) / (60 * 1000);
+    const isUnacceptedCommerceOrder = !order.isFavor && !order.isTrip && order.status === 'pending';
+    const isUnassignedFavorOrTrip = (order.isFavor || order.isTrip) && !order.driverId;
+    if (ageMinutes >= 30 && (isUnacceptedCommerceOrder || isUnassignedFavorOrTrip)) {
+      logger.info(`[ServerDispatch] Order ${orderId} is older than 30 minutes (${ageMinutes.toFixed(1)} mins) and unaccepted. Cancelling.`);
+      await db.collection("orders").doc(orderId).update({
+        status: "cancelled",
+        cancelReason: "Lamentablemente, el pedido expiró sin ser aceptado a tiempo.",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return;
+    }
+
+    // Guard: Regular commerce orders must ONLY be dispatched when they are 'ready'
+    if (!order.isFavor && !order.isTrip && order.status !== 'ready') {
+      logger.info(`[ServerDispatch] Order ${orderId} is a commerce order with status '${order.status}'. Skipping dispatch until 'ready'.`);
+      return;
+    }
+
+    logger.info(`[ServerDispatch] Running dispatch for order ${orderId} (isFavor=${!!order.isFavor}, isTrip=${!!order.isTrip}, status=${order.status})`);
+
+    // 1. Get commerce own-delivery emails
+    let ownEmails = [];
+    if (order.comercioId) {
+      const comSnap = await db.collection("comercios").doc(order.comercioId).get();
+      if (comSnap.exists) ownEmails = comSnap.data().ownDeliveries || [];
+    }
+    const isOwnDeliveryOrder = ownEmails.length > 0;
+
+    // 2. Fetch eligible drivers
+    let allDrivers = [];
+    const isDriverUser = (data) => {
+      const role = data.role || "";
+      const isDel = data.isDelivery === true || data.isDelivery === "true" || role === "delivery" || role === "driver" || role === "repartidor" || role === "chofer" || role === "admin";
+      return isDel;
+    };
+
+    if (isOwnDeliveryOrder) {
+      const ownEmailsLower = ownEmails.map(e => e.trim().toLowerCase());
+      const chunks = [];
+      for (let i = 0; i < ownEmailsLower.length; i += 30) chunks.push(ownEmailsLower.slice(i, i + 30));
+      for (const chunk of chunks) {
+        const snap = await db.collection("users").where("email", "in", chunk).get();
+        snap.docs.forEach(d => { if (isDriverUser(d.data())) allDrivers.push({ id: d.id, ...d.data() }); });
+      }
+    } else {
+      const snap = await db.collection("users").where("isOnline", "==", true).get();
+      snap.docs.forEach(d => { if (isDriverUser(d.data())) allDrivers.push({ id: d.id, ...d.data() }); });
+    }
+
+    if (allDrivers.length === 0) {
+      if (order.isFavor || order.isTrip) {
+        logger.warn(`[ServerDispatch] No online drivers found for favor/trip ${orderId}. Cancelling.`);
+        await db.collection("orders").doc(orderId).update({
+          status: "cancelled",
+          cancelReason: "No hay repartidores conectados en este momento.",
+          cancelledAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        logger.info(`[ServerDispatch] No online drivers found for commerce order ${orderId}. Leaving order pending for commerce acceptance.`);
+      }
+      return;
+    }
+
+    // 3. Get active orders to enforce simultaneous-order caps
+    const activeOrdersSnap = await db.collection("orders")
+      .where("status", "in", ["accepted", "confirmed", "preparing", "ready", "picked_up", "at_door", "delivering"])
+      .get();
+    const activeByDriver = {};
+    activeOrdersSnap.docs.forEach(docSnap => {
+      const ord = docSnap.data();
+      if (ord.driverId) {
+        if (!activeByDriver[ord.driverId]) activeByDriver[ord.driverId] = [];
+        activeByDriver[ord.driverId].push({ id: docSnap.id, ...ord });
+      }
+    });
+
+    const canTake = (driverId, comercioId) => {
+      const active = activeByDriver[driverId] || [];
+      if (active.length === 0) return true;
+      const allSame = active.every(x => x.comercioId && x.comercioId === active[0].comercioId);
+      const isSame = active[0]?.comercioId && active[0].comercioId === comercioId;
+      if (active.length >= 2) return allSame && isSame && active.length + 1 <= 3;
+      if (active.length === 1) return isSame ? active.length + 1 <= 3 : active.length + 1 <= 2;
+      return false;
+    };
+
+    const now = Date.now();
+    const rejected = order.queueRejectedDrivers || [];
+
+    let eligible = allDrivers.filter(d => {
+      if (!canTake(d.id, order.comercioId)) return false;
+      if (d.cooldownUntil) {
+        const coolMs = d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime();
+        if (coolMs > now) return false;
+      }
+      // DeliveryMode filter
+      const mode = d.deliveryMode || "both";
+      if (mode === "trip" && !order.isTrip) return false;
+      if (mode === "delivery" && order.isTrip) return false;
+      // Trip vehicle type filter
+      if (order.isTrip) {
+        const isApproved = d.tripStatus === "approved" || d.role === "chofer";
+        if (!isApproved) return false;
+        const reqType = (order.tripType || "auto").toLowerCase();
+        const drvType = (d.tripVehicleType || d.vehicleType || "").toLowerCase();
+        if (reqType !== drvType) return false;
+      }
+      return true;
+    });
+
+    if (eligible.length === 0) {
+      logger.warn(`[ServerDispatch] No eligible drivers for order ${orderId}. Leaving in public queue.`);
+      return;
+    }
+
+    // Strict rule: A driver can NEVER receive the same order twice in a row if there is at least one other eligible driver.
+    const lastOfferedDriverId = rejected[rejected.length - 1];
+    if (lastOfferedDriverId && eligible.length > 1) {
+      eligible = eligible.filter(d => d.id !== lastOfferedDriverId);
+    }
+
+    // 4. Sort: co-pickup first → fewest rejections → longest waiting time since last rejection or delivery
+    const coPickupDriver = eligible.find(d =>
+      activeOrdersSnap.docs.some(docSnap => {
+        const ord = docSnap.data();
+        return ord.driverId === d.id && ord.comercioId === order.comercioId && !ord.pickedUpAt;
+      })
+    );
+    const fourHoursAgoMs = Date.now() - (4 * 60 * 60 * 1000);
+
+    eligible.sort((a, b) => {
+      const ra = rejected.filter(id => id === a.id).length;
+      const rb = rejected.filter(id => id === b.id).length;
+      if (ra !== rb) return ra - rb;
+      
+      // Calculate Active Orders weight (+10 per active order in progress) + Recent completed in last 4 hours
+      const activeA = (activeByDriver[a.id] || []).length;
+      const activeB = (activeByDriver[b.id] || []).length;
+
+      const getRecentCompletedCount = (drv) => {
+        const times = drv.recentCompletedTimes || [];
+        if (!Array.isArray(times) || times.length === 0) {
+          return drv.completedOrdersToday || 0;
+        }
+        return times.filter(t => typeof t === 'number' && t >= fourHoursAgoMs).length;
+      };
+
+      const scoreA = (activeA * 10) + getRecentCompletedCount(a);
+      const scoreB = (activeB * 10) + getRecentCompletedCount(b);
+
+      if (scoreA !== scoreB) return scoreA - scoreB;
+
+      // If rejections count is equal, sort by the last rejection index in the array
+      // (a smaller index means they rejected/missed it longer ago, so they get it next)
+      const idxA = rejected.lastIndexOf(a.id);
+      const idxB = rejected.lastIndexOf(b.id);
+      if (idxA !== idxB) return idxA - idxB;
+      
+      // Fallback to lastDeliveryAt round-robin
+      const timeA = a.lastDeliveryAt ? (a.lastDeliveryAt.toMillis ? a.lastDeliveryAt.toMillis() : new Date(a.lastDeliveryAt).getTime()) : 0;
+      const timeB = b.lastDeliveryAt ? (b.lastDeliveryAt.toMillis ? b.lastDeliveryAt.toMillis() : new Date(b.lastDeliveryAt).getTime()) : 0;
+      return timeA - timeB;
+    });
+    const chosen = coPickupDriver || eligible[0];
+
+    const isOnlyDriver = allDrivers.length === 1;
+
+    let assigned = false;
+    await db.runTransaction(async (tx) => {
+      const freshSnap = await tx.get(db.collection("orders").doc(orderId));
+      if (!freshSnap.exists) return;
+      const freshOrder = freshSnap.data();
+      if (freshOrder.driverId || freshOrder.queueTargetDriverId) return; // already claimed
+      
+      tx.update(db.collection("orders").doc(orderId), {
+        queueTargetDriverId: chosen.id,
+        queueTargetDriverName: chosen.displayName || chosen.name || "Repartidor",
+        queueOfferedAt: admin.firestore.FieldValue.serverTimestamp(),
+        queueRejectedDrivers: rejected,
+        isPermanentOffer: isOnlyDriver ? true : null
+      });
+      assigned = true;
+    });
+
+    if (assigned) {
+      logger.info(`[ServerDispatch] ✅ Order ${orderId} → driver ${chosen.id} (${chosen.displayName || chosen.name})`);
+      
+      // Notify the chosen target driver via Push Notification & In-App Notification (even if rotated back to them)
+      try {
+        const orderTypeStr = order.isFavor 
+          ? (order.favorType === "compra" ? "GOMANDADO 🛒" : "GOFAVOR 📦")
+          : (order.isTrip ? "GOTAXI 🚕" : "PEDIDO 🛍️");
+
+        const originStr = order.comercioName || (order.isTrip ? "Pasajero" : (order.isFavor ? (order.favorTypeLabel || "Favor") : "Comercio"));
+        const destStr = order.destinationAddress || order.address || order.deliveryAddress || "Dirección de entrega";
+        const earnings = Math.round(order.driverEarnings || order.shippingFee || order.deliveryFee || order.shippingCost || 0);
+        const earningsBadge = earnings > 0 ? `$${earnings.toLocaleString('es-AR')} Ganancia` : 'Disponible';
+
+        const pushTitle = `🚨 ¡OFERTA: ${earningsBadge}! (${orderTypeStr})`;
+        const pushBody = `📍 Retiro: ${originStr}\n🏁 Entrega: ${destStr}\n¡Tenés 60s para aceptar!`;
+
+        await db.collection("users").doc(chosen.id).collection("notifications").add({
+          type: "new_exclusive_offer",
+          title: pushTitle,
+          body: pushBody,
+          status: "unread",
+          url: "#/delivery",
+          orderId: orderId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const targetTokens = await getUserTokens(chosen.id);
+        if (targetTokens.length > 0) {
+          await sendPush(targetTokens, {
+            title: pushTitle,
+            body: pushBody
+          }, { 
+            tag: `exclusive-offer-${orderId}-${Date.now()}`, 
+            url: "#/delivery",
+            type: "exclusive_offer",
+            orderId: orderId,
+            sound: "alert.mp3",
+            channelId: "exclusive_offers"
+          });
+          logger.info(`[ServerDispatch] Sent FCM push to target driver ${chosen.id}`);
+        }
+      } catch (pushErr) {
+        logger.error(`[ServerDispatch] Error sending push to target driver ${chosen.id}:`, pushErr);
+      }
+    } else {
+      logger.info(`[ServerDispatch] Order ${orderId} already claimed — skipping.`);
+    }
+  } catch (err) {
+    logger.error(`[ServerDispatch] Error dispatching order ${orderId}:`, err);
   }
 }
 
@@ -402,22 +783,24 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
       const adminTokens = await getAdminTokens();
       if (adminTokens.length > 0) {
         await sendPush(adminTokens, {
-          title: `🔔 Nuevo Pedido #${orderNum}`,
-          body: `Se ha registrado una nueva orden: ${orderTypeLabel}`
+          title: `🚨 [SOPORTE GO] ¡Nuevo Pedido #${orderNum}!`,
+          body: `${orderTypeLabel} — Ingresó al sistema (${order.userName || 'Cliente'}). Tap para auditarlo.`
         }, {
-          tag: `new-order-admin-${orderId}`,
-          url: `#/admin/orders/${orderId}`,
-          type: 'new_order_alert'
+          tag: `admin-new-order-${orderId}`,
+          url: `#/admin/orders`,
+          type: 'admin_support_alert',
+          sound: 'alert.mp3',
+          channelId: 'admin_alerts'
         });
       }
 
       for (const adminDoc of adminsSnap.docs) {
         await db.collection("users").doc(adminDoc.id).collection("notifications").add({
-          title: `🔔 Nuevo Pedido #${orderNum}`,
+          title: `🚨 [SOPORTE] Nuevo Pedido #${orderNum}`,
           body: `Se ha registrado una nueva orden de tipo: ${orderTypeLabel}`,
-          type: 'system',
+          type: 'admin_support_alert',
           status: 'unread',
-          url: `#/admin/orders/${orderId}`,
+          url: `#/admin/orders`,
           createdAt: new Date()
         });
       }
@@ -425,61 +808,75 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
       logger.error("Error notifying admins of new order:", err);
     }
 
-    // 1. If it's a GoFavor order, notify all online drivers immediately
-    if (order.isFavor) {
-      const driverTokens = await getOnlineDeliveryTokens();
-      if (driverTokens.length > 0) {
-        let orderType = "go favor";
-        if (order.favorType === "compra") {
-          orderType = "mandado / compra";
-        } else if (order.favorType === "mandado") {
-          orderType = "encomienda";
-        } else if (order.favorType === "gocash") {
-          orderType = "go cash";
-        }
-        await sendPush(driverTokens, {
-          title: `🛵 ¡Nuevo GoFavor Disponible!`,
-          body: `Hay un nuevo pedido de tipo ${orderType.toUpperCase()} listo para tomar.`
-        }, { tag: `new-favor-${orderId}`, url: "#/delivery" });
-      }
+    // 1. GoFavor and GoViaje orders are dispatched immediately
+    //    server-side so only the targeted driver receives the exclusive offer push.
+    if (order.isFavor || order.isTrip) {
+      // Small delay to let Firestore settle before running dispatch
+      await new Promise(r => setTimeout(r, 1500));
+      await serverSideDispatch(orderId, order);
       return;
     }
 
-    // 1.5 If it's a Trip order (Go Viaje), notify all online drivers immediately
-    if (order.isTrip) {
-      const driverTokens = await getOnlineDeliveryTokens();
-      if (driverTokens.length > 0) {
-        await sendPush(driverTokens, {
-          title: `🚗 ¡Nuevo Viaje Disponible!`,
-          body: `Hay un nuevo traslado disponible para tomar.`
-        }, { tag: `new-trip-${orderId}`, url: "#/delivery" });
-      }
-      return;
-    }
+    // 2. Regular commerce owner notification (Fires on all orders regardless of payment method)
+    const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
+    if (comercioDoc.exists) {
+      const comData = comercioDoc.data();
+      let ownerId = comData.ownerId;
+      const commerceName = (comData.name || "").toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isGoMarket = commerceName.includes("gomarket");
 
-    // 2. Regular commerce owner notification (Only if Cash payment, Mercado Pago waits for confirmation)
-    if (order.paymentMethod === 'efectivo') {
-      const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
-      if (comercioDoc.exists) {
-        const comData = comercioDoc.data();
-        const ownerId = comData.ownerId;
-        const commerceName = (comData.name || "").toLowerCase();
-        const isGoMarket = commerceName.includes("go!") && commerceName.includes("market");
-
-        if (isGoMarket) {
-          // If it's GoMarket, notify ALL admins
-          const adminTokens = await getAdminTokens();
-          await sendPush(adminTokens, {
-            title: "🛒 ¡Nuevo Pedido en GoMarket!",
-            body: `Recibiste el pedido #${orderNum} de ${order.userName || "un cliente"}.`
-          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
-        } else {
-          // Regular commerce owner notification
+      if (isGoMarket) {
+        // If it's GoMarket, notify the commerce owner (if specified) AND ALL admins
+        let targetTokens = await getAdminTokens();
+        if (ownerId) {
           const ownerTokens = await getUserTokens(ownerId);
+          targetTokens = [...new Set([...targetTokens, ...ownerTokens])];
+        }
+
+        if (targetTokens.length > 0) {
+          await sendPush(targetTokens, {
+            title: "🛒 ¡Nuevo Pedido en GoMarket!",
+            body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`,
+            sound: "default"
+          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
+        }
+      } else {
+        // If ownerId is missing or empty, find user in 'users' collection where comercioId matches
+        if (!ownerId) {
+          const ownerQuerySnap = await db.collection("users").where("comercioId", "==", order.comercioId).get();
+          if (!ownerQuerySnap.empty) {
+            ownerId = ownerQuerySnap.docs[0].id;
+          }
+        }
+
+        let ownerTokens = ownerId ? await getUserTokens(ownerId) : [];
+        
+        // Also query fcmTokens directly under user if ownerId is present
+        if (ownerTokens.length === 0 && ownerId) {
+          const uDoc = await db.collection("users").doc(ownerId).get();
+          if (uDoc.exists && uDoc.data().fcmToken) {
+            ownerTokens = [uDoc.data().fcmToken];
+          }
+        }
+
+        if (ownerTokens.length > 0) {
+          logger.info(`[FCM] Sending new order push to commerce owner ${ownerId} (${ownerTokens.length} tokens).`);
           await sendPush(ownerTokens, {
             title: "🔔 ¡Nuevo Pedido Recibido!",
-            body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`
+            body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`,
+            sound: "default"
           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
+        } else {
+          // Fallback to admin if owner has no tokens registered
+          logger.warn(`[FCM] Commerce owner ${ownerId || 'unknown'} has no FCM tokens registered. Falling back to admins.`);
+          const adminTokens = await getAdminTokens();
+          if (adminTokens.length > 0) {
+            await sendPush(adminTokens, {
+              title: "🔔 ¡Nuevo Pedido Recibido!",
+              body: `Nuevo pedido #${orderNum} en ${comData.name || 'comercio'}.`,
+              sound: "default"
+            }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
+          }
         }
       }
     }
@@ -547,7 +944,7 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
           body: message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text
         }, {
           tag: `chat-${chatId}`,
-          url: `#/pedido/${orderId}`,
+          url: `#/mis-chats?chatId=${chatId}`,
           type: "chat_message"
         });
       }
@@ -648,13 +1045,27 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       before.isAtDoor === after.isAtDoor &&
       before.queueTargetDriverId === after.queueTargetDriverId &&
       JSON.stringify(before.items) === JSON.stringify(after.items) &&
-      before.total === after.total) {
+      before.total === after.total &&
+      JSON.stringify(before.storePrices || {}) === JSON.stringify(after.storePrices || {}) &&
+      before.subtotal === after.subtotal) {
     return;
   }
 
   const orderNum = after.orderId || orderId.slice(0, 6);
 
   try {
+    // 00. Queue rotation trigger: if the target driver is released (from exclusive to null)
+    // and the order is still active/unassigned, re-run dispatch.
+    // Commerce orders ONLY re-dispatch if they are in 'ready' status.
+    const isDispatchableStatus = (after.isFavor || after.isTrip) 
+      ? ['pending', 'confirmed', 'preparing', 'ready'].includes(after.status)
+      : (after.status === 'ready');
+
+    if (before.queueTargetDriverId && !after.queueTargetDriverId && !after.driverId && isDispatchableStatus) {
+      logger.info(`[ServerDispatch] Queue target released to null for order ${orderId}. Re-running serverSideDispatch.`);
+      await serverSideDispatch(orderId, after);
+    }
+
     // Server-side Auto-Accept Logic:
     // If a target driver is assigned, the driver changed, there is no driver assigned yet, and the driver has auto-accept enabled:
     if (after.queueTargetDriverId && before.queueTargetDriverId !== after.queueTargetDriverId && !after.driverId) {
@@ -687,14 +1098,29 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             missedOffersCount: 0
           });
 
+          // Fetch the customer's photo URL from their user profile
+          let customerPhoto = "";
+          try {
+            const customerDoc = await db.collection("users").doc(after.userId).get();
+            if (customerDoc.exists) {
+              customerPhoto = customerDoc.data().photoURL || "";
+            }
+          } catch (cErr) {
+            logger.error("Error fetching customer photo:", cErr);
+          }
+
           // Notify the driver via Push Notification
           const driverTokens = await getUserTokens(driverId);
           await sendPush(driverTokens, {
             title: "⚡ ¡Pedido auto-aceptado!",
-            body: `Se aceptó automáticamente el pedido de ${after.comercioName || 'Comercio'}. ¡Toca para ver tu ruta!`
+            body: `Se aceptó automáticamente el pedido de ${after.userName || 'Cliente'}. ¡Toca para ver tu ruta!`,
+            image: customerPhoto
           }, { 
             tag: `auto-accept-${orderId}`, 
             url: `#/delivery`,
+            type: "auto_accept",
+            sound: "cash.mp3",
+            channelId: "auto_accept_alerts",
             click_action: 'FLUTTER_NOTIFICATION_CLICK'
           });
 
@@ -709,6 +1135,21 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           });
 
           return; // Stop execution of the current invocation as document update will trigger a new event
+        } else {
+          // Standard Exclusive Offer Push Notification (Disabled to prevent double notifications)
+          try {
+            // Also add it to their Firestore notifications list so they see it in the app drawer
+            await db.collection("users").doc(driverId).collection("notifications").add({
+              type: "new_exclusive_offer",
+              title: "🛵 ¡Nueva Oferta Exclusiva!",
+              body: `Tenés un nuevo pedido disponible para aceptar de ${after.comercioName || 'Comercio'}.`,
+              status: "unread",
+              url: "#/delivery",
+              createdAt: new Date()
+            });
+          } catch (err) {
+            logger.error("[FCM Error] Failed to send exclusive offer notification:", err);
+          }
         }
       }
     }
@@ -743,34 +1184,80 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
     if (before.isAtDoor !== after.isAtDoor && after.isAtDoor === true) {
       if (after.userId) {
         const clientTokens = await getUserTokens(after.userId);
-        const codeStr = after.verificationCode ? ` Tené listo tu código de entrega: ${after.verificationCode}` : "";
+        const codePrefix = after.verificationCode ? `[Código: ${after.verificationCode}] ` : "";
         await sendPush(clientTokens, {
-          title: "¡Tu repartidor está en la puerta!",
+          title: `${codePrefix}¡Tu repartidor está en la puerta!`,
           body: after.isFavor 
-            ? `El repartidor llegó con tu favor. ¡Salí a recibirlo!${codeStr}` 
-            : `Prepárate para recibir tu pedido. ¡Ya llegó!${codeStr}`
-        }, { tag: `order-at-door-${orderId}`, url: `#/pedido/${orderId}` });
+            ? `Código: ${after.verificationCode || '----'} - El repartidor llegó con tu favor. ¡Salí a recibirlo!` 
+            : `Código: ${after.verificationCode || '----'} - Prepárate para recibir tu pedido. ¡Ya llegó!`
+        }, { 
+          tag: `order-active-${orderId}`, 
+          persistent: "true", 
+          ongoing: true, 
+          requireInteraction: true,
+          url: `#/pedido/${orderId}` 
+        });
       }
     }
 
-    // Status change notifications
+    // Driver Assignment Notification (Fires ONCE when a driver accepts an unassigned order/favor/trip)
+    if (!before.driverId && after.driverId && after.userId) {
+      const clientTokens = await getUserTokens(after.userId);
+      const driverName = after.driverName || "un repartidor";
+      const title = after.isTrip ? "🚕 Chofer Asignado" : "🛵 Repartidor Asignado";
+      const body = (after.isFavor || after.isTrip)
+        ? `Tu servicio fue asignado a ${driverName} y está en camino.`
+        : `Tu pedido fue asignado a ${driverName}.`;
+
+      await sendPush(clientTokens, {
+        title,
+        body
+      }, { 
+        tag: `order-active-${orderId}`, 
+        persistent: "true", 
+        ongoing: true, 
+        requireInteraction: true,
+        url: `#/pedido/${orderId}` 
+      });
+    }
+
+    // Status change notifications (ONLY when the order status itself changes, not just queue rotation)
     if (before.status !== after.status) {
       switch (after.status) {
         case "confirmed": {
-          // Notify client: "👨‍🍳 Preparando tu pedido"
+          // Notify client: differentiate between normal commerce orders vs GoFavores / Mandados
           const clientTokens = await getUserTokens(after.userId);
-          await sendPush(clientTokens, {
-            title: "✅ Pedido Confirmado",
-            body: "👨‍🍳 Preparando tu pedido. ¡Ya casi está!"
-          }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
+          if (!after.isFavor && !after.isTrip) {
+            await sendPush(clientTokens, {
+              title: "✅ Pedido Confirmado",
+              body: "👨‍🍳 Preparando tu pedido. ¡Ya casi está!"
+            }, { 
+              tag: `order-active-${orderId}`, 
+              persistent: "true", 
+              ongoing: true, 
+              requireInteraction: true,
+              url: `#/pedido/${orderId}` 
+            });
+          }
           break;
         }
         case "ready": {
+          // If the order has a targeted driver (exclusive queue offer), do NOT broadcast to all drivers
+          if (after.queueTargetDriverId) {
+            logger.info(`[FCM] Order ${orderId} has exclusive target driver ${after.queueTargetDriverId}. Skipping general broadcast.`);
+            break;
+          }
+
+          // ── SERVER-SIDE DISPATCH (via shared helper) ──────────────────────
+          await serverSideDispatch(orderId, after);
+          // ─────────────────────────────────────────────────────────────────
+
+
           // Notify client: "Un delivery está yendo a buscarlo"
           const clientTokens2 = await getUserTokens(after.userId);
           await sendPush(clientTokens2, {
             title: "📦 Pedido Listo",
-            body: "🛵 Un delivery está yendo a buscarlo"
+            body: "🛵 Tu pedido está listo. Buscando un repartidor..."
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
 
           // Manual Assignment only: Geohash & Distance Auto-Assignment algorithm is disabled.
@@ -822,32 +1309,16 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             logger.error("Error in co-pickup targeted scan:", err);
           }
 
-          // Fallback: Broadcast to all online drivers if no close driver is found
-          let orderType = "simple";
-          if (after.isFavor) {
-            orderType = after.favorType === "compra" ? "gofavor: compra" : "gofavor: mandado";
-          } else if (after.isMultiple) {
-            orderType = "multiple";
-          }
-
-          const driverTokens = await getOnlineDeliveryTokens();
-          // Exclude targeted co-pickup tokens from the general broadcast
-          const broadcastTokens = driverTokens.filter(t => !coPickupTokens.includes(t));
-          if (broadcastTokens.length > 0) {
-            await sendPush(broadcastTokens, {
-              title: `🛵 ¡Nuevo Pedido Disponible! (${orderType.toUpperCase()})`,
-              body: `Hay un nuevo pedido ${orderType.toUpperCase()} listo para retirar en ${after.comercioName || 'el comercio'}.`
-            }, { tag: "new-available-order", url: "#/delivery" });
-          }
           break;
         }
+
         case "delivering": {
           // Notify client: "El pedido está en camino" + Delivery Code
           const clientTokens3 = await getUserTokens(after.userId);
           const delCode = after.verificationCode || "----";
           await sendPush(clientTokens3, {
-            title: "🛵 ¡Tu pedido está en camino!",
-            body: `El repartidor ya lleva tu pedido. Código de entrega: ${delCode}`
+            title: `[Código: ${delCode}] 🛵 ¡Tu pedido está en camino!`,
+            body: `Código: ${delCode} - El repartidor ya lleva tu pedido.`
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}`, persistent: "true" });
           break;
         }
@@ -859,21 +1330,51 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             body: "El repartidor ya entregó tu pedido. ¡Que lo disfrutes!"
           }, { tag: `order-${orderId}-delivered`, url: `#/pedido/${orderId}`, persistent: "true" });
 
-          // 2. Update driver's debt: increment by appUsageFee and decrement by couponDiscount
-          if (after.driverId) {
+           if (after.driverId) {
             const appFee = after.appUsageFee || 0;
             const couponDiscount = after.couponDiscount || 0;
             const driverIncentiveAmount = after.driverIncentiveAmount || 0;
             const netDebtChange = appFee - couponDiscount - driverIncentiveAmount;
-            if (netDebtChange !== 0) {
-              try {
-                await db.collection("users").doc(after.driverId).update({
-                  deliveryDebt: admin.firestore.FieldValue.increment(netDebtChange)
-                });
-                logger.info(`Updated driver ${after.driverId} debt by ${netDebtChange} (AppFee: ${appFee}, Coupon: -${couponDiscount}, Incentive: -${driverIncentiveAmount}).`);
-              } catch (err) {
-                logger.error(`Error updating driver ${after.driverId} debt:`, err);
-              }
+
+            const date = new Date();
+            const argOffset = -3 * 60; // Argentina offset in minutes (UTC-3)
+            const localDate = new Date(date.getTime() + (argOffset + date.getTimezoneOffset()) * 60 * 1000);
+            const todayStr = localDate.toISOString().split('T')[0];
+
+            let todayCount = 0;
+            try {
+              const driverRef = db.collection("users").doc(after.driverId);
+              await db.runTransaction(async (transaction) => {
+                const driverSnap = await transaction.get(driverRef);
+                if (!driverSnap.exists) return;
+                const dData = driverSnap.data();
+
+                const lastDate = dData.lastDeliveryDateStr || "";
+                let tempCount = dData.completedOrdersToday || 0;
+
+                if (lastDate !== todayStr) {
+                  tempCount = 1;
+                } else {
+                  tempCount += 1;
+                }
+                todayCount = tempCount;
+
+                const driverUpdates = {
+                  lastDeliveryAt: admin.firestore.FieldValue.serverTimestamp(),
+                  lastDeliveryDateStr: todayStr,
+                  completedOrdersToday: todayCount,
+                  completedOrdersCount: admin.firestore.FieldValue.increment(1),
+                  recentCompletedTimes: admin.firestore.FieldValue.arrayUnion(Date.now())
+                };
+                if (netDebtChange !== 0) {
+                  driverUpdates.deliveryDebt = admin.firestore.FieldValue.increment(netDebtChange);
+                }
+
+                transaction.update(driverRef, driverUpdates);
+              });
+              logger.info(`Updated driver ${after.driverId} on completion: todayCount=${todayCount} (debt change: ${netDebtChange}).`);
+            } catch (err) {
+              logger.error(`Error updating driver ${after.driverId} on completion transaction:`, err);
             }
           }
 
@@ -918,8 +1419,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                   completedOrdersCount: admin.firestore.FieldValue.increment(1)
                 });
                 
-                // Update order with pointsEarned and appliedMultiplier
-                batch.update(db.collection("orders").doc(orderId), {
+                // Update order with pointsEarned and appliedMultiplier (separate update to avoid re-triggering status notifications)
+                await db.collection("orders").doc(orderId).update({
                   pointsEarned: pointsEarned,
                   appliedMultiplier: multiplier
                 });
@@ -958,8 +1459,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                       referredRewardGranted: true
                     });
                     
-                    // Note on order
-                    batch.update(db.collection("orders").doc(orderId), {
+                    // Note on order (separate update, not in batch, to avoid re-triggering status change handler)
+                    await db.collection("orders").doc(orderId).update({
                       referredRewardGranted: true,
                       referralBonusAmount: referralPoints
                     });
@@ -1080,24 +1581,41 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
         case "cancelled": {
           // Notify client: "Pedido cancelado"
           const clientTokens5 = await getUserTokens(after.userId);
+          let cancelMsg = "Lamentablemente, tu pedido fue cancelado.";
+          
+          if (after.cancelReason && after.cancelReason.toLowerCase().includes("repartidor")) {
+            cancelMsg = "Lamentablemente, tu pedido fue cancelado por falta de repartidores disponibles en tu zona.";
+          } else if (after.cancelReason) {
+            cancelMsg = `Lamentablemente, tu pedido fue cancelado. Motivo: ${after.cancelReason}`;
+          }
+
           await sendPush(clientTokens5, {
             title: "❌ Pedido Cancelado",
-            body: `Lamentablemente, tu pedido #${orderNum} de ${after.comercioName} fue cancelado.`
+            body: cancelMsg
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
           break;
         }
       }
     }
     
-    // Order modification notification (items or total changed)
+    // Single consolidated order modification notification (items or total changed)
     if (before.status === after.status && 
-        (JSON.stringify(before.items) !== JSON.stringify(after.items) || before.total !== after.total)) {
+        (JSON.stringify(before.items) !== JSON.stringify(after.items) || before.total !== after.total || before.subtotal !== after.subtotal)) {
       const clientTokens = await getUserTokens(after.userId);
-      const modifierName = after.isFavor ? "El repartidor" : (after.comercioName || "El comercio");
-      await sendPush(clientTokens, {
-        title: "📝 Pedido Modificado",
-        body: `${modifierName} modificó tu pedido #${orderNum}. Nuevo total: $${after.total}`
-      }, { tag: `order-${orderId}-modified`, url: `#/pedido/${orderId}` });
+      if (clientTokens.length > 0) {
+        const modifierName = after.isFavor ? "El repartidor" : (after.comercioName || "El comercio");
+        const formatPrice = (val) => `$${Number(val).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+        await sendPush(clientTokens, {
+          title: "📝 Pedido Modificado",
+          body: `${modifierName} actualizó tu pedido #${orderNum}. Nuevo total: ${formatPrice(after.total)}`
+        }, { 
+          tag: `order-active-${orderId}`, 
+          persistent: "true", 
+          ongoing: true, 
+          requireInteraction: true,
+          url: `#/pedido/${orderId}` 
+        });
+      }
     }
 
   } catch (err) {
@@ -1147,9 +1665,22 @@ async function checkIfRainingInMagdalena() {
 
 function getArgentinaTime() {
   const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const artOffset = -3;
-  return new Date(utc + (3600000 * artOffset));
+  try {
+    const options = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    const parts = formatter.formatToParts(now);
+    const map = {};
+    parts.forEach(p => { if (p.type !== 'literal') map[p.type] = parseInt(p.value, 10); });
+    const hours = (map.hour || 0) % 24;
+    const minutes = map.minute || 0;
+    const day = map.day || 1;
+    const month = (map.month || 1) - 1;
+    const year = map.year || 2026;
+    return new Date(year, month, day, hours, minutes, map.second || 0);
+  } catch (e) {
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    return new Date(utc + (3600000 * -3));
+  }
 }
 
 function isScheduleActive(config) {
@@ -1159,8 +1690,8 @@ function isScheduleActive(config) {
   const currentTime = now.getHours() * 60 + now.getMinutes();
 
   try {
-    const [startH, startM] = config.start.split(':').map(Number);
-    const [endH, endM] = config.end.split(':').map(Number);
+    const [startH, startM] = (config.start || '00:00').split(':').map(Number);
+    const [endH, endM] = (config.end || '06:00').split(':').map(Number);
     
     if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return false;
 
@@ -1170,6 +1701,8 @@ function isScheduleActive(config) {
     if (endMinutes < startMinutes) {
       // Overnight schedule, e.g. 23:00 to 06:00
       return currentTime >= startMinutes || currentTime <= endMinutes;
+    } else if (startMinutes === endMinutes) {
+      return true;
     } else {
       // Normal schedule, e.g. 12:00 to 15:00
       return currentTime >= startMinutes && currentTime <= endMinutes;
@@ -1198,7 +1731,7 @@ function calculateScheduleSurcharge(config, baseValue) {
 // ═══════════════════════════════════════════════════
 // BACKEND-DRIVEN CHECKOUT & ORDER CREATION (Pilar 1)
 // ═══════════════════════════════════════════════════
-exports.createOrder = onRequest({ cors: true }, async (req, res) => {
+exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, res) => {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed");
   }
@@ -1239,6 +1772,29 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       logger.error("Error fetching active offers for checkout:", err);
     }
 
+    // Fetch current weather status outside transaction
+    const weatherDocSnap = await db.collection("settings").doc("weather").get();
+    const weatherData = weatherDocSnap.exists ? weatherDocSnap.data() : {};
+    let isRainingFromApi = false;
+    let needsWeatherUpdate = false;
+    const lastUpdated = weatherData.updatedAt ? weatherData.updatedAt.toDate().getTime() : 0;
+    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+    if (!weatherData || !weatherData.updatedAt || lastUpdated < thirtyMinutesAgo) {
+      try {
+        isRainingFromApi = await checkIfRainingInMagdalena();
+        needsWeatherUpdate = true;
+      } catch (err) {
+        logger.warn("Weather API check failed:", err);
+      }
+    }
+
+    if (needsWeatherUpdate) {
+      await db.collection("settings").doc("weather").set({
+        isRaining: isRainingFromApi,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    }
+
     // Start transactional order creation
     const result = await db.runTransaction(async (transaction) => {
       // 1. Fetch user data to verify points
@@ -1259,10 +1815,6 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       const globalSettingsSnap = await transaction.get(db.collection("settings").doc("global"));
       const globalSettings = globalSettingsSnap.exists ? globalSettingsSnap.data() : {};
 
-      // Fetch current weather status
-      const weatherSnap = await transaction.get(db.collection("settings").doc("weather"));
-      const weatherData = weatherSnap.exists ? weatherSnap.data() : {};
-
       const rainMode = globalSettings.rainMode || "auto";
       let isRaining = false;
       if (rainMode === "on") {
@@ -1270,14 +1822,8 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
       } else if (rainMode === "off") {
         isRaining = false;
       } else {
-        const lastUpdated = weatherData.updatedAt ? weatherData.updatedAt.toDate().getTime() : 0;
-        const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
-        if (!weatherData || !weatherData.updatedAt || lastUpdated < thirtyMinutesAgo) {
-          isRaining = await checkIfRainingInMagdalena();
-          transaction.set(db.collection("settings").doc("weather"), {
-            isRaining,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+        if (needsWeatherUpdate) {
+          isRaining = isRainingFromApi;
         } else {
           isRaining = weatherData.isRaining || false;
         }
@@ -1451,6 +1997,7 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
 
       const createdOrders = [];
       const appUsageFeeRate = globalSettings.appUsageFeeRate !== undefined ? globalSettings.appUsageFeeRate : 0.05;
+      let remainingCouponDiscount = couponData ? Number(couponData.value || 0) : 0;
 
       // Calculate and create orders
       for (let i = 0; i < commerceEntries.length; i++) {
@@ -1501,10 +2048,9 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
           const isMerchantCoupon = couponData.ownerId && couponData.ownerId !== 'admin';
           const isMySubOrder = !isMerchantCoupon || (cId === couponData.ownerId);
 
-          if (isMySubOrder) {
+          if (isMySubOrder && remainingCouponDiscount > 0) {
             const scope = couponData.scope || 'products';
             const discountType = couponData.discountType || (couponData.type === 'free_delivery' ? 'percentage' : 'percentage');
-            const couponVal = Number(couponData.value || 0);
 
             if (scope === 'shipping' || couponData.type === 'free_delivery') {
               if (i === 0) {
@@ -1512,17 +2058,24 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
                 if (couponData.type === 'free_delivery') {
                   subCouponDiscount = baseDeliveryFee;
                 } else if (discountType === 'percentage') {
-                  subCouponDiscount = baseDeliveryFee * (couponVal / 100);
+                  subCouponDiscount = baseDeliveryFee * (remainingCouponDiscount / 100);
                 } else if (discountType === 'fixed') {
-                  subCouponDiscount = Math.min(couponVal, baseDeliveryFee);
+                  subCouponDiscount = Math.min(remainingCouponDiscount, baseDeliveryFee);
                 }
               }
             } else { // products
               if (discountType === 'percentage') {
-                subCouponDiscount = subProductsTotal * (couponVal / 100);
+                subCouponDiscount = subProductsTotal * (remainingCouponDiscount / 100);
               } else if (discountType === 'fixed') {
-                subCouponDiscount = Math.min(couponVal, subProductsTotal);
+                if (couponData.ownerId === 'admin') {
+                  subCouponDiscount = Math.min(remainingCouponDiscount, subProductsTotal + subDeliveryCost);
+                } else {
+                  subCouponDiscount = Math.min(remainingCouponDiscount, subProductsTotal);
+                }
               }
+            }
+            if (discountType === 'fixed') {
+              remainingCouponDiscount -= subCouponDiscount;
             }
           }
         }
@@ -1670,7 +2223,7 @@ exports.createOrder = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
+exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, res) => {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed");
   }
@@ -1799,8 +2352,10 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
          secureDeliveryCost = minPriceVal;
       }
 
+      const activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, secureDeliveryCost);
+
       if (secureDeliveryCost > 0) {
-        secureDeliveryCost += activeRainSurcharge;
+        secureDeliveryCost += activeRainSurcharge + activeNightSurcharge;
       }
 
       let finalDeliveryCost = Number(deliveryCost);
@@ -1845,16 +2400,23 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
           } else {
             secureCouponDiscount = couponVal;
           }
+        } else if (scope === 'global') {
+          if (discountType === 'percentage') {
+            secureCouponDiscount = subtotalVal * (couponVal / 100);
+          } else {
+            secureCouponDiscount = couponVal;
+          }
         }
+        if (secureCouponDiscount > subtotalVal) secureCouponDiscount = subtotalVal;
       }
-      const finalCouponDiscount = Number(couponDiscount) || secureCouponDiscount;
 
-      const secureTotal = Math.max(finalDeliveryCost + finalPurchaseFee + finalAppUsageFee + Number(extraStopsFee || 0) - Number(finalCouponDiscount || 0) + Number(tip || 0), 0);
-      let finalTotal = Number(total);
-      if (finalTotal < 0.9 * secureTotal) {
-         logger.warn(`GoFavor Total fee tampering detected! Client: ${finalTotal}, calculated: ${secureTotal}. Overwriting.`);
-         finalTotal = secureTotal;
+      const finalCouponDiscount = Number(couponDiscount || 0);
+      if (couponData && Math.abs(finalCouponDiscount - secureCouponDiscount) > 10) {
+        logger.warn(`GoFavor Coupon discount tampering detected! Client: ${finalCouponDiscount}, calculated: ${secureCouponDiscount}. Overwriting.`);
       }
+
+      const rawTotal = subtotalVal + finalAppUsageFee + Number(extraStopsFee || 0) + Number(tip || 0) - finalCouponDiscount;
+      const finalTotal = Math.max(0, Math.ceil(rawTotal));
 
       // Extract address notes from deliveryAddress if formatted as "Address (Detalle: Notes)"
       let finalDeliveryAddress = deliveryAddress;
@@ -1881,6 +2443,7 @@ exports.createFavorOrder = onRequest({ cors: true }, async (req, res) => {
         deliveryCost: finalDeliveryCost,
         isRaining: isRaining,
         rainSurcharge: activeRainSurcharge,
+        nightSurcharge: activeNightSurcharge,
         purchaseFee: finalPurchaseFee,
         appUsageFee: finalAppUsageFee,
         extraStopsFee: Number(extraStopsFee || 0),
@@ -1955,9 +2518,12 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
 
   const uid = decodedToken.uid;
   try {
-    // 1. Verify user is an Admin
+    const ADMIN_EMAILS = ['kioscopaulos7@gmail.com'];
     const userDoc = await db.collection("users").doc(uid).get();
-    if (!userDoc.exists || userDoc.data().role !== "admin") {
+    const userData = userDoc.exists ? userDoc.data() : null;
+    const callerEmail = decodedToken.email || '';
+    const isAdminUser = ADMIN_EMAILS.includes(callerEmail) || (userData && (userData.role === 'admin' || userData.isAdmin === true));
+    if (!isAdminUser) {
       return res.status(403).json({ error: "No tenés permisos para realizar esta acción" });
     }
 
@@ -2131,7 +2697,8 @@ exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/
   const userId = event.params.userId;
   if (!notification) return;
 
-  // Protect from loop: Only trigger push notifications for direct P2P points transfer, weekly challenge completions, driver/delivery approvals, scheduled trip events, or commerce approvals
+  // Protect from loop: Only trigger push notifications for direct P2P points transfer, weekly challenge completions, driver/delivery approvals, scheduled trip events, or commerce approvals.
+  // IMPORTANT: Do NOT add 'system', 'order_taken', 'trip_taken', or 'push_mirror' here — those are written by the client when it receives a push, which would cause an infinite loop.
   if (
     notification.type !== 'points_received' && 
     notification.type !== 'challenge_completion' && 
@@ -2171,7 +2738,6 @@ exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
     return res.status(405).send("Method Not Allowed");
   }
 
-  // Get token either from Auth header or req.body.idToken
   let token = null;
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -2194,8 +2760,12 @@ exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
   const uid = decodedToken.uid;
   try {
     // 1. Verify user is an Admin
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (!userDoc.exists || userDoc.data().role !== "admin") {
+    const ADMIN_EMAILS_RESET = ['kioscopaulos7@gmail.com'];
+    const userDoc2 = await db.collection("users").doc(uid).get();
+    const userData2 = userDoc2.exists ? userDoc2.data() : null;
+    const callerEmail2 = decodedToken.email || '';
+    const isAdminUser2 = ADMIN_EMAILS_RESET.includes(callerEmail2) || (userData2 && (userData2.role === 'admin' || userData2.isAdmin === true));
+    if (!isAdminUser2) {
       return res.status(403).json({ error: "No tenés permisos para realizar esta acción" });
     }
 
@@ -2326,44 +2896,8 @@ async function getAllDeliveryDrivers() {
 }
 
 exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
-  try {
-    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
-    const snap = await db.collection("users")
-      .where("isOnline", "==", true)
-      .get();
-
-    for (const doc of snap.docs) {
-      const data = doc.data();
-      const isDel = (data.isDelivery === true || data.isDelivery === "true" || data.role === "delivery" || data.role === "driver" || data.role === "repartidor" || data.deliveryStatus === "approved");
-      if (!isDel) continue;
-
-      // FIX: Check lastActivityAt (updated by heartbeat/actions) instead of lastActiveTime
-      const lastActiveTime = data.lastActivityAt ? data.lastActivityAt.toDate() : new Date(0);
-      
-      if (lastActiveTime < threeHoursAgo) {
-        const activeOrdersSnap = await db.collection("orders")
-          .where("driverId", "==", doc.id)
-          .where("status", "in", ["confirmed", "ready", "delivering"])
-          .get();
-          
-        if (activeOrdersSnap.empty) {
-          await doc.ref.update({ isOnline: false });
-          const settingsSnap = await db.collection("settings").doc("global").get();
-          const msgs = settingsSnap.exists ? settingsSnap.data().pushMessages : {};
-          const title = msgs?.disconnect?.title || "Zzz... Sesión pausada";
-          const body = msgs?.disconnect?.body || "Te desconectamos porque pasaron 3 horas de inactividad.";
-          
-          const tokens = await getUserTokens(doc.id);
-          if (tokens.length > 0) {
-            await sendPush(tokens, { title, body }, { tag: "auto-disconnect", url: "#/delivery" });
-          }
-          logger.info(`Auto-disconnected driver ${doc.id}`);
-        }
-      }
-    }
-  } catch (e) {
-    logger.error("Error in autoDisconnectDrivers:", e);
-  }
+  // Desconexión automática deshabilitada: Los repartidores nunca se desconectan por inactividad.
+  logger.info("[autoDisconnectDrivers] Desconexión automática deshabilitada por configuración.");
 });
 
 exports.cancelUnassignedOrders = onSchedule("*/5 * * * *", async (event) => {
@@ -2444,6 +2978,80 @@ exports.checkWeatherPeriodic = onSchedule("*/15 * * * *", async (event) => {
   }
 });
 
+exports.checkNightSurchargeSchedule = onSchedule("*/5 * * * *", async (event) => {
+  try {
+    const settingsSnap = await db.collection("settings").doc("global").get();
+    if (!settingsSnap.exists) return;
+    
+    const globalSettings = settingsSnap.data();
+    const config = globalSettings.nightSurchargeConfig;
+    if (!config || !config.enabled) {
+      await db.collection("settings").doc("night_surcharge_state").set({
+        isActive: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      return;
+    }
+
+    const isCurrentlyActive = isScheduleActive(config);
+    const stateRef = db.collection("settings").doc("night_surcharge_state");
+    const stateSnap = await stateRef.get();
+    const wasActive = stateSnap.exists ? !!stateSnap.data().isActive : false;
+
+    const startStr = config.start || "00:00";
+    const endStr = config.end || "06:00";
+    const msgs = globalSettings.pushMessages || {};
+
+    if (isCurrentlyActive && !wasActive) {
+      // Night Surcharge START window reached!
+      await stateRef.set({
+        isActive: true,
+        lastNotifiedStart: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      const title = msgs.night?.title || "🌙 ¡Comenzó el Recargo Nocturno!";
+      const body = msgs.night?.body || `El recargo nocturno de entregas ya está activo (${startStr} a ${endStr} hs). Se aplica una tarifa adicional a los envíos.`;
+
+      const driverDocs = await getAllDeliveryDrivers();
+      let allDriverTokens = [];
+      for (const doc of driverDocs) {
+         const t = await getUserTokens(doc.id);
+         allDriverTokens = allDriverTokens.concat(t);
+      }
+      allDriverTokens = [...new Set(allDriverTokens)];
+
+      if (allDriverTokens.length > 0) {
+        await sendPush(allDriverTokens, { title, body }, { tag: "night-surcharge-start", url: "#/delivery" });
+        logger.info(`Night Surcharge START push sent (${startStr} to ${endStr}) to ${allDriverTokens.length} drivers.`);
+      }
+    } else if (!isCurrentlyActive && wasActive) {
+      // Night Surcharge END window reached!
+      await stateRef.set({
+        isActive: false,
+        lastNotifiedEnd: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      const title = "☀️ ¡Finalizó el Recargo Nocturno!";
+      const body = `El horario de recargo nocturno (${startStr} a ${endStr} hs) ha finalizado. Las tarifas han vuelto al valor habitual.`;
+
+      const driverDocs = await getAllDeliveryDrivers();
+      let allDriverTokens = [];
+      for (const doc of driverDocs) {
+         const t = await getUserTokens(doc.id);
+         allDriverTokens = allDriverTokens.concat(t);
+      }
+      allDriverTokens = [...new Set(allDriverTokens)];
+
+      if (allDriverTokens.length > 0) {
+        await sendPush(allDriverTokens, { title, body }, { tag: "night-surcharge-end", url: "#/delivery" });
+        logger.info(`Night Surcharge END push sent (${startStr} to ${endStr}) to ${allDriverTokens.length} drivers.`);
+      }
+    }
+  } catch (e) {
+    logger.error("Error in checkNightSurchargeSchedule:", e);
+  }
+});
+
 exports.onOfferCreated = onDocumentCreated("offers/{offerId}", async (event) => {
   const offer = event.data.data();
   if (!offer) return;
@@ -2494,23 +3102,7 @@ exports.onSettingsUpdated = onDocumentUpdated("settings/global", async (event) =
   const msgs = after.pushMessages || {};
   
   try {
-    // Check Night Surcharge
-    if (!before.nightSurchargeConfig?.enabled && after.nightSurchargeConfig?.enabled) {
-      const title = msgs.night?.title || "🌙 Recargo Nocturno Activo";
-      const body = msgs.night?.body || "Comenzó el horario de recargo nocturno.";
-      
-      const driverDocs = await getAllDeliveryDrivers();
-      let allDriverTokens = [];
-      for (const doc of driverDocs) {
-         const t = await getUserTokens(doc.id);
-         allDriverTokens = allDriverTokens.concat(t);
-      }
-      allDriverTokens = [...new Set(allDriverTokens)];
-      
-      if (allDriverTokens.length > 0) {
-        await sendPush(allDriverTokens, { title, body }, { tag: "night-surcharge", url: "#/delivery" });
-      }
-    }
+    // Note: Night Surcharge push is handled automatically by checkNightSurchargeSchedule per active schedule hours (00:00 to 06:00 hs).
     
     // Check Driver Incentive
     if (!before.driverIncentiveConfig?.enabled && after.driverIncentiveConfig?.enabled) {
@@ -2838,5 +3430,209 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
   }
 });
 
+exports.getServerTime = onRequest({ cors: true }, (req, res) => {
+  res.status(200).json({ serverTime: Date.now() });
+});
 
+/**
+ * Scheduler: Auto-disconnect delivery drivers who have been online for more than 2 hours
+ * without activity. Runs every 10 minutes. Sends an FCM push notification so the driver
+ * is notified even when the app is closed or the phone is locked.
+ */
+exports.autoDisconnectInactiveDrivers = onSchedule("every 10 minutes", async () => {
+  // Desconexión automática por inactividad deshabilitada: Los repartidores solo se desconectan manualmente.
+  logger.info("[AutoDisconnect] Desconexión automática deshabilitada por configuración.");
+});
+
+/**
+ * Scheduler: Rotate expired queue offers every minute.
+ *
+ * When a driver is offered an order, they have 30 seconds to accept.
+ * On Android, setInterval is frozen when the screen locks, so client-side
+ * rotation never fires. This function runs server-side every minute and
+ * rotates any order whose offer has been sitting for >35 seconds without
+ * being accepted, ensuring the next driver always gets the offer even
+ * if all apps are in background or closed.
+ */
+exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
+  const OFFER_TIMEOUT_MS = 60 * 1000; // Strict 60-second limit
+  const now = Date.now();
+  const cutoff = new Date(now - OFFER_TIMEOUT_MS);
+
+  try {
+    // Fetch all active orders (filtering by driverId in memory prevents empty results from missing properties)
+    const pendingSnap = await db.collection("orders")
+      .where("status", "in", ["pending", "confirmed", "preparing", "ready"])
+      .get();
+
+    // Filter and process expired offers / cancel orders > 30 minutes / dispatch unassigned orders
+    const expiredOrders = [];
+    const unassignedOrders = [];
+    const cancelPromises = [];
+
+    pendingSnap.docs.forEach(docSnap => {
+      const o = docSnap.data();
+      if (o.driverId) return; // Already assigned — skip
+
+      // Check 30 minutes auto-cancel limit ONLY for pending orders or unassigned favors/trips
+      const createdAt = o.createdAt ? (o.createdAt.toMillis ? o.createdAt.toMillis() : new Date(o.createdAt).getTime()) : Date.now();
+      const ageMinutes = (now - createdAt) / (60 * 1000);
+      const isUnacceptedCommerceOrder = !o.isFavor && !o.isTrip && o.status === 'pending';
+      const isUnassignedFavorOrTrip = (o.isFavor || o.isTrip) && !o.driverId;
+      if (ageMinutes >= 30 && (isUnacceptedCommerceOrder || isUnassignedFavorOrTrip)) {
+        logger.info(`[RotateOffers] Order ${docSnap.id} is older than 30 minutes (${ageMinutes.toFixed(1)} mins) and unaccepted. Cancelling.`);
+        cancelPromises.push(
+          db.collection("orders").doc(docSnap.id).update({
+            status: "cancelled",
+            cancelReason: "Lamentablemente, el pedido expiró sin ser aceptado a tiempo.",
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp()
+          }).catch(err => {
+            logger.error(`Error auto-cancelling order ${docSnap.id}:`, err);
+          })
+        );
+        return;
+      }
+
+      if (!o.queueTargetDriverId) {
+        unassignedOrders.push(docSnap);
+        return;
+      }
+      
+      // If queueOfferedAt is missing but there is a target, treat it as expired to prevent stuck states
+      if (!o.queueOfferedAt) {
+        expiredOrders.push(docSnap);
+        return;
+      }
+      
+      const offeredAt = o.queueOfferedAt.toDate ? o.queueOfferedAt.toDate() : new Date(o.queueOfferedAt);
+      if (offeredAt.getTime() <= cutoff.getTime()) {
+        expiredOrders.push(docSnap);
+      }
+    });
+
+    if (cancelPromises.length > 0) {
+      await Promise.all(cancelPromises);
+    }
+
+    // Dispatch unassigned orders
+    for (const docSnap of unassignedOrders) {
+      logger.info(`[RotateOffers] Dispatching unassigned active order ${docSnap.id}`);
+      await serverSideDispatch(docSnap.id, docSnap.data());
+    }
+
+    if (expiredOrders.length === 0) {
+      logger.info("[RotateOffers] No expired offers found.");
+      return;
+    }
+
+    logger.info(`[RotateOffers] Found ${expiredOrders.length} expired offer(s). Rotating...`);
+
+    for (const docSnap of expiredOrders) {
+      const orderId = docSnap.id;
+      const order = docSnap.data();
+      const prevDriverId = order.queueTargetDriverId;
+
+      logger.info(`[RotateOffers] Rotating order ${orderId} (was offered to ${prevDriverId})`);
+
+      try {
+        // Driver didn't accept the offer: rotate to next driver without disconnecting or incrementing missed offers
+        logger.info(`[RotateOffers] Offer expired for driver ${prevDriverId}. Rotating order ${orderId} without disconnecting driver.`);
+
+        // 2. Build updated order object with prev driver rejected
+        const rejected = [...(order.queueRejectedDrivers || []), prevDriverId];
+        const updatedOrder = {
+          ...order,
+          queueRejectedDrivers: rejected,
+          queueTargetDriverId: null,
+          queueOfferedAt: null
+        };
+
+        // 3. Clear the current target atomically so no client picks it up mid-rotation
+        await db.runTransaction(async (tx) => {
+          const freshSnap = await tx.get(db.collection("orders").doc(orderId));
+          if (!freshSnap.exists) return;
+          const fresh = freshSnap.data();
+          // Abort if order was already accepted during our processing
+          if (fresh.driverId || fresh.queueTargetDriverId !== prevDriverId) return;
+          tx.update(db.collection("orders").doc(orderId), {
+            queueTargetDriverId: null,
+            queueOfferedAt: null,
+            queueRejectedDrivers: rejected
+          });
+        });
+
+        // 4. Find the next eligible driver and assign
+        await serverSideDispatch(orderId, updatedOrder);
+
+      } catch (orderErr) {
+        logger.error(`[RotateOffers] Error rotating order ${orderId}:`, orderErr);
+      }
+    }
+
+    logger.info("[RotateOffers] Done.");
+  } catch (err) {
+    logger.error("[RotateOffers] Fatal error:", err);
+  }
+});
+
+
+
+// ═══════════════════════════════════════════════════
+// DRIVER DISCONNECT NOTIFICATION
+// Fires whenever a user document changes.
+// If a delivery driver transitions from isOnline: true → isOnline: false,
+// send them a push notification letting them know they were disconnected.
+// This covers ALL disconnect scenarios: admin action, inactivity auto-logout,
+// session expiry, app crash, etc.
+// ═══════════════════════════════════════════════════
+exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event) => {
+  try {
+    const before = event.data.before.data();
+    const after  = event.data.after.data();
+    const userId = event.params.userId;
+
+    // Only care about delivery users
+    const isDelivery = after.role === "delivery" || after.isDelivery === true;
+    if (!isDelivery) return null;
+
+    // Only fire when isOnline flips from true → false
+    const wasOnline = before.isOnline === true;
+    const nowOffline = after.isOnline === false || after.isOnline === null || after.isOnline === undefined;
+    if (!wasOnline || !nowOffline) return null;
+
+    const driverName = after.displayName || after.name || "Repartidor";
+    logger.info(`[DriverDisconnect] ${driverName} (${userId}) went offline. Sending push notification.`);
+
+    // 1. Write in-app notification so it appears in the drawer
+    await db.collection("users").doc(userId).collection("notifications").add({
+      title: "🔴 Sesión finalizada",
+      body: "Tu sesión de repartidor fue cerrada. Volvé a conectarte desde el Panel de Repartidor.",
+      type: "driver_disconnected",
+      url: "#/delivery-panel",
+      status: "unread",
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // 2. Send push notification to the driver's FCM tokens
+    const tokens = await getUserTokens(userId);
+    if (tokens.length > 0) {
+      await sendPush(tokens, {
+        title: "🔴 Sesión finalizada",
+        body: "Tu sesión de repartidor fue cerrada. Tocá para volver a conectarte."
+      }, {
+        type: "driver_disconnected",
+        url: "#/delivery-panel",
+        tag: `driver-disconnected-${userId}`
+      });
+      logger.info(`[DriverDisconnect] Push sent to ${tokens.length} token(s) for driver ${userId}.`);
+    } else {
+      logger.warn(`[DriverDisconnect] No FCM tokens found for driver ${userId}. In-app notification written only.`);
+    }
+
+    return null;
+  } catch (err) {
+    logger.error("[DriverDisconnect] Error:", err);
+    return null;
+  }
+});
 

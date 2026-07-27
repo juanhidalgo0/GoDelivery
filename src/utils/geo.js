@@ -144,6 +144,13 @@ const LOCAL_GEO_DICT = [
     lng: -57.5255
   },
   {
+    keys: ['empalme', 'empalme magdalena'],
+    address: 'Empalme Magdalena, Magdalena',
+    displayName: 'Empalme Magdalena, Magdalena, Buenos Aires, Argentina',
+    lat: -35.0933,
+    lng: -57.5410
+  },
+  {
     keys: ['bavio', 'general mansilla', 'mansilla'],
     address: 'General Mansilla (Bavio), Magdalena',
     displayName: 'General Mansilla (Bavio), Magdalena, Buenos Aires, Argentina',
@@ -166,80 +173,118 @@ const LOCAL_GEO_DICT = [
   }
 ];
 
+// Palabras clave de localidades permitidas en la zona de Magdalena y alrededores
+const LOCAL_ZONE_KEYWORDS = ['magdalena', 'bavio', 'general mansilla', 'atalaya', 'vieytes', 'empalme', '7101'];
+
+// Exclusiones explícitas de Capital Federal y zonas distantes
+const DISALLOWED_LOCATION_TERMS = [
+  'capital federal', 'caba', 'ciudad autonoma de buenos aires', 'ciudad autónoma de buenos aires',
+  'san isidro', 'vicente lopez', 'vicente lópez', 'avellaneda', 'quilmes', 'lanus', 'lanús',
+  'lomas de zamora', 'moron', 'morón', 'san martin, buenos aires', 'san martín, buenos aires'
+];
+
 /**
- * Searches OpenStreetMap Nominatim for local address suggestions,
- * automatically scoping the query to Magdalena, Buenos Aires, Argentina.
+ * Checks if a suggestion string or object belongs to the Magdalena region
+ */
+function isLocalAddress(desc) {
+  if (!desc) return false;
+  const lower = desc.toLowerCase();
+  
+  // Reject if it mentions Capital Federal or distant CABA municipalities
+  for (const forbidden of DISALLOWED_LOCATION_TERMS) {
+    if (lower.includes(forbidden)) return false;
+  }
+  return true;
+}
+
+/**
+ * Searches address suggestions scoped strictly to Magdalena, Empalme, Atalaya, Bavio, Vieytes and surroundings.
  */
 export async function searchAddressSuggestions(term) {
-  if (!term || term.trim().length < 3) return [];
+  if (!term || term.trim().length < 2) return [];
   
   // 1. Check local dictionary first
   const normalizedTerm = term.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const localMatches = [];
   
   for (const item of LOCAL_GEO_DICT) {
-    const matchesKey = item.keys.some(k => normalizedTerm.includes(k));
+    const matchesKey = item.keys.some(k => k.includes(normalizedTerm) || normalizedTerm.includes(k));
     if (matchesKey) {
       let cleanTyped = term.trim();
-      cleanTyped = cleanTyped.replace(/,?\s*magdalena.*/i, '');
+      cleanTyped = cleanTyped.replace(/,?\s*(magdalena|bavio|atalaya|vieytes|empalme).*/i, '');
       
       localMatches.push({
         lat: item.lat,
         lng: item.lng,
-        address: `${cleanTyped}, Magdalena`,
-        displayName: `${cleanTyped}, Magdalena, Buenos Aires, Argentina (Barrio Local)`
+        address: cleanTyped ? `${cleanTyped}, ${item.address}` : item.address,
+        displayName: item.displayName
       });
     }
   }
 
   try {
-    let query = term;
-    if (!query.toLowerCase().includes('magdalena')) {
-      query += `, Magdalena, Buenos Aires, Argentina`;
+    const hasLocalContext = LOCAL_ZONE_KEYWORDS.some(k => normalizedTerm.includes(k));
+    let searchQuery = term.trim();
+    if (!hasLocalContext) {
+      searchQuery += `, Magdalena, Buenos Aires, Argentina`;
+    }
+
+    // Return local dictionary matches immediately if available for instant response
+    if (localMatches.length > 0 && !normalizedTerm.includes('calle')) {
+      return localMatches;
     }
 
     // Google Places Autocomplete Attempt
     if (window.google && window.google.maps && window.google.maps.places) {
       try {
-        console.log('[Autocomplete] Attempting Google Maps autocomplete...');
+        console.log('[Autocomplete] Attempting Google Maps autocomplete for local area...');
         let predictions = null;
+
+        const magdalenaBounds = {
+          north: -34.95,
+          south: -35.40,
+          east: -57.20,
+          west: -57.85
+        };
 
         // Try modern fetchAutocompleteSuggestions (Places API v1) first
         if (window.google.maps.places.AutocompleteSuggestion) {
           try {
-            // Race the modern API with a 1.5s timeout
             const response = await Promise.race([
               window.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-                input: term,
-                locationBias: { lat: -35.0811, lng: -57.5146 }
+                input: searchQuery,
+                locationRestriction: magdalenaBounds
               }),
-              new Promise((_, rej) => setTimeout(() => rej(new Error('Google Modern API timeout')), 1500))
+              new Promise((_, rej) => setTimeout(() => rej(new Error('Google Modern API timeout')), 400))
             ]);
             if (response && response.suggestions) {
               predictions = response.suggestions.map(s => {
                 const p = s.placePrediction;
                 return {
                   place_id: p.placeId,
-                  description: p.text.toString(),
-                  main_text: p.text.mainText ? p.text.mainText.text : ''
+                  description: p.text ? p.text.toString() : '',
+                  main_text: p.text && p.text.mainText ? p.text.mainText.text : ''
                 };
               });
-              console.log('[Autocomplete] Google Modern API predictions found:', predictions.length);
             }
           } catch (modernErr) {
-            console.log('[Places API] Modern autocomplete failed/not enabled, trying legacy AutocompleteService.', modernErr.message || modernErr);
+            console.log('[Places API] Modern autocomplete fallback:', modernErr.message || modernErr);
           }
         }
 
-        // Fallback to legacy AutocompleteService if new API not supported or failed
+        // Fallback to legacy AutocompleteService with strict bounds
         if (!predictions && window.google.maps.places.AutocompleteService) {
-          console.log('[Autocomplete] Attempting legacy AutocompleteService...');
           predictions = await Promise.race([
             new Promise((resolve, reject) => {
               const service = new window.google.maps.places.AutocompleteService();
+              const boundsObj = new window.google.maps.LatLngBounds(
+                { lat: magdalenaBounds.south, lng: magdalenaBounds.west },
+                { lat: magdalenaBounds.north, lng: magdalenaBounds.east }
+              );
               service.getPlacePredictions({
-                input: term,
-                locationBias: { radius: 10000, center: { lat: -35.0811, lng: -57.5146 } },
+                input: searchQuery,
+                bounds: boundsObj,
+                strictBounds: true,
                 componentRestrictions: { country: 'ar' }
               }, (preds, status) => {
                 if (status === 'OK' && preds) {
@@ -251,77 +296,86 @@ export async function searchAddressSuggestions(term) {
             }),
             new Promise((_, rej) => setTimeout(() => rej(new Error('Google Legacy API timeout')), 1500))
           ]);
-          console.log('[Autocomplete] Google Legacy predictions found:', predictions?.length || 0);
         }
 
         if (predictions && predictions.length > 0) {
-          const geocoder = new window.google.maps.Geocoder();
-          const results = await Promise.all(predictions.slice(0, 5).map(async (pred) => {
-            try {
-              const geoRes = await Promise.race([
-                new Promise((res, rej) => {
-                  geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
-                    if (s === 'OK' && r && r[0]) {
-                      res(r[0]);
-                    } else {
-                      rej(new Error(s));
-                    }
-                  });
-                }),
-                new Promise((_, rej) => setTimeout(() => rej(new Error('Google Geocoder timeout')), 1200))
-              ]);
-              return {
-                lat: geoRes.geometry.location.lat(),
-                lng: geoRes.geometry.location.lng(),
-                address: pred.main_text || pred.description.split(',')[0],
-                displayName: pred.description
-              };
-            } catch (e) {
-              return null;
-            }
-          }));
-          const filtered = results.filter(Boolean);
-          if (filtered.length > 0 || localMatches.length > 0) {
-            console.log('[Autocomplete] Returning Google predictions:', filtered.length, 'local matches:', localMatches.length);
-            return [...localMatches, ...filtered];
+          const filteredResults = predictions
+            .filter(pred => isLocalAddress(pred.description || pred.main_text))
+            .slice(0, 5)
+            .map(pred => ({
+              placeId: pred.place_id,
+              address: pred.main_text || pred.description.split(',')[0],
+              displayName: pred.description
+            }));
+
+          if (filteredResults.length > 0 || localMatches.length > 0) {
+            console.log('[Autocomplete] Returning filtered Google predictions:', filteredResults.length);
+            return [...localMatches, ...filteredResults];
           }
         }
       } catch (gErr) {
-        console.warn('[Autocomplete] Google autocomplete pipeline failed, falling back:', gErr.message || gErr);
+        console.warn('[Autocomplete] Google autocomplete pipeline failed, using Nominatim fallback:', gErr.message || gErr);
       }
     }
 
-    // Passive Nominatim Fallback
-    console.log('[Autocomplete] Querying Nominatim for address search...', query);
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&accept-language=es`, {
-      headers: {
-        'Accept-Language': 'es'
-      }
+    // Passive Nominatim Fallback strictly bounded to Magdalena region (-57.85,-34.95,-57.20,-35.40)
+    console.log('[Autocomplete] Querying Nominatim for address search...', searchQuery);
+    const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&viewbox=-57.85,-34.95,-57.20,-35.40&bounded=1&addressdetails=1&limit=5&accept-language=es`;
+    const response = await fetch(nominatimUrl, {
+      headers: { 'Accept-Language': 'es' }
     });
     const data = await response.json();
-    console.log('[Autocomplete] Nominatim returned results:', data.length);
-    const mapped = data.map(item => {
-      const a = item.address;
-      const street = a.road || a.pedestrian || a.suburb || '';
-      const number = a.house_number || '';
-      const neighborhood = a.neighbourhood || a.residential || '';
-      const city = a.city || a.town || a.village || '';
+    
+    const mapped = (data || [])
+      .filter(item => isLocalAddress(item.display_name))
+      .map(item => {
+        const a = item.address;
+        const street = a.road || a.pedestrian || a.suburb || '';
+        const number = a.house_number || '';
+        const neighborhood = a.neighbourhood || a.residential || '';
+        const city = a.city || a.town || a.village || 'Magdalena';
+        
+        let display = `${street} ${number}`.trim();
+        if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
+        if (city && !display.includes(city)) display += `, ${city}`;
+        
+        return {
+          lat: parseFloat(item.lat),
+          lng: parseFloat(item.lon),
+          address: display || item.display_name.split(',')[0],
+          displayName: item.display_name
+        };
+      });
       
-      let display = `${street} ${number}`.trim();
-      if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
-      if (city && !display.includes(city)) display += `, ${city}`;
-      
-      return {
-        lat: parseFloat(item.lat),
-        lng: parseFloat(item.lon),
-        address: display || item.display_name.split(',')[0],
-        displayName: item.display_name
-      };
-    });
     return [...localMatches, ...mapped];
   } catch (err) {
     console.error('Error searching suggestions:', err);
     return localMatches;
   }
 }
+
+/**
+ * Resolves a Google Maps place ID to lat/lng coordinates on-demand.
+ */
+export async function geocodePlaceId(placeId) {
+  if (!placeId) return null;
+  if (window.google && window.google.maps && window.google.maps.Geocoder) {
+    return new Promise((resolve) => {
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ placeId }, (results, status) => {
+        if (status === 'OK' && results && results[0]) {
+          resolve({
+            lat: results[0].geometry.location.lat(),
+            lng: results[0].geometry.location.lng()
+          });
+        } else {
+          console.error('[Geocode] Failed to geocode place ID:', placeId, 'Status:', status);
+          resolve(null);
+        }
+      });
+    });
+  }
+  return null;
+}
+
 

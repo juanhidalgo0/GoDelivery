@@ -33,10 +33,13 @@ function showLockScreen() {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 24px;
+    justify-content: flex-start;
+    padding: 16px 16px 32px;
     text-align: center;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     animation: fadeIn 0.4s ease-out;
+    box-sizing: border-box;
   `;
 
   document.body.appendChild(lockScreen);
@@ -57,27 +60,27 @@ function showLockScreen() {
     currentView = viewToRender;
 
     lockScreen.innerHTML = `
-      <div class="lock-content" style="max-width: 320px; width: 100%; animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);">
-        <div class="lock-logo-container" style="margin-bottom: 32px;">
-          <div style="width: 100px; height: 100px; background: var(--color-primary); border-radius: 28px; margin: 0 auto; display: flex; align-items: center; justify-content: center; box-shadow: 0 12px 30px rgba(227, 27, 35, 0.3);">
+      <div class="lock-content" style="max-width: 360px; width: 100%; margin: auto 0; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);">
+        <div class="lock-logo-container" style="margin-bottom: 10px; margin-top: 10px;">
+          <div style="width: 64px; height: 64px; background: #E11D48; border-radius: 18px; margin: 0 auto; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(225, 29, 72, 0.3);">
             <img src="/logo-pwa.png" style="width: 100%; height: 100%; border-radius: inherit; object-fit: cover;" />
           </div>
         </div>
 
-        <h1 style="font-family: var(--font-display); font-size: 1.85rem; font-weight: 900; color: var(--color-text-primary); margin-bottom: 12px; letter-spacing: -0.02em;">
+        <h1 style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 900; color: var(--color-text-primary); margin-bottom: 4px; letter-spacing: -0.02em;">
           GoDelivery App
         </h1>
-        <p style="color: var(--color-text-secondary); font-size: 15px; line-height: 1.6; margin-bottom: 32px;">
+        <p style="color: var(--color-text-secondary); font-size: 13px; line-height: 1.4; margin-bottom: 14px;">
           Instalá nuestra app oficial para una experiencia más rápida y segura.
         </p>
 
         ${isIos ? renderIosGuide() : `
           <div style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
-            <button id="lock-install-btn" class="btn btn-primary btn-block btn-lg" style="height: 60px; font-weight: 800; font-size: 1.1rem; border-radius: 18px; box-shadow: var(--shadow-primary);">
+            <button id="lock-install-btn" class="btn btn-primary btn-block btn-lg" style="height: 56px; font-weight: 800; font-size: 1.05rem; border-radius: 18px; box-shadow: var(--shadow-primary);">
               ${icon('plus', 20)} Instalar App
             </button>
             
-            <button id="lock-skip-btn" class="btn btn-ghost btn-block" style="color: var(--color-text-tertiary); font-weight: 600; font-size: 14px; margin-top: 8px;">
+            <button id="lock-skip-btn" class="btn btn-ghost btn-block" style="color: var(--color-text-tertiary); font-weight: 600; font-size: 13.5px; margin-top: 4px;">
               Continuar en el navegador
             </button>
           </div>
@@ -160,23 +163,47 @@ function showLockScreen() {
 
 function renderIosGuide() {
   return `
-    <div class="ios-guide" style="background: var(--color-bg-secondary); border-radius: 24px; padding: 20px; text-align: left; border: 1.5px solid var(--color-border); animation: fadeIn 0.5s ease-out;">
-      <p style="font-weight: 800; font-size: 13px; color: var(--color-primary); text-transform: uppercase; margin-bottom: 16px;">Instrucciones para iPhone:</p>
+    <div class="ios-guide" style="background: var(--color-surface); border-radius: 28px; padding: 22px; text-align: left; border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); animation: fadeIn 0.4s ease-out;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom: 18px;">
+        <div style="width:36px; height:36px; background:#E11D48; color:white; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:18px;">📱</div>
+        <div>
+          <h3 style="font-weight: 900; font-size: 15px; color: var(--color-text-primary); margin:0;">Cómo instalar en iPhone</h3>
+          <p style="font-size: 12px; color: var(--color-text-tertiary); margin:0;">Seguí estos 3 pasos rápidos en Safari:</p>
+        </div>
+      </div>
       
-      <div style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <div style="width: 28px; height: 28px; background: var(--color-primary-light); color: var(--color-primary); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 14px;">1</div>
-          <p style="font-size: 14px; font-weight: 600; color: var(--color-text-primary);">Toca el botón de compartir ${icon('externalLink', 16)}</p>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: flex-start; gap: 12px; background: var(--color-bg-secondary); padding: 12px 14px; border-radius: 16px; border: 1px solid var(--color-border-light);">
+          <div style="width: 28px; height: 28px; background: #E11D48; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; flex-shrink: 0;">1</div>
+          <div>
+            <p style="font-size: 13.5px; font-weight: 800; color: var(--color-text-primary); margin:0 0 2px;">Tocá el botón Compartir <span style="display:inline-block; background:rgba(225,29,72,0.12); color:#E11D48; padding:2px 8px; border-radius:8px; font-size:15px; font-weight:900;">⎋</span></p>
+            <p style="font-size: 11.5px; color: var(--color-text-tertiary); margin:0;">Ubicado abajo al centro en la barra de Safari.</p>
+          </div>
         </div>
         
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <div style="width: 28px; height: 28px; background: var(--color-primary-light); color: var(--color-primary); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 14px;">2</div>
-          <p style="font-size: 14px; font-weight: 600; color: var(--color-text-primary);">Busca <strong style="color: var(--color-primary);">"Agregar a inicio"</strong></p>
+        <div style="display: flex; align-items: flex-start; gap: 12px; background: var(--color-bg-secondary); padding: 12px 14px; border-radius: 16px; border: 1px solid var(--color-border-light);">
+          <div style="width: 28px; height: 28px; background: #E11D48; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; flex-shrink: 0;">2</div>
+          <div>
+            <p style="font-size: 13.5px; font-weight: 800; color: var(--color-text-primary); margin:0 0 2px;">Buscá <strong style="color: #E11D48;">"Agregar a inicio"</strong> <span style="display:inline-block; background:rgba(225,29,72,0.12); color:#E11D48; padding:2px 8px; border-radius:8px; font-size:14px; font-weight:900;">➕</span></p>
+            <p style="font-size: 11.5px; color: var(--color-text-tertiary); margin:0;">Deslizá el menú de opciones hacia abajo para encontrarla.</p>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; background: var(--color-bg-secondary); padding: 12px 14px; border-radius: 16px; border: 1px solid var(--color-border-light);">
+          <div style="width: 28px; height: 28px; background: #E11D48; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; flex-shrink: 0;">3</div>
+          <div>
+            <p style="font-size: 13.5px; font-weight: 800; color: var(--color-text-primary); margin:0 0 2px;">Tocá <strong style="color: #E11D48;">"Agregar"</strong> arriba a la derecha</p>
+            <p style="font-size: 11.5px; color: var(--color-text-tertiary); margin:0;">¡Listo! Se creará el ícono oficial en tu pantalla.</p>
+          </div>
         </div>
       </div>
 
-      <button id="lock-skip-btn-ios" class="btn btn-ghost btn-block" style="margin-top: 20px; font-size: 12px; opacity: 0.7;">
-        Ya lo hice / Continuar en Safari
+      <div style="text-align: center; margin-top: 12px; font-size: 20px; animation: pulse-blue 1.5s infinite;">
+        👇
+      </div>
+
+      <button id="lock-skip-btn-ios" class="btn btn-ghost btn-block" style="margin-top: 10px; font-size: 12.5px; font-weight: 700; color: var(--color-text-tertiary);">
+        Continuar en Safari sin instalar
       </button>
     </div>
   `;
