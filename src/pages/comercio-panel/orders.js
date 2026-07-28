@@ -837,7 +837,9 @@ function showOrderDetailModal(initialOrder) {
 
               transaction.update(orderRef, {
                 status: 'cancelled',
-                cancelledAt: serverTimestamp()
+                cancelledAt: serverTimestamp(),
+                cancelledBy: 'comercio',
+                cancelReason: 'Rechazado por el comercio'
               });
 
               if (orderData.pointsRedeemed > 0 && orderData.userId) {
@@ -891,7 +893,8 @@ function showOrderDetailModal(initialOrder) {
               transaction.update(orderRef, {
                 status: 'cancelled',
                 cancelledAt: serverTimestamp(),
-                cancelledBy: 'comercio'
+                cancelledBy: 'comercio',
+                cancelReason: 'Cancelado por el comercio'
               });
 
               if (orderData.pointsRedeemed > 0 && orderData.userId) {

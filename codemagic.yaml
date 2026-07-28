@@ -32,6 +32,11 @@ workflows:
         script: |
           npx cap sync ios
 
+      - name: Set iOS Build Number
+        script: |
+          cd ios/App
+          agvtool new-version -all $(($BUILD_NUMBER + 10))
+
       - name: Setup keychain and signing certificates
         script: |
           # Inicializa el llavero de Codemagic para firmas digitales

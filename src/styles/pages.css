@@ -1105,8 +1105,8 @@ body.header-hidden .slide-overlay {
 
 .category-card-large {
   position: relative;
-  height: 160px;
-  border-radius: 24px;
+  height: 150px;
+  border-radius: 22px;
   overflow: hidden;
   background: #EFF2F5;
   display: flex;
@@ -1119,6 +1119,7 @@ body.header-hidden .slide-overlay {
   box-shadow: var(--shadow-sm);
   transition: transform var(--transition-spring), box-shadow var(--transition-spring), border-color var(--transition-fast);
 }
+
 
 .category-card-large::after {
   content: '';
@@ -1178,10 +1179,12 @@ body.header-hidden .slide-overlay {
 .category-row-small::-webkit-scrollbar { display: none; }
 
 .category-card-small {
-  flex: 0 0 100px;
-  height: 130px;
+  flex: 0 0 106px;
+  height: 122px;
   background: var(--color-surface);
-  border-radius: 24px;
+  border-radius: 22px;
+
+
   display: flex;
   flex-direction: column;
   align-items: center;

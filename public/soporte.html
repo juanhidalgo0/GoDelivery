@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Soporte y Atención al Cliente — GoDelivery</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;850&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --primary: #E11D48;
+      --bg: #F9FAFB;
+      --card-bg: #FFFFFF;
+      --text: #111827;
+      --text-muted: #4B5563;
+      --border: #E5E7EB;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+    }
+    header {
+      background: #FFFFFF;
+      border-bottom: 1px solid var(--border);
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+    }
+    header img {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    header h1 {
+      margin: 12px 0 4px;
+      font-size: 24px;
+      font-weight: 850;
+      color: var(--primary);
+    }
+    .container {
+      max-width: 720px;
+      margin: 32px auto;
+      padding: 0 20px 48px;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+      border: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 800;
+      margin-top: 0;
+      color: var(--text);
+    }
+    .contact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .contact-item {
+      background: #F3F4F6;
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+    }
+    .contact-item strong {
+      display: block;
+      color: var(--primary);
+      font-size: 16px;
+      margin-bottom: 6px;
+    }
+    .contact-item a {
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+      word-break: break-all;
+    }
+    .faq-item {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+    }
+    .faq-item:last-child {
+      border-bottom: none;
+    }
+    .faq-item h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 0 0 8px;
+      color: var(--text);
+    }
+    .faq-item p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/logo-brand.jpg" alt="GoDelivery" />
+    <h1>Centro de Soporte GoDelivery</h1>
+    <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Estamos para ayudarte en todo momento</p>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h2>📞 Canales de Contacto Directo</h2>
+      <p style="color: var(--text-muted); font-size: 15px;">Si tenés alguna consulta, reclamo o necesitás ayuda con un pedido, contactanos a través de cualquiera de nuestros canales oficiales:</p>
+      
+      <div class="contact-grid">
+        <div class="contact-item">
+          <strong>✉️ Correo de Soporte</strong>
+          <a href="mailto:kioscopaulos7@gmail.com">kioscopaulos7@gmail.com</a>
+        </div>
+        <div class="contact-item">
+          <strong>💬 WhatsApp Atenciones</strong>
+          <a href="https://wa.me/5492221412030" target="_blank">+54 9 2221 41-2030</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>❓ Preguntas Frecuentes (FAQ)</h2>
+      
+      <div class="faq-item">
+        <h3>¿Cómo puedo realizar el seguimiento de mi pedido?</h3>
+        <p>Podés ver el estado en tiempo real de tu pedido ingresando a la sección "Pedidos" en la aplicación o PWA.</p>
+      </div>
+
+      <div class="faq-item">
+        <h3>¿Qué hago si mi pedido tiene un inconveniente?</h3>
+        <p>Ingresá al chat integrado de la orden o comunicate directamente con soporte vía WhatsApp a nuestro número oficial.</p>
+      </div>
+
+      <div class="faq-item">
+        <h3>¿Cómo solicito la eliminación de mi cuenta o datos personales?</h3>
+        <p>Podés solicitar la baja de tus datos en cualquier momento enviando un correo a soporte con el asunto "Baja de Cuenta".</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    &copy; 2026 GoDelivery. Todos los derechos reservados.
+  </footer>
+</body>
+</html>

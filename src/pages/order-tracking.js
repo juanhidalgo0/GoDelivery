@@ -961,7 +961,8 @@ function updateUI(order) {
             transaction.update(orderRef, {
               status: 'cancelled',
               cancelledAt: serverTimestamp(),
-              cancelledBy: 'client'
+              cancelledBy: 'client',
+              cancelReason: 'Cancelado por el cliente'
             });
 
             if (orderData.pointsRedeemed > 0 && orderData.userId) {

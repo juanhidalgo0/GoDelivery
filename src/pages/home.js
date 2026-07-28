@@ -23,68 +23,74 @@ export async function renderHome(content) {
       <div class="home-blob home-blob-2"></div>
       
 
-      <!-- Quick Services Column Structure (Mandados on Top, Viajes and Market below) -->
-      <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 0; margin-bottom: 4px;">
-        <!-- Mandados Hero Card (100% width) -->
-        <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover scroll-reveal reveal-fade-down" style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); border-radius: 20px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; height: 76px; box-shadow: 0 10px 24px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
-          <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-            ${icon('package', 20)}
+      <!-- Services & Main Categories Block (Symmetrical 16px Padding & 12px Gaps) -->
+      <div style="display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 0; margin-bottom: 12px;">        <!-- Mandados Hero Card (Full Width Symmetrical & Compact) -->
+        <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover scroll-reveal reveal-fade-down" style="background: linear-gradient(135deg, #FF2E55 0%, #C9002B 100%); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; height: 68px; box-shadow: 0 8px 22px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.22); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
+          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 60%); pointer-events: none;"></div>
+          <div style="width: 38px; height: 38px; border-radius: 12px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
+            <i class="ph-duotone ph-package" style="font-size: 20px;"></i>
           </div>
           <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-            <h4 style="font-family: var(--font-display); font-size: 16px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Mandados</h4>
-            <span style="font-size: 11.5px; color: #ffffff; font-weight: 850; letter-spacing: -0.01em; margin-top: 2px; display: block; line-height: 1.2;">¿Qué te traemos? Pedí lo que quieras del pueblo</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">Mandados</h4>
+              <span style="font-size: 8.5px; font-weight: 900; background: rgba(255,255,255,0.25); color: #FFF; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px; backdrop-filter: blur(4px);">Express</span>
+            </div>
+            <span style="font-size: 11px; color: rgba(255,255,255,0.95); font-weight: 800; letter-spacing: -0.01em; margin-top: 2px; display: block; line-height: 1.2;">¿Qué te traemos? Pedí lo que quieras</span>
           </div>
           
-          <!-- Modern Floating Badge -->
-          <span class="badge-pulse-modern" style="position: absolute; top: 10px; right: 14px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #000; font-size: 8.5px; font-weight: 900; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.6px; box-shadow: 0 4px 10px rgba(255, 215, 0, 0.35); font-family: var(--font-display); line-height: 1; z-index: 3;">¡Más Pedido!</span>
+          <span class="badge-pulse-modern" style="position: absolute; top: 10px; right: 12px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #000; font-size: 8px; font-weight: 900; padding: 3px 8px; border-radius: 16px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(255, 215, 0, 0.35); font-family: var(--font-display); line-height: 1; z-index: 3;">¡Más Pedido!</span>
         </a>
 
-        <!-- Viajes & Market split row -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%;">
-          <!-- Pedir Viaje Quick Card -->
-          <a href="#/viajes" class="glow-hover spring-hover scroll-reveal reveal-fade-right" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('car', 16)}
+        <!-- Viajes & Market Symmetrical Split Row -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; box-sizing: border-box;">
+          <!-- Viajes Quick Card -->
+          <a href="#/viajes" class="glow-hover spring-hover scroll-reveal reveal-fade-right" style="background: linear-gradient(135deg, #1E40AF 0%, #1D4ED8 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(30, 64, 175, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
+            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
+              <i class="ph-duotone ph-car-profile" style="font-size: 18px;"></i>
             </div>
             <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
               <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Viajes</h4>
-              <span style="font-size: 10.5px; color: #ffffff; font-weight: 850; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
+              <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
             </div>
           </a>
 
-          <!-- Marketplace Quick Card -->
-          <a href="#/marketplace" class="glow-hover spring-hover scroll-reveal reveal-fade-left" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); border-radius: 18px; padding: 10px 8px; display: flex; align-items: center; gap: 6px; height: 68px; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('shop', 16) || icon('tag', 16) || '🏷️'}
+          <!-- Market Quick Card -->
+          <a href="#/marketplace" class="glow-hover spring-hover scroll-reveal reveal-fade-left" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(5, 150, 105, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
+            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
+              <i class="ph-duotone ph-storefront" style="font-size: 18px;"></i>
             </div>
             <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
               <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Market</h4>
-              <span style="font-size: 10.5px; color: #ffffff; font-weight: 850; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
+              <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
             </div>
           </a>
         </div>
       </div>
+
+
  
-       <!-- Premium Category Grid (Comida & GoMarket) -->
+       <!-- Premium Category Grid (Comida & GoMarket - 100% Full Bleed Coverage) -->
        <div class="category-grid" style="margin-top: 10px; margin-bottom: 14px;">
          <a href="#/category/Comida" class="category-card-large glow-hover spring-hover scroll-reveal reveal-fade-right">
-           <div style="position: absolute; top: 12px; left: 12px; background: rgba(225, 29, 72, 0.9); backdrop-filter: blur(4px); color: white; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; z-index: 2; box-shadow: var(--shadow-sm); text-transform: uppercase;">
+           <div style="position: absolute; top: 10px; left: 10px; background: rgba(225, 29, 72, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
              Tus antojos, rápido
            </div>
-           <img src="/images/categories/restaurants.png" alt="Comida" />
+           <img src="/images/categories/restaurants.png" alt="Comida" style="object-fit: cover; width: 100%; height: 100%;" />
            <span class="card-title">Comida</span>
          </a>
          <a href="#/category/GoMarket" id="gomarket-card" class="category-card-large glow-hover spring-hover scroll-reveal reveal-fade-left">
-           <div style="position: absolute; top: 12px; left: 12px; background: rgba(13, 148, 136, 0.9); backdrop-filter: blur(4px); color: white; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; z-index: 2; box-shadow: var(--shadow-sm); text-transform: uppercase;">
+           <div style="position: absolute; top: 10px; left: 10px; background: rgba(13, 148, 136, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
              Tu súper en minutos
            </div>
-           <img src="/images/categories/gomarket.png" alt="GoMarket" />
+           <img src="/images/categories/gomarket.png" alt="GoMarket" style="object-fit: cover; width: 100%; height: 100%;" />
            <span class="card-title">GoMarket</span>
          </a>
        </div>
+
+
+
        
        <!-- Small Categories Slider Section -->
        <div class="categories-slider-wrapper scroll-reveal reveal-fade-up" style="position: relative; margin-top: 2px; display: flex; align-items: center; width: 100%;">
@@ -1051,6 +1057,7 @@ const CATEGORY_IMAGE_MAP = {
   'Heladeria': '/images/categories/heladeria.png',
   'Fiambrería': '/images/categories/fiambreria.png',
   'Fiambreria': '/images/categories/fiambreria.png',
+  'Postres': '/images/categories/postres.png',
   'Comida': '/images/categories/restaurants.png',
   'Bazar': '/images/categories/bazar.png',
   'Tecnología': '/assets/categories/technology.png',
@@ -1061,7 +1068,13 @@ function renderCategories(categories, active) {
   const container = document.getElementById('categories-row-small');
   if (!container) return;
 
-  // Filter out Todos, Comida, Restaurante, Restaurantes, and GoMarket from small categories
+  // Ensure Postres is present
+  let postresCat = categories.find(c => (c.name || '').toLowerCase().includes('postres'));
+  if (!postresCat) {
+    postresCat = { id: 'postres', name: 'Postres', order: 0 };
+  }
+
+  // Filter out Todos, Comida, Restaurante, Restaurantes, GoMarket, Pizzería, and Postres (to place Postres first)
   const filteredCats = categories.filter(c => 
     c.name !== 'Todos' &&
     c.name !== 'Comida' &&
@@ -1069,18 +1082,20 @@ function renderCategories(categories, active) {
     c.name !== 'Restaurantes' &&
     c.name !== 'GoMarket' &&
     c.name !== 'Pizzería' &&
-    c.name !== 'Pizzeria'
+    c.name !== 'Pizzeria' &&
+    ! (c.name || '').toLowerCase().includes('postres')
   );
 
-  // Shuffle categories randomly every hour
-  const smallCats = seededShuffle(filteredCats, getHourSeed());
+  // Shuffle remaining categories randomly every hour
+  const shuffled = seededShuffle(filteredCats, getHourSeed());
+  const smallCats = [postresCat, ...shuffled];
 
   container.innerHTML = smallCats.map(cat => {
     const cleanName = cat.name.replace('🎁', '').trim();
-    const img = CATEGORY_IMAGE_MAP[cleanName];
+    const img = CATEGORY_IMAGE_MAP[cleanName] || CATEGORY_IMAGE_MAP[cat.name];
     
     return `
-      <a href="#/category/${cat.name}" class="category-card-small" style="flex: 0 0 110px; height: 140px; text-decoration: none;">
+      <a href="#/category/${cat.name}" class="category-card-small" style="flex: 0 0 106px; height: 122px; border-radius: 22px; text-decoration: none;">
         ${img ? 
           `<img src="${img}" alt="${cleanName}" />` : 
           `<div class="card-icon"><i class="ph-duotone ph-${CATEGORY_PHOSPHOR_MAP[cat.name] || 'package'}"></i></div>`
@@ -1089,6 +1104,7 @@ function renderCategories(categories, active) {
       </a>
     `;
   }).join('');
+
 
   // Arrows logic for smooth sliding and dynamic visibility
   const prevBtn = document.getElementById('cat-prev-btn');

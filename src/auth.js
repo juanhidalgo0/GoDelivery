@@ -58,9 +58,11 @@ export async function signInWithGoogle() {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
         // Initialize first to ensure serverClientId is configured for Firebase Auth
+        const SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
         try {
           await GoogleAuth.initialize({
-            clientId: '109430872242-go.apps.googleusercontent.com',
+            clientId: SERVER_CLIENT_ID,
+            serverClientId: SERVER_CLIENT_ID,
             scopes: ['profile', 'email'],
             grantOfflineAccess: true
           });
@@ -70,7 +72,7 @@ export async function signInWithGoogle() {
         
         const googleUser = await GoogleAuth.signIn();
         const idToken = googleUser.authentication?.idToken || googleUser.idToken;
-        if (!idToken) throw new Error('No se obtuvo el token de Google');
+        if (!idToken) throw new Error('No se obtuvo el token de autenticación de Google');
 
         const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
@@ -79,13 +81,16 @@ export async function signInWithGoogle() {
         showToast(`¡Bienvenido, ${user.displayName || user.email}!`, 'success');
         return user;
       } catch (nativeErr) {
-        console.warn('[Auth] Native Google Sign-In failed, falling back to Web Popup...', nativeErr);
+        console.error('[Auth] Native Google Sign-In error:', nativeErr);
         if (nativeErr.code === '12501' || nativeErr.message?.toLowerCase().includes('cancel') || nativeErr.message?.toLowerCase().includes('dismissed')) {
           showToast('Inicio de sesión cancelado', 'info');
-          return null;
+        } else {
+          showToast('Error en inicio de sesión con Google: ' + (nativeErr.message || 'Error de autenticación'), 'error');
         }
+        return null;
       }
     }
+
 
     // Web / PWA Google Sign-In
     googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -175,6 +180,10 @@ export async function signInWithApple() {
           showToast('Inicio de sesión cancelado', 'info');
           return null;
         }
+        if (errStr.includes('operation-not-allowed') || nativeErr?.code === 'auth/operation-not-allowed') {
+          showToast('El inicio de sesión con Apple requiere estar habilitado en la consola de Firebase (Authentication > Sign-in method)', 'error');
+          return null;
+        }
         showToast('Error al iniciar sesión con Apple: ' + (nativeErr.message || 'Desconocido'), 'error');
         return null;
       }
@@ -191,6 +200,10 @@ export async function signInWithApple() {
     console.error('Apple Auth error:', error);
     if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
       showToast('Inicio de sesión cancelado', 'info');
+      return null;
+    }
+    if (error.code === 'auth/operation-not-allowed' || error.message?.includes('operation-not-allowed')) {
+      showToast('El inicio de sesión con Apple requiere estar habilitado en Firebase Console', 'error');
       return null;
     }
     showToast('Error al iniciar sesión con Apple: ' + (error.message || 'Desconocido'), 'error');

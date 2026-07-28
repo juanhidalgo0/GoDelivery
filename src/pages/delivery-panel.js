@@ -1936,10 +1936,11 @@ function loadTabContent(tab, container, user) {
           }
 
           // Drop-off stops (unique per address)
-          if (!deliveries.has(o.deliveryAddress)) {
-            deliveries.set(o.deliveryAddress, { userName: o.userName, orders: [] });
+          const dropAddress = o.deliveryAddress || o.pickupAddress || o.comercioAddress || 'Dirección de Entrega';
+          if (!deliveries.has(dropAddress)) {
+            deliveries.set(dropAddress, { userName: o.userName || 'Cliente', orders: [] });
           }
-          deliveries.get(o.deliveryAddress).orders.push(o);
+          deliveries.get(dropAddress).orders.push(o);
         });
 
         // Convert pickups to stops
@@ -2095,7 +2096,8 @@ function loadTabContent(tab, container, user) {
                 
                 ${stops.map((stop, idx) => {
                   const isActive = !stop.pickedUp && (idx === 0 || stops[idx-1].pickedUp);
-                  const stopKey = (stop.type + '_' + (stop.type === 'PICKUP' ? stop.docId : stop.address)).replace(/[^a-zA-Z0-9]/g, '_');
+                  const addressVal = (stop.type === 'PICKUP' ? stop.docId : stop.address) || '';
+                  const stopKey = (stop.type + '_' + addressVal).replace(/[^a-zA-Z0-9]/g, '_');
                   container._expandedStops = container._expandedStops || new Set();
                   const isExpanded = container._expandedStops.has(stopKey);
 

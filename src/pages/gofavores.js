@@ -594,7 +594,9 @@ export async function showMandadoForm() {
     headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
     headerTextColor: '#ffffff'
   });
+  const pickupBtn = modalEl.querySelector('#pickup-addr-btn');
   const deliveryBtn = modalEl.querySelector('#delivery-addr-btn');
+
   const pickupText = modalEl.querySelector('#pickup-text');
   const deliveryText = modalEl.querySelector('#delivery-text');
   const detailsInput = modalEl.querySelector('#favor-details');

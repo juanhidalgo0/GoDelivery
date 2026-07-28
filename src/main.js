@@ -746,7 +746,7 @@ async function init() {
           <div class="login-wall-container" style="position:fixed; inset:0; background:linear-gradient(to bottom, #F9FAFB, #FFFFFF); z-index:1500; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;">
             <div class="login-card" style="max-width:400px; width:100%; background:white; padding:40px 32px; border-radius:32px; box-shadow:0 20px 50px rgba(0,0,0,0.08); text-align:center; animation: fadeInUp 0.6s cubic-bezier(0.23, 1, 0.32, 1);">
               <div style="margin-bottom:24px;">
-                <img src="/logo-brand.jpg" alt="GoDelivery" style="width:100px; height:100px; border-radius:50%; box-shadow:0 12px 30px rgba(0,0,0,0.1); border: 4px solid white;" />
+                <img id="login-brand-logo" src="/logo-brand.jpg" alt="GoDelivery" style="width:100px; height:100px; border-radius:50%; box-shadow:0 12px 30px rgba(0,0,0,0.1); border: 4px solid white; cursor: pointer; user-select: none;" />
               </div>
               
               <h1 style="font-family:var(--font-display); font-size:2.2rem; font-weight:900; color:#111827; margin:0 0 12px;">¡Bienvenido!</h1>
@@ -760,22 +760,18 @@ async function init() {
                   <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                 </svg>
                 <span style="font-weight:700; color:#374151; font-size:15px;">Continuar con Google</span>
-                        <button id="apple-login-btn" style="width:100%; height:56px; background:black; border:none; border-radius:100px; display:none; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
-                <svg width="18" height="22" viewBox="0 0 170 170" fill="white">
+              </button>
+
+              <button id="apple-login-btn" style="width:100%; height:56px; background:#000000; border:none; border-radius:100px; display:none; align-items:center; justify-content:center; gap:10px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px; font-family: -apple-system, SF Pro Display, Helvetica Neue, sans-serif;">
+                <svg width="18" height="22" viewBox="0 0 170 170" fill="white" style="margin-bottom:2px;">
                   <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.72.13-9.56-1.92-14.53-6.15-3.12-2.65-7-7.23-11.64-13.74-6.47-9.06-11.64-19.19-15.51-30.39-3.87-11.2-5.81-22.13-5.81-32.79 0-14.8 3.73-27.14 11.19-37.01 7.46-9.87 16.89-14.98 28.3-15.34 4.85 0 10.14 1.18 15.86 3.55 5.72 2.37 9.5 3.56 11.34 3.56 1.48 0 5.43-1.24 11.86-3.73 6.43-2.49 11.97-3.61 16.62-3.37 12.3.62 22.37 5.14 30.2 13.56-10.97 6.64-16.32 15.8-16.06 27.48.26 9.17 3.86 16.84 10.8 23 6.94 6.16 15.17 9.49 24.69 9.99-2.58 7.57-6.02 15.42-10.33 23.57zM119.22 31.78c0-7.3 2.66-14.37 7.98-21.2 5.32-6.83 12.01-10.58 20.08-11.25.13.9.2 1.74.2 2.52 0 7.17-2.73 14.32-8.19 21.45-5.46 7.13-12.18 10.99-20.17 11.58-.04-1.04-.07-1.89-.07-2.55z"/>
                 </svg>
-                <span style="font-weight:700; color:white; font-size:15px;">Continuar con Apple</span>
+                <span style="font-weight:600; color:white; font-size:16px; letter-spacing: -0.2px;">Iniciar sesión con Apple</span>
               </button>
 
               <button id="guest-login-btn" style="width:100%; height:56px; background:#F3F4F6; border:1px solid #E5E7EB; border-radius:100px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px;">
                 <span style="font-weight:700; color:#4B5563; font-size:15px;">Explorar como Invitado</span>
               </button>
-
-              <div style="margin-top: 20px; text-align: center;">
-                <button id="reviewer-login-btn" style="background: none; border: none; color: #6B7280; font-size: 13px; font-weight: 700; text-decoration: underline; cursor: pointer; opacity: 0.8;">
-                  Acceso de prueba (Revisores)
-                </button>
-              </div>         </div>
             </div>
           </div>
           <style>
@@ -788,13 +784,15 @@ async function init() {
 
         const { signInWithGoogle, signInWithApple } = await import('./auth.js');
         
-        const reviewerBtn = document.getElementById('reviewer-login-btn');
-        reviewerBtn?.addEventListener('click', () => {
+        // Secret reviewer gesture: 5 taps on the brand logo
+        let tapCount = 0;
+        let tapTimer = null;
+        const openReviewerModal = () => {
           const modalEl = document.createElement('div');
           modalEl.style.cssText = 'padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 16px)) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
           modalEl.innerHTML = `
             <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
-            <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales proporcionadas para revisar la aplicación.</p>
+            <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales para acceder.</p>
             <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
               <input type="email" id="test-email" placeholder="Correo electrónico" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
               <input type="password" id="test-password" placeholder="Contraseña" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
@@ -832,6 +830,17 @@ async function init() {
               }
             });
           });
+        };
+
+        const brandLogo = document.getElementById('login-brand-logo');
+        brandLogo?.addEventListener('click', () => {
+          tapCount++;
+          if (tapTimer) clearTimeout(tapTimer);
+          tapTimer = setTimeout(() => { tapCount = 0; }, 2000);
+          if (tapCount >= 5) {
+            tapCount = 0;
+            openReviewerModal();
+          }
         });
 
         const loginBtn = document.getElementById('google-login-btn');
@@ -1377,16 +1386,23 @@ async function checkAppUpdate() {
     const settingsDoc = await getDoc(doc(db, 'settings', 'global'));
     if (settingsDoc.exists()) {
       const settings = settingsDoc.data();
-      const minVersion = settings.minAndroidVersionCode || 0;
+      const { Capacitor } = await import('@capacitor/core');
+      const platform = Capacitor.getPlatform();
+      
+      const minVersion = platform === 'ios' 
+        ? (settings.minIosVersionCode || settings.minIosBuild || 0)
+        : (settings.minAndroidVersionCode || 0);
       
       const { App } = await import('@capacitor/app');
       const info = await App.getInfo();
       const localVersion = parseInt(info.build, 10) || 0;
       
-      console.log(`[VersionCheck] Local Version Code: ${localVersion}, Required Minimum: ${minVersion}`);
+      console.log(`[VersionCheck] Platform: ${platform}, Local Version Code: ${localVersion}, Required Minimum: ${minVersion}`);
       
-      if (localVersion < minVersion) {
-        const storeUrl = settings.playStoreUrl || 'https://play.google.com/store/apps/details?id=com.godelivery.magdalena';
+      if (minVersion > 0 && localVersion < minVersion) {
+        const storeUrl = platform === 'ios'
+          ? (settings.appStoreUrl || 'https://apps.apple.com/app/godelivery/id6741753760')
+          : (settings.playStoreUrl || 'https://play.google.com/store/apps/details?id=com.godelivery.magdalena');
         console.log(`[VersionCheck] Version outdated. Displaying floating update banner pointing to: ${storeUrl}`);
         showUpdateFloatingBanner(storeUrl);
         return false; // Do not block app load

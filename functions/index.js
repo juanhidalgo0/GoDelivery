@@ -511,20 +511,8 @@ async function getAdminTokens() {
  */
 async function serverSideDispatch(orderId, order) {
   try {
-    // 0. Auto-cancel if order is older than 30 minutes ONLY for pending orders or unassigned favors/trips
-    const createdAt = order.createdAt ? (order.createdAt.toMillis ? order.createdAt.toMillis() : new Date(order.createdAt).getTime()) : Date.now();
-    const ageMinutes = (Date.now() - createdAt) / (60 * 1000);
-    const isUnacceptedCommerceOrder = !order.isFavor && !order.isTrip && order.status === 'pending';
-    const isUnassignedFavorOrTrip = (order.isFavor || order.isTrip) && !order.driverId;
-    if (ageMinutes >= 30 && (isUnacceptedCommerceOrder || isUnassignedFavorOrTrip)) {
-      logger.info(`[ServerDispatch] Order ${orderId} is older than 30 minutes (${ageMinutes.toFixed(1)} mins) and unaccepted. Cancelling.`);
-      await db.collection("orders").doc(orderId).update({
-        status: "cancelled",
-        cancelReason: "Lamentablemente, el pedido expiró sin ser aceptado a tiempo.",
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      return;
-    }
+    // Auto-cancellation disabled completely per user directive.
+    // Orders must ONLY be cancelled manually.
 
     // Guard: Regular commerce orders must ONLY be dispatched when they are 'ready'
     if (!order.isFavor && !order.isTrip && order.status !== 'ready') {
@@ -564,16 +552,7 @@ async function serverSideDispatch(orderId, order) {
     }
 
     if (allDrivers.length === 0) {
-      if (order.isFavor || order.isTrip) {
-        logger.warn(`[ServerDispatch] No online drivers found for favor/trip ${orderId}. Cancelling.`);
-        await db.collection("orders").doc(orderId).update({
-          status: "cancelled",
-          cancelReason: "No hay repartidores conectados en este momento.",
-          cancelledAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-      } else {
-        logger.info(`[ServerDispatch] No online drivers found for commerce order ${orderId}. Leaving order pending for commerce acceptance.`);
-      }
+      logger.info(`[ServerDispatch] No online drivers found for order ${orderId}. Order remains active until drivers connect or manual cancellation.`);
       return;
     }
 
@@ -2901,35 +2880,8 @@ exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
 });
 
 exports.cancelUnassignedOrders = onSchedule("*/5 * * * *", async (event) => {
-  try {
-    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
-    const pendingOrdersSnap = await db.collection("orders")
-      .where("status", "==", "pending")
-      .where("createdAt", "<=", thirtyMinutesAgo)
-      .get();
-
-    for (const doc of pendingOrdersSnap.docs) {
-      const order = doc.data();
-      
-      await doc.ref.update({
-        status: "cancelled",
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
-        cancelReason: "No se encontró un repartidor disponible."
-      });
-
-      logger.info(`Automatically cancelled unassigned order ${doc.id} (30 minutes expired).`);
-
-      const clientTokens = await getUserTokens(order.userId);
-      if (clientTokens.length > 0) {
-        await sendPush(clientTokens, {
-          title: "❌ Pedido Cancelado",
-          body: "Lo sentimos, no encontramos un repartidor disponible para realizar tu pedido en este momento."
-        }, { tag: `order-${doc.id}-cancelled`, url: `#/pedido/${doc.id}` });
-      }
-    }
-  } catch (e) {
-    logger.error("Error in cancelUnassignedOrders:", e);
-  }
+  logger.info("Automatic cancellation of unassigned orders is disabled per user directive.");
+  return;
 });
 
 exports.checkWeatherPeriodic = onSchedule("*/15 * * * *", async (event) => {
@@ -3210,29 +3162,17 @@ exports.checkScheduledTrips = onSchedule({
         }
         logger.info(`Activated scheduled trip ${doc.id} (has driver ${trip.driverId})`);
       } else {
-        // No driver assigned → cancel and notify user
-        await doc.ref.update({ status: "cancelled", cancelReason: "No se encontró chofer disponible para el viaje programado." });
-        
+        // No driver assigned yet → notify user to re-search or wait, but do NOT cancel automatically
+        logger.info(`Scheduled trip ${doc.id} reached time without assigned driver. Leaving active.`);
         if (trip.userId) {
           const userTokens = await getUserTokens(trip.userId);
           if (userTokens.length > 0) {
             await sendPush(userTokens, {
-              title: "❌ Viaje programado cancelado",
-              body: "Lamentablemente no se encontró un chofer disponible para tu viaje. Intentá solicitar uno nuevo."
-            }, { tag: "scheduled-trip-cancelled", url: "#/viajes" });
+              title: "🚗 Recordatorio de viaje programado",
+              body: "Tu viaje programado está activo y buscando chofer."
+            }, { tag: "scheduled-trip-reminder", url: "#/viajes" });
           }
-
-          // Create notification in Firestore for the user
-          await db.collection("users").doc(trip.userId).collection("notifications").add({
-            title: "❌ Viaje programado cancelado",
-            body: "No se encontró chofer disponible para tu viaje programado. Por favor, intentá solicitar uno nuevo.",
-            type: "scheduled_trip_cancelled",
-            orderId: doc.id,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            read: false
-          });
         }
-        logger.info(`Cancelled unassigned scheduled trip ${doc.id}`);
       }
     }
 
@@ -3382,11 +3322,7 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
         logger.info(`Sending new support ticket push notification for ${ticketId} to ${adminTokens.length} admins.`);
         
         let title = `Soporte: Nuevo Ticket ${ticketId}`;
-        if (lastMessageText.includes("Reporte de Bug") || lastMessageText.includes("🐞") || lastMessageText.includes("[REPORTE DE BUG/ERROR]")) {
-          title = `🐞 Bug Report: ${ticketId}`;
-        }
-
-        await sendPush(adminTokens, {
+await sendPush(adminTokens, {
           title: title,
           body: `${userName}: ${lastMessageText}`
         }, {
@@ -3435,16 +3371,6 @@ exports.getServerTime = onRequest({ cors: true }, (req, res) => {
 });
 
 /**
- * Scheduler: Auto-disconnect delivery drivers who have been online for more than 2 hours
- * without activity. Runs every 10 minutes. Sends an FCM push notification so the driver
- * is notified even when the app is closed or the phone is locked.
- */
-exports.autoDisconnectInactiveDrivers = onSchedule("every 10 minutes", async () => {
-  // Desconexión automática por inactividad deshabilitada: Los repartidores solo se desconectan manualmente.
-  logger.info("[AutoDisconnect] Desconexión automática deshabilitada por configuración.");
-});
-
-/**
  * Scheduler: Rotate expired queue offers every minute.
  *
  * When a driver is offered an order, they have 30 seconds to accept.
@@ -3465,33 +3391,13 @@ exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
       .where("status", "in", ["pending", "confirmed", "preparing", "ready"])
       .get();
 
-    // Filter and process expired offers / cancel orders > 30 minutes / dispatch unassigned orders
+    // Filter and process expired offers / dispatch unassigned orders
     const expiredOrders = [];
     const unassignedOrders = [];
-    const cancelPromises = [];
 
     pendingSnap.docs.forEach(docSnap => {
       const o = docSnap.data();
-      if (o.driverId) return; // Already assigned — skip
-
-      // Check 30 minutes auto-cancel limit ONLY for pending orders or unassigned favors/trips
-      const createdAt = o.createdAt ? (o.createdAt.toMillis ? o.createdAt.toMillis() : new Date(o.createdAt).getTime()) : Date.now();
-      const ageMinutes = (now - createdAt) / (60 * 1000);
-      const isUnacceptedCommerceOrder = !o.isFavor && !o.isTrip && o.status === 'pending';
-      const isUnassignedFavorOrTrip = (o.isFavor || o.isTrip) && !o.driverId;
-      if (ageMinutes >= 30 && (isUnacceptedCommerceOrder || isUnassignedFavorOrTrip)) {
-        logger.info(`[RotateOffers] Order ${docSnap.id} is older than 30 minutes (${ageMinutes.toFixed(1)} mins) and unaccepted. Cancelling.`);
-        cancelPromises.push(
-          db.collection("orders").doc(docSnap.id).update({
-            status: "cancelled",
-            cancelReason: "Lamentablemente, el pedido expiró sin ser aceptado a tiempo.",
-            cancelledAt: admin.firestore.FieldValue.serverTimestamp()
-          }).catch(err => {
-            logger.error(`Error auto-cancelling order ${docSnap.id}:`, err);
-          })
-        );
-        return;
-      }
+      // Auto-cancellation completely disabled per user directive.
 
       if (!o.queueTargetDriverId) {
         unassignedOrders.push(docSnap);
