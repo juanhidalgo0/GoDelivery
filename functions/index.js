@@ -1395,6 +1395,23 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             } catch (err) {
               logger.error(`Error updating driver ${after.driverId} on completion transaction:`, err);
             }
+
+            // Immediately check for any unassigned orders that were stuck because all drivers were busy
+            try {
+              const pendingUnassignedSnap = await db.collection("orders")
+                .where("status", "in", ["pending", "confirmed", "ready"])
+                .get();
+
+              for (const pendingDoc of pendingUnassignedSnap.docs) {
+                const pData = pendingDoc.data();
+                if (!pData.driverId && !pData.queueTargetDriverId) {
+                  logger.info(`[Auto-Redispatch] Driver ${after.driverId} completed order ${orderId}. Re-running dispatch for waiting order ${pendingDoc.id}`);
+                  await serverSideDispatch(pendingDoc.id, pData);
+                }
+              }
+            } catch (rErr) {
+              logger.error("Error running auto-redispatch on order completion:", rErr);
+            }
           }
 
           // 3. Process Customer loyalty points, completedOrdersCount, referral system and challenges
