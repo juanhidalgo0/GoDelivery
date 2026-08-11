@@ -1,0 +1,2498 @@
+import { getState, setState, getCartByComercio, getCartTotal, getCartCount, updateCartQty, removeFromCart, clearCart, subscribe, setDeliveryAddress } from "../state.js";
+import { formatPrice, calculateScheduleSurcharge } from "../utils/format.js";
+import { showToast } from "../components/toast.js";
+window.showToast = showToast;
+import { showModal, closeModal, showConfirm } from "../components/modal.js";
+import { isLoggedIn } from "../auth.js";
+import { renderNavbar } from "../components/navbar.js";
+import { icon } from "../utils/icons.js";
+import { db, auth } from "../firebase.js";
+import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit, getDocsFromServer } from "firebase/firestore";
+import { isRainingInMagdalena } from "../utils/weather.js";
+import { AudioManager } from "../utils/audio-manager.js";
+import { ConfettiCelebrator } from "../utils/confetti.js";
+let currentCartStep = 1;
+let isSubmitting = false;
+let selectedPaymentMethod = null;
+let selectedIsScheduled = false;
+let selectedSchedDate = "";
+let selectedSchedTime = "";
+function escapeHtmlAttr(str) {
+  if (!str) return "";
+  return str.replace(/"/g, "&quot;");
+}
+export async function renderCart(content) {
+  if (!content) content = document.getElementById("page-cart") || document.getElementById("app-content");
+  if (!content) return;
+  currentCartStep = 1;
+  selectedPaymentMethod = null;
+  calculateAllFees();
+  const isPreview = window.location.hash.includes("preview=true") || window.location.search.includes("preview=true");
+  if (isPreview) {
+    setState("isRaining", false);
+  }
+  if (!isPreview) {
+    try {
+      const oSnap = await getDocs(query(collection(db, "offers"), where("active", "==", true)));
+      setState({ activeOffers: oSnap.docs.map((d) => ({ id: d.id, ...d.data() })) });
+    } catch (e) {
+      console.error("Error loading offers", e);
+    }
+  }
+  if (auth.currentUser && !isPreview && sessionStorage.getItem("welcome-coupon-cleared") !== "true") {
+    const userObj = getState().user;
+    const currentApplied = getState().appliedCoupon;
+    let isWelcomeUsed = false;
+    try {
+      const usedKey = `gd_used_coupons_${auth.currentUser.uid}`;
+      const used = JSON.parse(localStorage.getItem(usedKey) || "[]");
+      isWelcomeUsed = used.includes("BIENVENIDA");
+    } catch (e) {
+    }
+    if (userObj && (userObj.completedOrdersCount || 0) === 0 && !currentApplied && !isWelcomeUsed) {
+      try {
+        const welcomeRef = doc(db, "coupons", "BIENVENIDA");
+        const welcomeSnap = await getDoc(welcomeRef);
+        let wData;
+        if (!welcomeSnap.exists()) {
+          wData = {
+            active: true,
+            ownerId: "admin",
+            comercioIds: [],
+            scope: "products",
+            discountType: "fixed",
+            absorbedBy: "platform",
+            type: "fixed",
+            value: 3e3,
+            usageLimit: 999999,
+            remaining: 999999,
+            usedCount: 0,
+            createdAt: /* @__PURE__ */ new Date(),
+            description: "Cup\xF3n autom\xE1tico de bienvenida para tu primer pedido"
+          };
+          const { setDoc } = await import("firebase/firestore");
+          await setDoc(welcomeRef, wData);
+          console.log("[Cart] Welcome coupon BIENVENIDA initialized.");
+        } else {
+          wData = welcomeSnap.data();
+        }
+        if (wData.active === true) {
+          setState("appliedCoupon", { id: "BIENVENIDA", code: "BIENVENIDA", ...wData });
+        }
+      } catch (err) {
+        console.warn("Welcome coupon check failed:", err);
+      }
+    }
+  }
+  function updateCartDOMInPlace(content2) {
+    const state = getState();
+    const cart = state.cart;
+    const activeOffers = state.activeOffers || [];
+    cart.forEach((item) => {
+      const itemEl = content2.querySelector(`[data-cart-item-id="${item.cartItemId}"]`);
+      if (!itemEl) return;
+      const qtyValEl = itemEl.querySelector(".qty-value");
+      if (qtyValEl) qtyValEl.textContent = item.qty;
+      const minusBtn = itemEl.querySelector('[data-action="minus"]');
+      if (minusBtn) {
+        if (item.qty === 1) {
+          if (!minusBtn.querySelector("svg")) {
+            minusBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+          }
+          minusBtn.style.color = "var(--color-danger)";
+        } else {
+          minusBtn.textContent = "\u2212";
+          minusBtn.style.color = "var(--color-text-primary)";
+        }
+      }
+      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const originalTotal = basePrice * item.qty;
+      let finalTotal = originalTotal;
+      const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+      if (offer) {
+        if (offer.type === "2x1") {
+          const paidQty = Math.ceil(item.qty / 2);
+          finalTotal = basePrice * paidQty;
+        } else if (offer.type === "percentage") {
+          finalTotal = originalTotal * ((100 - offer.value) / 100);
+        }
+      }
+      const totalEl = itemEl.querySelector(".cart-item-total-price");
+      if (totalEl) totalEl.textContent = formatPrice(finalTotal);
+      const origPriceEl = itemEl.querySelector(".cart-item-original-price");
+      if (origPriceEl) origPriceEl.textContent = formatPrice(originalTotal);
+      const multEl = itemEl.querySelector(".cart-item-qty-multiplier");
+      if (multEl) {
+        if (item.qty > 1) {
+          multEl.textContent = `(${item.qty} x ${formatPrice(basePrice)})`;
+          multEl.style.display = "";
+        } else {
+          multEl.style.display = "none";
+        }
+      }
+    });
+    const totalProducts = cart.reduce((sum, item) => {
+      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const originalTotal = basePrice * item.qty;
+      let finalTotal = originalTotal;
+      const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+      if (offer) {
+        if (offer.type === "2x1") {
+          finalTotal = basePrice * Math.ceil(item.qty / 2);
+        } else if (offer.type === "percentage") {
+          finalTotal = originalTotal * ((100 - offer.value) / 100);
+        }
+      }
+      return sum + finalTotal;
+    }, 0);
+    const dynamicFees = state.dynamicDeliveryFees || {};
+    const commerceEntries = [...new Set(cart.map((i) => i.comercioId))];
+    const allFeesReady = commerceEntries.every((cid) => dynamicFees[cid] !== void 0);
+    const selectedTip = state.selectedTip || 0;
+    const individualFees = commerceEntries.map((cid) => dynamicFees[cid]);
+    const maxIndividualFee = allFeesReady ? Math.max(...individualFees, 0) : null;
+    const extraStopsFee = allFeesReady && individualFees.length > 1 ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+    const rainSurcharge = state.isRaining ? state.deliveryRainSurcharge || 300 : 0;
+    let baseDeliveryFeeCalc = null;
+    let nightSurcharge = null;
+    let totalDelivery = null;
+    if (allFeesReady) {
+      baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+      nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
+      totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
+    }
+    const appUsageFee = Math.ceil(totalProducts * (state.appUsageFeeRate || 0.05) / 10) * 10;
+    const discount = state.appliedDiscount || 0;
+    let couponDiscount = 0;
+    if (state.appliedCoupon && allFeesReady) {
+      const coupon = state.appliedCoupon;
+      const scope = coupon.scope || "products";
+      const discountType = coupon.discountType || (coupon.type === "free_delivery" ? "percentage" : "percentage");
+      const couponVal = Number(coupon.value || 0);
+      if (scope === "shipping" || coupon.type === "free_delivery") {
+        const feeForCoupon = baseDeliveryFeeCalc + (nightSurcharge || 0);
+        if (coupon.type === "free_delivery") {
+          couponDiscount = feeForCoupon || 0;
+        } else if (discountType === "percentage") {
+          couponDiscount = feeForCoupon * (couponVal / 100);
+        } else if (discountType === "fixed") {
+          couponDiscount = Math.min(couponVal, feeForCoupon);
+        }
+      } else {
+        const targetProductsTotal = cart.filter((item) => !coupon.comercioId || item.comercioId === coupon.comercioId).reduce((sum, item) => {
+          const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+          const originalTotal = basePrice * item.qty;
+          let finalTotal = originalTotal;
+          const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+          if (offer) {
+            if (offer.type === "2x1") {
+              finalTotal = basePrice * Math.ceil(item.qty / 2);
+            } else if (offer.type === "percentage") {
+              finalTotal = originalTotal * ((100 - offer.value) / 100);
+            }
+          }
+          return sum + finalTotal;
+        }, 0);
+        if (discountType === "percentage") {
+          couponDiscount = targetProductsTotal * (couponVal / 100);
+        } else if (discountType === "fixed") {
+          couponDiscount = Math.min(couponVal, targetProductsTotal);
+        }
+      }
+    }
+    const grandTotal = allFeesReady ? Math.max(totalProducts + totalDelivery + appUsageFee - discount - couponDiscount, 0) : null;
+    const subtotalEl = content2.querySelector("#cart-summary-subtotal");
+    if (subtotalEl) subtotalEl.textContent = formatPrice(totalProducts);
+    const deliveryEl = content2.querySelector("#cart-summary-delivery");
+    if (deliveryEl) {
+      deliveryEl.textContent = allFeesReady ? totalDelivery + appUsageFee > 0 ? formatPrice(totalDelivery + appUsageFee) : "\xA1Gratis!" : "Calculando...";
+    }
+    const grandTotalEl = content2.querySelector("#cart-summary-grandtotal");
+    if (grandTotalEl) {
+      grandTotalEl.textContent = allFeesReady ? formatPrice(grandTotal) : "---";
+    }
+  }
+  let renderTimeout = null;
+  const triggerRender = () => {
+    if (renderTimeout) return;
+    renderTimeout = requestAnimationFrame(() => {
+      const scrollArea = content.querySelector(".cart-scroll-area");
+      const cart = getState().cart;
+      if (scrollArea && currentCartStep === 1 && cart.length > 0) {
+        const itemEls = scrollArea.querySelectorAll(".cart-item");
+        if (itemEls.length === cart.length) {
+          updateCartDOMInPlace(content);
+          renderTimeout = null;
+          return;
+        }
+      }
+      renderCartContent(content);
+      renderTimeout = null;
+    });
+  };
+  triggerRender();
+  const unsubCart = subscribe("cart", () => {
+    calculateAllFees();
+    triggerRender();
+    renderNavbar();
+  });
+  const unsubUser = subscribe("user", triggerRender);
+  const unsubDollarPerPoint = subscribe("dollarPerPoint", triggerRender);
+  const unsubPointsPerDollar = subscribe("pointsPerDollar", triggerRender);
+  const unsubTip = subscribe("selectedTip", triggerRender);
+  const unsubAppliedDiscount = subscribe("appliedDiscount", triggerRender);
+  const unsubRedeemedPoints = subscribe("redeemedPoints", triggerRender);
+  const unsubAppliedCoupon = subscribe("appliedCoupon", triggerRender);
+  const unsubDistances = subscribe("dynamicDistances", triggerRender);
+  const unsubFees = subscribe("dynamicDeliveryFees", triggerRender);
+  const unsubComerciosData = subscribe("comerciosData", triggerRender);
+  const unsubAddress = subscribe("deliveryAddress", async () => {
+    setState({ dynamicDeliveryFees: {}, dynamicDistances: {} });
+    await calculateAllFees();
+    triggerRender();
+  });
+  content.addEventListener("click", handleCartClick);
+  return {
+    cleanup: () => {
+      content.removeEventListener("click", handleCartClick);
+      unsubCart();
+      unsubUser();
+      unsubDollarPerPoint();
+      unsubPointsPerDollar();
+      unsubTip();
+      unsubAppliedDiscount();
+      unsubRedeemedPoints();
+      unsubAppliedCoupon();
+      unsubDistances();
+      unsubFees();
+      unsubComerciosData();
+      unsubAddress();
+    }
+  };
+}
+export async function calculateAllFees(proactiveCommerceId = null) {
+  const state = getState();
+  const cart = state.cart;
+  const commerceIdsInCart = cart.map((item) => item.comercioId);
+  const comercioIds = [...new Set(proactiveCommerceId ? [...commerceIdsInCart, proactiveCommerceId] : commerceIdsInCart)];
+  if (comercioIds.length === 0) return;
+  const { doc: doc2, getDoc: getDoc2 } = await import("firebase/firestore");
+  const { db: db2 } = await import("../firebase.js");
+  const { setState: setState2 } = await import("../state.js");
+  const newComerciosData = { ...state.comerciosData || {} };
+  let comerciosDataChanged = false;
+  for (const cid of comercioIds) {
+    if (newComerciosData[cid] === void 0) {
+      try {
+        const cSnap = await getDoc2(doc2(db2, "comercios", cid));
+        if (cSnap.exists()) {
+          const cData = cSnap.data();
+          const logoUrl = cData.logo || cData.image || null;
+          newComerciosData[cid] = logoUrl;
+          comerciosDataChanged = true;
+        } else {
+          newComerciosData[cid] = null;
+          comerciosDataChanged = true;
+        }
+      } catch (err) {
+        console.error("Error fetching logo for", cid, err);
+      }
+    }
+  }
+  if (comerciosDataChanged) {
+    setState2("comerciosData", newComerciosData);
+  }
+  const dynamicFees = state.dynamicDeliveryFees || {};
+  const needsFeeCalculation = comercioIds.some((cid) => dynamicFees[cid] === void 0);
+  if (!needsFeeCalculation) return;
+  const { geocodeAddress, getDistance, calculateDynamicFee } = await import("../utils/geo.js");
+  let userCoords = state.deliveryCoords;
+  if (!userCoords && state.deliveryAddress) {
+    userCoords = await geocodeAddress(state.deliveryAddress);
+    if (userCoords) {
+      localStorage.setItem("gd-coords", JSON.stringify(userCoords));
+      state.deliveryCoords = userCoords;
+    }
+  }
+  if (!userCoords) return;
+  const newFees = {};
+  const newDistances = {};
+  let changed = false;
+  for (const cid of comercioIds) {
+    try {
+      const cSnap = await getDoc2(doc2(db2, "comercios", cid));
+      if (cSnap.exists()) {
+        const cData = cSnap.data();
+        const cCoords = cData.coords;
+        if (cCoords) {
+          const dist = await getDistance(userCoords.lat, userCoords.lng, cCoords.lat, cCoords.lng);
+          newDistances[cid] = dist;
+          newFees[cid] = calculateDynamicFee(dist);
+          changed = true;
+        } else if (cData.address) {
+          const geocoded = await geocodeAddress(cData.address);
+          if (geocoded) {
+            const dist = await getDistance(userCoords.lat, userCoords.lng, geocoded.lat, geocoded.lng);
+            newDistances[cid] = dist;
+            newFees[cid] = calculateDynamicFee(dist);
+            changed = true;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error calculating fee for", cid, err);
+    }
+  }
+  if (changed) {
+    setState2("dynamicDeliveryFees", newFees);
+    if (Object.keys(newDistances).length > 0) {
+      const mergedDistances = { ...state.dynamicDistances, ...newDistances };
+      setState2("dynamicDistances", mergedDistances);
+      localStorage.setItem("gd-cached-fees", JSON.stringify(newFees));
+      localStorage.setItem("gd-cached-distances", JSON.stringify(mergedDistances));
+    }
+  }
+}
+function renderCartContent(content) {
+  const cart = getState().cart;
+  const total = getCartTotal();
+  const count = getCartCount();
+  if (cart.length === 0) {
+    content.innerHTML = `
+      <div class="cart-page" style="height:100%; display:flex; align-items:center; justify-content:center; padding:20px; background:var(--color-bg-page);">
+        <div class="empty-state-professional" style="text-align:center; max-width:320px; width:100%; animation:fadeInUp 0.6s ease-out;">
+          <div style="position:relative; width:120px; height:120px; margin:0 auto 32px; display:flex; align-items:center; justify-content:center;">
+            <div style="position:absolute; inset:0; background:var(--color-primary); opacity:0.08; border-radius:40px; transform:rotate(-10deg); transition:all 0.5s;"></div>
+            <div style="position:absolute; inset:0; background:var(--color-primary); opacity:0.05; border-radius:40px; transform:rotate(10deg); transition:all 0.5s;"></div>
+            <div style="width:80px; height:80px; background:white; border-radius:28px; display:flex; align-items:center; justify-content:center; box-shadow:0 15px 35px rgba(0,0,0,0.08); z-index:1; color:var(--color-primary);">
+              ${icon("cart", 40)}
+            </div>
+            <div style="position:absolute; -right:5px; -top:5px; width:40px; height:40px; background:var(--color-bg-page); border-radius:50%; display:flex; align-items:center; justify-content:center; z-index:2;">
+              <div style="width:28px; height:28px; background:#FF9500; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 4px 10px rgba(255,149,0,0.3);">
+                ${icon("plus", 14)}
+              </div>
+            </div>
+          </div>
+          
+          <h2 style="font-size:24px; font-weight:900; color:var(--color-text-primary); margin-bottom:12px; letter-spacing:-0.5px;">Tu carrito est\xE1 vac\xEDo</h2>
+          <p style="font-size:15px; color:var(--color-text-tertiary); line-height:1.6; margin-bottom:40px; opacity:0.8;">
+            Parece que a\xFAn no has agregado nada. \xA1Explora los mejores comercios de tu zona y haz tu pedido!
+          </p>
+          
+          <a href="#/" class="btn btn-primary" style="height:56px; padding:0 32px; border-radius:18px; font-weight:900; font-size:14px; text-transform:uppercase; letter-spacing:0.05em; display:inline-flex; align-items:center; gap:12px; box-shadow:0 12px 25px rgba(var(--color-primary-rgb), 0.3); transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1); width:100%;">
+            ${icon("search", 18)} EXPLORAR COMERCIOS
+          </a>
+        </div>
+      </div>
+      <style>
+        @keyframes fadeInUp {
+          from { opacity:0; transform:translateY(20px); }
+          to { opacity:1; transform:translateY(0); }
+        }
+      </style>
+    `;
+    return;
+  }
+  const grouped = getCartByComercio();
+  const stepHeaderOrProducts = currentCartStep === 1 ? `
+        <!-- Zona de Productos (Scrollable) -->
+        <div class="cart-scroll-area">
+          
+          ${Object.entries(grouped).map(([comercioId, group]) => {
+    const logoUrl = getState().comerciosData?.[comercioId];
+    return `
+              <div class="comercio-group" style="margin-bottom:var(--space-5); background:var(--color-bg-card); border-radius:var(--radius-xl); border:1px solid var(--color-border-light); overflow:hidden; box-shadow:var(--shadow-md);">
+                <div style="padding:14px 16px; border-bottom:1px solid var(--color-border-light); background:var(--color-bg-secondary); display:flex; justify-content:space-between; align-items:center;">
+                  <h3 style="font-family:var(--font-display);font-size:14.5px;font-weight:800;margin:0;display:flex;align-items:center;gap:10px; color:var(--color-text-primary);">
+                    ${logoUrl ? `<img src="${logoUrl}" style="width:24px; height:24px; border-radius:50%; object-fit:cover; border:1.5px solid var(--color-border-light);" />` : icon("store", 18)} ${group.comercioName}
+                  </h3>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  ${getState().dynamicDeliveryFees[comercioId] !== void 0 ? `
+                    <span style="font-size:10px; color:var(--color-text-tertiary); font-weight:600; background:var(--color-bg-secondary); padding:2px 8px; border-radius:6px; border:1px solid var(--color-border-light);">
+                      ${getState().dynamicDistances?.[comercioId] ? `${getState().dynamicDistances[comercioId].toFixed(1)} km` : "Calculando..."}
+                    </span>
+                  ` : ""}
+                  <span class="badge badge-primary" style="font-size:10px;">${group.items.length} productos</span>
+                </div>
+              </div>
+              
+              ${group.items.map((item) => {
+      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const activeOffers = getState().activeOffers || [];
+      const offer = activeOffers.find((o) => o.active && o.comercioId === comercioId && o.productIds && o.productIds.includes(item.product.id));
+      let originalTotal = basePrice * item.qty;
+      let finalTotal = originalTotal;
+      let offerBadge = "";
+      if (offer) {
+        if (offer.type === "2x1") {
+          const paidQty = Math.ceil(item.qty / 2);
+          finalTotal = basePrice * paidQty;
+          offerBadge = `<span style="position:absolute; bottom:3px; left:3px; background:#EF4444; color:white; font-size:8px; font-weight:900; padding:2px 5px; border-radius:6px; text-transform:uppercase; letter-spacing:0.02em; box-shadow:0 2px 6px rgba(239,68,68,0.45); z-index:2; pointer-events:none; border:1px solid var(--color-bg-card); line-height:1;">2x1</span>`;
+        } else if (offer.type === "percentage") {
+          finalTotal = originalTotal * ((100 - offer.value) / 100);
+          offerBadge = `<span style="position:absolute; bottom:3px; left:3px; background:#EF4444; color:white; font-size:8px; font-weight:900; padding:2px 5px; border-radius:6px; text-transform:uppercase; letter-spacing:0.02em; box-shadow:0 2px 6px rgba(239,68,68,0.45); z-index:2; pointer-events:none; border:1px solid var(--color-bg-card); line-height:1;">${offer.value}% OFF</span>`;
+        }
+      }
+      return `
+                  <div class="cart-item" data-cart-item-id="${escapeHtmlAttr(item.cartItemId)}" data-comercio-id="${comercioId}" style="display:flex; align-items:flex-start; gap:12px; position:relative; padding:12px 14px; border-bottom:1px solid var(--color-border-light);">
+                    <div style="position:relative; width:60px; height:60px; flex-shrink:0;">
+                      <img src="${item.product.image || "/logo.png"}" alt="${item.product.name}" style="width:100%; height:100%; border-radius:12px; object-fit:cover; background:var(--color-bg-secondary); border:1px solid var(--color-border-light);" />
+                      ${offerBadge}
+                    </div>
+                    <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-top:2px;">
+                      <div style="font-weight:800; font-size:14px; color:var(--color-text-primary); display:flex; align-items:center; gap:6px; flex-wrap:wrap; line-height:1.35;">
+                        <span style="word-break:break-word;">${item.product.name}</span>
+                      </div>
+                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                        <span class="cart-item-total-price" style="color:var(--color-primary); font-weight:900; font-size:14px;">${formatPrice(finalTotal)}</span>
+                        ${finalTotal !== originalTotal ? `<span class="cart-item-original-price" style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; text-decoration:line-through;">${formatPrice(originalTotal)}</span>` : ""}
+                        ${item.qty > 1 ? `<span class="cart-item-qty-multiplier" style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:500; opacity:0.85;">(${item.qty} x ${formatPrice(basePrice)})</span>` : ""}
+                      </div>
+                      ${item.options && item.options.length > 0 ? `
+                        <div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; opacity:0.8; line-height:1.3;">
+                          ${item.options.map((o) => `${o.qty > 1 ? `${o.qty}x ` : ""}${o.name}`).join(", ")}
+                        </div>
+                      ` : ""}
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px; flex-shrink:0; align-self:center; margin-left:4px;">
+                      <div class="qty-controls" style="background:var(--color-bg-secondary); border-radius:10px; border:1px solid var(--color-border-light); padding:2px; display:flex; align-items:center;">
+                        <button class="qty-btn cart-qty-btn" data-action="minus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px; font-weight:800; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:${item.qty === 1 ? "var(--color-danger)" : "var(--color-text-primary)"};">
+                          ${item.qty === 1 ? icon("trash", 12) : "\u2212"}
+                        </button>
+                        <span class="qty-value" style="font-size:13px; font-weight:800; min-width:24px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
+                        <button class="qty-btn cart-qty-btn" data-action="plus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px; font-weight:800; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--color-text-primary);">+</button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+    }).join("")}
+            </div>
+          `;
+  }).join("")}
+          <div style="display:flex; justify-content:center; align-items:center; margin: 24px 0 16px;">
+            <button class="btn btn-ghost" style="color:var(--color-danger); opacity:0.85; font-size:11px; padding:8px 16px; height:auto; display:flex; align-items:center; gap:6px; font-weight:800; background:rgba(239, 68, 68, 0.05); border-radius:12px; border:1px solid rgba(239, 68, 68, 0.1); cursor:pointer;" id="clear-cart-btn">
+              ${icon("trash", 12)} VACIAR TODO EL CARRITO
+            </button>
+          </div>
+        </div>
+  ` : `
+        <!-- Paso 2 Header y Botones de Beneficios (Scrollable) -->
+        <div class="cart-scroll-area">
+          <div style="display:flex; align-items:center; gap:16px; margin-bottom:24px; margin-top:12px; background:var(--color-bg-card); border-radius:18px; border:1px solid var(--color-border-light); padding:16px; box-shadow:var(--shadow-xs);">
+            <button class="btn btn-ghost" id="cart-back-step-btn" style="padding:0; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); cursor:pointer; color:var(--color-text-primary);">
+              ${icon("back", 20)}
+            </button>
+            <div>
+              <h2 style="font-family:var(--font-display); font-size:17px; font-weight:900; margin:0; color:var(--color-text-primary); text-align:left;">Beneficios y Propina</h2>
+              <p style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 0 0; opacity:0.8; text-align:left;">Paso 2 de 2: Personaliz\xE1 tu orden</p>
+            </div>
+          </div>
+
+          <!-- Compact Tipping, GoPoints, and Coupon (Step 2 Top) -->
+          ${(() => {
+    const state = getState();
+    const selectedTip = state.selectedTip || 0;
+    const appliedDiscount = state.appliedDiscount || 0;
+    const userPoints = state.user?.points || 0;
+    const appliedCoupon = state.appliedCoupon;
+    return `
+              <div style="display:flex; flex-direction:column; gap:16px; margin-bottom:24px;">
+                <!-- Tip Pill -->
+                <button id="cart-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? "#10b981" : "var(--color-border-light)"}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+                  <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                    <div style="width:36px; height:36px; background:${selectedTip > 0 ? "linear-gradient(135deg, #10b981 0%, #059669 100%)" : "rgba(16, 185, 129, 0.08)"}; color:${selectedTip > 0 ? "white" : "#10b981"}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                      ${icon("dollarSign", 18)}
+                    </div>
+                    <div style="min-width:0;">
+                      <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Propina al Repartidor</div>
+                      <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+                        ${selectedTip > 0 ? `Propina aplicada: ${formatPrice(selectedTip)}` : "Apoyar repartidor"}
+                      </div>
+                    </div>
+                  </div>
+                  <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
+                    ${selectedTip > 0 ? icon("checkCircle", 16, "", "#10b981") : icon("chevronRight", 16)}
+                  </div>
+                </button>
+
+                <!-- GoPoints Pill -->
+                <button id="cart-open-gopoints-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedDiscount > 0 ? "#f59e0b" : "var(--color-border-light)"}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+                  <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                    <div style="width:36px; height:36px; background:${appliedDiscount > 0 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)" : "rgba(245, 158, 11, 0.08)"}; color:${appliedDiscount > 0 ? "white" : "#f59e0b"}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                      ${icon("goPointsLogo", 20)}
+                    </div>
+                    <div style="min-width:0;">
+                      <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Canjear GoPoints</div>
+                      <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+                        ${appliedDiscount > 0 ? `Descuento: -${formatPrice(appliedDiscount)}` : `Disponibles: ${userPoints} pts`}
+                      </div>
+                    </div>
+                  </div>
+                  <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
+                    ${appliedDiscount > 0 ? icon("checkCircle", 16, "", "#f59e0b") : icon("chevronRight", 16)}
+                  </div>
+                </button>
+
+                <!-- Coupon Pill -->
+                <button id="cart-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? "#a855f7" : "var(--color-border-light)"}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+                  <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                    <div style="width:36px; height:36px; background:${appliedCoupon ? "linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)" : "rgba(168, 85, 247, 0.08)"}; color:${appliedCoupon ? "white" : "#a855f7"}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                      ${icon("tag", 18)}
+                    </div>
+                    <div style="min-width:0;">
+                      <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Cup\xF3n de Descuento</div>
+                      <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+                        ${appliedCoupon ? `${appliedCoupon.code} - ${appliedCoupon.scope === "shipping" ? appliedCoupon.discountType === "percentage" ? `${appliedCoupon.value}% En env\xEDo` : `$${appliedCoupon.value} En env\xEDo` : appliedCoupon.discountType === "percentage" ? `${appliedCoupon.value}% OFF` : `$${appliedCoupon.value} OFF`}` : "Ingresar cup\xF3n"}
+                      </div>
+                    </div>
+                  </div>
+                  <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
+                    ${appliedCoupon ? icon("checkCircle", 16, "", "#a855f7") : icon("chevronRight", 16)}
+                  </div>
+                </button>
+              </div>
+            `;
+  })()}
+        </div>
+  `;
+  content.innerHTML = `
+      <div class="cart-container">
+        ${stepHeaderOrProducts}
+        
+        <!-- Consolidated Checkout Dashboard (Fixed Bottom) -->
+        ${(() => {
+    const commerceEntries = Object.entries(grouped);
+    if (commerceEntries.length === 0) return "";
+    const isMulti = commerceEntries.length > 1;
+    const totalProducts = getCartTotal();
+    const dynamicFees = getState().dynamicDeliveryFees;
+    const commerceIds = Object.keys(grouped);
+    const allFeesReady = commerceIds.every((cid) => dynamicFees[cid] !== void 0);
+    const selectedTip = getState().selectedTip || 0;
+    const individualFees = commerceIds.map((cid) => dynamicFees[cid]);
+    const maxIndividualFee = allFeesReady ? Math.max(...individualFees, 0) : null;
+    const extraStopsFee = allFeesReady && individualFees.length > 1 ? (individualFees.length - 1) * (getState().deliveryExtraStopFee || 500) : 0;
+    const rainSurcharge = getState().isRaining ? getState().deliveryRainSurcharge || 300 : 0;
+    let baseDeliveryFeeCalc = null;
+    let nightSurcharge = null;
+    let totalDelivery = null;
+    if (allFeesReady) {
+      baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+      nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, baseDeliveryFeeCalc);
+      totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
+    }
+    const appUsageFee = Math.ceil(totalProducts * (getState().appUsageFeeRate || 0.05) / 10) * 10;
+    const discount = getState().appliedDiscount || 0;
+    const appliedCoupon = getState().appliedCoupon;
+    let couponDiscount = 0;
+    if (appliedCoupon && allFeesReady) {
+      const scope = appliedCoupon.scope || "products";
+      const discountType = appliedCoupon.discountType || (appliedCoupon.type === "free_delivery" ? "percentage" : "percentage");
+      const couponVal = Number(appliedCoupon.value || 0);
+      if (scope === "shipping" || appliedCoupon.type === "free_delivery") {
+        const feeForCoupon = baseDeliveryFeeCalc + (nightSurcharge || 0);
+        if (appliedCoupon.type === "free_delivery") {
+          couponDiscount = feeForCoupon || 0;
+        } else if (discountType === "percentage") {
+          couponDiscount = feeForCoupon * (couponVal / 100);
+        } else if (discountType === "fixed") {
+          couponDiscount = Math.min(couponVal, feeForCoupon);
+        }
+      } else {
+        let targetProductsTotal = totalProducts;
+        if (appliedCoupon.ownerId && appliedCoupon.ownerId !== "admin") {
+          const merchantId = appliedCoupon.ownerId;
+          const cart2 = getState().cart || [];
+          targetProductsTotal = cart2.filter((item) => item.comercioId === merchantId).reduce((sum, item) => {
+            const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+            const activeOffers = getState().activeOffers || [];
+            const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+            if (offer) {
+              if (offer.type === "2x1") {
+                const paidQty = Math.ceil(item.qty / 2);
+                return sum + basePrice * paidQty;
+              } else if (offer.type === "percentage") {
+                const disc = (100 - (offer.value || 0)) / 100;
+                return sum + basePrice * item.qty * disc;
+              }
+            }
+            return sum + basePrice * item.qty;
+          }, 0);
+        } else if (appliedCoupon.comercioIds && Array.isArray(appliedCoupon.comercioIds) && appliedCoupon.comercioIds.length > 0) {
+          const cart2 = getState().cart || [];
+          targetProductsTotal = cart2.filter((item) => appliedCoupon.comercioIds.includes(item.comercioId)).reduce((sum, item) => {
+            const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+            const activeOffers = getState().activeOffers || [];
+            const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+            if (offer) {
+              if (offer.type === "2x1") {
+                const paidQty = Math.ceil(item.qty / 2);
+                return sum + basePrice * paidQty;
+              } else if (offer.type === "percentage") {
+                const disc = (100 - (offer.value || 0)) / 100;
+                return sum + basePrice * item.qty * disc;
+              }
+            }
+            return sum + basePrice * item.qty;
+          }, 0);
+        } else {
+          targetProductsTotal = totalProducts + (baseDeliveryFeeCalc || 0) + (nightSurcharge || 0);
+        }
+        if (discountType === "percentage") {
+          couponDiscount = targetProductsTotal * (couponVal / 100);
+        } else if (discountType === "fixed") {
+          couponDiscount = Math.min(couponVal, targetProductsTotal);
+        }
+      }
+    }
+    const grandTotal = allFeesReady ? Math.max(totalProducts + totalDelivery + appUsageFee - discount - couponDiscount, 0) : null;
+    return `
+            <div class="cart-fixed-footer">
+              
+              ${currentCartStep === 2 ? `
+              <!-- Payment Method Selection Card -->
+              <div style="display: flex; gap: 10px; margin-bottom: 16px; width: 100%;">
+                <label class="payment-option" style="flex: 1; margin: 0;">
+                  <input type="radio" name="payment-method" value="efectivo" ${selectedPaymentMethod === "efectivo" ? "checked" : ""} style="display:none;">
+                  <div class="pm-card-v4 pm-cash" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 13px; padding: 14px 10px;">
+                    ${icon("dollarSign", 15, "pm-icon")}
+                    <span class="pm-label">EFECTIVO</span>
+                    <div class="pm-dot"></div>
+                  </div>
+                </label>
+                
+                <label class="payment-option" style="flex: 1; margin: 0;">
+                  <input type="radio" name="payment-method" value="mercadopago" ${selectedPaymentMethod === "mercadopago" ? "checked" : ""} style="display:none;">
+                  <div class="pm-card-v4 pm-mp" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 13px; padding: 14px 10px;">
+                    ${icon("bank", 15, "pm-icon")}
+                    <span class="pm-label">TRANSFERENCIA</span>
+                    <div class="pm-dot"></div>
+                  </div>
+                </label>
+              </div>
+              ` : ""}
+
+              <div style="background:var(--color-bg-secondary); padding:var(--space-3); border-radius:var(--radius-lg); margin-bottom:var(--space-4); border:1px solid var(--color-border-light);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--color-text-secondary); font-size:12px;">
+                  <span>Subtotal ${isMulti ? `(${commerceEntries.length} comercios)` : ""}</span>
+                  <span id="cart-summary-subtotal" style="color:var(--color-text-primary); font-weight:600;">${formatPrice(totalProducts)}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--color-text-secondary); font-size:12px; align-items:center;">
+                  <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                    <span>Env\xEDo ${isMulti ? "(M\xFAltiple)" : ""}</span>
+                    <button id="show-fee-details" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-right:4px;">${icon("info", 14)}</button>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    ${!isMulti && commerceIds[0] && getState().dynamicDistances?.[commerceIds[0]] ? `
+                      <span style="font-size:10px; opacity:0.6; font-weight:600;">(${getState().dynamicDistances[commerceIds[0]].toFixed(1)} km)</span>
+                    ` : ""}
+                    <span id="cart-summary-delivery" style="color:var(--color-success); font-weight:700;">${allFeesReady ? totalDelivery + appUsageFee > 0 ? `${formatPrice(totalDelivery + appUsageFee)}` : "\xA1Gratis!" : "Calculando..."}</span>
+                  </div>
+                </div>
+                ${getState().appliedDiscount ? `
+                  <div style="display:flex; justify-content:space-between; color:var(--color-success); font-size:12px; font-weight:700; margin-top:4px; padding-top:4px; border-top:1px dashed var(--color-border-light);">
+                    <span>Descuento GoPoints</span>
+                    <span>- ${formatPrice(getState().appliedDiscount)}</span>
+                  </div>
+                ` : ""}
+                ${getState().appliedCoupon ? `
+                  <div style="display:flex; justify-content:space-between; color:#a855f7; font-size:12px; font-weight:700; margin-top:4px; padding-top:4px; border-top:1px dashed var(--color-border-light);">
+                    <span>Cup\xF3n (${getState().appliedCoupon.code})</span>
+                    <span>- ${formatPrice(couponDiscount)}</span>
+                  </div>
+                ` : ""}
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-4); padding:0 var(--space-2);">
+
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Total a pagar</span>
+                  <span id="cart-summary-grandtotal" style="font-size:24px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.03em;">${allFeesReady ? formatPrice(grandTotal) : "---"}</span>
+                </div>
+                
+                <button class="btn btn-primary checkout-btn" 
+                        id="global-checkout-btn"
+                        ${!allFeesReady ? "disabled" : ""}
+                        style="height:54px; width:180px; border-radius:16px; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:0.02em; display:flex; align-items:center; justify-content:center; gap:var(--space-2); background:${!allFeesReady ? "var(--color-text-tertiary)" : "var(--color-primary)"}; box-shadow: ${!allFeesReady ? "none" : "0 12px 24px rgba(var(--color-primary-rgb), 0.3)"}; border:none; opacity: ${!allFeesReady ? 0.6 : 1}; pointer-events: ${!allFeesReady ? "none" : "auto"};">
+                  ${currentCartStep === 1 ? `${icon("arrowRight", 18)} SIGUIENTE` : `${icon("check", 18)} ${isMulti ? "PEDIDO M\xDALTIPLE" : "CONFIRMAR"}`}
+                </button>
+              </div>
+            </div>
+          `;
+  })()}
+      </div>
+
+      <style>
+        @keyframes pulse {
+          0% { opacity: 0.6; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.02); }
+          100% { opacity: 0.6; transform: scale(1); }
+        }
+        .payment-option { cursor: pointer; width: 100%; }
+        
+        .pm-card-v4 {
+          background: var(--color-bg-secondary);
+          border: 1px solid var(--color-border-light);
+          padding: 16px 12px;
+          border-radius: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
+          cursor: pointer;
+          color: var(--color-text-secondary);
+        }
+
+        .pm-icon {
+          color: var(--color-text-secondary);
+          transition: all 0.3s;
+          flex-shrink: 0;
+        }
+
+        .pm-label {
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          color: var(--color-text-secondary);
+          transition: all 0.3s;
+          text-align: center;
+        }
+
+        .pm-dot {
+          position: absolute;
+          bottom: 8px;
+          width: 4px;
+          height: 4px;
+          border-radius: 50%;
+          background: white;
+          opacity: 0;
+          transform: translateY(4px);
+          transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        /* Active Cash */
+        .payment-option input:checked + .pm-cash {
+          background: #22C55E;
+          border-color: #22C55E;
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px rgba(34, 197, 94, 0.3);
+        }
+        .payment-option input:checked + .pm-cash .pm-label { color: white; }
+        .payment-option input:checked + .pm-cash .pm-icon { color: white; }
+        .payment-option input:checked + .pm-cash .pm-dot { 
+          opacity: 1; 
+          transform: translateY(0); 
+        }
+
+        /* Active MP */
+        .payment-option input:checked + .pm-mp {
+          background: #009EE3;
+          border-color: #009EE3;
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px rgba(0, 158, 227, 0.3);
+        }
+        .payment-option input:checked + .pm-mp .pm-label { color: white; }
+        .payment-option input:checked + .pm-mp .pm-icon { color: white; }
+        .payment-option input:checked + .pm-mp .pm-dot { 
+          opacity: 1; 
+          transform: translateY(0); 
+        }
+
+        /* Dark Mode */
+        [data-theme="dark"] .pm-card-v4 {
+          background: rgba(255,255,255,0.05);
+          border-color: rgba(255,255,255,0.1);
+        }
+        [data-theme="dark"] .pm-label {
+          color: rgba(255,255,255,0.5);
+        }
+
+        /* Quantity Selector Redesign */
+        .qty-controls {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .qty-btn {
+          width: 26px;
+          height: 26px;
+          border-radius: 8px;
+          border: none;
+          background: var(--color-surface-hover);
+          color: var(--color-text-primary);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 700;
+          transition: all 0.2s ease;
+        }
+
+        .qty-btn:hover { background: var(--color-primary-light); color: var(--color-primary); }
+        .qty-btn:active { transform: scale(0.9); }
+
+        .qty-value {
+          font-size: 14px;
+          font-weight: 800;
+          color: var(--color-text-primary);
+          min-width: 20px;
+          text-align: center;
+        }
+      </style>
+    </div>
+  `;
+  content.querySelectorAll('input[name="payment-method"]').forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      selectedPaymentMethod = e.target.value;
+      const btn = document.getElementById("global-checkout-btn");
+      if (!btn) return;
+      const isMulti = Object.keys(getCartByComercio()).length > 1;
+      if (e.target.value === "mercadopago") {
+        if (currentCartStep === 1) {
+          btn.innerHTML = `${icon("arrowRight", 18)} SIGUIENTE`;
+        } else {
+          btn.innerHTML = `${icon("creditCard", 20)} ${isMulti ? "PEDIDO M\xDALTIPLE" : "CONFIRMAR"}`;
+        }
+        btn.style.background = "#009ee3";
+        btn.style.boxShadow = "0 10px 20px -5px rgba(0, 158, 227, 0.3)";
+      } else {
+        if (currentCartStep === 1) {
+          btn.innerHTML = `${icon("arrowRight", 18)} SIGUIENTE`;
+        } else {
+          btn.innerHTML = `${icon("check", 20)} ${isMulti ? "PEDIDO M\xDALTIPLE" : "CONFIRMAR"}`;
+        }
+        btn.style.background = "var(--color-primary)";
+        btn.style.boxShadow = "0 10px 20px -5px rgba(var(--color-primary-rgb), 0.3)";
+      }
+    });
+  });
+  content.querySelector("#cart-open-tip-btn")?.addEventListener("click", () => {
+    openTipModal();
+  });
+  content.querySelector("#cart-open-gopoints-btn")?.addEventListener("click", () => {
+    openGoPointsModal();
+  });
+  content.querySelector("#cart-open-coupon-btn")?.addEventListener("click", () => {
+    openCouponModal();
+  });
+  document.getElementById("show-fee-details")?.addEventListener("click", () => {
+    showFeeDetails();
+  });
+}
+function showFeeDetails() {
+  const state = getState();
+  const grouped = getCartByComercio();
+  const isMulti = Object.keys(grouped).length > 1;
+  const dynamicFees = state.dynamicDeliveryFees;
+  const dynamicDistances = state.dynamicDistances || {};
+  const { showModal: showModal2 } = import("../components/modal.js");
+  let html = `
+    <div style="padding:4px;">
+      <p style="font-size:13px; color:var(--color-text-secondary); margin-bottom:20px; line-height:1.5;">
+        Calculamos el costo de env\xEDo bas\xE1ndonos en la distancia real recorrida y la cantidad de comercios.
+      </p>
+      
+      <div style="background:var(--color-bg-secondary); border-radius:16px; padding:16px; border:1px solid var(--color-border-light);">
+  `;
+  if (isMulti) {
+    const individualFees = Object.keys(grouped).map((cid) => ({
+      name: grouped[cid].comercioName,
+      fee: dynamicFees[cid] || state.deliveryCost,
+      dist: dynamicDistances[cid] || 0
+    }));
+    const maxItem = individualFees.reduce((prev, current) => prev.fee > current.fee ? prev : current);
+    const othersCount = individualFees.length - 1;
+    const extraFee = othersCount * (state.deliveryExtraStopFee || 500);
+    html += `
+      <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--color-border-light);">
+        <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">LOGICA DE PEDIDO MULTIPLE</div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:13px;">
+          <span>Env\xEDo m\xE1s largo (${maxItem.name})</span>
+          <span style="font-weight:700;">${formatPrice(maxItem.fee)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:13px;">
+          <span>${othersCount} paradas extra ($${state.deliveryExtraStopFee || 500} c/u)</span>
+          <span style="font-weight:700; color:var(--color-success);">+ ${formatPrice(extraFee)}</span>
+        </div>
+      </div>
+    `;
+  } else {
+    const cid = Object.keys(grouped)[0];
+    const dist = dynamicDistances[cid] || 0;
+    const kmPrice = dist * state.deliveryPricePerKm;
+    const totalRaw = state.deliveryBasePrice + kmPrice;
+    const minPrice = state.deliveryMinPrice || 1500;
+    const minAdjustment = Math.max(0, minPrice - totalRaw);
+    const beforeRound = Math.max(minPrice, totalRaw);
+    const rounded = Math.ceil(beforeRound / 10) * 10;
+    const roundingAdjustment = rounded - beforeRound;
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(0,158,227,0.08); color:#009EE3; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("truck", 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Costo Base</span>
+        </div>
+        <span style="font-weight:800; color:var(--color-text-primary);">${formatPrice(state.deliveryBasePrice)}</span>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(245,158,11,0.08); color:#f59e0b; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("mapPin", 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Distancia (${dist.toFixed(1)} km)</span>
+        </div>
+        <span style="font-weight:800; color:var(--color-text-primary);">+ ${formatPrice(kmPrice)}</span>
+      </div>
+    `;
+    if (minAdjustment > 0) {
+      html += `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon("info", 14)}
+            </div>
+            <span style="color:var(--color-text-secondary); font-weight:600;">Ajuste Costo M\xEDnimo</span>
+          </div>
+          <span style="font-weight:800; color:#10b981;">+ ${formatPrice(minAdjustment)}</span>
+        </div>
+      `;
+    }
+    if (roundingAdjustment > 0) {
+      html += `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:28px; height:28px; border-radius:8px; background:rgba(107,114,128,0.08); color:var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${icon("tag", 14)}
+            </div>
+            <span style="color:var(--color-text-secondary); font-weight:600;">Ajuste de Redondeo</span>
+          </div>
+          <span style="font-weight:800; color:var(--color-text-tertiary);">+ ${formatPrice(roundingAdjustment)}</span>
+        </div>
+      `;
+    }
+  }
+  let baseDeliveryFeeCalc = 0;
+  if (isMulti) {
+    const individualFees = Object.keys(grouped).map((cid) => dynamicFees[cid] || state.deliveryCost);
+    const maxFee = Math.max(...individualFees);
+    const othersCount = individualFees.length - 1;
+    baseDeliveryFeeCalc = maxFee + othersCount * (state.deliveryExtraStopFee || 500);
+  } else {
+    const cid = Object.keys(grouped)[0];
+    const dist = dynamicDistances[cid] || 0;
+    baseDeliveryFeeCalc = dynamicFees[cid] || Math.ceil(Math.max(state.deliveryMinPrice || 1500, state.deliveryBasePrice + dist * state.deliveryPricePerKm) / 10) * 10;
+  }
+  const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFeeCalc);
+  if (nightSurcharge > 0) {
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(163,11,17,0.08); color:#a30b11; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("moon", 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Recargo Nocturno</span>
+        </div>
+        <span style="font-weight:800; color:#a30b11;">+ ${formatPrice(nightSurcharge)}</span>
+      </div>
+    `;
+  }
+  if (state.isRaining) {
+    const rainSurcharge = state.deliveryRainSurcharge || 300;
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; padding-top:${nightSurcharge > 0 ? "0" : "12px"}; border-top:${nightSurcharge > 0 ? "none" : "1px dashed var(--color-border-light)"}; font-size:13px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(0,158,227,0.08); color:#009EE3; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("cloudRain", 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Recargo por Lluvia</span>
+        </div>
+        <span style="font-weight:800; color:#009EE3;">+ ${formatPrice(rainSurcharge)}</span>
+      </div>
+    `;
+  }
+  const selectedTip = state.selectedTip || 0;
+  if (selectedTip > 0) {
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("heart", 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Propina al Repartidor</span>
+        </div>
+        <span style="font-weight:800; color:#10b981;">+ ${formatPrice(selectedTip)}</span>
+      </div>
+    `;
+  }
+  const totalProducts = getCartTotal();
+  const appUsageFee = Math.ceil(totalProducts * (state.appUsageFeeRate || 0.05) / 10) * 10;
+  if (appUsageFee > 0) {
+    html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:28px; height:28px; border-radius:8px; background:rgba(168,85,247,0.08); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("info", 14)}
+          </div>
+          <span style="color:var(--color-text-secondary); font-weight:600;">Tarifa de servicio</span>
+        </div>
+        <span style="font-weight:800; color:var(--color-text-secondary);">+ ${formatPrice(appUsageFee)}</span>
+      </div>
+    `;
+  }
+  const finalBreakdownTotal = baseDeliveryFeeCalc + nightSurcharge + (state.isRaining ? state.deliveryRainSurcharge || 300 : 0) + selectedTip + appUsageFee;
+  html += `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; font-size:16px; font-weight:900; color:var(--color-text-primary); border-top:2px dashed var(--color-border-light);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:32px; height:32px; border-radius:10px; background:rgba(34,197,94,0.1); color:#22C55E; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon("creditCard", 16)}
+          </div>
+          <span style="font-family:var(--font-display); font-weight:900; color:var(--color-text-primary);">Total del Env\xEDo</span>
+        </div>
+        <span style="font-size:18px; font-weight:900; color:#22C55E;">${formatPrice(finalBreakdownTotal)}</span>
+      </div>
+  `;
+  html += `
+      </div>
+      
+      <div style="margin-top:20px; font-size:11px; color:var(--color-text-tertiary); font-style:italic;">
+        * Los precios est\xE1n basados en la configuraci\xF3n global de log\xEDstica y ruteo en tiempo real.
+      </div>
+    </div>
+  `;
+  import("../components/modal.js").then((m) => {
+    m.showModal({
+      title: "Detalle del Env\xEDo",
+      height: "auto",
+      content: html
+    });
+  });
+}
+function openTipModal() {
+  const state = getState();
+  const selectedTip = state.selectedTip || 0;
+  const presetTips = [300, 500, 700];
+  const isCustom = selectedTip > 0 && !presetTips.includes(selectedTip);
+  const modalContent = document.createElement("div");
+  modalContent.style.cssText = "padding: 24px 20px 40px; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; display: flex; flex-direction: column; gap: 20px;";
+  modalContent.innerHTML = `
+    <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
+    
+    <div style="text-align: center;">
+      <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25);">
+        ${icon("dollarSign", 28)}
+      </div>
+      <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
+        Propina al Repartidor
+      </h2>
+      <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; padding: 0 10px;">
+        El 100% de la propina va directamente al repartidor para apoyar su valioso servicio y dedicaci\xF3n.
+      </p>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:16px; margin-top:8px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; width:100%;">
+        ${presetTips.map((amount) => {
+    const isActive = selectedTip === amount;
+    return `
+            <button class="tip-modal-preset-btn ${isActive ? "active" : ""}" 
+                    data-amount="${amount}"
+                    style="flex:1; min-width:80px; height:46px; border-radius:12px; border:2px solid ${isActive ? "var(--color-primary)" : "var(--color-border-light)"}; background:${isActive ? "var(--color-primary-light)" : "var(--color-bg-secondary)"}; color:${isActive ? "var(--color-primary)" : "var(--color-text-primary)"}; font-size:14px; font-weight:800; cursor:pointer; transition:all 0.2s;">
+              + ${formatPrice(amount)}
+            </button>
+          `;
+  }).join("")}
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Otro Monto (Opcional)</label>
+        <div style="position:relative; display:flex; align-items:center;">
+          <span style="position:absolute; left:16px; font-size:16px; font-weight:800; color:var(--color-text-secondary);">$</span>
+          <input type="number" id="tip-modal-custom-input" 
+                 min="1" 
+                 placeholder="Ingresa otro valor" 
+                 value="${isCustom ? selectedTip : ""}"
+                 style="width:100%; height:50px; border-radius:14px; background:var(--color-bg-secondary); border:2px solid var(--color-border-light); padding:0 16px 0 32px; font-size:15px; font-weight:800; color:var(--color-text-primary); outline:none; transition:all 0.2s;" />
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-top: 12px;">
+      ${selectedTip > 0 ? `
+        <button id="tip-modal-clear-btn" class="btn btn-ghost" style="height: 52px; flex: 1; border-radius: 14px; font-weight: 800; color: var(--color-danger); background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; gap: 8px; padding:0;">
+          ${icon("trash", 16)} Eliminar
+        </button>
+      ` : ""}
+      <button id="tip-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        ${icon("check", 16)} APLICAR PROPINA
+      </button>
+    </div>
+  `;
+  const { close } = showModal({
+    title: "",
+    hideHeader: true,
+    height: "auto",
+    content: modalContent
+  });
+  const customInput = modalContent.querySelector("#tip-modal-custom-input");
+  modalContent.querySelectorAll(".tip-modal-preset-btn").forEach((btn) => {
+    btn.onclick = () => {
+      modalContent.querySelectorAll(".tip-modal-preset-btn").forEach((b) => {
+        b.classList.remove("active");
+        b.style.borderColor = "var(--color-border-light)";
+        b.style.backgroundColor = "var(--color-bg-secondary)";
+        b.style.color = "var(--color-text-primary)";
+      });
+      btn.classList.add("active");
+      btn.style.borderColor = "var(--color-primary)";
+      btn.style.backgroundColor = "var(--color-primary-light)";
+      btn.style.color = "var(--color-primary)";
+      if (customInput) customInput.value = "";
+    };
+  });
+  if (customInput) {
+    customInput.oninput = () => {
+      modalContent.querySelectorAll(".tip-modal-preset-btn").forEach((b) => {
+        b.classList.remove("active");
+        b.style.borderColor = "var(--color-border-light)";
+        b.style.backgroundColor = "var(--color-bg-secondary)";
+        b.style.color = "var(--color-text-primary)";
+      });
+    };
+  }
+  const confirmBtn = modalContent.querySelector("#tip-modal-confirm-btn");
+  confirmBtn.onclick = () => {
+    let finalAmount = 0;
+    const activePreset = modalContent.querySelector(".tip-modal-preset-btn.active");
+    if (activePreset) {
+      finalAmount = parseInt(activePreset.dataset.amount, 10);
+    } else if (customInput) {
+      const valStr = customInput.value.trim();
+      if (valStr) {
+        finalAmount = parseInt(valStr, 10);
+        if (isNaN(finalAmount) || finalAmount <= 0) {
+          showToast("Por favor ingres\xE1 un monto de propina v\xE1lido.", "warning");
+          return;
+        }
+      }
+    }
+    setState("selectedTip", finalAmount);
+    if (finalAmount > 0) {
+      showToast(`Propina de ${formatPrice(finalAmount)} agregada.`, "success");
+    } else {
+      showToast("Propina eliminada.", "info");
+    }
+    close();
+  };
+  const clearBtn = modalContent.querySelector("#tip-modal-clear-btn");
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      setState("selectedTip", 0);
+      showToast("Propina eliminada.", "info");
+      close();
+    };
+  }
+}
+function openGoPointsModal() {
+  const state = getState();
+  const userPoints = state.user?.points || 0;
+  const dollarPerPoint = state.dollarPerPoint || 1;
+  const appliedDiscount = state.appliedDiscount || 0;
+  const redeemedPoints = state.redeemedPoints || 0;
+  const grouped = getCartByComercio();
+  const totalProducts = getCartTotal();
+  const dynamicFees = state.dynamicDeliveryFees || {};
+  const commerceIds = Object.keys(grouped);
+  const allFeesReady = commerceIds.every((cid) => dynamicFees[cid] !== void 0);
+  const selectedTip = state.selectedTip || 0;
+  let totalDelivery = 0;
+  let nightSurcharge = 0;
+  if (allFeesReady) {
+    const individualFees = commerceIds.map((cid) => dynamicFees[cid]);
+    const maxIndividualFee = Math.max(...individualFees, 0);
+    const extraStopsFee = individualFees.length > 1 ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+    const rainSurcharge = state.isRaining ? state.deliveryRainSurcharge || 300 : 0;
+    const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+    nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
+    totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
+  }
+  const appUsageFee = Math.ceil(totalProducts * (state.appUsageFeeRate || 0.05) / 10) * 10;
+  const preDiscountTotal = totalProducts + totalDelivery + appUsageFee;
+  const maxPointsToRedeem = Math.min(userPoints, Math.floor(preDiscountTotal / dollarPerPoint));
+  const modalContent = document.createElement("div");
+  modalContent.style.cssText = "padding: 24px 20px 40px; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; display: flex; flex-direction: column; gap: 20px;";
+  modalContent.innerHTML = `
+    <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
+    
+    <div style="text-align: center;">
+      <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(245, 158, 11, 0.35);">
+        ${icon("goPointsLogo", 30)}
+      </div>
+      <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
+        Canjear GoPoints
+      </h2>
+      <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; padding: 0 10px;">
+        Canje\xE1 tus puntos acumulados por descuentos directos en este pedido.
+      </p>
+    </div>
+
+    <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:8px;">
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary);">
+        <span>Tus puntos disponibles:</span>
+        <span style="font-weight:800; color:var(--color-text-primary);">${userPoints} pts (${formatPrice(userPoints * dollarPerPoint)})</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary);">
+        <span>Tipo de cambio:</span>
+        <span style="font-weight:700; color:var(--color-text-primary);">1 pt = ${formatPrice(dollarPerPoint)}</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary);">
+        <span>Canje m\xE1ximo permitido:</span>
+        <span style="font-weight:800; color:var(--color-primary);">${maxPointsToRedeem} pts (${formatPrice(maxPointsToRedeem * dollarPerPoint)})</span>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Puntos a canjear</label>
+      <div style="position:relative; display:flex; align-items:center; width:100%;">
+        <input type="number" id="gopoints-modal-input" 
+               min="1" 
+               max="${maxPointsToRedeem}" 
+               placeholder="Ej. 100" 
+               value="${redeemedPoints > 0 ? redeemedPoints : ""}"
+               style="width:100%; height:50px; border-radius:14px; background:var(--color-bg-secondary); border:2px solid var(--color-border-light); padding:0 100px 0 16px; font-size:15px; font-weight:800; color:var(--color-text-primary); outline:none; transition:all 0.2s;" />
+        <button id="gopoints-modal-max-btn" 
+                style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:var(--color-primary-light); border:none; color:var(--color-primary); font-size:11px; font-weight:900; padding:8px 14px; border-radius:10px; cursor:pointer; transition:all 0.2s;">
+          M\xC1XIMO
+        </button>
+      </div>
+      <div id="gopoints-modal-error" style="display:none; color:var(--color-danger); font-size:12px; font-weight:700; padding-left:4px; margin-top: 4px;"></div>
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-top: 12px;">
+      ${appliedDiscount > 0 ? `
+        <button id="gopoints-modal-clear-btn" class="btn btn-ghost" style="height: 52px; flex: 1; border-radius: 14px; font-weight: 800; color: var(--color-danger); background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0;">
+          ${icon("trash", 16)} Quitar
+        </button>
+      ` : ""}
+      <button id="gopoints-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        ${icon("check", 16)} APLICAR DESCUENTO
+      </button>
+    </div>
+  `;
+  const { close } = showModal({
+    title: "",
+    hideHeader: true,
+    height: "auto",
+    content: modalContent
+  });
+  const input = modalContent.querySelector("#gopoints-modal-input");
+  const errorMsg = modalContent.querySelector("#gopoints-modal-error");
+  const maxBtn = modalContent.querySelector("#gopoints-modal-max-btn");
+  const confirmBtn = modalContent.querySelector("#gopoints-modal-confirm-btn");
+  const clearBtn = modalContent.querySelector("#gopoints-modal-clear-btn");
+  if (maxBtn && input) {
+    maxBtn.onclick = () => {
+      input.value = maxPointsToRedeem;
+      if (errorMsg) errorMsg.style.display = "none";
+    };
+  }
+  if (input) {
+    input.oninput = () => {
+      if (errorMsg) errorMsg.style.display = "none";
+    };
+  }
+  confirmBtn.onclick = () => {
+    const valStr = input.value.trim();
+    if (!valStr) {
+      errorMsg.textContent = "Por favor ingres\xE1 una cantidad de puntos.";
+      errorMsg.style.display = "block";
+      return;
+    }
+    const points = parseInt(valStr, 10);
+    if (isNaN(points) || points <= 0) {
+      errorMsg.textContent = "Ingres\xE1 un n\xFAmero de puntos v\xE1lido mayor a 0.";
+      errorMsg.style.display = "block";
+      return;
+    }
+    if (points > userPoints) {
+      errorMsg.textContent = `No ten\xE9s suficientes puntos. Tu saldo actual es de ${userPoints} pts.`;
+      errorMsg.style.display = "block";
+      return;
+    }
+    if (points > maxPointsToRedeem) {
+      errorMsg.textContent = `El canje m\xE1ximo para este pedido es de ${maxPointsToRedeem} pts.`;
+      errorMsg.style.display = "block";
+      return;
+    }
+    errorMsg.style.display = "none";
+    const discountValue = points * dollarPerPoint;
+    setState("appliedDiscount", discountValue);
+    setState("redeemedPoints", points);
+    showToast(`\xA1Descuento de ${formatPrice(discountValue)} aplicado!`, "success");
+    close();
+  };
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      setState("appliedDiscount", 0);
+      setState("redeemedPoints", 0);
+      showToast("Descuento de GoPoints removido.", "info");
+      close();
+    };
+  }
+}
+function openCouponModal() {
+  const state = getState();
+  const appliedCoupon = state.appliedCoupon;
+  const modalContent = document.createElement("div");
+  modalContent.style.cssText = "padding: 24px 20px 40px; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; display: flex; flex-direction: column; gap: 20px;";
+  modalContent.innerHTML = `
+    <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
+    
+    <div style="text-align: center;">
+      <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(168, 85, 247, 0.35);">
+        ${icon("tag", 26)}
+      </div>
+      <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
+        Ingresar Cup\xF3n
+      </h2>
+      <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; padding: 0 10px;">
+        Ingres\xE1 un c\xF3digo promocional para obtener env\xEDos gratis o descuentos en tus comercios favoritos.
+      </p>
+    </div>
+
+    ${appliedCoupon ? `
+      <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px solid rgba(168, 85, 247, 0.2); border-radius: 16px; padding: 14px; display: flex; align-items: center; justify-content: space-between;">
+        <div>
+          <div style="font-size: 11px; font-weight: 900; color: #a855f7; text-transform: uppercase; letter-spacing: 0.5px;">CUP\xD3N ACTIVO</div>
+          <div style="font-size: 14px; font-weight: 800; color: var(--color-text-primary); margin-top: 2px;">
+            ${appliedCoupon.code} <span style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary); opacity: 0.85;">(${appliedCoupon.type === "free_delivery" ? "Env\xEDo Gratis" : `${appliedCoupon.value}% OFF`})</span>
+          </div>
+        </div>
+        <div style="width: 24px; height: 24px; color: #a855f7; display: flex; align-items: center; justify-content: center;">
+          ${icon("checkCircle", 18)}
+        </div>
+      </div>
+    ` : ""}
+
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">C\xF3digo del Cup\xF3n</label>
+      <div style="position:relative; display:flex; align-items:center; width:100%;">
+        <input type="text" id="coupon-modal-input" 
+               placeholder="Ej. GODEL-XYZ" 
+               value="${appliedCoupon ? appliedCoupon.code : ""}"
+               style="width:100%; height:50px; border-radius:14px; background:var(--color-bg-secondary); border:2px solid var(--color-border-light); padding:0 16px; font-size:15px; font-weight:800; color:var(--color-text-primary); outline:none; transition:all 0.2s; text-transform: uppercase;" />
+      </div>
+      <div id="coupon-modal-error" style="display:none; color:var(--color-danger); font-size:12px; font-weight:700; padding-left:4px; margin-top: 4px;"></div>
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-top: 12px;">
+      ${appliedCoupon ? `
+        <button id="coupon-modal-clear-btn" class="btn btn-ghost" style="height: 52px; flex: 1; border-radius: 14px; font-weight: 800; color: var(--color-danger); background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0;">
+          ${icon("trash", 16)} Quitar
+        </button>
+      ` : ""}
+      <button id="coupon-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; box-shadow: 0 8px 20px rgba(168, 85, 247, 0.25);">
+        ${icon("check", 16)} APLICAR CUP\xD3N
+      </button>
+    </div>
+  `;
+  const { close } = showModal({
+    title: "",
+    hideHeader: true,
+    height: "auto",
+    content: modalContent
+  });
+  const input = modalContent.querySelector("#coupon-modal-input");
+  const errorMsg = modalContent.querySelector("#coupon-modal-error");
+  const confirmBtn = modalContent.querySelector("#coupon-modal-confirm-btn");
+  const clearBtn = modalContent.querySelector("#coupon-modal-clear-btn");
+  if (input) {
+    input.oninput = () => {
+      if (errorMsg) errorMsg.style.display = "none";
+      input.value = input.value.toUpperCase();
+    };
+  }
+  confirmBtn.onclick = async () => {
+    const valStr = input.value.trim().toUpperCase();
+    if (!valStr) {
+      errorMsg.textContent = "Por favor ingres\xE1 un c\xF3digo de cup\xF3n.";
+      errorMsg.style.display = "block";
+      return;
+    }
+    if (!auth.currentUser) {
+      errorMsg.textContent = "Debes iniciar sesi\xF3n para validar cupones.";
+      errorMsg.style.display = "block";
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = `${icon("loader", 16, "animate-spin")} VALIDANDO...`;
+    if (clearBtn) clearBtn.disabled = true;
+    if (input) input.disabled = true;
+    try {
+      const couponRef = doc(db, "coupons", valStr);
+      const couponSnap = await getDoc(couponRef);
+      if (!couponSnap.exists()) {
+        throw new Error("El cup\xF3n ingresado no existe.");
+      }
+      const cData = couponSnap.data();
+      if (cData.active !== true) {
+        throw new Error("El cup\xF3n ingresado no est\xE1 activo.");
+      }
+      if (typeof cData.remaining === "number" && cData.remaining <= 0) {
+        throw new Error("Este cup\xF3n ya no tiene usos disponibles.");
+      }
+      if (cData.expirationDate) {
+        const expDate = /* @__PURE__ */ new Date(cData.expirationDate + "T23:59:59-03:00");
+        if (Date.now() > expDate.getTime()) {
+          throw new Error("Este cup\xF3n ha expirado.");
+        }
+      }
+      if (cData.ownerId && cData.ownerId !== "admin") {
+        const cart = getState().cart || [];
+        const hasMerchantItems = cart.some((item) => item.comercioId === cData.ownerId);
+        if (!hasMerchantItems) {
+          throw new Error(`Este cup\xF3n es exclusivo para productos del comercio ${cData.comercioName || "propietario"}.`);
+        }
+      } else if (cData.comercioIds && Array.isArray(cData.comercioIds) && cData.comercioIds.length > 0) {
+        const cart = getState().cart || [];
+        const hasMerchantItems = cart.some((item) => cData.comercioIds.includes(item.comercioId));
+        if (!hasMerchantItems) {
+          throw new Error("Este cup\xF3n no es v\xE1lido para los productos en tu carrito.");
+        }
+      }
+      const isFixed = cData.discountType === "fixed" || cData.type !== "percentage" && cData.type !== "free_delivery";
+      if (isFixed) {
+        const couponVal = Number(cData.value || 0);
+        let applicableTotal = 0;
+        const scope = cData.scope || "products";
+        if (scope === "shipping") {
+          const state2 = getState();
+          const cart = state2.cart || [];
+          const grouped = {};
+          cart.forEach((item) => {
+            if (!grouped[item.comercioId]) grouped[item.comercioId] = [];
+            grouped[item.comercioId].push(item);
+          });
+          const commerceIds = Object.keys(grouped);
+          const dynamicFees = state2.dynamicDeliveryFees || {};
+          const allFeesReady = commerceIds.every((cid) => dynamicFees[cid] !== void 0);
+          let baseDeliveryFeeCalc = 0;
+          let nightSurcharge = 0;
+          if (allFeesReady) {
+            const individualFees = commerceIds.map((cid) => dynamicFees[cid]);
+            const maxIndividualFee = Math.max(...individualFees, 0);
+            const extraStopsFee = individualFees.length > 1 ? (individualFees.length - 1) * (state2.deliveryExtraStopFee || 500) : 0;
+            const rainSurcharge = state2.isRaining ? state2.deliveryRainSurcharge || 300 : 0;
+            baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+            nightSurcharge = calculateScheduleSurcharge(state2.nightSurchargeConfig, baseDeliveryFeeCalc);
+          }
+          applicableTotal = baseDeliveryFeeCalc + nightSurcharge;
+        } else {
+          const totalProducts = getCartTotal();
+          let targetProductsTotal = totalProducts;
+          if (cData.ownerId && cData.ownerId !== "admin") {
+            const merchantId = cData.ownerId;
+            const cart = getState().cart || [];
+            targetProductsTotal = cart.filter((item) => item.comercioId === merchantId).reduce((sum, item) => {
+              const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+              const activeOffers = getState().activeOffers || [];
+              const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+              if (offer) {
+                if (offer.type === "2x1") {
+                  const paidQty = Math.ceil(item.qty / 2);
+                  return sum + basePrice * paidQty;
+                } else if (offer.type === "percentage") {
+                  const disc = (100 - (offer.value || 0)) / 100;
+                  return sum + basePrice * item.qty * disc;
+                }
+              }
+              return sum + basePrice * item.qty;
+            }, 0);
+          } else if (cData.comercioIds && Array.isArray(cData.comercioIds) && cData.comercioIds.length > 0) {
+            const cart = getState().cart || [];
+            targetProductsTotal = cart.filter((item) => cData.comercioIds.includes(item.comercioId)).reduce((sum, item) => {
+              const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+              const activeOffers = getState().activeOffers || [];
+              const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+              if (offer) {
+                if (offer.type === "2x1") {
+                  const paidQty = Math.ceil(item.qty / 2);
+                  return sum + basePrice * paidQty;
+                } else if (offer.type === "percentage") {
+                  const disc = (100 - (offer.value || 0)) / 100;
+                  return sum + basePrice * item.qty * disc;
+                }
+              }
+              return sum + basePrice * item.qty;
+            }, 0);
+          }
+          if (!cData.ownerId || cData.ownerId === "admin") {
+            if (!(cData.comercioIds && Array.isArray(cData.comercioIds) && cData.comercioIds.length > 0)) {
+              let shippingFee = 0;
+              const state2 = getState();
+              const cart = state2.cart || [];
+              const grouped = {};
+              cart.forEach((item) => {
+                if (!grouped[item.comercioId]) grouped[item.comercioId] = [];
+                grouped[item.comercioId].push(item);
+              });
+              const commerceIds = Object.keys(grouped);
+              const dynamicFees = state2.dynamicDeliveryFees || {};
+              const allFeesReady = commerceIds.every((cid) => dynamicFees[cid] !== void 0);
+              if (allFeesReady) {
+                const individualFees = commerceIds.map((cid) => dynamicFees[cid]);
+                const maxIndividualFee = Math.max(...individualFees, 0);
+                const extraStopsFee = individualFees.length > 1 ? (individualFees.length - 1) * (state2.deliveryExtraStopFee || 500) : 0;
+                const rainSurcharge = state2.isRaining ? state2.deliveryRainSurcharge || 300 : 0;
+                const baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
+                const nightSurcharge = calculateScheduleSurcharge(state2.nightSurchargeConfig, baseDeliveryFeeCalc);
+                shippingFee = baseDeliveryFeeCalc + nightSurcharge;
+              }
+              targetProductsTotal = totalProducts + shippingFee;
+            }
+          }
+          applicableTotal = targetProductsTotal;
+        }
+        if (applicableTotal < couponVal) {
+          throw new Error(`El total de tu pedido es menor al valor del cup\xF3n (${formatPrice(couponVal)}).`);
+        }
+      }
+      const redemptionRef = doc(db, "coupons", valStr, "redemptions", auth.currentUser.uid);
+      const redemptionSnap = await getDoc(redemptionRef);
+      if (redemptionSnap.exists()) {
+        throw new Error("Ya has utilizado este cup\xF3n anteriormente.");
+      }
+      setState("appliedCoupon", {
+        code: valStr,
+        type: cData.type,
+        value: cData.value,
+        ownerId: cData.ownerId || "admin",
+        comercioIds: cData.comercioIds || [],
+        scope: cData.scope || "products",
+        discountType: cData.discountType || (cData.type === "free_delivery" ? "percentage" : "percentage"),
+        absorbedBy: cData.absorbedBy || "platform",
+        comercioName: cData.comercioName || "",
+        expirationDate: cData.expirationDate || null
+      });
+      showToast(`\xA1Cup\xF3n ${valStr} aplicado con \xE9xito!`, "success");
+      close();
+    } catch (err) {
+      console.error("Error validating coupon:", err);
+      errorMsg.textContent = err.message || "Error al validar el cup\xF3n.";
+      errorMsg.style.display = "block";
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = `${icon("check", 16)} APLICAR CUP\xD3N`;
+      if (clearBtn) clearBtn.disabled = false;
+      if (input) input.disabled = false;
+    }
+  };
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      setState("appliedCoupon", null);
+      sessionStorage.setItem("welcome-coupon-cleared", "true");
+      showToast("Cup\xF3n removido.", "info");
+      close();
+    };
+  }
+}
+async function checkOnlineDrivers() {
+  try {
+    const q = query(
+      collection(db, "users"),
+      where("isOnline", "==", true)
+    );
+    const snap = await getDocsFromServer(q);
+    const hasDriver = snap.docs.some((d) => {
+      const data = d.data();
+      const role = data.role || "";
+      const isDel = data.isDelivery === true || data.isDelivery === "true" || role === "delivery" || role === "driver" || role === "repartidor" || role === "chofer" || role === "admin";
+      return isDel;
+    });
+    console.log("Driver Verification: Found online delivery driver:", hasDriver);
+    return hasDriver;
+  } catch (err) {
+    console.warn("Error verifying drivers, assuming offline:", err);
+    return false;
+  }
+}
+async function openCheckoutConfirmationModal() {
+  if (!selectedPaymentMethod) {
+    const { showToast: showToast2 } = await import("../components/toast.js");
+    showToast2("Por favor, selecciona un m\xE9todo de pago", "warning");
+    isSubmitting = false;
+    return;
+  }
+  const hasDelivery = await checkOnlineDrivers();
+  if (!hasDelivery) {
+    isSubmitting = false;
+    const { showModal: showModal2 } = await import("../components/modal.js");
+    const { close: closeAlert } = showModal2({
+      title: "",
+      hideHeader: true,
+      height: "auto",
+      content: `
+        <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
+          <div style="font-size: 44px; margin-bottom: 4px;">\u{1F6F5}</div>
+          <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3; color: var(--color-danger);">Sin repartidores disponibles</h4>
+          <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
+            No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo m\xE1s tarde.
+          </p>
+          <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+            ENTENDIDO
+          </button>
+        </div>
+      `
+    });
+    setTimeout(() => {
+      const btn = document.getElementById("no-drivers-close-btn");
+      if (btn) btn.onclick = () => closeAlert();
+    }, 50);
+    return;
+  }
+  const state = getState();
+  const address = state.deliveryAddress;
+  const user = state.user;
+  const paymentMethod = selectedPaymentMethod;
+  const grouped = getCartByComercio();
+  const commerceEntries = Object.entries(grouped);
+  const isMultiOrder = commerceEntries.length > 1;
+  const totalProducts = getCartTotal();
+  const dynamicFees = state.dynamicDeliveryFees || {};
+  const selectedTip = state.selectedTip || 0;
+  const individualFees = Object.keys(grouped).map((cid) => dynamicFees[cid] !== void 0 ? dynamicFees[cid] : state.deliveryCost || state.deliveryMinPrice || 0);
+  const maxIndividualFee = Math.max(...individualFees, 0);
+  const extraStopsFee = individualFees.length > 1 ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+  const rainSurcharge = state.isRaining ? state.deliveryRainSurcharge || 300 : 0;
+  const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+  const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
+  const driverIncentive = calculateScheduleSurcharge(state.driverIncentiveConfig, baseDeliveryFee);
+  const totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
+  const appUsageFee = Math.ceil(totalProducts * (state.appUsageFeeRate || 0.05) / 10) * 10;
+  const discount = state.appliedDiscount || 0;
+  const appliedCoupon = state.appliedCoupon;
+  let couponDiscount = 0;
+  if (appliedCoupon) {
+    const scope = appliedCoupon.scope || "products";
+    const discountType = appliedCoupon.discountType || (appliedCoupon.type === "free_delivery" ? "percentage" : "percentage");
+    const couponVal = Number(appliedCoupon.value || 0);
+    if (scope === "shipping" || appliedCoupon.type === "free_delivery") {
+      const feeForCoupon = baseDeliveryFee + (nightSurcharge || 0);
+      if (appliedCoupon.type === "free_delivery") {
+        couponDiscount = feeForCoupon || 0;
+      } else if (discountType === "percentage") {
+        couponDiscount = feeForCoupon * (couponVal / 100);
+      } else if (discountType === "fixed") {
+        couponDiscount = Math.min(couponVal, feeForCoupon);
+      }
+    } else {
+      let targetProductsTotal = totalProducts;
+      if (appliedCoupon.ownerId && appliedCoupon.ownerId !== "admin") {
+        const merchantId = appliedCoupon.ownerId;
+        const cart = getState().cart || [];
+        targetProductsTotal = cart.filter((item) => item.comercioId === merchantId).reduce((sum, item) => {
+          const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+          const activeOffers = getState().activeOffers || [];
+          const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+          if (offer) {
+            if (offer.type === "2x1") {
+              const paidQty = Math.ceil(item.qty / 2);
+              return sum + basePrice * paidQty;
+            } else if (offer.type === "percentage") {
+              const disc = (100 - (offer.value || 0)) / 100;
+              return sum + basePrice * item.qty * disc;
+            }
+          }
+          return sum + basePrice * item.qty;
+        }, 0);
+      } else if (appliedCoupon.comercioIds && Array.isArray(appliedCoupon.comercioIds) && appliedCoupon.comercioIds.length > 0) {
+        const cart = getState().cart || [];
+        targetProductsTotal = cart.filter((item) => appliedCoupon.comercioIds.includes(item.comercioId)).reduce((sum, item) => {
+          const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+          const activeOffers = getState().activeOffers || [];
+          const offer = activeOffers.find((o) => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
+          if (offer) {
+            if (offer.type === "2x1") {
+              const paidQty = Math.ceil(item.qty / 2);
+              return sum + basePrice * paidQty;
+            } else if (offer.type === "percentage") {
+              const disc = (100 - (offer.value || 0)) / 100;
+              return sum + basePrice * item.qty * disc;
+            }
+          }
+          return sum + basePrice * item.qty;
+        }, 0);
+      } else {
+        targetProductsTotal = totalProducts + (baseDeliveryFee || 0) + (nightSurcharge || 0);
+      }
+      if (discountType === "percentage") {
+        couponDiscount = targetProductsTotal * (couponVal / 100);
+      } else if (discountType === "fixed") {
+        couponDiscount = Math.min(couponVal, targetProductsTotal);
+      }
+    }
+  }
+  const grandTotal = Math.max(totalProducts + totalDelivery + appUsageFee - discount - couponDiscount, 0);
+  const commerceNames = commerceEntries.map(([_, g]) => g.comercioName).join(", ");
+  const modalContent = document.createElement("div");
+  modalContent.className = "confirm-order-modal-container";
+  modalContent.style.cssText = `
+    --confirm-padding: 16px 16px 20px;
+    --confirm-gap: 12px;
+    --confirm-card-padding: 10px 12px;
+    --confirm-card-gap: 6px;
+    --confirm-title-size: 1.2rem;
+    --confirm-subtitle-size: 11px;
+    --confirm-text-size: 12px;
+    --confirm-label-size: 10px;
+    --confirm-total-label: 13px;
+    --confirm-total-val: 18px;
+    --confirm-btn-height: 44px;
+    --confirm-btn-font: 13px;
+    
+    padding: var(--confirm-padding);
+    background: var(--color-bg);
+    border-top-left-radius: 28px;
+    border-top-right-radius: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--confirm-gap);
+    max-height: 82dvh;
+    overflow: hidden;
+    box-sizing: border-box;
+  `;
+  modalContent.innerHTML = `
+    <style>
+      .confirm-order-modal-container {
+        --confirm-padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 20px));
+        --confirm-gap: 12px;
+        --confirm-card-padding: 10px 12px;
+        --confirm-card-gap: 6px;
+        --confirm-title-size: 1.2rem;
+        --confirm-subtitle-size: 11px;
+        --confirm-text-size: 12px;
+        --confirm-label-size: 10px;
+        --confirm-total-label: 13px;
+        --confirm-total-val: 18px;
+        --confirm-btn-height: 44px;
+        --confirm-btn-font: 13px;
+      }
+      @media (max-height: 740px) {
+        .confirm-order-modal-container {
+          --confirm-padding: 10px 12px 14px !important;
+          --confirm-gap: 8px !important;
+          --confirm-card-padding: 8px 10px !important;
+          --confirm-card-gap: 4px !important;
+          --confirm-title-size: 1.05rem !important;
+          --confirm-subtitle-size: 10px !important;
+          --confirm-text-size: 11px !important;
+          --confirm-label-size: 9px !important;
+          --confirm-total-label: 12px !important;
+          --confirm-total-val: 16px !important;
+          --confirm-btn-height: 38px !important;
+          --confirm-btn-font: 12px !important;
+        }
+      }
+      @media (max-height: 600px) {
+        .confirm-order-modal-container {
+          --confirm-padding: 6px 8px 10px !important;
+          --confirm-gap: 6px !important;
+          --confirm-card-padding: 6px 8px !important;
+          --confirm-card-gap: 3px !important;
+          --confirm-title-size: 0.95rem !important;
+          --confirm-subtitle-size: 9px !important;
+          --confirm-text-size: 10px !important;
+          --confirm-label-size: 8px !important;
+          --confirm-total-label: 11px !important;
+          --confirm-total-val: 14px !important;
+          --confirm-btn-height: 32px !important;
+          --confirm-btn-font: 11px !important;
+        }
+      }
+      /* Premium custom toggle switch */
+      .confirm-switch {
+        position: relative;
+        display: inline-block;
+        width: 48px;
+        height: 28px;
+        flex-shrink: 0;
+      }
+      .confirm-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .confirm-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: var(--color-border);
+        transition: .3s;
+        border-radius: 34px;
+        border: 2px solid transparent;
+      }
+      .confirm-slider:before {
+        position: absolute;
+        content: "";
+        height: 20px;
+        width: 20px;
+        left: 2px;
+        bottom: 2px;
+        background-color: white;
+        transition: .3s;
+        border-radius: 50%;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+      }
+      .confirm-switch input:checked + .confirm-slider {
+        background-color: var(--color-primary) !important;
+      }
+      .confirm-switch input:checked + .confirm-slider:before {
+        transform: translateX(20px);
+      }
+    </style>
+
+    <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 4px; flex-shrink: 0;"></div>
+    
+    <div style="text-align: center; flex-shrink: 0;">
+      <h2 style="font-family: var(--font-display); font-size: var(--confirm-title-size); font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">
+        ${isMultiOrder ? "\xBFConfirmar Pedido M\xFAltiple?" : "\xBFConfirmar Pedido?"}
+      </h2>
+      <p style="font-size: var(--confirm-subtitle-size); color: var(--color-text-secondary); margin: 0;">
+        Por favor, verifica los detalles antes de continuar
+      </p>
+    </div>
+
+    <div class="confirm-modal-scrollable-body" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--confirm-gap); padding-right: 4px; margin-bottom: 4px;">
+      <!-- DIRECCI\xD3N DE ENTREGA (Interactive Address Card) -->
+      <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); transition: all 0.2s; flex-shrink: 0;">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
+          ${icon("mapPin", 12)} Direcci\xF3n de entrega
+        </span>
+        <button id="confirm-change-address-btn" style="background: var(--color-primary-light); border: none; color: var(--color-primary); font-size: var(--confirm-btn-font); font-weight: 800; padding: 4px 8px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: all 0.2s;">
+          ${icon("edit", 10)} Cambiar
+        </button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <div id="confirm-address-text" style="font-weight: 800; font-size: var(--confirm-text-size); color: var(--color-text-primary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+          ${address || '<span style="color: var(--color-danger);">\u26A0\uFE0F Elegir direcci\xF3n de entrega...</span>'}
+        </div>
+        ${state.addressNotes ? `
+          <div id="confirm-address-notes" style="font-size: var(--confirm-subtitle-size); color: var(--color-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+            ${icon("info", 10)} ${state.addressNotes}
+          </div>
+        ` : ""}
+      </div>
+      
+      <!-- Saved Addresses Quick Selector -->
+      ${state.savedAddresses && state.savedAddresses.length > 0 ? `
+        <div style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; margin-top: 4px; scrollbar-width: none; -ms-overflow-style: none;">
+          ${state.savedAddresses.map((addr) => {
+    const isCurrent = addr.address === address;
+    return `
+              <button class="quick-addr-chip" data-id="${addr.id}" style="flex-shrink: 0; padding: 6px 12px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${isCurrent ? "var(--color-primary)" : "var(--color-border-light)"}; background: ${isCurrent ? "var(--color-primary-light)" : "var(--color-bg)"}; color: ${isCurrent ? "var(--color-primary)" : "var(--color-text-secondary)"}; cursor: pointer; transition: all 0.2s; white-space: nowrap;">
+                ${addr.name}
+              </button>
+            `;
+  }).join("")}
+        </div>
+      ` : ""}
+    </div>
+
+    <!-- PROGRAMACI\xD3N DE ENTREGA -->
+    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); flex-shrink: 0;">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
+          \u{1F4C5} \xBFCu\xE1ndo quer\xE9s recibirlo?
+        </span>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 4px;">
+        <button type="button" id="sched-now-btn" style="flex: 1; height: 38px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${selectedIsScheduled ? "var(--color-border-light)" : "var(--color-primary)"}; background: ${selectedIsScheduled ? "var(--color-bg)" : "var(--color-primary-light)"}; color: ${selectedIsScheduled ? "var(--color-text-secondary)" : "var(--color-primary)"}; cursor: pointer; transition: all 0.2s;">
+          Entregar ahora
+        </button>
+        <button type="button" id="sched-later-btn" style="flex: 1; height: 38px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${selectedIsScheduled ? "var(--color-primary)" : "var(--color-border-light)"}; background: ${selectedIsScheduled ? "var(--color-primary-light)" : "var(--color-bg)"}; color: ${selectedIsScheduled ? "var(--color-primary)" : "var(--color-text-secondary)"}; cursor: pointer; transition: all 0.2s;">
+          Programar m\xE1s tarde
+        </button>
+      </div>
+      
+      <!-- CONTROLES DE FECHA Y HORA -->
+      <div id="sched-selectors-container" style="display: ${selectedIsScheduled ? "flex" : "none"}; flex-direction: column; gap: 10px; margin-top: 6px; padding-top: 10px; border-top: 1px dashed var(--color-border-light);">
+        <div style="display: flex; gap: 8px;">
+          <div style="flex: 1.2; display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 9px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">D\xEDa</label>
+            <select id="sched-date-select" style="height: 38px; border-radius: 8px; border: 1.5px solid var(--color-border-light); padding: 0 8px; font-size: 12px; font-weight: 700; color: var(--color-text-primary); background: var(--color-surface); outline: none;">
+            </select>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 9px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Hora</label>
+            <select id="sched-time-select" style="height: 38px; border-radius: 8px; border: 1.5px solid var(--color-border-light); padding: 0 8px; font-size: 12px; font-weight: 700; color: var(--color-text-primary); background: var(--color-surface); outline: none;">
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESUMEN DE PAGO -->
+    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); flex-shrink: 0;">
+      <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
+        ${icon("creditCard", 12)} Resumen del pedido
+      </span>
+      
+      <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary);">
+        <span>Comercio(s)</span>
+        <span style="font-weight: 700; color: var(--color-text-primary); max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right;">
+          ${commerceNames}
+        </span>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary);">
+        <span>M\xE9todo de pago</span>
+        <span style="font-weight: 800; color: ${paymentMethod === "mercadopago" ? "#009EE3" : "#22C55E"}; text-transform: uppercase;">
+          ${paymentMethod === "mercadopago" ? "Transferencia" : "Efectivo"}
+        </span>
+      </div>
+
+      <div style="height: 1px; background: var(--color-border-light); margin: 2px 0;"></div>
+
+      <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary);">
+        <span>Productos</span>
+        <span style="font-weight: 600; color: var(--color-text-primary);">${formatPrice(totalProducts)}</span>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary); align-items: center;">
+        <span style="display: flex; align-items: center; gap: 3px;">
+          Env\xEDo
+          <button id="show-fee-details-confirm" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-left:2px;">${icon("info", 12)}</button>
+        </span>
+        <span style="font-weight: 600; color: var(--color-text-primary); text-align: right;">
+          ${totalDelivery + appUsageFee > 0 ? formatPrice(totalDelivery + appUsageFee) : "\xA1Gratis!"}
+        </span>
+      </div>
+
+      ${discount > 0 ? `
+        <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-success); font-weight: 700;">
+          <span>Descuento GoPoints</span>
+          <span>- ${formatPrice(discount)}</span>
+        </div>
+      ` : ""}
+
+      ${appliedCoupon ? `
+        <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: #a855f7; font-weight: 700; align-items: center; background: rgba(168, 85, 247, 0.06); padding: 6px 8px; border-radius: 8px; border: 1px dashed rgba(168, 85, 247, 0.25); margin: 0;">
+          <span style="display: flex; align-items: center; gap: 4px;">
+            ${icon("tag", 12)} Cup\xF3n (${appliedCoupon.code})
+          </span>
+          <span style="font-weight: 800;">- ${formatPrice(couponDiscount)}</span>
+        </div>
+      ` : ""}
+
+      <div style="height: 1px; background: var(--color-border-light); margin: 2px 0;"></div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: var(--confirm-total-label); font-weight: 900; color: var(--color-text-primary);">Total final</span>
+        <span style="font-size: var(--confirm-total-val); font-weight: 900; color: var(--color-primary); letter-spacing: -0.02em;">
+          ${formatPrice(grandTotal)}
+        </span>
+      </div>
+    </div>
+
+    </div>
+
+    <div style="display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--color-border-light); width: 100%; flex-shrink: 0; background: var(--color-bg); z-index: 10;">
+      <button id="confirm-cancel-btn" class="btn btn-ghost" style="flex: 1; height: var(--confirm-btn-height); border-radius: 12px; font-weight: 800; font-size: var(--confirm-btn-font); color: var(--color-text-secondary); background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); margin: 0; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">
+        Cancelar
+      </button>
+      <button id="confirm-submit-btn" class="btn btn-primary" style="flex: 1.8; height: var(--confirm-btn-height); border-radius: 12px; font-weight: 900; font-size: var(--confirm-btn-font); background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 6px 16px rgba(var(--color-primary-rgb), 0.2); margin: 0; transition: all 0.2s; cursor: pointer; opacity: 1;">
+        ${icon("check", 16)} CONFIRMAR Y PEDIR
+      </button>
+    </div>
+  `;
+  const { close } = showModal({
+    title: "",
+    hideHeader: true,
+    height: "auto",
+    content: modalContent,
+    onClose: () => {
+      isSubmitting = false;
+    }
+  });
+  const cancelBtn = modalContent.querySelector("#confirm-cancel-btn");
+  cancelBtn.onclick = () => {
+    close();
+    isSubmitting = false;
+  };
+  modalContent.querySelector("#show-fee-details-confirm")?.addEventListener("click", () => {
+    showFeeDetails();
+  });
+  const nowBtn = modalContent.querySelector("#sched-now-btn");
+  const laterBtn = modalContent.querySelector("#sched-later-btn");
+  const schedContainer = modalContent.querySelector("#sched-selectors-container");
+  const populateSchedulingOptions = () => {
+    const dateSelect = modalContent.querySelector("#sched-date-select");
+    const timeSelect = modalContent.querySelector("#sched-time-select");
+    if (!dateSelect || !timeSelect) return;
+    const today = /* @__PURE__ */ new Date();
+    const tomorrow = /* @__PURE__ */ new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    const formatDateVal = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+    dateSelect.innerHTML = `
+      <option value="${formatDateVal(today)}">Hoy (${today.toLocaleDateString("es-AR", { day: "numeric", month: "short" })})</option>
+      <option value="${formatDateVal(tomorrow)}">Ma\xF1ana (${tomorrow.toLocaleDateString("es-AR", { day: "numeric", month: "short" })})</option>
+    `;
+    const updateTimes = () => {
+      const isToday = dateSelect.value === formatDateVal(today);
+      let startHour = 0;
+      let startMinute = 0;
+      if (isToday) {
+        const minTime = new Date(Date.now() + 45 * 60 * 1e3);
+        startHour = minTime.getHours();
+        startMinute = Math.ceil(minTime.getMinutes() / 15) * 15;
+        if (startMinute >= 60) {
+          startHour += 1;
+          startMinute = 0;
+        }
+      }
+      let optionsHTML = "";
+      for (let h = startHour; h < 24; h++) {
+        const mStart = h === startHour ? startMinute : 0;
+        for (let m = mStart; m < 60; m += 15) {
+          const hh = String(h).padStart(2, "0");
+          const mm = String(m).padStart(2, "0");
+          optionsHTML += `<option value="${hh}:${mm}">${hh}:${mm} hs</option>`;
+        }
+      }
+      if (!optionsHTML) {
+        optionsHTML = `<option value="">Sin horarios disponibles</option>`;
+      }
+      timeSelect.innerHTML = optionsHTML;
+    };
+    dateSelect.onchange = updateTimes;
+    updateTimes();
+  };
+  if (nowBtn && laterBtn) {
+    nowBtn.onclick = () => {
+      selectedIsScheduled = false;
+      nowBtn.style.borderColor = "var(--color-primary)";
+      nowBtn.style.background = "var(--color-primary-light)";
+      nowBtn.style.color = "var(--color-primary)";
+      laterBtn.style.borderColor = "var(--color-border-light)";
+      laterBtn.style.background = "var(--color-bg)";
+      laterBtn.style.color = "var(--color-text-secondary)";
+      schedContainer.style.display = "none";
+    };
+    laterBtn.onclick = () => {
+      selectedIsScheduled = true;
+      laterBtn.style.borderColor = "var(--color-primary)";
+      laterBtn.style.background = "var(--color-primary-light)";
+      laterBtn.style.color = "var(--color-primary)";
+      nowBtn.style.borderColor = "var(--color-border-light)";
+      nowBtn.style.background = "var(--color-bg)";
+      nowBtn.style.color = "var(--color-text-secondary)";
+      schedContainer.style.display = "flex";
+      populateSchedulingOptions();
+    };
+  }
+  if (selectedIsScheduled) {
+    populateSchedulingOptions();
+  }
+  const quickAddrChips = modalContent.querySelectorAll(".quick-addr-chip");
+  quickAddrChips.forEach((chip) => {
+    chip.onclick = async () => {
+      const addrId = chip.getAttribute("data-id");
+      const saved = state.savedAddresses.find((a) => a.id === addrId);
+      if (saved) {
+        close();
+        const loadingBlocker = showModal({
+          title: "",
+          hideHeader: true,
+          height: "auto",
+          content: (() => {
+            const el = document.createElement("div");
+            el.style.cssText = "padding: 32px 24px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: var(--color-bg); border-radius: 20px;";
+            el.innerHTML = `
+              <div class="animate-spin" style="width: 48px; height: 48px; border: 4px solid var(--color-primary); border-top-color: transparent; border-radius: 50%; display: inline-block;"></div>
+              <span style="font-weight: 800; font-size: 16px; color: var(--color-text-primary);">Recalculando tarifas de env\xEDo...</span>
+              <span style="font-size: 12px; color: var(--color-text-tertiary);">Por favor, aguard\xE1 un instante</span>
+            `;
+            return el;
+          })()
+        });
+        const overlayEl = document.getElementById(`${loadingBlocker.id}-overlay`);
+        if (overlayEl) {
+          overlayEl.style.pointerEvents = "none";
+        }
+        try {
+          setDeliveryAddress(saved.address, saved.notes || "", saved.coords || null);
+          setState({ dynamicDeliveryFees: {}, dynamicDistances: {} });
+          await calculateAllFees();
+        } catch (e) {
+          console.error("Error recalculating fees for quick saved address:", e);
+        } finally {
+          if (loadingBlocker && typeof loadingBlocker.close === "function") {
+            loadingBlocker.close();
+          }
+        }
+        openCheckoutConfirmationModal();
+      }
+    };
+  });
+  const changeAddressBtn = modalContent.querySelector("#confirm-change-address-btn");
+  changeAddressBtn.onclick = () => {
+    close();
+    import("../components/address-modal.js").then((m) => {
+      m.showAddressPrompt(async () => {
+        const loadingBlocker = showModal({
+          title: "",
+          hideHeader: true,
+          height: "auto",
+          content: (() => {
+            const el = document.createElement("div");
+            el.style.cssText = "padding: 32px 24px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: var(--color-bg); border-radius: 20px;";
+            el.innerHTML = `
+              <div class="animate-spin" style="width: 48px; height: 48px; border: 4px solid var(--color-primary); border-top-color: transparent; border-radius: 50%; display: inline-block;"></div>
+              <span style="font-weight: 800; font-size: 16px; color: var(--color-text-primary);">Recalculando tarifas de env\xEDo...</span>
+              <span style="font-size: 12px; color: var(--color-text-tertiary);">Por favor, aguard\xE1 un instante</span>
+            `;
+            return el;
+          })()
+        });
+        const overlayEl = document.getElementById(`${loadingBlocker.id}-overlay`);
+        if (overlayEl) {
+          overlayEl.style.pointerEvents = "none";
+        }
+        try {
+          setState({ dynamicDeliveryFees: {}, dynamicDistances: {} });
+          await calculateAllFees();
+        } catch (e) {
+          console.error("Error recalculating fees:", e);
+        } finally {
+          if (loadingBlocker && typeof loadingBlocker.close === "function") {
+            loadingBlocker.close();
+          }
+        }
+        openCheckoutConfirmationModal();
+      }, { skipDetails: true });
+    });
+  };
+  const submitBtn = modalContent.querySelector("#confirm-submit-btn");
+  submitBtn.onclick = async () => {
+    if (!hasDelivery) {
+      showToast("No es posible confirmar el pedido sin repartidores online", "error");
+      return;
+    }
+    if (!getState().deliveryAddress) {
+      showToast("Por favor selecciona una direcci\xF3n de entrega.", "warning");
+      return;
+    }
+    const finalAddressNotes = getState().addressNotes || "";
+    if (!finalAddressNotes.trim()) {
+      showToast("La referencia de ubicaci\xF3n es obligatoria.", "warning");
+      close();
+      import("../components/address-modal.js").then((m) => m.showAddressPrompt(() => {
+        openCheckoutConfirmationModal();
+      }, { skipDetails: true }));
+      return;
+    }
+    submitBtn.disabled = true;
+    cancelBtn.disabled = true;
+    changeAddressBtn.disabled = true;
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = `${icon("loader", 18, "animate-spin")} PROCESANDO...`;
+    try {
+      const bundleId = `BNDL-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      const { redeemedPoints } = getState();
+      const idToken = await auth.currentUser.getIdToken();
+      const finalAddress = getState().deliveryAddress;
+      const finalCoords = getState().deliveryCoords;
+      const allowReplacementEl = modalContent.querySelector("#confirm-allow-replacement");
+      const allowReplacement = allowReplacementEl ? allowReplacementEl.checked : true;
+      let schedDateVal = null;
+      let schedTimeVal = null;
+      if (selectedIsScheduled) {
+        const dateSelect = modalContent.querySelector("#sched-date-select");
+        const timeSelect = modalContent.querySelector("#sched-time-select");
+        schedDateVal = dateSelect ? dateSelect.value : "";
+        schedTimeVal = timeSelect ? timeSelect.value : "";
+        if (!schedDateVal || !schedTimeVal || schedTimeVal === "Sin horarios disponibles") {
+          showToast("Por favor selecciona una fecha y hora v\xE1lidas para programar.", "warning");
+          submitBtn.disabled = false;
+          cancelBtn.disabled = false;
+          changeAddressBtn.disabled = false;
+          submitBtn.innerHTML = originalText;
+          return;
+        }
+      }
+      const response = await fetch("https://us-central1-godelivery-magdalena.cloudfunctions.net/createOrder", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          cart: getState().cart,
+          address: finalAddress,
+          addressNotes: getState().addressNotes || "",
+          deliveryCoords: finalCoords || null,
+          paymentMethod,
+          redeemedPoints,
+          totalDelivery,
+          tip: selectedTip,
+          bundleId,
+          couponCode: appliedCoupon ? appliedCoupon.code : null,
+          allowReplacement,
+          isScheduled: selectedIsScheduled,
+          scheduledDate: schedDateVal,
+          scheduledTime: schedTimeVal,
+          nightSurcharge: nightSurcharge || 0,
+          driverIncentive: driverIncentive || 0
+        })
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Error al procesar el pedido en el servidor");
+      }
+      const resData = await response.json();
+      const result = resData.orders;
+      if (auth.currentUser) {
+        const { doc: doc2, updateDoc } = await import("firebase/firestore");
+        const { db: db2 } = await import("../firebase.js");
+        const userRef = doc2(db2, "users", auth.currentUser.uid);
+        try {
+          await updateDoc(userRef, {
+            lastAddress: {
+              address: finalAddress,
+              notes: finalAddressNotes || "",
+              coords: finalCoords || null
+            }
+          });
+        } catch (err) {
+          console.error("Error saving lastAddress to user profile:", err);
+        }
+      }
+      if (finalAddressNotes) {
+        const { doc: doc2, updateDoc } = await import("firebase/firestore");
+        const { db: db2 } = await import("../firebase.js");
+        for (const createdOrder of result) {
+          try {
+            await updateDoc(doc2(db2, "orders", createdOrder.docId), {
+              addressNotes: finalAddressNotes
+            });
+          } catch (updateErr) {
+            console.error("Error updating addressNotes on order:", updateErr);
+          }
+        }
+      }
+      close();
+      clearCart();
+      setState("appliedDiscount", 0);
+      setState("redeemedPoints", 0);
+      isSubmitting = false;
+      try {
+        ConfettiCelebrator.launch();
+        AudioManager.playSynthChime();
+      } catch (e) {
+        console.warn("Celebration failed:", e);
+      }
+      showToast("\xA1Pedido realizado con \xE9xito!", "success");
+      setTimeout(() => {
+        location.hash = `#/pedido/${result[0].docId}`;
+      }, 2e3);
+    } catch (err) {
+      isSubmitting = false;
+      console.error("Error processing order:", err);
+      close();
+      AudioManager.hapticError();
+      const isCouponError = err.message.toLowerCase().includes("cup\xF3n") || err.message.toLowerCase().includes("cupon") || err.message.toLowerCase().includes("coupon");
+      const currentCoupon = isCouponError ? getState().appliedCoupon : null;
+      const isConnectionError = err.message.includes("Failed to fetch") || err.message.includes("network") || err.message.includes("NetworkError") || err.message === "Error al procesar el pedido en el servidor";
+      const errorTitle = isConnectionError ? "\u26A0\uFE0F Error de Conexi\xF3n" : "\u26A0\uFE0F Error al procesar pedido";
+      const errorIcon = isConnectionError ? "\u{1F4F6}" : "\u274C";
+      const errorMessage = isConnectionError ? "No pudimos enviar tu pedido al servidor debido a un problema de conexi\xF3n. Por favor, verifica tu internet e intentalo nuevamente." : err.message;
+      const retryText = isCouponError ? "INTENTAR SIN CUP\xD3N" : "INTENTAR DE NUEVO";
+      setTimeout(async () => {
+        const { showModal: showErrorModal } = await import("../components/modal.js");
+        const { close: closeError } = showErrorModal({
+          title: "",
+          hideHeader: true,
+          height: "auto",
+          content: `
+            <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
+              <div style="font-size: 40px; margin-bottom: 8px;">${errorIcon}</div>
+              <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3;">${errorTitle}</h4>
+              <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.9;">
+                ${errorMessage}
+              </p>
+              <button id="error-retry-btn" class="btn btn-primary" style="height: 56px; border-radius: 16px; font-weight: 900; font-size: 16px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); cursor: pointer;">
+                ${retryText}
+              </button>
+              <button id="error-cancel-btn" class="btn btn-ghost" style="height: 48px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); cursor: pointer;">
+                Cerrar
+              </button>
+            </div>
+          `
+        });
+        const errorRetryBtn = document.getElementById("error-retry-btn");
+        if (errorRetryBtn) {
+          errorRetryBtn.onclick = () => {
+            closeError();
+            AudioManager.hapticLight();
+            if (isCouponError && currentCoupon && currentCoupon.code) {
+              setState("appliedCoupon", null);
+              try {
+                const usedKey = `gd_used_coupons_${auth.currentUser?.uid || "guest"}`;
+                const used = JSON.parse(localStorage.getItem(usedKey) || "[]");
+                if (!used.includes(currentCoupon.code)) {
+                  used.push(currentCoupon.code);
+                  localStorage.setItem(usedKey, JSON.stringify(used));
+                }
+              } catch (e) {
+              }
+            }
+            openCheckoutConfirmationModal();
+          };
+        }
+        const errorCancelBtn = document.getElementById("error-cancel-btn");
+        if (errorCancelBtn) {
+          errorCancelBtn.onclick = () => {
+            closeError();
+            AudioManager.hapticLight();
+            if (isCouponError && currentCoupon && currentCoupon.code) {
+              setState("appliedCoupon", null);
+              try {
+                const usedKey = `gd_used_coupons_${auth.currentUser?.uid || "guest"}`;
+                const used = JSON.parse(localStorage.getItem(usedKey) || "[]");
+                if (!used.includes(currentCoupon.code)) {
+                  used.push(currentCoupon.code);
+                  localStorage.setItem(usedKey, JSON.stringify(used));
+                }
+              } catch (e) {
+              }
+            }
+          };
+        }
+      }, 250);
+    }
+  };
+}
+async function handleCartClick(e) {
+  const qtyBtn = e.target.closest(".cart-qty-btn");
+  if (qtyBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    const id = qtyBtn.dataset.id;
+    const cid = qtyBtn.dataset.cid;
+    const action = qtyBtn.dataset.action;
+    const item = getState().cart.find((i) => i.cartItemId === id && i.comercioId === cid);
+    if (item) {
+      const newQty = action === "plus" ? item.qty + 1 : item.qty - 1;
+      updateCartQty(id, cid, newQty);
+    }
+    return;
+  }
+  const removeBtn = e.target.closest(".cart-item-remove");
+  if (removeBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    const id = removeBtn.dataset.id;
+    const cid = removeBtn.dataset.cid;
+    removeFromCart(id, cid);
+    showToast("Producto eliminado", "info");
+    return;
+  }
+  if (e.target.closest("#cart-back-step-btn")) {
+    e.stopPropagation();
+    e.preventDefault();
+    currentCartStep = 1;
+    renderCartContent(document.getElementById("page-cart") || document.getElementById("app-content"));
+    return;
+  }
+  const checkoutBtn = e.target.closest(".checkout-btn");
+  if (checkoutBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (checkoutBtn.disabled || checkoutBtn.getAttribute("disabled") !== null) {
+      return;
+    }
+    if (isSubmitting) return;
+    const address = getState().deliveryAddress;
+    const user = getState().user;
+    if (!user) {
+      showToast("Debes iniciar sesi\xF3n para hacer un pedido", "warning");
+      return;
+    }
+    if (!address) {
+      import("../components/address-modal.js").then((m) => m.showAddressPrompt(() => {
+        checkoutBtn.click();
+      }, { skipDetails: true }));
+      return;
+    }
+    const notes = getState().addressNotes;
+    if (!notes || notes.trim() === "") {
+      showToast("La referencia de ubicaci\xF3n es obligatoria.", "warning");
+      import("../components/address-modal.js").then((m) => m.showAddressPrompt(() => {
+        checkoutBtn.click();
+      }, { skipDetails: true }));
+      return;
+    }
+    if (!user.phone || user.phone.trim() === "" || !user.phoneVerified) {
+      const { showConfirm: showConfirm2 } = await import("../components/modal.js");
+      const isUnverified = user.phone && user.phone.trim() !== "" && !user.phoneVerified;
+      showConfirm2({
+        title: isUnverified ? "\u{1F4F1} Verificar Tel\xE9fono" : "\u{1F4F1} Tel\xE9fono Requerido",
+        message: isUnverified ? "Para realizar tu pedido debes verificar tu n\xFAmero telef\xF3nico primero." : "Para realizar un pedido en la plataforma es obligatorio configurar y verificar un celular de contacto para que el comercio y el repartidor se comuniquen.",
+        confirmText: isUnverified ? "Verificar ahora" : "Configurar ahora",
+        cancelText: "Volver",
+        onConfirm: () => {
+          sessionStorage.setItem("open-phone-edit", "true");
+          location.hash = "#/profile";
+        }
+      });
+      return;
+    }
+    if (currentCartStep === 1) {
+      currentCartStep = 2;
+      renderCartContent(document.getElementById("page-cart") || document.getElementById("app-content"));
+      return;
+    }
+    const paymentMethod = selectedPaymentMethod;
+    isSubmitting = true;
+    checkoutBtn.disabled = true;
+    const originalHTML = checkoutBtn.innerHTML;
+    checkoutBtn.innerHTML = `${icon("loader", 18, "animate-spin")} VERIFICANDO...`;
+    try {
+      selectedIsScheduled = false;
+      selectedSchedDate = "";
+      selectedSchedTime = "";
+      await openCheckoutConfirmationModal();
+    } catch (err) {
+      console.error("Error opening confirmation modal:", err);
+    } finally {
+      checkoutBtn.disabled = false;
+      checkoutBtn.innerHTML = originalHTML;
+    }
+  }
+  if (e.target.closest("#clear-cart-btn")) {
+    e.stopPropagation();
+    e.preventDefault();
+    showConfirm({
+      title: "Vaciar carrito",
+      message: "\xBFEst\xE1s seguro de que quer\xE9s vaciar todo el carrito?",
+      confirmText: "Vaciar",
+      danger: true,
+      onConfirm: () => {
+        clearCart();
+        showToast("Carrito vaciado", "info");
+      }
+    });
+  }
+}

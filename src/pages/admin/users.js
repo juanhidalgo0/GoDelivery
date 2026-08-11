@@ -893,74 +893,7 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
           </div>
         </div>
 
-        ${(u.isDelivery || u.tripStatus === 'approved') ? `
-          <!-- Vehicle & Canon details block -->
-          <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px; margin-top:8px; display:flex; flex-direction:column; gap:6.5px; font-size:12px; font-weight:700;">
-            <!-- Canon Diario Toggle & Exemption -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(225,29,72,0.04); border:1px solid rgba(225,29,72,0.12); padding:8px 12px; border-radius:12px;">
-              <div>
-                <div style="font-weight:900; font-size:12px; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
-                  Canon Diario (Hoy)
-                  ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt) ? '<span style="font-size:9px; background:#6366f1; color:white; padding:1px 5px; border-radius:4px;">EXENTO</span>' : ''}
-                </div>
-                <div style="font-size:10px; color:var(--color-text-secondary); font-weight:600;">
-                  ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt) ? 'Admin / Exento de pago' : 'Habilitar o bloquear jornada'}
-                </div>
-              </div>
-              <div style="display:flex; align-items:center; gap:6px;">
-                <button data-toggle-canon-exempt="${u.uid}" title="Cambiar exención permanente" style="padding:4px 8px; border-radius:8px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); font-size:10px; font-weight:800; cursor:pointer; color:var(--color-text-tertiary);">
-                  ${u.isCanonExempt ? '⭐ Exento' : '⚙️ Hacer Exento'}
-                </button>
-                <button data-toggle-canon="${u.uid}" style="padding:6px 12px; border-radius:10px; border:none; font-size:11px; font-weight:900; cursor:pointer; transition:all 0.2s; ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt || u.lastCanonDate === (new Date().toISOString().split('T')[0])) ? 'background:#22c55e; color:white;' : 'background:#ef4444; color:white;'}">
-                  ${(u.isAdmin || u.role === 'admin' || u.isCanonExempt || u.lastCanonDate === (new Date().toISOString().split('T')[0])) ? '🟢 HABILITADO' : '🔴 PENDIENTE'}
-                </button>
-              </div>
-            </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px dashed var(--color-border-light); padding-top: 5px;">
-              <span style="color:var(--color-text-secondary); display:flex; align-items:center; gap:4px; font-size:11px;">
-                ${icon('car', 14)} Vehículo:
-              </span>
-              <span style="color:var(--color-text-primary); font-weight:800; font-size:12px;">
-                ${u.vehicleType ? (u.vehicleType.toLowerCase() === 'moto' ? '🏍️ Moto' : '🚗 Auto') : '---'}
-              </span>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px dashed var(--color-border-light); padding-top: 5px;">
-              <span style="color:var(--color-text-secondary); font-size:11px;">Detalles:</span>
-              <span style="color:var(--color-text-primary); font-weight:800; font-size:12.5px;">
-                ${u.vehicleModel || '---'} ${u.vehicleColor ? `(${u.vehicleColor})` : ''}
-              </span>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px dashed var(--color-border-light); padding-top: 5px;">
-              <span style="color:var(--color-text-secondary); font-size:11px;">Patente:</span>
-              <span style="color:var(--color-text-primary); font-weight:850; letter-spacing:0.5px; font-size:12.5px;">
-                ${u.patente || u.vehicleDetails || '---'}
-              </span>
-            </div>
-            <button data-edit-vehicle="${u.uid}" style="margin-top:4px; height:32px; border-radius:8px; border:1px dashed var(--color-primary); background:none; color:var(--color-primary); font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s;" onmouseover="this.style.background='rgba(var(--color-primary-rgb), 0.05)'" onmouseout="this.style.background='none'">
-              ${icon('edit', 12)} Editar Vehículo
-            </button>
-
-            <!-- Liquidation Metrics (Week, Month, Total) -->
-            <div style="margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--color-border-light);">
-              <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Total Liquidado / Cobrado</div>
-              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">
-                <div style="background: var(--color-background); border: 1px solid var(--color-border-light); border-radius: 10px; padding: 6px 4px;">
-                  <div style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Esta Semana</div>
-                  <div style="font-size: 12.5px; font-weight: 900; color: #10b981; margin-top: 2px;">${formatPrice(u.weekLiquidated || 0)}</div>
-                </div>
-                <div style="background: var(--color-background); border: 1px solid var(--color-border-light); border-radius: 10px; padding: 6px 4px;">
-                  <div style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Este Mes</div>
-                  <div style="font-size: 12.5px; font-weight: 900; color: #059669; margin-top: 2px;">${formatPrice(u.monthLiquidated || 0)}</div>
-                </div>
-                <div style="background: var(--color-background); border: 1px solid var(--color-border-light); border-radius: 10px; padding: 6px 4px;">
-                  <div style="font-size: 9.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Hasta Ahora</div>
-                  <div style="font-size: 12.5px; font-weight: 900; color: var(--color-primary); margin-top: 2px;">${formatPrice(u.totalLiquidated || 0)}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ` : ''}
 
         <!-- Dedicated Reviews and Award Points Action Buttons -->
         <div style="display:grid; grid-template-columns: ${isMe ? '1fr 1fr' : '1fr 1fr 1fr'}; gap:10px; margin-top: 8px;">
@@ -997,23 +930,7 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
           `;
         })() : ''}
 
-        ${(u.deliveryDebt || 0) > 0 ? `
-          <!-- Beautiful Settle Debt Section -->
-          <div style="background: rgba(239, 68, 68, 0.05); border: 1px dashed rgba(239, 68, 68, 0.25); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; margin-top: 4px; animation: fadeIn 0.2s ease-out;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: #ef4444; flex-shrink: 0;">
-                ${icon('bank', 18)}
-              </div>
-              <div>
-                <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em;">Saldo de Repartidor</div>
-                <div style="font-size: 16px; font-weight: 900; color: #ef4444; margin-top: 1px;">${formatPrice(u.deliveryDebt)}</div>
-              </div>
-            </div>
-            <a href="#/admin/commissions" style="height: 38px; padding: 0 16px; border-radius: 10px; border: none; background: #ef4444; color: white; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-              ${icon('bank', 14)} Liquidar en Economía
-            </a>
-          </div>
-        ` : ''}
+
 
         ${canChangeRoles ? `
           <div style="margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--color-border-light);">
@@ -1892,3 +1809,5 @@ function showEditVehicleModal(u, onSuccess) {
     }
   };
 }
+
+

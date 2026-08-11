@@ -3,10 +3,11 @@ import { getState, setState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
 import { formatPrice, isScheduleActive } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
-import { db } from '../firebase.js';
+import { db, storage } from '../firebase.js';
 import { App } from '@capacitor/app';
 
 import { isDelivery } from '../auth.js';
+import { registerUnsubscribe } from '../utils/cleanup.js';
 
 export function getOrderDriverEarnings(o) {
   if (o.isTrip || o.isFavor) {
@@ -48,10 +49,12 @@ function onSnapshot(q, callback, errCallback) {
     listener.start();
   }
 
-  return () => {
+  const unsubFn = () => {
     listener.stop();
     activeListeners = activeListeners.filter(l => l !== listener);
   };
+  registerUnsubscribe(unsubFn);
+  return unsubFn;
 }
 
 // Track application background/foreground state changes
@@ -167,6 +170,24 @@ export async function renderDeliveryPanel() {
   }
   window.autoAcceptEnabled = user.autoAcceptEnabled || false;
   window.expiredLocalOrders = new Set();
+
+  // Real-time listener for pending proofs of this driver
+  if (user?.uid && !window._driverProofsUnsub) {
+    const qProofs = query(
+      collection(db, 'delivery_settlement_proofs'),
+      where('driverId', '==', user.uid),
+      where('status', '==', 'pending')
+    );
+    window._driverProofsUnsub = firebaseOnSnapshot(qProofs, (snap) => {
+      const pendingProofs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setState('pendingProofs', pendingProofs);
+      const barContainer = document.getElementById('session-status-bar-container');
+      if (barContainer) {
+        barContainer.innerHTML = renderStatusBar(getState().user || user);
+        attachStatusBarListeners(getState().user || user);
+      }
+    });
+  }
 
   const currentHash = window.location.hash || '';
   if (currentHash.includes('tab=settlements')) {
@@ -308,29 +329,27 @@ export async function renderDeliveryPanel() {
         <!-- Scrollable content area -->
         <div id="delivery-scroll-area" style="flex:1; overflow-y:auto; padding:20px 20px 100px 20px; -webkit-overflow-scrolling:touch;">
           <div id="delivery-earnings-widget"></div>
-          ${isNative ? `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-4); background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.05); padding: var(--space-3) var(--space-4); border-radius: 16px; border: 1px dashed rgba(var(--color-primary-rgb, 225, 29, 72), 0.15);">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
-                  Auto-Aceptar Pedidos
-                </span>
-                <button id="auto-accept-info-btn" style="border:none; background:none; color:var(--color-text-secondary); cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">
-                  ${icon('helpCircle', 16)}
-                </button>
-              </div>
-              <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
-                <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0; position:absolute;" onchange="
-                  window.toggleAutoAccept(this.checked, '${user.uid}');
-                  const slider = this.nextElementSibling;
-                  slider.style.backgroundColor = this.checked ? 'var(--color-primary, #e11d48)' : '#ccc';
-                  slider.querySelector('span').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';
-                " ${window.autoAcceptEnabled ? 'checked' : ''} />
-                <span class="ios-slider" style="position:absolute; inset:0; background-color:${window.autoAcceptEnabled ? 'var(--color-primary, #e11d48)' : '#ccc'}; border-radius:34px; transition:0.3s; display:flex; align-items:center; padding: 0 3px;">
-                  <span style="height:18px; width:18px; background-color:white; border-radius:50%; transition:0.3s; box-shadow:0 2px 4px rgba(0,0,0,0.2); display:block; transform:${window.autoAcceptEnabled ? 'translateX(20px)' : 'translateX(0)'};"></span>
-                </span>
-              </label>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-4); background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.05); padding: var(--space-3) var(--space-4); border-radius: 16px; border: 1px dashed rgba(var(--color-primary-rgb, 225, 29, 72), 0.15);">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                Auto-Aceptar Pedidos
+              </span>
+              <button id="auto-accept-info-btn" style="border:none; background:none; color:var(--color-text-secondary); cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">
+                ${icon('helpCircle', 16)}
+              </button>
             </div>
-          ` : ''}
+            <label class="ios-switch" style="position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; margin:0;">
+              <input type="checkbox" id="auto-accept-toggle" style="opacity:0; width:0; height:0; position:absolute;" onchange="
+                window.toggleAutoAccept(this.checked, '${user.uid}');
+                const slider = this.nextElementSibling;
+                slider.style.backgroundColor = this.checked ? 'var(--color-primary, #e11d48)' : '#ccc';
+                slider.querySelector('span').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';
+              " ${window.autoAcceptEnabled ? 'checked' : ''} />
+              <span class="ios-slider" style="position:absolute; inset:0; background-color:${window.autoAcceptEnabled ? 'var(--color-primary, #e11d48)' : '#ccc'}; border-radius:34px; transition:0.3s; display:flex; align-items:center; padding: 0 3px;">
+                <span style="height:18px; width:18px; background-color:white; border-radius:50%; transition:0.3s; box-shadow:0 2px 4px rgba(0,0,0,0.2); display:block; transform:${window.autoAcceptEnabled ? 'translateX(20px)' : 'translateX(0)'};"></span>
+              </span>
+            </label>
+          </div>
           <div class="tab-pills" style="margin-bottom: var(--space-6); display: flex; gap: var(--space-2); scrollbar-width: none;">
             <button class="tab-pill" data-tab="available" style="flex: 1; white-space: nowrap; height:44px; border-radius:12px; border:none; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon('package', 18)} Disponibles
@@ -811,6 +830,21 @@ function loadTabContent(tab, container, user) {
       const listUnsub = onSnapshot(q, (snap) => {
         const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         
+        // Auto-ready manual scheduled orders when current time >= dispatchAt
+        const currentTimeMs = Date.now() + (getState().serverTimeOffset || 0);
+        allOrders.forEach(o => {
+          if (o.isManual && o.status === 'confirmed' && o.dispatchAt) {
+            const dispatchTime = o.dispatchAt.toMillis ? o.dispatchAt.toMillis() : new Date(o.dispatchAt).getTime();
+            if (currentTimeMs >= dispatchTime) {
+              console.log(`Auto-readying manual order #${o.orderId} from delivery panel`);
+              updateDoc(doc(db, 'orders', o.id), {
+                status: 'ready',
+                readyAt: serverTimestamp()
+              }).catch(err => console.error("Error auto-readying manual order:", err));
+            }
+          }
+        });
+        
         const hasExclusiveOffer = allOrders.some(o => !o.driverId && o.queueTargetDriverId === user.uid);
         if (hasExclusiveOffer) {
           playExclusiveOfferAlert();
@@ -866,7 +900,7 @@ function loadTabContent(tab, container, user) {
           }
 
           // Handle Auto-Accept
-          if (false && o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
+          if (o.queueTargetDriverId === user.uid && window.autoAcceptEnabled) {
             if (!window.activeAutoAccepts) window.activeAutoAccepts = new Set();
             if (!window.activeAutoAccepts.has(o.id)) {
               window.activeAutoAccepts.add(o.id);
@@ -1816,7 +1850,7 @@ function loadTabContent(tab, container, user) {
 
         // Check if co-pickup recommendations apply
         const activeUnpickedComercioIds = [...new Set(
-          orders.filter(o => !o.pickedUpAt && o.comercioId).map(o => o.comercioId)
+          orders.filter(o => !o.pickedUpAt && o.status !== 'delivering' && o.comercioId).map(o => o.comercioId)
         )];
 
         // Under the new rule, co-pickup suggestions are shown if the current route consists of exactly 1 active order,
@@ -1873,7 +1907,7 @@ function loadTabContent(tab, container, user) {
         const fingerprint = JSON.stringify(orders.map(o => ({
           id: o.id,
           status: o.status,
-          pickedUp: !!o.pickedUpAt,
+          pickedUp: o.status === 'delivering' || !!o.pickedUpAt,
           isAtDoor: !!o.isAtDoor,
           comercioId: o.comercioId,
           orderId: o.orderId,
@@ -1915,13 +1949,12 @@ function loadTabContent(tab, container, user) {
                   if (o.favorType === 'pagodeservicios') {
                     const match = o.details?.match(/🏢\s*\*\*Servicio:\*\*\s*(.*?)(?=\n|$)/i);
                     stopName = match ? match[1].trim() : 'Pago de Servicio';
-                  } else if (o.favorType === 'mandado') {
-                    stopName = 'Punto de Retiro';
                   } else {
-                    stopName = 'Comercio a Comprar';
+                    const stores = parseFavorDetails(o.details || o.description);
+                    stopName = stores.length > 0 ? stores[0].name : (o.comercioName || 'Comercio a Comprar');
                   }
                 } else {
-                  stopName = 'Comercio a Comprar';
+                  stopName = o.comercioName || 'Comercio a Comprar';
                 }
               }
 
@@ -1945,7 +1978,7 @@ function loadTabContent(tab, container, user) {
 
         // Convert pickups to stops
         pickupsByCommerce.forEach((group, key) => {
-          const allPickedUp = group.orders.every(o => !!o.pickedUpAt);
+          const allPickedUp = group.orders.every(o => o.status === 'delivering' || !!o.pickedUpAt);
           const firstOrder = group.orders[0];
           const totalAmountToPay = group.orders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
 
@@ -2114,108 +2147,73 @@ function loadTabContent(tab, container, user) {
                   const stopRgb = getRgbString(stopColor);
 
                   return `
-                  <div class="stop-item" style="position:relative; margin-bottom:36px; animation: slide-up 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; animation-delay: ${idx * 0.1}s; opacity:0;">
+                  <div class="stop-item" style="position:relative; margin-bottom:36px;">
                     <!-- Timeline Dot -->
                     <div style="position:absolute; left:-38px; top:8px; width:20px; height:20px; border-radius:50%; background:${stop.pickedUp ? '#10b981' : (isActive ? stopColor : 'var(--color-border-light)')}; border:4px solid var(--color-bg-card); z-index:2; box-shadow:0 6px 15px rgba(0,0,0,0.12); transition:all 0.4s;">
                       ${isActive ? `<div style="position:absolute; inset:-8px; border-radius:50%; border:2.5px solid ${stopColor}; opacity:0.4; animation: pulse-dot 2s infinite;"></div>` : ''}
                     </div>
                     
-                    <div style="background:${isActive ? 'var(--color-bg)' : 'rgba(var(--color-bg-secondary-rgb), 0.5)'}; border:${isActive ? '2.5px' : '1.5px'} solid ${isActive ? stopColor : stopColor + '44'}; border-radius:26px; padding:24px; transition:all 0.4s; ${isActive ? `box-shadow: 0 15px 40px rgba(${stopRgb}, 0.12);` : ''}">
+                    <div style="background:${isActive ? 'var(--color-bg)' : 'rgba(var(--color-bg-secondary-rgb), 0.5)'}; border:${isActive ? '2.5px' : '1.5px'} solid ${isActive ? stopColor : stopColor + '44'}; border-radius:26px; padding:0 24px 24px 24px; overflow:hidden; transition:all 0.4s; ${isActive ? `box-shadow: 0 15px 40px rgba(${stopRgb}, 0.12);` : ''}">
+                      
+                      <!-- Card Header Strip -->
+                      <div style="background:${stopColor}; color:#ffffff; margin-left:-24px; margin-right:-24px; padding:10px 24px; font-size:11.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:18px; display:flex; align-items:center; gap:8px;">
+                        ${(() => {
+                          const o = firstOrder;
+                          if (o.isTrip) return icon('navigation', 14) + ' GO VIAJE';
+                          if (o.isFavor) {
+                            if (o.favorType === 'gocash') return icon('dollarSign', 14) + ' GO CASH';
+                            if (o.favorType === 'pagodeservicios') return icon('creditCard', 14) + ' PAGO DE SERVICIO';
+                            if (o.favorType === 'mandado') return `<img src="/go-pickup-point.png" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> ENCOMIENDA`;
+                            if (o.favorType === 'compra') return `<img src="/go-bag.png" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> MANDADO`;
+                            return `<img src="/go-bag.png" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> MANDADO`;
+                          }
+                          return icon('shoppingCart', 14) + ' COMERCIO';
+                        })()}
+                      </div>
                       
                       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
                         <div>
                           <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                            <span style="font-size:10px; font-weight:900; text-transform:uppercase; color:${isActive ? stopColor : 'var(--color-text-tertiary)'}; letter-spacing:0.1em;">
+                            <span style="font-size:10px; font-weight:900; text-transform:uppercase; color:${isActive ? stopColor : 'var(--color-text-tertiary)'}; letter-spacing:0.1em; display:inline-flex; align-items:center; gap:5px;">
                               ${(() => {
                                 const hasTrip = (stop.orders || []).some(o => o.isTrip);
+                                const isPickup = stop.type === 'PICKUP';
                                 if (hasTrip) {
-                                  return stop.type === 'PICKUP' ? 'Punto de Encuentro' : 'Destino del Viaje';
+                                  const text = isPickup ? 'Punto de Encuentro' : 'Destino del Viaje';
+                                  const ic = isPickup ? icon('mapPin', 12) : icon('navigationArrow', 12);
+                                  return `${ic} ${text}`;
+                                } else {
+                                  const text = isPickup ? 'Punto de Retiro' : 'Punto de Entrega';
+                                  const ic = isPickup ? icon('store', 12) : icon('home', 12);
+                                  return `${ic} ${text}`;
                                 }
-                                return stop.type === 'PICKUP' ? 'Punto de Retiro' : 'Punto de Entrega';
                               })()}
                             </span>
                             ${isActive ? `<div style="background:var(--color-primary); width:6px; height:6px; border-radius:50%; animation: blink 1s infinite;"></div>` : ''}
                           </div>
-                          <h4 style="margin:0; font-size:18px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.02em;">
-                            ${stop.type === 'PICKUP' ? stop.comercioName : stop.userName}
+                          <h4 style="margin:0; font-size:16.5px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.02em; line-height:1.4; text-align:left;">
+                            ${stop.type === 'PICKUP' ? (stop.comercioName || 'Punto de Retiro') : (stop.address || 'Dirección de Entrega')}
                           </h4>
+                          ${(stop.type === 'DROP_OFF' && stop.orders?.[0]?.addressNotes) ? `
+                            <div style="font-size:12px; font-weight:700; color:#d97706; margin-top:4.5px; text-align:left;">
+                              ⚠️ Ref: ${stop.orders[0].addressNotes}
+                            </div>
+                          ` : ''}
                           ${(() => {
                             if (stop.type === 'DROP_OFF') return '';
-                            const orderTypes = Array.from(new Set((stop.orders || []).map(o => {
-                              if (o.isTrip) return 'viaje';
-                              if (o.isFavor) {
-                                if (o.favorType === 'gocash') return 'go cash';
-                                if (o.favorType === 'pagodeservicios') return 'pago de servicios';
-                                if (o.favorType === 'mandado') return 'encomienda';
-                                if (o.favorType === 'compra') return 'mandado';
-                                return 'encomienda';
-                              }
-                              return 'comercio';
-                            })));
-                            return `
-                              <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; margin-bottom:2px;">
-                                ${orderTypes.map(t => {
-                                  let bg = '', border = '', color = '', iconName = '', label = '';
-                                  if (t === 'pago de servicios') {
-                                    bg = 'rgba(217, 119, 6, 0.12)';
-                                    border = '1px solid rgba(217, 119, 6, 0.25)';
-                                    color = '#d97706';
-                                    iconName = 'creditCard';
-                                    label = 'Pago de Servicio';
-                                  } else if (t === 'mandado') {
-                                    bg = 'rgba(244, 63, 94, 0.12)';
-                                    border = '1px solid rgba(244, 63, 94, 0.25)';
-                                    color = '#e11d48';
-                                    iconName = 'shoppingBag';
-                                    label = 'Mandado';
-                                  } else if (t === 'encomienda') {
-                                    bg = 'rgba(16, 185, 129, 0.12)';
-                                    border = '1px solid rgba(16, 185, 129, 0.25)';
-                                    color = '#059669';
-                                    iconName = 'package';
-                                    label = 'Encomienda';
-                                  } else if (t === 'go cash') {
-                                    bg = 'rgba(59, 130, 246, 0.12)';
-                                    border = '1px solid rgba(59, 130, 246, 0.25)';
-                                    color = '#2563eb';
-                                    iconName = 'dollarSign';
-                                    label = 'Go Cash';
-                                  } else if (t === 'viaje') {
-                                    bg = 'rgba(236, 72, 153, 0.12)';
-                                    border = '1px solid rgba(236, 72, 153, 0.25)';
-                                    color = '#db2777';
-                                    iconName = 'navigation';
-                                    label = 'Viaje';
-                                  } else {
-                                    bg = 'rgba(139, 92, 246, 0.12)';
-                                    border = '1px solid rgba(139, 92, 246, 0.25)';
-                                    color = '#7c3aed';
-                                    iconName = 'shoppingCart';
-                                    label = 'Comercio';
-                                  }
-                                  return `
-                                    <span style="background:${bg}; border:${border}; color:${color}; padding:4px 10px; border-radius:10px; font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.04em; display:inline-flex; align-items:center; gap:4px; flex-shrink:0;">
-                                      ${icon(iconName, 11)} ${label}
-                                    </span>
-                                  `;
-                                }).join('')}
-                              </div>
-                              ${(() => {
-                                const o = stop.orders && stop.orders[0];
-                                if (o && o.estimatedReadyAt) {
-                                  const dateObj = o.estimatedReadyAt.toDate ? o.estimatedReadyAt.toDate() : new Date(o.estimatedReadyAt);
-                                  const hh = String(dateObj.getHours()).padStart(2, '0');
-                                  const mm = String(dateObj.getMinutes()).padStart(2, '0');
-                                  const readyTimeStr = `${hh}:${mm} hs`;
-                                  return `
-                                    <div style="margin-top:6px; background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.04)); border:1px solid rgba(245,158,11,0.25); color:#d97706; padding:5px 10px; border-radius:10px; font-size:10.5px; font-weight:900; display:inline-flex; align-items:center; gap:5px;">
-                                      ${icon('clock', 12)} 🍳 Listo en cocina a las ${readyTimeStr}
-                                    </div>
-                                  `;
-                                }
-                                return '';
-                              })()}
-                            `;
+                            const o = stop.orders && stop.orders[0];
+                            if (o && o.estimatedReadyAt) {
+                              const dateObj = o.estimatedReadyAt.toDate ? o.estimatedReadyAt.toDate() : new Date(o.estimatedReadyAt);
+                              const hh = String(dateObj.getHours()).padStart(2, '0');
+                              const mm = String(dateObj.getMinutes()).padStart(2, '0');
+                              const readyTimeStr = `${hh}:${mm} hs`;
+                              return `
+                                <div style="margin-top:6px; background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.04)); border:1px solid rgba(245,158,11,0.25); color:#d97706; padding:5px 10px; border-radius:10px; font-size:10.5px; font-weight:900; display:inline-flex; align-items:center; gap:5px;">
+                                  ${icon('clock', 12)} 🍳 Listo en cocina a las ${readyTimeStr}
+                                </div>
+                              `;
+                            }
+                            return '';
                           })()}
                         </div>
                         ${stop.pickedUp ? `
@@ -2225,95 +2223,18 @@ function loadTabContent(tab, container, user) {
                         ` : ''}
                       </div>
                       
-                      <div style="font-size:13px; color:var(--color-text-secondary); margin-bottom:8px; display:flex; align-items:center; gap:8px; font-weight:700; opacity:0.9;">
-                        <div style="color:var(--color-primary); opacity:0.7;">${icon('mapPin', 16)}</div>
-                        <span>${stop.address}</span>
-                      </div>
+
 
                       ${(() => {
                         if (stop.type === 'DROP_OFF') {
-                          const totalCashToCollect = stop.orders.reduce((sum, o) => {
-                            return o.paymentMethod === 'mercadopago' ? sum : sum + (o.total || ((o.subtotal || 0) + (o.deliveryCost || 0)));
-                          }, 0);
-                          const isAllPaidOnline = stop.orders.every(o => o.paymentMethod === 'mercadopago');
-                          return `
-                            <!-- Hero Pill de Cobro al Cliente (Siempre Visible) -->
-                            <div style="margin-top:10px; margin-bottom:14px; padding:12px 14px; border-radius:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; ${isAllPaidOnline ? 'background:rgba(0,158,227,0.08); border:1.5px solid rgba(0,158,227,0.3); color:#0284c7;' : 'background:rgba(34,197,94,0.08); border:1.5px solid rgba(34,197,94,0.3); color:#15803d;'} box-shadow:0 4px 14px rgba(0,0,0,0.03);">
-                              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                                <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; ${isAllPaidOnline ? 'background:rgba(0,158,227,0.15); color:#009EE3;' : 'background:rgba(34,197,94,0.18); color:#16a34a;'} font-size:18px;">
-                                  ${isAllPaidOnline ? '💳' : '💵'}
-                                </div>
-                                <div style="display:flex; flex-direction:column; gap:1px; min-width:0;">
-                                  <span style="font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:0.06em; opacity:0.85;">
-                                    ${isAllPaidOnline ? 'Pago Online (MercadoPago)' : 'Cobrar en Efectivo'}
-                                  </span>
-                                  <span style="font-size:12px; font-weight:700; opacity:0.9; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
-                                    ${isAllPaidOnline ? 'No solicitar dinero al cliente' : 'Cobro en el domicilio'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div style="text-align:right; flex-shrink:0;">
-                                <span style="font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.05em; display:block; opacity:0.75;">Total a Cobrar</span>
-                                <span style="font-size:19px; font-weight:950; letter-spacing:-0.02em; line-height:1.1;">
-                                  ${isAllPaidOnline ? '$ 0' : formatPrice(totalCashToCollect)}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div style="margin-top:-4px; margin-bottom:14px; display:flex; flex-direction:column; gap:8px;">
-                              ${stop.orders.map(o => `
-                                <div style="display:flex; flex-direction:column; gap:6px; background:rgba(var(--color-primary-rgb, 79, 70, 229), 0.03); border:1.5px solid var(--color-border-light); padding:10px 12px; border-radius:14px;">
-                                  ${o.addressNotes ? `
-                                    <div style="display:flex; align-items:flex-start; gap:6px; font-size:12.5px; color:var(--color-text-secondary); font-weight:600; line-height:1.4;">
-                                      <span style="color:var(--color-text-tertiary); font-size:11px; text-transform:uppercase; margin-top:2px;">Ref:</span>
-                                      <span style="background:var(--color-bg-secondary); padding:4px 8px; border-radius:8px; border:1px solid var(--color-border-light); flex:1;">
-                                        ${o.addressNotes}
-                                      </span>
-                                    </div>
-                                  ` : `
-                                    <div style="font-size:12px; color:var(--color-text-tertiary); font-style:italic; font-weight:600;">Sin referencia de ubicación</div>
-                                  `}
-                                </div>
-                              `).join('')}
-                            </div>
-                          `;
+                          return '';
                         } else {
-                          const isFavorCompra = stop.isFavor && stop.orders.some(o => o.type === 'compra' || o.favorType === 'compra' || o.favorType === 'mandado');
-                          const isAbonarLocal = stop.amountToPay > 0 || isFavorCompra;
-                          return `
-                            <!-- Hero Pill de Retiro en Comercio (Siempre Visible) -->
-                            <div style="margin-top:10px; margin-bottom:14px; padding:12px 14px; border-radius:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; ${isAbonarLocal ? 'background:rgba(124,58,237,0.08); border:1.5px solid rgba(124,58,237,0.3); color:#6d28d9;' : 'background:rgba(16,185,129,0.08); border:1.5px solid rgba(16,185,129,0.3); color:#047857;'} box-shadow:0 4px 14px rgba(0,0,0,0.03);">
-                              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                                <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; ${isAbonarLocal ? 'background:rgba(124,58,237,0.15); color:#7c3aed;' : 'background:rgba(16,185,129,0.18); color:#10b981;'} font-size:18px;">
-                                  ${isAbonarLocal ? '🏪' : '✅'}
-                                </div>
-                                <div style="display:flex; flex-direction:column; gap:1px; min-width:0;">
-                                  <span style="font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:0.06em; opacity:0.85;">
-                                    ${isAbonarLocal ? 'Abonar al Comercio' : 'Ya abonado en la App'}
-                                  </span>
-                                  <span style="font-size:12px; font-weight:700; opacity:0.9; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
-                                    ${isAbonarLocal ? 'Pago de mercadería en local' : 'Retirar sin abonar'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div style="text-align:right; flex-shrink:0;">
-                                <span style="font-size:9.5px; font-weight:900; text-transform:uppercase; letter-spacing:0.05em; display:block; opacity:0.75;">A Abonar</span>
-                                <span style="font-size:17px; font-weight:950; letter-spacing:-0.02em; line-height:1.1;">
-                                  ${stop.amountToPay > 0 ? formatPrice(stop.amountToPay) : (isFavorCompra ? 'En caja' : '$ 0')}
-                                </span>
-                              </div>
-                            </div>
-                          `;
+                          return '';
                         }
                       })()}
 
                       <!-- Collapsible Stop Details -->
                       ${stop.type === 'PICKUP' ? `
-                        <!-- Toggle Button -->
-                        <button class="toggle-stop-details-btn ${isExpanded ? 'active' : ''}" data-key="${stopKey}" style="margin-bottom: ${isExpanded ? '12px' : '0'};">
-                          ${icon('chevronDown', 14)}
-                          <span>${isExpanded ? 'Ocultar detalle de pedido' : 'Mostrar detalle de pedido'}</span>
-                        </button>
 
                         <div class="collapsible-stop-details ${isExpanded ? 'expanded' : ''}" id="details-${stopKey}" style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
                           ${!stop.isFavor ? `
@@ -2384,11 +2305,7 @@ function loadTabContent(tab, container, user) {
                           `}
                         </div>
                       ` : `
-                        <!-- Toggle Button -->
-                        <button class="toggle-stop-details-btn ${isExpanded ? 'active' : ''}" data-key="${stopKey}" style="margin-bottom: ${isExpanded ? '12px' : '0'};">
-                          ${icon('chevronDown', 14)}
-                          <span>${isExpanded ? 'Ocultar detalle de entrega' : 'Mostrar detalle de entrega'}</span>
-                        </button>
+                        
 
                         <div class="collapsible-stop-details ${isExpanded ? 'expanded' : ''}" id="details-${stopKey}" style="background:var(--color-bg-secondary); border-radius:20px; padding:18px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:10px;">
                           <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Desglose de Cobro</div>
@@ -2543,7 +2460,7 @@ function loadTabContent(tab, container, user) {
                           ${stop.type === 'DROP_OFF' ? `
                             ${(() => {
                               const hasNotifiedAtDoor = stop.orders.every(o => o.isAtDoor);
-                              const allPickedUp = stop.orders.every(o => !!o.pickedUpAt);
+                              const allPickedUp = stop.orders.every(o => o.status === 'delivering' || !!o.pickedUpAt);
                               const isTrip = stop.orders.some(o => o.isTrip);
                               const isPagoServiciosDigital = stop.orders.some(o => o.favorType === 'pagodeservicios' && o.receiptDeliveryType === 'digital');
 
@@ -2572,6 +2489,27 @@ function loadTabContent(tab, container, user) {
                               }
                             })()}
                           ` : ''}
+                          
+                          ${(() => {
+                            const favorOrder = stop.orders.find(o => o.isFavor && (o.favorType === 'compra' || o.favorType === 'pagodeservicios'));
+                            if (!favorOrder) return '';
+                            return `
+                              <button class="btn driver-card-edit-price-btn" 
+                                      data-order-id="${favorOrder.id}"
+                                      style="width:100%; height:44px; font-size:12.5px; font-weight:800; border-radius:14px; border:1px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text-primary); transition:all 0.3s; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; margin-top:8px; box-sizing:border-box;">
+                                ${icon('creditCard', 14)} ${favorOrder.favorType === 'pagodeservicios' ? 'Ingresar Valor de Facturas' : 'Ingresar/Modificar Compra'} (${favorOrder.subtotal ? `$${favorOrder.subtotal}` : 'No cargado'})
+                              </button>
+                            `;
+                          })()}
+                        </div>
+                        
+                        <!-- Row 3: Ver Detalle del Pedido (Bottom Sheet) -->
+                        <div style="width:100%;">
+                          <button class="btn view-stop-details-sheet-btn" 
+                                  data-key="${stopKey}"
+                                  style="width:100%; height:44px; font-size:12.5px; font-weight:800; border-radius:14px; border:none; background:linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color:white; transition:all 0.3s; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.18); display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; margin-top:2px;">
+                            ${icon('shoppingBag', 14)} Ver Detalle del Pedido
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2637,29 +2575,7 @@ function loadTabContent(tab, container, user) {
           </div>
         `;
 
-        // Attach action event listeners
-        container.querySelectorAll('.toggle-stop-details-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const key = btn.dataset.key;
-            const collapsible = container.querySelector(`#details-${key}`);
-            const btnText = btn.querySelector('span');
-            const isPickup = key.startsWith('PICKUP');
-            
-            if (container._expandedStops.has(key)) {
-              container._expandedStops.delete(key);
-              collapsible?.classList.remove('expanded');
-              btn.classList.remove('active');
-              btn.style.marginBottom = '0';
-              if (btnText) btnText.textContent = isPickup ? 'Mostrar detalle de pedido' : 'Mostrar detalle de entrega';
-            } else {
-              container._expandedStops.add(key);
-              collapsible?.classList.add('expanded');
-              btn.classList.add('active');
-              btn.style.marginBottom = '12px';
-              if (btnText) btnText.textContent = isPickup ? 'Ocultar detalle de pedido' : 'Ocultar detalle de entrega';
-            }
-          });
-        });
+
 
         container.querySelectorAll('.add-suggested-order-btn').forEach(btn => {
           btn.addEventListener('click', () => {
@@ -2673,6 +2589,33 @@ function loadTabContent(tab, container, user) {
                 takeBatch(btn.dataset.id, user, null, btn);
               }
             });
+          });
+        });
+
+        container.querySelectorAll('.view-stop-details-sheet-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            const stop = stops.find(s => {
+              const addressVal = (s.type === 'PICKUP' ? s.docId : s.address) || '';
+              const sKey = (s.type + '_' + addressVal).replace(/[^a-zA-Z0-9]/g, '_');
+              return sKey === key;
+            });
+            if (stop) {
+              showStopDetailsBottomSheet(stop);
+            }
+          });
+        });
+
+        container.querySelectorAll('.driver-card-edit-price-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const orderId = btn.dataset.orderId;
+            const { doc, getDoc } = await import('firebase/firestore');
+            const { db } = await import('../firebase.js');
+            const orderSnap = await getDoc(doc(db, 'orders', orderId));
+            if (orderSnap.exists()) {
+              const orderData = { id: orderSnap.id, ...orderSnap.data() };
+              showEditFavorPriceModal(orderData, true);
+            }
           });
         });
 
@@ -2919,7 +2862,8 @@ function loadTabContent(tab, container, user) {
                     });
                     
                     if (order.userId) {
-                      const codeStr = order.verificationCode ? ` Tené listo tu código de entrega: ${order.verificationCode}` : '';
+                      const isEncomienda = order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda');
+                      const codeStr = (order.verificationCode && !isEncomienda) ? ` Tené listo tu código de entrega: ${order.verificationCode}` : '';
                       await addDoc(collection(db, 'users', order.userId, 'notifications'), {
                         title: '¡Tu repartidor está en la puerta!',
                         body: order.isFavor 
@@ -2958,7 +2902,7 @@ function loadTabContent(tab, container, user) {
               return;
             }
 
-            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true);
+            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda'));
             openSlideToConfirmModal({
               isTrip,
               noCodeRequired,
@@ -3192,7 +3136,7 @@ function loadTabContent(tab, container, user) {
                           <div style="position:absolute; left:5px; top:6px; bottom:6px; width:1.5px; background:var(--color-border-light);"></div>
                           ${[
                             { label: 'Creado', time: main.createdAt, color: 'var(--color-primary)', done: true },
-                            { label: 'Retirado', time: main.pickedUpAt, color: 'var(--color-primary)', done: !!main.pickedUpAt },
+                            { label: 'Retirado', time: main.pickedUpAt, color: 'var(--color-primary)', done: main.status === 'delivering' || !!main.pickedUpAt },
                             { label: 'Entregado', time: main.deliveredAt, color: '#10b981', done: !!main.deliveredAt }
                           ].map(step => `
                             <div style="margin-bottom:10px; position:relative; display:flex; justify-content:space-between; align-items:center;">
@@ -3298,7 +3242,41 @@ function loadTabContent(tab, container, user) {
             </div>
 
             <!-- Operations Stack -->
-            <div style="display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <!-- Resumen de Billetera -->
+              <div style="background:var(--color-bg-card); border:1.5px solid var(--color-border-light); border-radius:24px; padding:20px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:12px;">
+                <h4 style="margin:0; font-size:13px; font-weight:900; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                  ${icon('wallet', 16)} Resumen de Billetera
+                </h4>
+                <div style="display:flex; flex-direction:column; gap:8px; font-size:12.5px; font-weight:600; color:var(--color-text-secondary);">
+                  <div style="display:flex; justify-content:space-between;">
+                    <span>Ganancias por Transferencia (Digital)</span>
+                    <span id="wallet-digital-earnings" style="color:#10b981; font-weight:700;">$ 0</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between;">
+                    <span>Cobros en Efectivo (Bolsillo)</span>
+                    <span id="wallet-cash-earnings" style="color:#f59e0b; font-weight:700;">$ 0</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; border-top:1px dashed var(--color-border-light); padding-top:8px; font-weight:700;">
+                    <span>Total Facturado (Ambos)</span>
+                    <span id="wallet-total-combined" style="color:var(--color-text-primary); font-weight:800;">$ 0</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; color:#ef4444;">
+                    <span>Tarifa App (A Liquidar)</span>
+                    <span id="wallet-app-fee" style="font-weight:700;">-$ 0</span>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:4px; border-top:1.5px solid var(--color-border-light); padding-top:10px; margin-top:4px;">
+                    <div style="display:flex; justify-content:space-between; font-weight:900; font-size:14px;">
+                      <span style="color:var(--color-text-primary);">Balance Neto</span>
+                      <span id="wallet-net-balance" style="font-size:16px;">$ 0</span>
+                    </div>
+                    <div style="font-size:10px; color:var(--color-text-tertiary); text-align:center; font-weight:700; opacity:0.8; margin-top:2px;">
+                      Fórmula: Digital + Efectivo - Tarifa App
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Gestor de Balance -->
               <button id="open-balance-mgmt-btn" style="width:100%; height:48px; border-radius:16px; background:var(--color-bg-card); border:1.5px solid ${debt > 0 ? 'rgba(239,68,68,0.2)' : 'var(--color-border-light)'}; color:var(--color-text-primary); font-weight:900; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; padding:0 16px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.02); flex-shrink:0;">
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -3936,8 +3914,7 @@ async function showModifyOrderModal(order) {
   };
 }
 
-async function showEditFavorPriceModal(order, isPersistent = false) {
-  const { showModal, closeModal } = await import('../components/modal.js');
+export async function showEditFavorPriceModal(order, isPersistent = false) {
   const { icon } = await import('../utils/icons.js');
   const { formatPrice } = await import('../utils/format.js');
   
@@ -3963,17 +3940,45 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
   }
   const currentPrices = order.storePrices || {};
 
-  const modalEl = document.createElement('div');
-  modalEl.innerHTML = `
-    <div style="padding:24px; text-align:center;">
-      <div style="width:64px; height:64px; background:rgba(var(--color-primary-rgb),0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--color-primary); margin:0 auto 20px;">
-        ${icon('edit', 32)}
+  // Remove existing sheets if any
+  document.getElementById('v5-price-edit-sheet')?.remove();
+  document.getElementById('v5-price-edit-backdrop')?.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'v5-price-edit-backdrop';
+  backdrop.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 99998; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); opacity: 0; transition: opacity 0.3s ease;";
+
+  const sheet = document.createElement('div');
+  sheet.id = 'v5-price-edit-sheet';
+  sheet.style.cssText = "position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; box-shadow: 0 -12px 30px rgba(0,0,0,0.15); z-index: 99999; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 85vh; display: flex; flex-direction: column; padding-bottom: calc(20px + env(safe-area-inset-bottom, 16px)); overflow: hidden;";
+
+  const titleText = order.favorType === 'pagodeservicios' ? 'Monto de Servicios' : 'Precios por Comercio';
+  const subtitleText = order.favorType === 'pagodeservicios' ? 'Ingresá el valor total de las facturas pagadas.' : 'Ingresá el valor de los productos de cada local.';
+
+  sheet.innerHTML = `
+    <!-- Touch Drag Handle & Header -->
+    <div class="sheet-drag-header" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; padding: 12px 20px 16px; display: flex; flex-direction: column; align-items: center; position: relative; cursor: grab; flex-shrink: 0; box-shadow: 0 4px 15px rgba(190, 18, 60, 0.15); z-index: 10;">
+      <div style="width: 40px; height: 4px; background: rgba(255,255,255,0.4); border-radius: 2px; margin-bottom: 12px;"></div>
+      <div style="width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;">
+        <div style="width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">
+          ${icon('creditCard', 20)}
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0;">
+          <h3 style="margin: 0; font-size: 16.5px; font-weight: 900; color: white; letter-spacing: -0.01em;">${titleText}</h3>
+          <span style="font-size: 11.5px; color: rgba(255,255,255,0.85); font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${subtitleText}</span>
+        </div>
+        <button id="v5-price-edit-close" style="background: rgba(255,255,255,0.15); border: none; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: white; transition: background 0.2s;">
+          ${icon('close', 14)}
+        </button>
       </div>
-      <h3 style="font-size:20px; font-weight:950; color:var(--color-text); margin-bottom:8px;">${order.favorType === 'pagodeservicios' ? 'Monto de Servicios' : 'Precios por Comercio'}</h3>
-      <p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:20px;">${order.favorType === 'pagodeservicios' ? 'Ingresá el valor total de las facturas o servicios abonados.' : 'Ingresá el valor de los productos comprados en cada local individualmente.'}</p>
-      
-      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1px solid var(--color-border-light); margin-bottom:20px; display:flex; flex-direction:column; gap:16px;">
-        <div style="font-size:11px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; text-align:left; margin-bottom:4px;">${order.favorType === 'pagodeservicios' ? 'Costo facturas' : 'Costo de productos'}</div>
+    </div>
+
+    <!-- Content Area (Scrollable) -->
+    <div style="flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1.5px solid var(--color-border-light); display:flex; flex-direction:column; gap:16px; box-shadow: var(--shadow-sm);">
+        <div style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; text-align:left; margin-bottom:4px;">
+          ${order.favorType === 'pagodeservicios' ? 'Costo facturas' : 'Costo de productos'}
+        </div>
         
         ${stores.map((st, idx) => {
           const price = currentPrices[st.name] || '';
@@ -3981,7 +3986,7 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
             <div style="display:flex; flex-direction:column; gap:6px; text-align:left;">
               <label style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; justify-content:space-between; gap:6px;">
                 <span>${order.favorType === 'pagodeservicios' ? '🧾' : '🏪'} <strong>${st.name}</strong></span>
-                <span style="font-weight:500; font-size:11px; color:var(--color-text-secondary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:180px;">${st.items}</span>
+                <span style="font-weight:600; font-size:11px; color:var(--color-text-secondary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:180px;">${st.items}</span>
               </label>
               <div style="position:relative;">
                 <span style="position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; font-weight:800; color:var(--color-text-tertiary);">$</span>
@@ -3991,12 +3996,12 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
           `;
         }).join('')}
 
-        <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800; color:var(--color-text-primary);">
+        <div style="border-top:1.5px dashed var(--color-border-light); padding-top:14px; display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800; color:var(--color-text-primary);">
           <span>${order.favorType === 'pagodeservicios' ? 'Total Servicios:' : 'Total Productos:'}</span>
           <span id="favor-products-sum" style="font-size:17px; font-weight:950; color:#10b981;">${formatPrice(order.subtotal || 0)}</span>
         </div>
 
-        <div style="border-top:1px dashed var(--color-border-light); padding-top:14px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
+        <div style="border-top:1.5px dashed var(--color-border-light); padding-top:14px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
           <div style="display:flex; justify-content:space-between;">
             <span>Servicio (Envío/Gestión/App):</span>
             <span>+ ${formatPrice(deliveryFee + appFee + pFee + extraStops)}</span>
@@ -4020,18 +4025,71 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
         </div>
       </div>
 
-      <div style="display:grid; grid-template-columns:${isPersistent ? '1fr' : '1fr 1fr'}; gap:12px;">
-        ${isPersistent ? '' : '<button id="cancel-edit-price" style="height:54px; border-radius:18px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:none; font-weight:900; cursor:pointer;">CANCELAR</button>'}
-        <button id="confirm-edit-price" style="height:54px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:950; cursor:pointer; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);">GUARDAR</button>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:4px;">
+        <button id="cancel-edit-price" style="height:50px; border-radius:16px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1px solid var(--color-border-light); font-weight:900; font-size:13.5px; cursor:pointer;">CANCELAR</button>
+        <button id="confirm-edit-price" style="height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:950; font-size:13.5px; cursor:pointer; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.2);">GUARDAR</button>
       </div>
     </div>
   `;
 
-  showModal({ content: modalEl, height: 'auto', hideHeader: true, persistent: isPersistent });
+  document.body.appendChild(backdrop);
+  document.body.appendChild(sheet);
 
-  const inputs = modalEl.querySelectorAll('.favor-store-price-input');
-  const sumDisplay = modalEl.querySelector('#favor-products-sum');
-  const preview = modalEl.querySelector('#client-total-preview');
+  // Trigger animation
+  requestAnimationFrame(() => {
+    backdrop.style.opacity = '1';
+    sheet.style.transform = 'translateY(0)';
+  });
+
+  const closeSheet = () => {
+    backdrop.style.opacity = '0';
+    sheet.style.transform = 'translateY(100%)';
+    setTimeout(() => {
+      backdrop.remove();
+      sheet.remove();
+    }, 350);
+  };
+
+  backdrop.onclick = closeSheet;
+  sheet.querySelector('#v5-price-edit-close').onclick = closeSheet;
+  sheet.querySelector('#cancel-edit-price').onclick = closeSheet;
+
+  // Touch Swipe-to-Close Implementation
+  let startY = 0;
+  let currentY = 0;
+  let isDragging = false;
+  const dragHeader = sheet.querySelector('.sheet-drag-header');
+
+  dragHeader.addEventListener('touchstart', (e) => {
+    startY = e.touches[0].clientY;
+    isDragging = true;
+    sheet.style.transition = 'none';
+  }, { passive: true });
+
+  dragHeader.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    currentY = e.touches[0].clientY;
+    const deltaY = currentY - startY;
+    if (deltaY > 0) {
+      sheet.style.transform = `translateY(${deltaY}px)`;
+    }
+  }, { passive: true });
+
+  dragHeader.addEventListener('touchend', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    sheet.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+    const deltaY = currentY - startY;
+    if (deltaY > 120) {
+      closeSheet();
+    } else {
+      sheet.style.transform = 'translateY(0)';
+    }
+  });
+
+  const inputs = sheet.querySelectorAll('.favor-store-price-input');
+  const sumDisplay = sheet.querySelector('#favor-products-sum');
+  const preview = sheet.querySelector('#client-total-preview');
 
   const updateTotals = () => {
     let sum = 0;
@@ -4050,12 +4108,7 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
     inputs[0].focus();
   }
 
-  const cancelBtn = modalEl.querySelector('#cancel-edit-price');
-  if (cancelBtn) {
-    cancelBtn.onclick = () => closeModal();
-  }
-
-  modalEl.querySelector('#confirm-edit-price').onclick = () => {
+  sheet.querySelector('#confirm-edit-price').onclick = () => {
     const storePrices = {};
     let hasInvalid = false;
     let sum = 0;
@@ -4078,7 +4131,7 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
       return;
     }
 
-    closeModal();
+    closeSheet();
     showToast('Actualizando precio...', 'info');
 
     (async () => {
@@ -4092,6 +4145,7 @@ async function showEditFavorPriceModal(order, isPersistent = false) {
     })();
   };
 }
+
 
 async function saveFavorStorePrices(orderId, storePrices) {
   const { getDoc, doc: fDoc, serverTimestamp, addDoc, collection, updateDoc } = await import('firebase/firestore');
@@ -4570,27 +4624,11 @@ function renderFinancesCharts(orders) {
           Aún no tienes entregas completadas en este período para graficar.
         </div>
       `}
-    </div>
-
-    <style>
-      .bar-chart-col:hover .bar-amount {
-        color: var(--color-primary) !important;
-        transform: scale(1.05) translateY(-2px);
-      }
-      .legend-row {
-        padding: 4px 6px;
-        border-radius: 8px;
-        transition: background 0.2s;
-      }
-      .legend-row:hover {
-        background: var(--color-bg-secondary);
-      }
-    </style>
   `;
 }
 
 async function loadProfessionalStats(driverId, callback = null) {
-  const { getDocs, collection, query, where } = await import('firebase/firestore');
+  const { getDocs, getDoc, doc, collection, query, where } = await import('firebase/firestore');
   const q = query(collection(db, 'orders'), where('driverId', '==', driverId), where('status', '==', 'completed'));
   
   try {
@@ -4626,6 +4664,36 @@ async function loadProfessionalStats(driverId, callback = null) {
     if (document.getElementById('stats-week')) document.getElementById('stats-week').textContent = formatPrice(earningsWeek);
     if (document.getElementById('stats-month')) document.getElementById('stats-month').textContent = formatPrice(earningsMonth);
 
+    // Compute cash vs digital split for Billetera
+    let cashEarnings = 0;
+    let digitalEarnings = 0;
+    orders.forEach(o => {
+      const method = (o.paymentMethod || 'efectivo').toLowerCase();
+      if (method === 'efectivo' || method === 'cash') {
+        cashEarnings += (o.deliveryCost || 0);
+      } else {
+        digitalEarnings += (o.deliveryCost || 0);
+      }
+    });
+
+    const combinedTotal = cashEarnings + digitalEarnings;
+
+    // Fetch user debt
+    const userDocSnap = await getDoc(doc(db, 'users', driverId));
+    const debt = userDocSnap.exists() ? (userDocSnap.data().deliveryDebt || 0) : 0;
+    const netBalance = digitalEarnings + cashEarnings - debt;
+
+    if (document.getElementById('wallet-digital-earnings')) document.getElementById('wallet-digital-earnings').textContent = formatPrice(digitalEarnings);
+    if (document.getElementById('wallet-cash-earnings')) document.getElementById('wallet-cash-earnings').textContent = formatPrice(cashEarnings);
+    if (document.getElementById('wallet-total-combined')) document.getElementById('wallet-total-combined').textContent = formatPrice(combinedTotal);
+    if (document.getElementById('wallet-app-fee')) document.getElementById('wallet-app-fee').textContent = `-${formatPrice(debt)}`;
+    
+    const netBalanceEl = document.getElementById('wallet-net-balance');
+    if (netBalanceEl) {
+      netBalanceEl.textContent = formatPrice(netBalance);
+      netBalanceEl.style.color = netBalance >= 0 ? '#10b981' : '#ef4444';
+    }
+
     // Render the CSS/SVG charts dynamically
     renderFinancesCharts(orders);
 
@@ -4634,26 +4702,22 @@ async function loadProfessionalStats(driverId, callback = null) {
 }
 
 async function showBalanceManagementModal(user, debt) {
+  const pendingProofs = getState().pendingProofs || [];
+  const totalPending = pendingProofs.reduce((sum, p) => sum + (p.amount || 0), 0);
+
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding:20px; background:var(--color-bg); height:100%; display:flex; flex-direction:column; overflow:hidden;';
+  modalEl.style.cssText = 'padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)) 20px; background:var(--color-bg); height:100%; display:flex; flex-direction:column; overflow:hidden; justify-content:space-between;';
   
   modalEl.innerHTML = `
-    <div style="margin-bottom:16px; text-align:center; flex-shrink:0;">
-      <div style="width:48px; height:48px; border-radius:16px; background:rgba(239,68,68,0.1); color:#ef4444; display:flex; align-items:center; justify-content:center; margin:0 auto 12px;">
-        ${icon('bank', 24)}
-      </div>
-      <h2 style="font-family:var(--font-display); font-size:1.4rem; font-weight:950; margin:0; letter-spacing:-0.03em; color:var(--color-text-primary);">Balance</h2>
-      <p style="font-size:12px; color:var(--color-text-tertiary); margin-top:4px; font-weight:700; opacity:0.8;">Estado de cuenta y pagos</p>
-    </div>
-
     <div style="flex:1; display:flex; flex-direction:column; gap:16px; overflow:hidden;">
       <div class="debt-card-v3" style="
         background: ${debt > 0 ? 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)' : 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)'};
         border: 1.5px solid ${debt > 0 ? '#fecaca' : '#bbf7d0'};
-        border-radius: 24px; padding: 20px;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.04);
+        border-radius: 24px; padding: 24px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.04);
         text-align: center;
         flex-shrink: 0;
+        margin-top: 10px;
       ">
         <style>
           [data-theme="dark"] .debt-card-v3 {
@@ -4661,37 +4725,62 @@ async function showBalanceManagementModal(user, debt) {
             border-color: ${debt > 0 ? '#991b1b' : '#065f46'} !important;
           }
         </style>
-        <span style="font-size:10px; font-weight:900; color:${debt > 0 ? '#ef4444' : '#10b981'}; text-transform:uppercase; letter-spacing:0.1em; display:block; margin-bottom:8px;">Balance Pendiente</span>
-        <div style="font-size:36px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#10b981'}; letter-spacing:-1.5px; line-height:1;">${formatPrice(debt)}</div>
-        <p style="font-size:11px; color:var(--color-text-tertiary); margin:12px 0 0; font-weight:700; line-height:1.4; opacity:0.8;">
+        <span style="font-size:11px; font-weight:900; color:${debt > 0 ? '#ef4444' : '#10b981'}; text-transform:uppercase; letter-spacing:0.1em; display:block; margin-bottom:8px;">Balance Pendiente</span>
+        <div style="font-size:38px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#10b981'}; letter-spacing:-1.5px; line-height:1;">${formatPrice(debt)}</div>
+        <p style="font-size:12px; color:var(--color-text-secondary); margin:14px 0 0; font-weight:700; line-height:1.45; opacity:0.85;">
           ${debt > 0 ? 'Este monto será descontado de tus próximas ganancias.' : 'No tenés deudas pendientes con la plataforma.'}
         </p>
       </div>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; flex-shrink:0;">
-        <button id="modal-view-history-btn" style="height:48px; border-radius:16px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text-primary); font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; text-transform:uppercase;">
+      ${totalPending > 0 ? `
+        <div style="background:linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(217,119,6,0.04) 100%); border:1px solid rgba(245,158,11,0.25); border-radius:18px; padding:12px 16px; display:flex; gap:8px; align-items:center; margin-top:2px; box-shadow:var(--shadow-sm); flex-shrink:0;">
+          <span style="font-size:16px;">⏳</span>
+          <div style="font-size:11.5px; color:#d97706; font-weight:700; line-height:1.4; text-align:left;">
+            Tenés una transferencia de <strong style="font-weight:900;">${formatPrice(totalPending)}</strong> pendiente de validación por administración.
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; flex-shrink:0;">
+        <button id="modal-view-history-btn" style="height:50px; border-radius:16px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text-primary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; text-transform:uppercase; transition:all 0.2s;">
           ${icon('history', 16)} Historial
         </button>
-        <button id="modal-regularize-btn" style="height:48px; border-radius:16px; background:var(--color-primary); border:none; color:white; font-weight:900; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; text-transform:uppercase; box-shadow:0 6px 15px rgba(var(--color-primary-rgb), 0.2);">
+        <button id="modal-regularize-btn" style="height:50px; border-radius:16px; background:var(--color-primary); border:none; color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; text-transform:uppercase; box-shadow:0 6px 16px rgba(var(--color-primary-rgb), 0.25); transition:all 0.2s;">
           ${icon('wallet', 16)} Regularizar
         </button>
       </div>
-
-      <button id="modal-send-proof-btn" style="width:100%; height:54px; border-radius:18px; background:#25D366; border:none; color:white; font-weight:950; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; text-transform:uppercase; box-shadow:0 8px 20px rgba(37, 211, 102, 0.25); flex-shrink:0;">
-        ${icon('whatsappLogo', 20)} Enviar comprobante
-      </button>
     </div>
+
+    <button id="modal-send-proof-btn" style="width:100%; height:54px; border-radius:18px; background:#25D366; border:none; color:white; font-weight:950; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; text-transform:uppercase; box-shadow:0 8px 20px rgba(37, 211, 102, 0.25); flex-shrink:0; margin-top:20px;">
+      ${icon('whatsappLogo', 20)} Enviar comprobante
+    </button>
   `;
 
-  showModal({ title: 'Gestión de Balance', content: modalEl, height: '70dvh' });
+  showModal({ 
+    title: 'Gestión de Balance', 
+    content: modalEl, 
+    height: '70dvh',
+    headerBackground: '#E11D48',
+    headerTextColor: 'white'
+  });
 
   modalEl.querySelector('#modal-view-history-btn').onclick = () => {
     showBalanceHistoryModal(user.uid);
   };
   modalEl.querySelector('#modal-regularize-btn').onclick = () => {
+    const pendingProofs = getState().pendingProofs || [];
+    if (pendingProofs.length > 0) {
+      showToast('⚠️ Ya tenés una liquidación pendiente de verificación.', 'warning');
+      return;
+    }
     showRegularizeModal(debt);
   };
   modalEl.querySelector('#modal-send-proof-btn').onclick = () => {
+    const pendingProofs = getState().pendingProofs || [];
+    if (pendingProofs.length > 0) {
+      showToast('⚠️ Ya tenés una liquidación pendiente de verificación.', 'warning');
+      return;
+    }
     const wsp = getState().whatsappPayments || '5491123456789';
     const msg = encodeURIComponent(`Hola, adjunto comprobante de pago de GoDelivery.\n---\nREPARTIDOR: ${user.displayName || user.name}\nID: ${user.deliveryId || '---'}\nMONTO: ${formatPrice(debt)}\nDETALLE: Saldar balance pendiente.`);
     window.open(`https://wa.me/${wsp}?text=${msg}`, '_blank');
@@ -4700,54 +4789,102 @@ async function showBalanceManagementModal(user, debt) {
 
 async function showRegularizeModal(debt) {
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding:24px; background:var(--color-bg); height:100%; display:flex; flex-direction:column;';
+  modalEl.style.cssText = 'padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)) 20px; background:var(--color-bg); height:100%; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden;';
   
-  modalEl.innerHTML = `
-    <div style="margin-bottom:24px; text-align:center;">
-      <div style="width:64px; height:64px; border-radius:20px; background:rgba(79,70,229,0.1); color:#4f46e5; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-        ${icon('bank', 32)}
-      </div>
-      <h2 style="font-family:var(--font-display); font-size:1.5rem; font-weight:900; margin:0; letter-spacing:-0.02em;">Regularizar Balance</h2>
-      <p style="font-size:13px; color:var(--color-text-tertiary); margin-top:8px;">Para saldar tu deuda de <strong>${formatPrice(debt)}</strong>, realizá una transferencia:</p>
-    </div>
+  const bankAlias = getState().bankAlias || 'godelivery.oficial';
+  const bankOwner = getState().bankOwner || 'GoDelivery S.R.L.';
 
-    <div style="flex:1;">
-      <div style="background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); border-radius:20px; padding:20px; margin-bottom:24px;">
-        <div style="margin-bottom:16px; border-bottom:1px dashed var(--color-border-light); padding-bottom:12px;">
-          <label style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; display:block;">ALIAS / CVU</label>
+  modalEl.innerHTML = `
+    <div style="flex:1; display:flex; flex-direction:column; gap:20px; overflow-y:auto; margin-bottom:16px;">
+      <p style="font-size:13.5px; color:var(--color-text-secondary); margin:10px 0 0; font-weight:700; text-align:center; line-height:1.5;">
+        Para saldar tu deuda de <strong style="color:#ef4444; font-size:16px; font-weight:950;">${formatPrice(debt)}</strong>, realizá una transferencia bancaria o Mercado Pago:
+      </p>
+
+      <div style="background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); border-radius:22px; padding:22px; box-shadow:var(--shadow-sm);">
+        <div style="margin-bottom:16px; border-bottom:1px dashed var(--color-border-light); padding-bottom:14px;">
+          <label style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; display:block; letter-spacing:0.06em;">ALIAS / CVU</label>
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="font-size:18px; color:var(--color-text); letter-spacing:0.02em;">godelivery.pagos</strong>
-            <button class="btn-copy" onclick="navigator.clipboard.writeText('godelivery.pagos'); showToast('Copiado', 'success')" style="background:none; border:none; color:var(--color-primary); cursor:pointer;">${icon('copy', 18)}</button>
+            <strong style="font-size:18px; color:var(--color-text-primary); letter-spacing:0.02em; font-family:var(--font-mono, monospace);">${bankAlias}</strong>
+            <button class="btn-copy" onclick="navigator.clipboard.writeText('${bankAlias}'); showToast('Copiado', 'success')" style="background:rgba(var(--color-primary-rgb),0.08); border:none; color:var(--color-primary); cursor:pointer; width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">
+              ${icon('copy', 16)}
+            </button>
           </div>
         </div>
         
         <div>
-          <label style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; display:block;">TITULAR</label>
-          <strong style="font-size:14px; color:var(--color-text);">GoDelivery S.R.L.</strong>
+          <label style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px; display:block; letter-spacing:0.06em;">TITULAR</label>
+          <strong style="font-size:15px; color:var(--color-text-primary); font-weight:800;">${bankOwner}</strong>
         </div>
       </div>
 
-      <div style="background:rgba(255,193,7,0.1); border:1px solid rgba(255,193,7,0.2); border-radius:16px; padding:16px; display:flex; gap:12px; align-items:flex-start;">
-        <div style="color:#ffc107; margin-top:2px;">${icon('info', 18)}</div>
-        <p style="font-size:12px; color:var(--color-text-secondary); margin:0; line-height:1.4; font-weight:600;">
-          Una vez realizada la transferencia, presioná el botón de abajo para enviar el comprobante por WhatsApp y que nuestro equipo habilite tu balance.
+      <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.15); border-radius:18px; padding:16px; display:flex; gap:12px; align-items:flex-start;">
+        <div style="color:#d97706; margin-top:2px; display:flex; flex-shrink:0;">${icon('info', 18)}</div>
+        <p style="font-size:12.5px; color:var(--color-text-secondary); margin:0; line-height:1.45; font-weight:600;">
+          Una vez realizada la transferencia, seleccioná y subí la foto de tu comprobante para que el administrador la verifique y active tu saldo.
         </p>
       </div>
     </div>
 
-    <button id="modal-send-proof-btn"
-            style="width:100%; height:56px; border-radius:18px; background:#25D366; color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 12px 24px rgba(37,211,102,0.3); display:flex; align-items:center; justify-content:center; gap:10px; text-transform:uppercase;">
-      <div style="color:white; display:flex;">${icon('whatsappLogo', 22)}</div> ENVIAR COMPROBANTE
+    <input type="file" id="receipt-file-input" accept="image/*" style="display:none;" />
+    
+    <button id="modal-upload-receipt-btn"
+            style="width:100%; height:54px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:950; font-size:14px; cursor:pointer; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25); display:flex; align-items:center; justify-content:center; gap:10px; text-transform:uppercase; flex-shrink:0; transition:all 0.2s;">
+      ${icon('camera', 20)} SUBIR COMPROBANTE
     </button>
   `;
 
-  showModal({ title: 'Regularizar Balance', content: modalEl, height: '70dvh' });
+  showModal({ 
+    title: 'Regularizar Balance', 
+    content: modalEl, 
+    height: '70dvh',
+    headerBackground: '#E11D48',
+    headerTextColor: 'white'
+  });
 
-  modalEl.querySelector('#modal-send-proof-btn').onclick = () => {
-    const user = getState().user;
-    const wsp = getState().whatsappPayments || '5491123456789';
-    const msg = encodeURIComponent(`Hola, adjunto comprobante de pago de GoDelivery.\n---\nREPARTIDOR: ${user.displayName || user.name}\nID: ${user.deliveryId || '---'}\nMONTO: ${formatPrice(debt)}\nDETALLE: Saldar balance pendiente.`);
-    window.open(`https://wa.me/${wsp}?text=${msg}`, '_blank');
+  const fileInput = modalEl.querySelector('#receipt-file-input');
+  const uploadBtn = modalEl.querySelector('#modal-upload-receipt-btn');
+
+  uploadBtn.onclick = () => {
+    fileInput.click();
+  };
+
+  fileInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    uploadBtn.disabled = true;
+    uploadBtn.innerHTML = 'Subiendo comprobante...';
+    uploadBtn.style.opacity = '0.7';
+
+    try {
+      const user = getState().user;
+      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      
+      const storageRef = ref(storage, `delivery_receipts/${user.uid}_${Date.now()}.jpg`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+
+      // Create transaction request in Firestore collection delivery_settlement_proofs
+      await addDoc(collection(db, 'delivery_settlement_proofs'), {
+        driverId: user.uid,
+        driverName: user.displayName || user.name || 'Repartidor',
+        driverDeliveryId: user.deliveryId || '---',
+        amount: debt,
+        imageUrl: downloadUrl,
+        status: 'pending',
+        createdAt: new Date()
+      });
+
+      showToast('✅ Comprobante subido con éxito. El administrador lo revisará en breve.', 'success');
+      closeModal(); // close Regularize Modal
+      closeModal(); // close Balance Management Modal
+    } catch (err) {
+      console.error(err);
+      showToast('❌ Error al subir comprobante. Reintenta.', 'error');
+      uploadBtn.disabled = false;
+      uploadBtn.innerHTML = `${icon('camera', 20)} SUBIR COMPROBANTE`;
+      uploadBtn.style.opacity = '1';
+    }
   };
 }
 
@@ -5131,103 +5268,332 @@ async function showSessionsHistoryModal(driverId) {
     }
   };
 }
-async function showBalanceHistoryModal(driverId) {
-  const { getDocs, collection, query, where, orderBy } = await import('firebase/firestore');
+async function showCompletedOrderDetailsModal(orderId) {
+  const { getDoc, doc } = await import('firebase/firestore');
+  const orderDoc = await getDoc(doc(db, 'orders', orderId));
+  if (!orderDoc.exists()) {
+    import('../components/toast.js').then(m => m.showToast('No se encontró el pedido', 'warning'));
+    return;
+  }
+  const o = { id: orderDoc.id, ...orderDoc.data() };
   
   const content = document.createElement('div');
-  content.style.cssText = 'padding:24px; background:var(--color-bg); min-height:60dvh; display:flex; flex-direction:column;';
+  content.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px;';
+  
+  let itemsHtml = '';
+  if (o.isFavor) {
+    itemsHtml = `<p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.4; margin:0;">${o.details || o.description || 'Sin descripción'}</p>`;
+  } else if (o.items && o.items.length > 0) {
+    itemsHtml = o.items.map(item => `
+      <div style="font-size:13px; color:var(--color-text-secondary); margin-bottom:6px;"><span style="color:var(--color-primary); font-weight:800;">${item.qty || 1}x</span> ${item.name}</div>
+    `).join('');
+  } else {
+    itemsHtml = `<p style="font-size:13px; color:var(--color-text-tertiary); font-style:italic; margin:0;">Pedido de Comercio</p>`;
+  }
+
+  const totalAmount = (o.subtotal || 0) + (o.deliveryCost || 0) + (o.tip || 0) + (o.appUsageFee || 0);
+
+  content.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:14px;">
+      <div>
+        <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Cliente</span>
+        <div style="font-size:14px; font-weight:800; color:var(--color-text-primary); margin-top:2px;">${o.userName || 'Cliente'}</div>
+        ${o.userPhone ? `<div style="font-size:12px; color:var(--color-text-secondary); margin-top:2px;">Tel: ${o.userPhone}</div>` : ''}
+      </div>
+
+      <div>
+        <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Dirección de Entrega</span>
+        <div style="font-size:13.5px; font-weight:700; color:var(--color-text-primary); margin-top:2px;">${o.deliveryAddress || '---'}</div>
+        ${o.addressNotes ? `<div style="font-size:12.5px; color:#d97706; font-weight:700; margin-top:2px;">⚠️ Ref: ${o.addressNotes}</div>` : ''}
+      </div>
+
+      <div style="border-top:1px solid var(--color-border-light); padding-top:12px;">
+        <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Productos</span>
+        <div style="margin-top:6px;">${itemsHtml}</div>
+      </div>
+
+      <div style="background:var(--color-bg-secondary); border-radius:16px; padding:14px; border:1px solid var(--color-border-light); display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:600;">
+          <span style="color:var(--color-text-secondary);">Subtotal Productos</span>
+          <span style="color:var(--color-text-primary);">$${Math.round(o.subtotal || 0).toLocaleString('es-AR')}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:600;">
+          <span style="color:var(--color-text-secondary);">Costo de Envío</span>
+          <span style="color:var(--color-text-primary);">$${Math.round(o.deliveryCost || 0).toLocaleString('es-AR')}</span>
+        </div>
+        ${o.tip > 0 ? `
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:600; color:#10b981;">
+            <span>Propina</span>
+            <span>+$${Math.round(o.tip || 0).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        ${o.appUsageFee > 0 ? `
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:600; color:#f59e0b;">
+            <span>Tarifa de Uso App</span>
+            <span>+$${Math.round(o.appUsageFee || 0).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:900; border-top:1px solid var(--color-border-light); padding-top:8px; margin-top:4px;">
+          <span>Total Cobrado</span>
+          <span style="color:var(--color-primary);">$${Math.round(totalAmount).toLocaleString('es-AR')}</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  showModal({ title: `Detalle de Pedido #${o.orderId || '---'}`, content });
+}
+
+async function showBalanceHistoryModal(driverId) {
+  const { getDocs, getDoc, doc, collection, query, where } = await import('firebase/firestore');
+  
+  const content = document.createElement('div');
+  content.style.cssText = 'padding:16px 20px; background:var(--color-bg); min-height:60dvh; display:flex; flex-direction:column;';
   content.innerHTML = `<div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>`;
   
-  showModal({ title: 'Historial de Balance', content, height: '80dvh' });
+  showModal({ 
+    title: 'Historial de Balance', 
+    content, 
+    height: '80dvh',
+    headerBackground: '#E11D48',
+    headerTextColor: 'white'
+  });
   
   try {
-    const q = query(
+    // 1. Fetch user deliveryDebt from Firestore reference correctly
+    const userDocSnap = await getDoc(doc(db, 'users', driverId));
+    const userData = userDocSnap.exists() ? userDocSnap.data() : {};
+    const actualDebt = userData.deliveryDebt || 0;
+    const lastLiquidationAt = userData.lastLiquidationAt;
+
+    // 2. Fetch transactions
+    const qTrans = query(
       collection(db, 'delivery_transactions'), 
       where('driverId', '==', driverId)
     );
-    
-    const snap = await getDocs(q);
-    const transactions = snap.docs
+    const transSnap = await getDocs(qTrans);
+    const transList = transSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // 3. Fetch completed orders pending liquidation
+    const qOrders = query(
+      collection(db, 'orders'),
+      where('driverId', '==', driverId),
+      where('status', '==', 'completed')
+    );
+    const ordersSnap = await getDocs(qOrders);
+    const pendingOrdersList = ordersSnap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-    
-    if (transactions.length === 0) {
-      content.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--color-text-tertiary); opacity:0.6;">${icon('receipt', 48)}<p style="margin-top:16px; font-weight:600;">No hay movimientos registrados</p></div>`;
-      return;
+      .filter(o => {
+        let isSettled = o.isSettledDriver === true;
+        if (!isSettled && lastLiquidationAt) {
+          const lqTime = lastLiquidationAt.toMillis ? lastLiquidationAt.toMillis() : new Date(lastLiquidationAt).getTime();
+          const orderTime = o.deliveredAt ? (o.deliveredAt.toMillis ? o.deliveredAt.toMillis() : new Date(o.deliveredAt).getTime()) : (o.createdAt ? (o.createdAt.toMillis ? o.createdAt.toMillis() : new Date(o.createdAt).getTime()) : 0);
+          if (orderTime > 0 && orderTime <= lqTime) {
+            isSettled = true;
+          }
+        }
+        return !isSettled && (o.appUsageFee || 0) > 0;
+      })
+      .map(o => ({
+        id: o.id,
+        type: 'app_usage_fee',
+        amount: o.appUsageFee,
+        description: `Tarifa de Uso App (Pedido #${o.orderId})`,
+        createdAt: o.deliveredAt || o.createdAt,
+        orderId: o.id
+      }));
+
+    // 4. Algorithm to build "Pendientes de Liquidar" list that sums exactly to actualDebt
+    const allCharges = [
+      ...pendingOrdersList,
+      ...transList.filter(t => t.type === 'canon_charge').map(t => ({
+        id: t.id,
+        type: 'canon_charge',
+        amount: t.amount,
+        description: t.description || 'Canon Diario Jornada',
+        createdAt: t.createdAt
+      }))
+    ].sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt).getTime();
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt).getTime();
+      return (timeB || 0) - (timeA || 0);
+    });
+
+    const pendingCharges = [];
+    let accumulated = 0;
+    for (const charge of allCharges) {
+      if (accumulated >= actualDebt) break;
+      const amt = charge.amount || 0;
+      if (accumulated + amt <= actualDebt) {
+        pendingCharges.push(charge);
+        accumulated += amt;
+      } else {
+        const partialAmt = actualDebt - accumulated;
+        pendingCharges.push({
+          ...charge,
+          amount: partialAmt,
+          isPartial: true
+        });
+        accumulated += partialAmt;
+      }
     }
-    
+
+    const discrepancy = actualDebt - accumulated;
+    if (Math.abs(discrepancy) > 1) {
+      pendingCharges.push({
+        id: 'virtual_adjustment',
+        type: 'adjustment_charge',
+        amount: discrepancy,
+        description: 'Saldo Pendiente Anterior',
+        createdAt: null
+      });
+    }
+
+    // 5. Liquidations tab list (all past liquidations/coupons)
+    const liquidationsList = transList
+      .filter(t => t.type === 'liquidation' || t.type === 'coupon_reimbursement')
+      .sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt).getTime();
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt).getTime();
+        return (timeB || 0) - (timeA || 0);
+      });
+
+    // 6. Draw Tabs
     content.innerHTML = `
-      <div style="flex:1; overflow-y:auto; padding-bottom:20px;">
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          ${transactions.map(t => {
-            const isLiquidation = t.type === 'liquidation';
-            const isCoupon = t.type === 'coupon_reimbursement';
-            const isCanon = t.type === 'canon_charge';
-            const amount = t.amount || 0;
-            const absAmount = Math.abs(amount);
-
-            let iconColor = '#ef4444';
-            let iconBg = 'rgba(239,68,68,0.1)';
-            let iconName = 'package';
-            let amountSign = '+';
-            let amountColor = '#ef4444';
-            let labelText = 'Tarifa App';
-
-            if (isLiquidation) {
-              iconColor = '#22c55e';
-              iconBg = 'rgba(34,197,94,0.1)';
-              iconName = 'checkCircle';
-              amountSign = '-';
-              amountColor = '#22c55e';
-              labelText = 'Saldo Restado';
-            } else if (isCoupon) {
-              iconColor = '#a855f7';
-              iconBg = 'rgba(168,85,247,0.1)';
-              iconName = 'tag';
-              amountSign = '-';
-              amountColor = '#a855f7';
-              labelText = 'Reintegro Cupón';
-            } else if (isCanon) {
-              iconColor = '#e11d48';
-              iconBg = 'rgba(225,29,72,0.1)';
-              iconName = 'bike';
-              amountSign = '+';
-              amountColor = '#e11d48';
-              labelText = 'Canon Diario';
-            }
-            
-            return `
-              <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:18px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm);">
-                <div style="min-width:0; flex:1; display:flex; align-items:center; gap:14px;">
-                  <div style="width:40px; height:40px; border-radius:12px; background:${iconBg}; color:${iconColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                    ${icon(iconName, 20)}
-                  </div>
-                  <div style="min-width:0;">
-                    <div style="font-weight:800; font-size:14px; color:var(--color-text); margin-bottom:2px;">${t.description || (isLiquidation ? 'Liquidación' : isCoupon ? 'Reintegro Cupón' : 'Entrega')}</div>
-                    <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase;">
-                      ${t.createdAt ? new Date(t.createdAt.toDate()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : ''}
-                    </div>
-                  </div>
-                </div>
-                <div style="text-align:right; margin-left:16px;">
-                  <div style="font-weight:900; font-size:17px; color:${amountColor}; letter-spacing:-0.5px;">
-                    ${amountSign}${formatPrice(absAmount)}
-                  </div>
-                  <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">
-                    ${labelText}
-                  </div>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
+      <!-- Tab Headers -->
+      <div style="display:flex; background:var(--color-bg-secondary); border-radius:16px; padding:4px; margin-bottom:18px; border:1px solid var(--color-border-light); flex-shrink:0;">
+        <button id="tab-btn-pending" style="flex:1; height:40px; border-radius:12px; border:none; background:var(--color-surface); color:var(--color-primary); font-size:12px; font-weight:800; cursor:pointer; transition:all 0.2s; box-shadow:var(--shadow-sm);">
+          A Liquidar ($${Math.round(actualDebt).toLocaleString('es-AR')})
+        </button>
+        <button id="tab-btn-history" style="flex:1; height:40px; border-radius:12px; border:none; background:transparent; color:var(--color-text-secondary); font-size:12px; font-weight:700; cursor:pointer; transition:all 0.2s;">
+          Liquidaciones
+        </button>
       </div>
-      <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--color-border-light); text-align:center;">
-        <p style="font-size:11px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Historial completo de movimientos</p>
+
+      <!-- Tab Content Area -->
+      <div id="balance-tab-content-area" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px;">
       </div>
     `;
+
+    const pendingBtn = content.querySelector('#tab-btn-pending');
+    const historyBtn = content.querySelector('#tab-btn-history');
+    const contentArea = content.querySelector('#balance-tab-content-area');
+
+    function renderTab(tabName) {
+      if (tabName === 'pending') {
+        pendingBtn.style.background = 'var(--color-surface)';
+        pendingBtn.style.color = 'var(--color-primary)';
+        pendingBtn.style.fontWeight = '800';
+        pendingBtn.style.boxShadow = 'var(--shadow-sm)';
+        
+        historyBtn.style.background = 'transparent';
+        historyBtn.style.color = 'var(--color-text-secondary)';
+        historyBtn.style.fontWeight = '700';
+        historyBtn.style.boxShadow = 'none';
+
+        if (pendingCharges.length === 0) {
+          contentArea.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--color-text-tertiary); opacity:0.6;">${icon('checkCircle', 48)}<p style="margin-top:16px; font-weight:600;">¡Tu cuenta está al día!</p></div>`;
+          return;
+        }
+
+        contentArea.innerHTML = pendingCharges.map(t => {
+          const isCanon = t.type === 'canon_charge';
+          const isAppFee = t.type === 'app_usage_fee';
+          const amount = t.amount || 0;
+          const formattedDate = t.createdAt ? new Date(t.createdAt.toMillis ? t.createdAt.toMillis() : new Date(t.createdAt).getTime()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Saldo Pendiente';
+          
+          let iconColor = isCanon ? '#e11d48' : '#f59e0b';
+          let iconBg = isCanon ? 'rgba(225,29,72,0.08)' : 'rgba(245,158,11,0.08)';
+          let iconName = isCanon ? 'bike' : 'cart';
+          if (t.type === 'adjustment_charge') {
+            iconColor = '#64748b';
+            iconBg = 'rgba(100,116,139,0.08)';
+            iconName = 'receipt';
+          }
+
+          return `
+            <div class="balance-item-card" data-order-id="${t.orderId || ''}" style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:18px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:${t.orderId ? 'pointer' : 'default'}; transition:all 0.2s; box-shadow:var(--shadow-xs);">
+              <div style="min-width:0; flex:1; display:flex; align-items:center; gap:10px;">
+                <div style="width:34px; height:34px; border-radius:10px; background:${iconBg}; color:${iconColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon(iconName, 16)}
+                </div>
+                <div style="min-width:0; display:flex; flex-direction:column; gap:1px;">
+                  <div style="font-weight:800; font-size:13.5px; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${t.description}</div>
+                  <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700;">${formattedDate}</div>
+                </div>
+              </div>
+              <div style="text-align:right; margin-left:12px; flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end;">
+                <span style="font-weight:900; font-size:15px; color:${iconColor}; letter-spacing:-0.5px;">+$${Math.round(amount).toLocaleString('es-AR')}</span>
+                <span style="font-size:8px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.02em;">${isCanon ? 'CANON' : isAppFee ? 'TARIFA APP' : 'SALDO'}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        contentArea.querySelectorAll('.balance-item-card').forEach(card => {
+          if (card.dataset.orderId) {
+            card.addEventListener('click', () => {
+              showCompletedOrderDetailsModal(card.dataset.orderId);
+            });
+            // Hover styling
+            card.onmouseover = () => { card.style.borderColor = 'var(--color-primary)'; card.style.background = 'rgba(var(--color-primary-rgb), 0.02)'; };
+            card.onmouseout = () => { card.style.borderColor = 'var(--color-border-light)'; card.style.background = 'var(--color-surface)'; };
+          }
+        });
+
+      } else {
+        historyBtn.style.background = 'var(--color-surface)';
+        historyBtn.style.color = 'var(--color-primary)';
+        historyBtn.style.fontWeight = '800';
+        historyBtn.style.boxShadow = 'var(--shadow-sm)';
+        
+        pendingBtn.style.background = 'transparent';
+        pendingBtn.style.color = 'var(--color-text-secondary)';
+        pendingBtn.style.fontWeight = '700';
+        pendingBtn.style.boxShadow = 'none';
+
+        if (liquidationsList.length === 0) {
+          contentArea.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--color-text-tertiary); opacity:0.6;">${icon('receipt', 48)}<p style="margin-top:16px; font-weight:600;">No hay liquidaciones registradas</p></div>`;
+          return;
+        }
+
+        contentArea.innerHTML = liquidationsList.map(t => {
+          const isCoupon = t.type === 'coupon_reimbursement';
+          const formattedDate = t.createdAt ? new Date(t.createdAt.toMillis ? t.createdAt.toMillis() : new Date(t.createdAt).getTime()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Reciente';
+          
+          const iconColor = isCoupon ? '#a855f7' : '#22c55e';
+          const iconBg = isCoupon ? 'rgba(168,85,247,0.08)' : 'rgba(34,197,94,0.08)';
+          const iconName = isCoupon ? 'tag' : 'checkCircle';
+
+          return `
+            <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:18px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-xs);">
+              <div style="min-width:0; flex:1; display:flex; align-items:center; gap:10px;">
+                <div style="width:34px; height:34px; border-radius:10px; background:${iconBg}; color:${iconColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  ${icon(iconName, 16)}
+                </div>
+                <div style="min-width:0; display:flex; flex-direction:column; gap:1px;">
+                  <div style="font-weight:800; font-size:13.5px; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${t.description || 'Liquidación de Balance'}</div>
+                  <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700;">${formattedDate}</div>
+                </div>
+              </div>
+              <div style="text-align:right; margin-left:12px; flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end;">
+                <span style="font-weight:900; font-size:15px; color:${iconColor}; letter-spacing:-0.5px;">-$${Math.round(Math.abs(t.amount || 0)).toLocaleString('es-AR')}</span>
+                <span style="font-size:8px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.02em;">${isCoupon ? 'REINTEGRO' : 'LIQUIDADO'}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    pendingBtn.onclick = () => renderTab('pending');
+    historyBtn.onclick = () => renderTab('history');
+
+    // Default to pending tab
+    renderTab('pending');
+
   } catch (e) {
-    console.error(e);
+    console.error("Error drawing balance history modal:", e);
     content.innerHTML = `<p style="color:var(--color-danger); text-align:center; padding:40px;">Error al cargar el historial de balance.</p>`;
   }
 }
@@ -5257,50 +5623,109 @@ function renderStatusBar(user) {
     document.head.appendChild(s);
   }
 
+  const pendingProofs = getState().pendingProofs || [];
+  const totalPending = pendingProofs.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const pendingBadgeHtml = totalPending > 0 ? `
+    <div style="
+      font-size: 10px;
+      font-weight: 900;
+      background: linear-gradient(135deg, rgba(245,158,11,0.12) 0%, rgba(217,119,6,0.08) 100%);
+      color: #d97706;
+      padding: 6px 11px;
+      border-radius: 100px;
+      border: 1px solid rgba(245,158,11,0.25);
+      display: flex; align-items: center; gap: 5px;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(245,158,11,0.1);
+    " onclick="document.getElementById('status-tarife-badge')?.click()">
+      <span style="opacity: 0.75; font-size:9px; letter-spacing:0.5px;">⏳ PENDIENTE:</span>
+      <strong style="font-weight: 950; font-size: 11px;">${formatPrice(totalPending)}</strong>
+    </div>
+  ` : '';
+
   return `
     <div id="session-status-bar" class="status-bar-slide" style="
-      padding: 12px 20px;
+      padding: 12px 16px;
       background: ${finalIsOnline ? 'rgba(34,197,94,0.08)' : 'rgba(148,163,184,0.05)'};
       border-bottom: 1px solid ${finalIsOnline ? 'rgba(34,197,94,0.12)' : 'var(--color-border-light)'};
       display: flex; align-items: center; justify-content: space-between;
+      gap: 8px;
       backdrop-filter: blur(10px);
       transition: all 0.5s ease;
     ">
-      <div style="display:flex; align-items:center; gap:12px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-shrink:1; min-width:0;">
         <div class="${finalIsOnline ? 'status-dot-active' : ''}" style="
-          width: 10px; height: 10px; border-radius: 50%;
+          width: 8px; height: 8px; border-radius: 50%;
           background: ${finalIsOnline ? '#22c55e' : '#64748b'};
-          box-shadow: ${finalIsOnline ? '0 0 12px #22c55e' : 'none'};
+          box-shadow: ${finalIsOnline ? '0 0 10px #22c55e' : 'none'};
           transition: all 0.5s ease;
+          flex-shrink: 0;
         "></div>
-        <div style="display:flex; flex-direction:column;">
+        <div style="display:flex; flex-direction:column; min-width:0;">
           <span style="
-            font-size: 12px; font-weight: 800;
+            font-size: 11px; font-weight: 800;
             color: ${finalIsOnline ? '#22c55e' : 'var(--color-text-tertiary)'};
             text-transform: uppercase; letter-spacing: 0.05em;
             transition: all 0.5s ease;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           ">
             ${finalIsOnline ? 'Conectado' : 'Desconectado'}
           </span>
-          <span style="font-size: 10px; color: var(--color-text-tertiary); font-weight: 600;">
-            ${finalIsOnline ? 'Recibiendo pedidos en vivo' : 'No visible para comercios'}
+          <span style="font-size: 9px; color: var(--color-text-tertiary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${finalIsOnline ? 'En línea' : 'No visible'}
           </span>
         </div>
       </div>
+
+      <!-- BADGES CONTAINER -->
+      <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+        ${pendingBadgeHtml}
+        
+        <!-- TARIFA APP BADGE -->
+        <div id="status-tarife-badge" style="
+          font-size: 10px;
+          font-weight: 900;
+          background: ${(latestUser.deliveryDebt || 0) > 0
+            ? 'linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(185,28,28,0.08) 100%)'
+            : 'linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(5,150,105,0.08) 100%)'};
+          color: ${(latestUser.deliveryDebt || 0) > 0 ? '#ef4444' : '#10b981'};
+          padding: 6px 11px;
+          border-radius: 100px;
+          border: 1px solid ${(latestUser.deliveryDebt || 0) > 0 ? 'rgba(239,68,68,0.25)' : 'rgba(16,185,129,0.25)'};
+          display: flex; align-items: center; gap: 5px;
+          cursor: pointer;
+          user-select: none;
+          white-space: nowrap;
+          transition: all 0.2s ease;
+          flex-shrink: 0;
+          box-shadow: ${(latestUser.deliveryDebt || 0) > 0 ? '0 2px 8px rgba(239,68,68,0.1)' : '0 2px 8px rgba(16,185,129,0.1)'};
+        ">
+          <span style="opacity: 0.75; font-size:9px; letter-spacing:0.5px;">TARIFA:</span>
+          <strong style="font-weight: 950; font-size: 11px;">${formatPrice(latestUser.deliveryDebt || 0)}</strong>
+        </div>
+      </div>
+
       <button id="session-toggle-btn" style="
-        height: 36px; padding: 0 18px; border-radius: 12px;
+        height: 33px; padding: 0 14px; border-radius: 100px;
         border: none;
-        background: ${finalIsOnline ? 'rgba(239, 68, 68, 0.08)' : 'var(--color-primary)'};
+        background: ${finalIsOnline
+          ? 'linear-gradient(135deg, rgba(239,68,68,0.1) 0%, rgba(185,28,28,0.07) 100%)'
+          : 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)'};
         color: ${finalIsOnline ? '#ef4444' : 'white'};
-        font-weight: 900; font-size: 11px;
+        font-weight: 900; font-size: 10px; letter-spacing: 0.3px;
         cursor: pointer;
-        box-shadow: ${finalIsOnline ? 'none' : '0 4px 15px rgba(var(--color-primary-rgb), 0.3)'};
-        border: 1px solid ${finalIsOnline ? 'rgba(239, 68, 68, 0.2)' : 'transparent'};
+        box-shadow: ${finalIsOnline ? '0 1px 4px rgba(239,68,68,0.15)' : '0 4px 15px rgba(225,29,72,0.3)'};
+        border: 1px solid ${finalIsOnline ? 'rgba(239,68,68,0.2)' : 'transparent'};
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         text-transform: uppercase;
-        display: flex; align-items: center; gap: 8px;
+        display: flex; align-items: center; gap: 6px;
+        flex-shrink: 0;
       ">
-        ${finalIsOnline ? icon('x', 14) + ' Desconectar' : icon('power', 14) + ' Conectar'}
+        ${finalIsOnline ? icon('x', 11) + ' Salir' : icon('power', 11) + ' Conectar'}
       </button>
     </div>
   `;
@@ -5361,7 +5786,8 @@ export async function ensureDriverPermissions() {
         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3500, maximumAge: 10000, enableHighAccuracy: true });
       });
 
-      if (pos && pos.coords && typeof pos.coords.accuracy === 'number' && pos.coords.accuracy > 100) {
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile && pos && pos.coords && typeof pos.coords.accuracy === 'number' && pos.coords.accuracy > 100) {
         const preciseHelpText = isStandalone
           ? (isIOS
               ? 'En tu iPhone: Abrí <b>Ajustes</b> ➔ <b>Privacidad y seguridad</b> ➔ <b>Localización</b> ➔ Buscá <b>GoDelivery / Safari</b> ➔ Activá el switch <b>"Ubicación precisa"</b>.'
@@ -5415,6 +5841,14 @@ export async function ensureDriverPermissions() {
 function attachStatusBarListeners(user) {
   const btn = document.getElementById('session-toggle-btn');
   if (!btn || !user) return;
+
+  const badge = document.getElementById('status-tarife-badge');
+  if (badge) {
+    badge.onclick = () => {
+      const latest = getState().user || user;
+      showBalanceManagementModal(latest, latest.deliveryDebt || 0);
+    };
+  }
   
   btn.onclick = async () => {
     const currentUser = getState().user || user;
@@ -5443,6 +5877,41 @@ function attachStatusBarListeners(user) {
       });
     } else {
       if (btn.disabled) return;
+
+      // Semáforo de Deuda guard
+      const debtLimitEnabled = getState().debtLimitEnabled === true;
+      const maxDebtLimit = getState().maxDebtLimit !== undefined ? getState().maxDebtLimit : 15000;
+      const debt = currentUser.deliveryDebt || 0;
+      
+      if (debtLimitEnabled && debt > maxDebtLimit) {
+        showModal({
+          title: '🚨 Cuenta Suspendida por Deuda',
+          content: `
+            <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; background: var(--color-bg);">
+              <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center;">
+                ${icon('shieldAlert', 28)}
+              </div>
+              <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Límite de Deuda Excedido</h3>
+              <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
+                Tu deuda acumulada es de <strong style="color:#ef4444;">${formatPrice(debt)}</strong>, lo cual supera el límite permitido de <strong>${formatPrice(maxDebtLimit)}</strong>.<br><br>
+                Para poder conectarte y seguir recibiendo pedidos, debés transferir y subir tu comprobante de pago en el Gestor de Balance.
+              </p>
+              <button id="modal-suspend-pay-btn" style="width:100%; height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:13px; cursor:pointer; text-transform:uppercase; margin-top:8px; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.25);">
+                Regularizar Ahora
+              </button>
+            </div>
+          `,
+          height: 'auto',
+          headerBackground: '#E11D48',
+          headerTextColor: 'white'
+        });
+        
+        document.getElementById('modal-suspend-pay-btn').onclick = () => {
+          closeModal();
+          showBalanceManagementModal(currentUser, debt);
+        };
+        return;
+      }
       
       const originalText = btn.innerHTML;
 
@@ -5459,9 +5928,9 @@ function attachStatusBarListeners(user) {
         const day = String(now.getDate()).padStart(2, '0');
         const todayStr = `${year}-${month}-${day}`;
 
-        const isExempt = user.isCanonExempt === true;
+        const isExempt = user.isCanonExempt === true || user.role === 'admin' || user.isAdmin === true;
         const isFirstConnectionToday = !isExempt && user.lastCanonChargeDate !== todayStr;
-        const configuredCanonAmount = (window.gd_settings && window.gd_settings.canonAmount) || 2000;
+        const configuredCanonAmount = getState().canonAmount || 2000;
 
         const modalMessage = isFirstConnectionToday
           ? `Comenzarás a recibir pedidos en tu zona. Se sumarán <b>$${configuredCanonAmount.toLocaleString('es-AR')}</b> de canon diario a tu saldo de comisiones.`
@@ -5501,38 +5970,44 @@ function attachStatusBarListeners(user) {
                 }
 
                 if (isFirstConnectionToday) {
-                  const { doc, setDoc, updateDoc, increment, serverTimestamp, collection } = await import('firebase/firestore');
+                  const { doc, setDoc, updateDoc, increment, serverTimestamp, collection, getDoc } = await import('firebase/firestore');
                   const { db } = await import('../firebase.js');
 
                   const canonDocRef = doc(db, 'delivery_canon_payments', `${user.uid}_${todayStr}`);
                   
-                  // 1. Record individual Canon transaction
-                  await setDoc(canonDocRef, {
-                    driverId: user.uid,
-                    driverName: user.displayName || user.name || 'Repartidor',
-                    dateStr: todayStr,
-                    amount: configuredCanonAmount,
-                    settled: false,
-                    createdAt: serverTimestamp()
-                  }, { merge: true });
+                  // Double check in Firestore to absolutely prevent duplicates
+                  const canonSnap = await getDoc(canonDocRef);
+                  if (canonSnap.exists() && canonSnap.data().amount > 0) {
+                    console.log(`[Canon] Already charged for today (${todayStr}) in Firestore. Skipping duplicate charge.`);
+                  } else {
+                    // 1. Record individual Canon transaction
+                    await setDoc(canonDocRef, {
+                      driverId: user.uid,
+                      driverName: user.displayName || user.name || 'Repartidor',
+                      dateStr: todayStr,
+                      amount: configuredCanonAmount,
+                      settled: false,
+                      createdAt: serverTimestamp()
+                    }, { merge: true });
 
-                  // 2. Record in delivery_transactions so it appears in the Driver's Balance History
-                  const transRef = doc(collection(db, 'delivery_transactions'));
-                  await setDoc(transRef, {
-                    driverId: user.uid,
-                    type: 'canon_charge',
-                    amount: configuredCanonAmount,
-                    description: `Canon Diario Jornada (${todayStr})`,
-                    createdAt: serverTimestamp()
-                  });
+                    // 2. Record in delivery_transactions so it appears in the Driver's Balance History
+                    const transRef = doc(collection(db, 'delivery_transactions'));
+                    await setDoc(transRef, {
+                      driverId: user.uid,
+                      type: 'canon_charge',
+                      amount: configuredCanonAmount,
+                      description: `Canon Diario Jornada (${todayStr})`,
+                      createdAt: serverTimestamp()
+                    });
 
-                  // 3. Add canon amount to deliveryDebt and update lastCanonChargeDate
-                  await updateDoc(doc(db, 'users', user.uid), {
-                    deliveryDebt: increment(configuredCanonAmount),
-                    lastCanonChargeDate: todayStr
-                  });
+                    // 3. Add canon amount to deliveryDebt and update lastCanonChargeDate
+                    await updateDoc(doc(db, 'users', user.uid), {
+                      deliveryDebt: increment(configuredCanonAmount),
+                      lastCanonChargeDate: todayStr
+                    });
 
-                  showToast(`🛵 Se registraron +$${configuredCanonAmount.toLocaleString('es-AR')} de canon diario en tu saldo de comisiones.`, 'info');
+                    showToast(`🛵 Se registraron +$${configuredCanonAmount.toLocaleString('es-AR')} de canon diario en tu saldo de comisiones.`, 'info');
+                  }
                 }
 
                 await startSession(user);
@@ -5940,7 +6415,8 @@ export async function markAsPickedUp(orderIdOrIds) {
           if (orderSnap.exists()) {
             const orderData = orderSnap.data();
             if (orderData.userId) {
-              const codeStr = orderData.verificationCode ? ` Tené listo tu código de entrega: ${orderData.verificationCode}` : '';
+              const isEncomienda = orderData.favorType === 'encomienda' || (orderData.isFavor && orderData.favorType === 'encomienda');
+              const codeStr = (orderData.verificationCode && !isEncomienda) ? ` Tené listo tu código de entrega: ${orderData.verificationCode}` : '';
               await addDoc(collection(db, 'users', orderData.userId, 'notifications'), {
                 title: orderData.isFavor ? '¡Tu favor va en camino! 🚴' : '¡Tu pedido va en camino! 🚴',
                 body: orderData.isFavor 
@@ -6408,21 +6884,35 @@ export async function markAsDelivered(orderIdOrIds) {
     const totalAppFee = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
     const batch = writeBatch(db);
 
+    // Fetch customer data docs
+    const customerUids = [...new Set(orders.map(o => o.userId).filter(Boolean))];
+    const customerDataMap = {};
+    for (const uid of customerUids) {
+      const userSnap = await getDoc(doc(db, 'users', uid));
+      if (userSnap.exists()) {
+        customerDataMap[uid] = userSnap.data();
+      }
+    }
+
     // 2. Update orders to completed (this is fully authorized by the driver's write rules on orders)
-    ids.forEach(id => {
+    for (const id of ids) {
       const orderData = orders.find(o => o.id === id);
       batch.update(doc(db, 'orders', id), {
         status: 'completed',
         deliveredAt: serverTimestamp(),
         deliverySessionId: user.currentSessionId || orderData?.deliverySessionId || null
       });
-    });
 
+      if (orderData?.userId && customerDataMap[orderData.userId]) {
+        const { processOrderCompletionRewards } = await import('../utils/rewards.js');
+        await processOrderCompletionRewards(batch, orderData.userId, customerDataMap[orderData.userId], id);
+      }
+    }
+
+    // NOTE: deliveryDebt is incremented by the Cloud Function (functions/index.js)
+    // when the order status changes to 'completed'. We only update local state here
+    // to reflect the change immediately in the UI without waiting for Firestore.
     if (totalAppFee > 0) {
-      batch.update(doc(db, 'users', user.uid), {
-        deliveryDebt: increment(totalAppFee)
-      });
-      
       const currentLocalUser = getState().user || {};
       const newDebt = (currentLocalUser.deliveryDebt || 0) + totalAppFee;
       setState('user', { ...currentLocalUser, deliveryDebt: newDebt });
@@ -6790,8 +7280,22 @@ export async function renderDailyEarningsWidget(user) {
             </div>
           </div>
         </div>
+
+        <!-- Ver Pedidos Button -->
+        ${todayCount > 0 ? `
+        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.07);">
+          <button id="view-today-orders-btn" style="width:100%; height:36px; border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.8); font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s; letter-spacing:0.3px; text-transform:uppercase;" onmouseover="this.style.background='rgba(255,255,255,0.13)'" onmouseout="this.style.background='rgba(255,255,255,0.07)'">
+            ${icon('list', 14)} Ver pedidos de hoy (${todayCount})
+          </button>
+        </div>` : ''}
       </div>
     `;
+
+    if (todayCount > 0) {
+      document.getElementById('view-today-orders-btn')?.addEventListener('click', () => {
+        window._todayOrdersList && openTodayOrdersSheet(window._todayOrdersList);
+      });
+    }
   };
 
   renderFrame(0, 0);
@@ -6811,6 +7315,7 @@ export async function renderDailyEarningsWidget(user) {
     const snap = await getDocs(q);
     let todayTotal = 0;
     let todayCount = 0;
+    const todayOrders = [];
 
     snap.docs.forEach(docSnap => {
       const data = docSnap.data();
@@ -6820,17 +7325,103 @@ export async function renderDailyEarningsWidget(user) {
           const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
           if (date >= startOfDay) {
             todayCount++;
-            todayTotal += (getOrderDriverEarnings(data) || 0);
+            const earnings = getOrderDriverEarnings(data) || 0;
+            todayTotal += earnings;
+            todayOrders.push({ id: docSnap.id, ...data, _earnings: earnings, _date: date });
           }
         }
       }
     });
+
+    // Sort newest first
+    todayOrders.sort((a, b) => b._date - a._date);
+    window._todayOrdersList = todayOrders;
 
     renderFrame(todayTotal, todayCount);
   } catch (err) {
     console.warn('Error loading daily earnings widget:', err);
   }
 }
+
+function openTodayOrdersSheet(orders) {
+  const existing = document.getElementById('today-orders-sheet');
+  if (existing) existing.remove();
+
+  const ordersHtml = orders.map((o, i) => {
+    const timeStr = o._date ? o._date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+    const appFee = o.appUsageFee || o.appFee || o.deliveryFee || 0;
+    const coupon = o.couponCode || o.appliedCoupon || null;
+    const earnings = o._earnings || 0;
+    const orderNum = o.orderNumber || o.id?.slice(-4)?.toUpperCase() || `#${i+1}`;
+
+    return `
+      <div style="background: var(--color-bg-secondary); border-radius: 14px; padding: 13px 15px; border: 1px solid var(--color-border-light); display: flex; flex-direction: column; gap: 8px;">
+        <!-- Header row -->
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 30px; height: 30px; border-radius: 9px; background: rgba(225,29,72,0.1); display: flex; align-items: center; justify-content: center; color: var(--color-primary); font-size: 14px;">🛵</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 900; color: var(--color-text-primary);">Pedido #${orderNum}</div>
+              <div style="font-size: 10px; color: var(--color-text-tertiary); font-weight: 600;">${timeStr} · ${o.commerceName || 'Comercio'}</div>
+            </div>
+          </div>
+          <div style="font-size: 16px; font-weight: 950; color: #22c55e; letter-spacing: -0.5px;">${formatPrice(earnings)}</div>
+        </div>
+        <!-- Fee row -->
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: 10px; font-weight: 800; background: rgba(239,68,68,0.1); color: #ef4444; padding: 3px 8px; border-radius: 20px; border: 1px solid rgba(239,68,68,0.2);">Tarifa App: ${formatPrice(appFee)}</span>
+          ${coupon ? `<span style="font-size: 10px; font-weight: 800; background: rgba(168,85,247,0.1); color: #a855f7; padding: 3px 8px; border-radius: 20px; border: 1px solid rgba(168,85,247,0.2);">🎟️ ${coupon}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'today-orders-sheet';
+  overlay.style.cssText = 'position:fixed; inset:0; z-index:999999; background:rgba(0,0,0,0.5); display:flex; flex-direction:column; justify-content:flex-end; opacity:0; transition:opacity 0.3s ease;';
+  overlay.innerHTML = `
+    <div id="today-orders-sheet-card" style="background:var(--color-bg); border-top-left-radius:24px; border-top-right-radius:24px; display:flex; flex-direction:column; max-height:85vh; box-shadow:0 -8px 40px rgba(0,0,0,0.2); transform:translateY(100%); transition:transform 0.35s cubic-bezier(0.16,1,0.3,1);">
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg, #dc2626 0%, #991b1b 100%); border-top-left-radius:24px; border-top-right-radius:24px; padding:18px 20px; position:relative; overflow:hidden; flex-shrink:0;">
+        <div style="position:absolute; top:-20px; right:-20px; width:80px; height:80px; background:rgba(255,255,255,0.08); border-radius:50%;"></div>
+        <div style="position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);"></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; position:relative; z-index:1;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px;">📦</div>
+            <div>
+              <div style="font-size:9.5px; font-weight:900; color:rgba(255,255,255,0.6); text-transform:uppercase; letter-spacing:1px; margin-bottom:1px;">Jornada de Hoy</div>
+              <div style="font-size:16px; font-weight:950; color:white; letter-spacing:-0.5px;">${orders.length} Pedido${orders.length !== 1 ? 's' : ''} Entregado${orders.length !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+          <button id="today-orders-close-btn" style="width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.2); color:white; font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+        </div>
+      </div>
+      <!-- Scrollable list -->
+      <div style="overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; -webkit-overflow-scrolling:touch;">
+        ${ordersHtml || '<div style="text-align:center; color:var(--color-text-tertiary); font-size:13px; padding:20px;">No hay pedidos entregados hoy</div>'}
+        <div style="height: env(safe-area-inset-bottom, 12px);"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    overlay.style.opacity = '1';
+    const card = document.getElementById('today-orders-sheet-card');
+    if (card) card.style.transform = 'translateY(0)';
+  }, 10);
+
+  const closeSheet = () => {
+    const card = document.getElementById('today-orders-sheet-card');
+    if (card) card.style.transform = 'translateY(100%)';
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.remove(), 350);
+  };
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSheet(); });
+  document.getElementById('today-orders-close-btn')?.addEventListener('click', closeSheet);
+}
+
 
 let exclusiveModalCountdownInterval = null;
 
@@ -7126,7 +7717,8 @@ export function stopExclusiveOfferAlert() {
 export function showCanonPaymentModal(user, dateStr) {
   import('../components/modal.js').then(({ showModal, closeModal }) => {
     const adminPhone = (window.gd_settings && window.gd_settings.whatsappPayments) || '5491123456789';
-    const wpMessage = encodeURIComponent(`Hola! Soy ${user.displayName || 'repartidor'} (${user.uid}). Quisiera abonar/confirmar el canon diario de la jornada ${dateStr} ($2.000) para que me habiliten ONLINE.`);
+    const canonAmt = (window.gd_settings && window.gd_settings.canonAmount) || getState().canonAmount || 2000;
+    const wpMessage = encodeURIComponent(`Hola! Soy ${user.displayName || 'repartidor'} (${user.uid}). Quisiera abonar/confirmar el canon diario de la jornada ${dateStr} ($${canonAmt.toLocaleString('es-AR')}) para que me habiliten ONLINE.`);
     const wpUrl = `https://wa.me/${adminPhone}?text=${wpMessage}`;
 
     showModal({
@@ -7139,7 +7731,7 @@ export function showCanonPaymentModal(user, dateStr) {
             Canon Diario Pendiente (${dateStr})
           </h3>
           <p style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.5; margin-bottom:20px;">
-            Tu jornada de hoy no se encuentra habilitada aún por administración. Aboná el canon diario de <strong>$2.000</strong> o enviá el comprobante a soporte para activarla.
+            Tu jornada de hoy no se encuentra habilitada aún por administración. Aboná el canon diario de <strong>$${canonAmt.toLocaleString('es-AR')}</strong> o enviá el comprobante a soporte para activarla.
           </p>
           <div style="background:rgba(225,29,72,0.06); border:1px solid rgba(225,29,72,0.15); border-radius:14px; padding:12px; margin-bottom:20px; font-size:12.5px; color:var(--color-primary); font-weight:700;">
             💬 Contactate con el administrador por WhatsApp para confirmar tu pago y comenzar a recibir pedidos.
@@ -7151,4 +7743,215 @@ export function showCanonPaymentModal(user, dateStr) {
       `
     });
   });
+}
+
+
+function showStopDetailsBottomSheet(stop) {
+  document.getElementById('v5-stop-details-sheet')?.remove();
+  document.getElementById('v5-stop-details-backdrop')?.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'v5-stop-details-backdrop';
+  backdrop.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 99998; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); opacity: 0; pointer-events: none; transition: opacity 0.3s ease;";
+
+  const sheet = document.createElement('div');
+  sheet.id = 'v5-stop-details-sheet';
+  sheet.style.cssText = "position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; box-shadow: 0 -12px 30px rgba(0,0,0,0.15); z-index: 99999; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 85vh; display: flex; flex-direction: column; padding-bottom: calc(20px + env(safe-area-inset-bottom, 16px));";
+
+  const isPickup = stop.type === 'PICKUP';
+  const firstOrder = stop.orders?.[0] || {};
+  const totalAmountToPay = stop.orders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
+  const totalTips = stop.orders.reduce((sum, o) => sum + (o.tip || 0), 0);
+  const totalDeliveryCost = stop.orders.reduce((sum, o) => {
+    const baseFee = Math.max(0, (o.deliveryCost || 0) - (o.rainSurcharge || 0));
+    return sum + baseFee;
+  }, 0);
+  const totalAppFee = stop.orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
+  const totalPurchaseFee = stop.orders.reduce((sum, o) => sum + (o.purchaseFee || 0), 0);
+  const totalRainSurcharge = stop.orders.reduce((sum, o) => sum + (o.rainSurcharge || 0), 0);
+  const totalExtraStops = stop.orders.reduce((sum, o) => sum + (o.extraStopsFee || 0), 0);
+  const totalDiscount = stop.orders.reduce((sum, o) => sum + (o.discountAmount || 0), 0);
+  const totalCouponDiscount = stop.orders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
+
+  let itemsHtml = '';
+  if (stop.isFavor) {
+    const details = firstOrder.details || firstOrder.description || '';
+    const parsedStores = parseFavorDetails(details);
+    if (parsedStores.length > 0) {
+      itemsHtml = parsedStores.map((s, idx) => `
+        <div style="background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); border-radius:18px; padding:16px; display:flex; flex-direction:column; gap:12px; box-shadow: var(--shadow-sm); margin-bottom: 10px;">
+          <div style="display:flex; flex-direction:column; gap:4px; text-align:left; border-bottom:1px dashed var(--color-border-light); padding-bottom:10px;">
+            <span style="font-size:9.5px; font-weight:900; color:#3b82f6; text-transform:uppercase; letter-spacing:0.08em;">Comercio ${idx + 1}</span>
+            <div style="font-size:14.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:8px;">
+              <span style="font-size:16px;">🏪</span> ${s.name}
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:4px; text-align:left;">
+            <span style="font-size:9.5px; font-weight:900; color:#e11d48; text-transform:uppercase; letter-spacing:0.08em;">Detalle del Pedido</span>
+            <div style="font-size:14px; font-weight:700; color:var(--color-text-secondary); line-height:1.4; display:flex; align-items:flex-start; gap:8px;">
+              <span style="font-size:16px; margin-top:2px;">📦</span> 
+              <div style="flex:1; white-space: pre-wrap;">${s.items}</div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      itemsHtml = `
+        <div style="background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); border-radius:18px; padding:16px; text-align:left;">
+          <div style="font-size:14px; font-weight:700; color:var(--color-text-secondary); line-height:1.4; white-space: pre-wrap;">
+            ${details}
+          </div>
+        </div>
+      `;
+    }
+  } else {
+    itemsHtml = stop.orders.map(o => `
+      <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:800; color:var(--color-text-primary);">
+          <span>Pedido #${o.orderId || '---'}</span>
+          <span>$${Math.round(o.subtotal || 0).toLocaleString('es-AR')}</span>
+        </div>
+        ${o.items && o.items.length > 0 ? `
+          <div style="font-size:12px; color:var(--color-text-secondary); padding-left:8px; border-left:2.5px solid var(--color-primary); display:flex; flex-direction:column; gap:4px;">
+            ${o.items.map(item => `
+              <div><span style="color:var(--color-primary); font-weight:800;">${item.qty || 1}x</span> ${item.name}</div>
+            `).join('')}
+          </div>
+        ` : `<div style="font-size:11.5px; color:var(--color-text-tertiary); font-style:italic;">Pedido de Comercio</div>`}
+      </div>
+    `).join('');
+  }
+
+  const orderNumber = firstOrder.orderId || '---';
+  const isEncomienda = firstOrder.favorType === 'mandado';
+  
+  const headerBg = isEncomienda 
+    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
+    : 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)';
+  const headerIconSrc = isEncomienda ? '/go-pickup-point.png' : '/go-bag.png';
+  const headerShadow = isEncomienda 
+    ? '0 4px 15px rgba(5, 150, 105, 0.15)' 
+    : '0 4px 15px rgba(190, 18, 60, 0.15)';
+
+  sheet.innerHTML = `
+    <div style="background: ${headerBg}; padding: 18px 24px; border-top-left-radius: 28px; border-top-right-radius: 28px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; color: white; position: relative; box-shadow: ${headerShadow};">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <img src="${headerIconSrc}" style="width: 48px; height: 48px; object-fit: contain; display: block; flex-shrink: 0; margin-right: 4px;" />
+        <div style="display: flex; flex-direction: column; gap: 2px; text-align: left;">
+          <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: white; letter-spacing: -0.01em;">Desglose del Importe</h3>
+          <span style="font-size: 12px; color: rgba(255,255,255,0.85); font-weight: 600;">Detalle transparente del pedido #${orderNumber}</span>
+        </div>
+      </div>
+      <button id="v5-stop-details-close" style="background: rgba(255,255,255,0.15); border: none; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: white; transition: background 0.2s;">
+        ${icon('close', 16)}
+      </button>
+    </div>
+
+    <div style="flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 6px; text-align: left;">
+        <span style="font-size: 10px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px;">${isPickup ? 'Origen / Retiro' : 'Destino / Entrega'}</span>
+        <strong style="font-size: 15px; color: var(--color-text-primary); font-weight: 800;">${isPickup ? (stop.comercioName || 'Comercio') : stop.address}</strong>
+        ${(!isPickup && firstOrder.addressNotes) ? `<span style="font-size: 12.5px; color:#d97706; font-weight:700;">⚠️ Ref: ${firstOrder.addressNotes}</span>` : ''}
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+        <span style="font-size: 10px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px;">Productos / Contenido</span>
+        ${itemsHtml}
+      </div>
+
+      <div style="background: var(--color-surface); border-radius: 24px; padding: 20px; border: 1.5px solid var(--color-border-light); display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow-sm);">
+        <div style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; text-align: left;">Desglose de Cobro</div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary);">
+          <span>Costo del Mandado / Productos:</span>
+          ${totalAmountToPay === 0 ? `
+            <span style="background: #fef3c7; color: #d97706; font-size: 10px; font-weight: 900; padding: 4px 8px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid #fde68a;">PENDIENTE</span>
+          ` : `
+            <span style="color: var(--color-text-primary); font-weight: 800;">$${Math.round(totalAmountToPay).toLocaleString('es-AR')}</span>
+          `}
+        </div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary);">
+          <span>Costo de Envío / Reparto:</span>
+          <span style="color: var(--color-text-primary); font-weight: 800;">$${Math.round(totalDeliveryCost).toLocaleString('es-AR')}</span>
+        </div>
+        
+        ${totalPurchaseFee > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary);">
+            <span>Gestión de Compra / Trámite:</span>
+            <span style="color: var(--color-text-primary); font-weight: 800;">$${Math.round(totalPurchaseFee).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        ${totalRainSurcharge > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary);">
+            <span>Recargo por Lluvia:</span>
+            <span style="color: var(--color-text-primary); font-weight: 800;">$${Math.round(totalRainSurcharge).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        ${totalExtraStops > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary);">
+            <span>Paradas Extra:</span>
+            <span style="color: var(--color-text-primary); font-weight: 800;">$${Math.round(totalExtraStops).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        ${totalTips > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: #10b981;">
+            <span>Propina al Repartidor:</span>
+            <span style="font-weight: 800;">+ $${Math.round(totalTips).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        ${totalAppFee > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary);">
+            <span>Tarifa de Servicio:</span>
+            <span style="color: var(--color-text-primary); font-weight: 800;">$${Math.round(totalAppFee).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        ${totalDiscount > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 750; color: var(--color-success);">
+            <span>Descuento GoPoints:</span>
+            <span>- $${Math.round(totalDiscount).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        ${totalCouponDiscount > 0 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; font-weight: 750; color: #a855f7;">
+            <span>Descuento Cupón:</span>
+            <span>- $${Math.round(totalCouponDiscount).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 15.5px; font-weight: 900; padding-top: 14px; border-top: 2px dashed var(--color-border-light); margin-top: 4px;">
+          <span style="color: var(--color-text-primary); letter-spacing: -0.01em;">${isPickup ? 'TOTAL A ABONAR:' : 'TOTAL FINAL:'}</span>
+          <span style="color: #e11d48; font-size: 21px; font-weight: 950; letter-spacing: -0.02em;">$${Math.round(isPickup ? (stop.amountToPay || 0) : stop.orders.reduce((s, o) => s + (o.total || o.totalAmount || 0), 0)).toLocaleString('es-AR')}</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(sheet);
+
+  requestAnimationFrame(() => {
+    backdrop.style.opacity = '1';
+    backdrop.style.pointerEvents = 'auto';
+    sheet.style.transform = 'translateY(0)';
+  });
+
+  const close = () => {
+    backdrop.style.opacity = '0';
+    backdrop.style.pointerEvents = 'none';
+    sheet.style.transform = 'translateY(100%)';
+    setTimeout(() => {
+      backdrop.remove();
+      sheet.remove();
+    }, 350);
+  };
+
+  backdrop.onclick = close;
+  sheet.querySelector('#v5-stop-details-close').onclick = close;
 }

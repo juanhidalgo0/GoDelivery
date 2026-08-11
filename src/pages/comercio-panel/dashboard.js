@@ -147,6 +147,15 @@ export async function renderComercioDashboard() {
             </div>
           </a>
 
+          <div style="display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:16px; opacity:0.55; cursor:not-allowed; position:relative; box-sizing:border-box;">
+            <div class="drawer-nav-icon" style="background:rgba(217, 70, 239, 0.1); color:#d946ef;">${icon('megaphone', 18)}</div>
+            <div class="drawer-nav-text">
+              <span class="drawer-nav-title" style="color:var(--color-text-tertiary);">Publicidad y Banners</span>
+              <span class="drawer-nav-desc">Campañas y destacar tu local</span>
+            </div>
+            <span style="margin-left:auto; font-size:8px; font-weight:900; padding:2px 7px; border-radius:6px; background:rgba(217,70,239,0.12); color:#d946ef; text-transform:uppercase; white-space:nowrap; flex-shrink:0;">Próximamente</span>
+          </div>
+
           <a href="#/mi-comercio/${comercioId}/settings" class="drawer-nav-item">
             <div class="drawer-nav-icon" style="background:rgba(100, 116, 139, 0.1); color:#64748b;">${icon('settings', 18)}</div>
             <div class="drawer-nav-text">

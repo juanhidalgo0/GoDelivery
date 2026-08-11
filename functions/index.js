@@ -277,11 +277,51 @@ exports.mercadopagoWebhook = onRequest(async (req, res) => {
 // PUSH NOTIFICATION FUNCTIONS
 // ═══════════════════════════════════════════════════
 
+let cachedMaintenance = null;
+let lastMaintenanceFetch = 0;
+
+async function getMaintenanceConfig() {
+  const now = Date.now();
+  if (cachedMaintenance && (now - lastMaintenanceFetch < 10000)) {
+    return cachedMaintenance;
+  }
+  try {
+    const globalSnap = await db.collection("settings").doc("global").get();
+    if (globalSnap.exists) {
+      cachedMaintenance = globalSnap.data();
+    } else {
+      cachedMaintenance = { maintenanceMode: false, maintenanceAllowedEmails: [] };
+    }
+  } catch (err) {
+    logger.error("Error fetching maintenance settings:", err);
+    cachedMaintenance = { maintenanceMode: false, maintenanceAllowedEmails: [] };
+  }
+  lastMaintenanceFetch = now;
+  return cachedMaintenance;
+}
+
 /**
- * Helper: Get all FCM tokens for a user
+ * Helper: Get all FCM tokens for a user (respecting maintenance allowed emails list)
  */
 async function getUserTokens(userId) {
   try {
+    const mCfg = await getMaintenanceConfig();
+    if (mCfg.maintenanceMode === true) {
+      const userSnap = await db.collection("users").doc(userId).get();
+      if (userSnap.exists) {
+        const uData = userSnap.data();
+        const email = (uData.email || "").toLowerCase().trim();
+        const allowedEmails = (mCfg.maintenanceAllowedEmails || []).map(e => e.toLowerCase().trim());
+        const isSuperOwner = email === "juanhidalgobass@gmail.com";
+        const isAllowed = isSuperOwner || allowedEmails.includes(email);
+        
+        if (!isAllowed) {
+          logger.info(`Blocking push tokens for user ${userId} (${email}) during maintenance mode.`);
+          return [];
+        }
+      }
+    }
+
     const tokensSnap = await db.collection("users").doc(userId).collection("fcmTokens").get();
     return tokensSnap.docs.map(d => d.data().token).filter(Boolean);
   } catch (err) {
@@ -1572,6 +1612,30 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             title: "❌ Pedido Cancelado",
             body: cancelMsg
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
+
+          // Restore stock for cancelled orders
+          try {
+            if (Array.isArray(after.items) && after.items.length > 0) {
+              const batch = db.batch();
+              let hasStockRestoration = false;
+              for (const item of after.items) {
+                if (item.product && item.product.id && item.product.stockMode === 'limited') {
+                  const cId = item.product.comercioId || after.comercioId || after.commerceId;
+                  if (cId) {
+                    const pRef = db.collection("comercios").doc(cId).collection("products").doc(item.product.id);
+                    batch.update(pRef, { stockQuantity: admin.firestore.FieldValue.increment(item.qty || 1) });
+                    hasStockRestoration = true;
+                  }
+                }
+              }
+              if (hasStockRestoration) {
+                await batch.commit();
+                logger.info(`Stock restored successfully for cancelled order ${orderId}`);
+              }
+            }
+          } catch (err) {
+            logger.error(`Error restoring stock for cancelled order ${orderId}:`, err);
+          }
           break;
         }
       }
@@ -1729,7 +1793,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
   }
 
   const uid = decodedToken.uid;
-  const { cart, address, addressNotes, deliveryCoords, paymentMethod, redeemedPoints, totalDelivery, bundleId, tip, couponCode, allowReplacement } = req.body;
+  const { cart, address, addressNotes, deliveryCoords, paymentMethod, redeemedPoints, totalDelivery, bundleId, tip, couponCode, allowReplacement, isScheduled, scheduledDate, scheduledTime } = req.body;
 
   if (!cart || !Array.isArray(cart) || cart.length === 0) {
     return res.status(400).json({ error: "El carrito está vacío" });
@@ -1816,8 +1880,9 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
         throw new Error("Puntos insuficientes para redimir");
       }
 
-      // Calculate GoPoints discount: 1 point = $1
-      const calculatedDiscount = redeemedPoints > 0 ? redeemedPoints : 0;
+      // Calculate GoPoints discount: convert points to currency using dollarPerPoint exchange rate
+      const dollarPerPoint = globalSettings.dollarPerPoint !== undefined ? Number(globalSettings.dollarPerPoint) : 1.00;
+      const calculatedDiscount = redeemedPoints > 0 ? redeemedPoints * dollarPerPoint : 0;
 
       // Validate Coupon securely inside transaction
       let couponData = null;
@@ -2061,6 +2126,15 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
 
         const subTotal = Math.max(subProductsTotal + subDeliveryCost + subAppUsageFee - subDiscount - subCouponDiscount, 0);
 
+        let scheduledForObj = null;
+        if (isScheduled && scheduledDate && scheduledTime) {
+          const dtStr = `${scheduledDate}T${scheduledTime}:00`;
+          const parsed = new Date(dtStr);
+          if (!isNaN(parsed.getTime())) {
+            scheduledForObj = admin.firestore.Timestamp.fromDate(parsed);
+          }
+        }
+
         const orderRef = db.collection("orders").doc();
         const orderData = {
           orderId: lastId,
@@ -2079,6 +2153,10 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
           deliveryCoords: deliveryCoords || null,
           verificationCode: sharedVerificationCode,
           allowReplacement: allowReplacement === true || allowReplacement === 'true',
+          isScheduled: isScheduled === true || isScheduled === 'true',
+          scheduledDate: scheduledDate || null,
+          scheduledTime: scheduledTime || null,
+          scheduledFor: scheduledForObj,
           items: g.items.map((item, idx) => {
             const pSnap = pDocs[idx];
             const pData = pSnap.data();
@@ -3179,6 +3257,52 @@ exports.checkScheduledTrips = onSchedule({
     logger.info(`Scheduled trip check completed. Reminders: ${reminderSnap.size}, Activations: ${activateSnap.size}`);
   } catch (err) {
     logger.error("Error in checkScheduledTrips:", err);
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// SCHEDULED COMMERCE ORDERS - Periodic Checker (every 1 min)
+// ═══════════════════════════════════════════════════
+exports.checkScheduledCommerceOrders = onSchedule({
+  schedule: "every 1 minutes",
+  timeZone: "America/Argentina/Buenos_Aires",
+  memory: "256Mi"
+}, async (event) => {
+  try {
+    const now = admin.firestore.Timestamp.now();
+    const nowMs = now.toMillis();
+    
+    // Queremos activar pedidos que esten en 'preparing' y cuyo scheduledFor sea <= dentro de 5 minutos
+    const fiveMinsFromNow = new admin.firestore.Timestamp(
+      Math.floor((nowMs + 5 * 60 * 1000) / 1000), 0
+    );
+
+    const scheduledOrdersSnap = await db.collection("orders")
+      .where("status", "==", "preparing")
+      .where("isScheduled", "==", true)
+      .where("scheduledFor", "<=", fiveMinsFromNow)
+      .get();
+
+    if (scheduledOrdersSnap.empty) return;
+
+    const batch = db.batch();
+    let activatedCount = 0;
+
+    for (const doc of scheduledOrdersSnap.docs) {
+      batch.update(doc.ref, { 
+        status: "ready", 
+        updatedAt: admin.firestore.FieldValue.serverTimestamp() 
+      });
+      activatedCount++;
+    }
+
+    if (activatedCount > 0) {
+      await batch.commit();
+      logger.info(`checkScheduledCommerceOrders: Activated ${activatedCount} scheduled orders to 'ready'.`);
+    }
+
+  } catch (err) {
+    logger.error("Error in checkScheduledCommerceOrders:", err);
   }
 });
 

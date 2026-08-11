@@ -153,68 +153,119 @@ function renderOrders(orders) {
       cancelled: { label: 'Cancelado', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)', pulse: false }
     };
 
-    const config = statusConfig[o.status] || statusConfig.pending;
-    const cardLeftColor = o.isFavor ? getFavorTypeMeta(o.favorType).color : (isActive ? config.color : 'transparent');
+    const status = statusConfig[o.status] || statusConfig.pending;
 
-    // Use page-enter only for initial load/staggering, avoid re-adding animation classes on status changes to prevent flash
+    // Define colors & assets per order type
+    let orderTypeColor = '#E11D48';
+    let orderTypeBg = 'rgba(225, 29, 72, 0.08)';
+    let orderTypeLabel = 'COMERCIO';
+    let orderTypeTitle = o.comercioName || 'Pedido de Comercio';
+    let logoSrc = o.comercioLogo || '';
+
+    // If it's a favor:
+    if (o.isFavor) {
+      const meta = getFavorTypeMeta(o.favorType);
+      orderTypeColor = meta.color;
+      orderTypeBg = meta.bg;
+      orderTypeLabel = meta.label;
+      orderTypeTitle = meta.title;
+
+      // Assign compressed icons from /public
+      if (o.favorType === 'gocash') logoSrc = '/go-cash.png';
+      else if (o.favorType === 'encomienda') logoSrc = '/go-delivery-moto.png';
+      else if (o.favorType === 'pagodeservicios') logoSrc = '/go-clipboard.png';
+      else logoSrc = '/go-bag.png'; // mandado / compra
+    } else {
+      // Fallback for Paulos logo if named Paulos and logo is missing
+      if (!logoSrc && orderTypeTitle.toLowerCase().includes('paulos')) {
+        logoSrc = '/paulos-logo.jpg';
+      }
+    }
+
+    const cardLeftColor = isActive ? status.color : 'transparent';
     const animationClass = container.dataset.lastOrdersFingerprint ? '' : `page-enter stagger-${Math.min(index + 1, 6)}`;
+
+    // Build the logo HTML element (Self-contained, preventing quoting and parsing bugs)
+    const logoHtml = `
+      <div style="position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+        ${logoSrc ? `<img src="${logoSrc}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : ''}
+        <div style="display:${logoSrc ? 'none' : 'flex'}; width:100%; height:100%; align-items:center; justify-content:center; background:${orderTypeBg}; color:${orderTypeColor}; border-radius:12px;">
+          ${icon(o.isFavor ? 'bike' : 'store', 20)}
+        </div>
+      </div>
+    `;
 
     return `
       <div class="order-card-v3 ${animationClass}" onclick="location.hash='#/pedido/${o.id}'" style="
         background: var(--color-surface);
-        border: 1px solid ${isActive ? config.color + '44' : 'var(--color-border-light)'};
-        border-radius: 24px;
-        padding: 20px;
-        margin-bottom: 16px;
+        border: 1px solid ${isActive ? status.color + '44' : 'var(--color-border-light)'};
+        border-radius: 20px;
+        padding: 16px;
+        margin-bottom: 14px;
         cursor: pointer;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: ${isActive ? `0 10px 25px ${config.color}15` : 'var(--shadow-sm)'};
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: ${isActive ? `0 8px 20px ${status.color}10` : 'var(--shadow-sm)'};
         position: relative;
         overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
       ">
-        ${cardLeftColor !== 'transparent' ? `<div style="position:absolute; top:0; left:0; width:4px; height:100%; background:${cardLeftColor};"></div>` : ''}
+        ${cardLeftColor !== 'transparent' ? `<div style="position:absolute; top:0; left:0; width:4.5px; height:100%; background:${cardLeftColor};"></div>` : ''}
         
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
-          <div style="flex:1; min-width:0;">
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-              <span style="font-size:10px; font-weight:900; padding:2px 8px; border-radius:8px; background:${o.isFavor ? getFavorTypeMeta(o.favorType).bg : 'rgba(var(--color-primary-rgb),0.1)'}; color:${o.isFavor ? getFavorTypeMeta(o.favorType).color : 'var(--color-primary)'}; text-transform:uppercase; letter-spacing:0.05em;">
-                ${o.isFavor ? getFavorTypeMeta(o.favorType).label : 'PEDIDO'}
+        <!-- Header: Logo, Title, Status -->
+        <div style="display:flex; gap:12px; align-items:center; width:100%;">
+          <!-- Circular Logo with high-quality styling -->
+          <div style="width:48px; height:48px; border-radius:14px; border:1px solid rgba(0,0,0,0.06); flex-shrink:0; overflow:hidden; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
+            ${logoHtml}
+          </div>
+          
+          <!-- Central text info -->
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span style="font-size:9px; font-weight:900; padding:1px 6px; border-radius:6px; background:${orderTypeBg}; color:${orderTypeColor}; text-transform:uppercase; letter-spacing:0.04em;">
+                ${orderTypeLabel}
               </span>
-              <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase;">#${o.orderId || o.id.slice(0,6)}</span>
+              <span style="font-size:10px; color:var(--color-text-tertiary); font-weight:750; text-transform:uppercase;">#${o.orderId || o.id.slice(0,6)}</span>
             </div>
-            <div style="font-weight:900; font-size:18px; color:var(--color-text); letter-spacing:-0.02em;">
-              ${o.isFavor ? getFavorTypeMeta(o.favorType).title : (o.comercioName || 'Pedido')}
+            <div style="font-weight:850; font-size:15px; color:var(--color-text-primary); letter-spacing:-0.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px;">
+              ${orderTypeTitle}
             </div>
-            <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:700; text-transform:uppercase; margin-top:4px; display:flex; align-items:center; gap:6px;">
-              ${icon('clock', 12)}
+            <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:700; display:flex; align-items:center; gap:4px; margin-top:1px;">
+              ${icon('clock', 11)}
               ${o.createdAt?.toDate() ? new Date(o.createdAt.toDate()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Reciente'}
             </div>
           </div>
+
+          <!-- Status badge -->
           <span style="
-            font-size:11px; 
+            font-size:10px; 
             font-weight:900; 
-            padding:6px 12px; 
-            border-radius:10px; 
-            background:${config.bg}; 
-            color:${config.color};
+            padding:5px 10px; 
+            border-radius:8px; 
+            background:${status.bg}; 
+            color:${status.color};
             display:flex;
             align-items:center;
-            gap:6px;
+            gap:4px;
             text-transform:uppercase;
-            letter-spacing:0.02em;
-          " class="${config.pulse ? 'animate-pulse' : ''}">
-            ${config.pulse ? `<span style="width:6px; height:6px; border-radius:50%; background:${config.color};"></span>` : ''}
-            ${config.label}
+            letter-spacing:0.01em;
+            align-self:flex-start;
+          " class="${status.pulse ? 'animate-pulse' : ''}">
+            ${status.pulse ? `<span style="width:5px; height:5px; border-radius:50%; background:${status.color}; display:inline-block;"></span>` : ''}
+            ${status.label}
           </span>
         </div>
         
-        <div style="height:1px; background:var(--color-border-light); margin-bottom:14px; opacity:0.5;"></div>
- 
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; max-width:65%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <!-- Divider -->
+        <div style="height:1px; background:var(--color-border-light); opacity:0.4; width:100%;"></div>
+        
+        <!-- Bottom: Details & Price -->
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+          <div style="font-size:12.5px; color:var(--color-text-secondary); font-weight:600; max-width:65%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:2px;">
             ${o.isFavor ? (cleanFavorDetailsText(o.details) || 'Ver detalles...') : (o.items ? o.items.map(i => i.name).join(', ') : 'Detalle no disponible')}
           </div>
-          <div style="font-weight:950; font-size:18px; color:var(--color-text); letter-spacing:-0.03em;">${formatPrice(o.total)}</div>
+          <div style="font-weight:950; font-size:17px; color:var(--color-text-primary); letter-spacing:-0.02em;">${formatPrice(o.total)}</div>
         </div>
       </div>
     `;

@@ -147,6 +147,20 @@ const ASSETS_TO_CACHE = [
   '/logo-brand.jpg',
   '/badge-icon.svg',
   '/icons.svg',
+  '/go-bag.png',
+  '/go-pickup-point.png',
+  '/go-cash.png',
+  '/go-clipboard.png',
+  '/go-thumbs-up.png',
+  '/go-hourglass.png',
+  '/go-delivery-moto.png',
+  '/address-house.png',
+  '/logo.png',
+  '/badge-icon.png',
+  '/go-box.png',
+  '/assets/sounds/message.mp3',
+  '/assets/sounds/notification.mp3',
+  '/assets/sounds/chime.mp3',
 ];
 
 // Install: Pre-cache App Shell

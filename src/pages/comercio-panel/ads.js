@@ -1,0 +1,429 @@
+import { db } from '../../firebase.js';
+import { doc, getDoc, getDocs, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { getRouteParams } from '../../router.js';
+import { icon } from '../../utils/icons.js';
+import { showToast } from '../../components/toast.js';
+import { showModal, closeModal, showConfirm } from '../../components/modal.js';
+import { formatPrice } from '../../utils/format.js';
+import { openCropper } from '../../utils/cropper.js';
+
+let currentComercioName = '';
+let pricingSettings = {
+  bannerBasePrice: 1000, // per day
+  premiumGlowPrice: 500, // per day
+  sponsoredBasePrice: 1500 // per day
+};
+
+export async function renderComercioAds(container) {
+  const params = getRouteParams();
+  const comercioId = params.id;
+
+  if (!comercioId) {
+    location.hash = '#/profile';
+    return;
+  }
+
+  // Calculate padding dynamically
+  const isNative = !!window.Capacitor;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const topPadding = isNative 
+    ? 'var(--status-bar-height, 24px)' 
+    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+
+  container.innerHTML = `
+    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
+      <!-- Premium Fixed Header -->
+      <div style="width:100%; padding-top: ${topPadding}; background: var(--color-primary); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 12px 16px 20px 16px; position:relative; overflow:hidden; color:white;">
+          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
+          
+          <div style="display:flex; align-items:center; gap:12px; position:relative; z-index:2; min-width:0; flex:1;">
+            <a href="#/mi-comercio/${comercioId}" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.15); color:white; text-decoration:none;">
+              ${icon('chevronLeft', 24)}
+            </a>
+            <div style="min-width:0; flex:1;">
+              <h1 style="font-family:var(--font-display); font-weight:800; font-size:18px; margin:0; line-height:1.2; letter-spacing:-0.01em;">Publicidad y Banners</h1>
+              <p id="ads-commerce-subtitle" style="font-size:10px; color:rgba(255,255,255,0.85); font-weight:700; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Cargando...</p>
+            </div>
+          </div>
+          
+          <button id="commerce-request-ad-btn" style="height:36px; padding: 0 12px; border-radius:10px; border:none; background:white; color:var(--color-primary); font-weight:800; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:4px; position:relative; z-index:2; box-shadow:0 4px 10px rgba(0,0,0,0.1); transition: all 0.2s;">
+            ${icon('plus', 14)} Solicitar
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable List -->
+      <div style="flex:1; overflow-y:auto; padding:20px; -webkit-overflow-scrolling:touch;">
+        <div style="display:flex; flex-direction:column; gap:16px; max-width:600px; margin:0 auto;">
+          <h2 style="font-size:14px; font-weight:900; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.05em; margin:0 0 -4px 0;">Tus Campañas Publicitarias</h2>
+          
+          <div id="commerce-ads-list" style="display:flex; flex-direction:column; gap:14px; padding-bottom:30px;">
+            <div style="text-align:center; padding:40px; color:var(--color-text-tertiary);">Cargando campañas...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Fetch commerce name and ad settings
+  let logoUrl = '';
+  try {
+    const comSnap = await getDoc(doc(db, 'comercios', comercioId));
+    if (comSnap.exists()) {
+      const data = comSnap.data();
+      currentComercioName = data.name || 'Mi Comercio';
+      logoUrl = data.logo || '';
+      const sub = document.getElementById('ads-commerce-subtitle');
+      if (sub) sub.textContent = currentComercioName;
+    }
+
+    const settingsSnap = await getDoc(doc(db, 'settings', 'ads_pricing'));
+    if (settingsSnap.exists()) {
+      pricingSettings = { ...pricingSettings, ...settingsSnap.data() };
+    }
+  } catch (err) {
+    console.error('Error fetching details:', err);
+  }
+
+  // Load Commerce campaigns
+  const loadCommerceAds = async () => {
+    const listContainer = document.getElementById('commerce-ads-list');
+    if (!listContainer) return;
+
+    try {
+      const q = query(collection(db, 'banners_mandados'), where('comercioId', '==', comercioId));
+      const snap = await getDocs(q);
+      const campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      if (campaigns.length === 0) {
+        listContainer.innerHTML = `
+          <div style="text-align:center; padding:40px; color:var(--color-text-tertiary); background:var(--color-surface); border-radius:20px; border:1.5px dashed var(--color-border);">
+            <div style="font-size:32px; display:inline-block; margin-bottom:12px; color:var(--color-text-tertiary);">${icon('megaphone', 32)}</div>
+            <h4 style="font-size:14px; font-weight:800; color:var(--color-text); margin:0 0 4px;">Sin campañas activas</h4>
+            <p style="font-size:11px; max-width:240px; margin:0 auto; line-height:1.4;">Impulsá tus ventas solicitando un banner en Mandados o patrocinio en la lista.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Sort by status and date
+      campaigns.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
+      listContainer.innerHTML = campaigns.map(c => {
+        let statusLabel = 'Pendiente';
+        let statusBg = 'rgba(245, 158, 11, 0.15)';
+        let statusColor = '#f59e0b';
+
+        if (c.status === 'active') {
+          statusLabel = 'Activa';
+          statusBg = 'rgba(16, 185, 129, 0.15)';
+          statusColor = '#10b981';
+        } else if (c.status === 'waiting') {
+          statusLabel = 'Aprobada (En Espera)';
+          statusBg = 'rgba(99, 102, 241, 0.15)';
+          statusColor = '#6366f1';
+        } else if (c.status === 'rejected') {
+          statusLabel = 'Rechazada';
+          statusBg = 'rgba(239, 68, 68, 0.15)';
+          statusColor = '#ef4444';
+        } else if (c.status === 'completed') {
+          statusLabel = 'Finalizada';
+          statusBg = 'var(--color-bg-secondary)';
+          statusColor = 'var(--color-text-tertiary)';
+        }
+
+        const isBannerType = c.type !== 'sponsored_listing';
+
+        return `
+          <div style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:12px; box-sizing:border-box;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <span style="font-weight:900; font-size:14px; color:var(--color-text-primary);">${c.name}</span>
+              <span style="font-size:9.5px; font-weight:900; padding:2px 8px; border-radius:6px; background:${statusBg}; color:${statusColor}; text-transform:uppercase;">${statusLabel}</span>
+            </div>
+
+            <div style="display:flex; gap:12px; align-items:center;">
+              ${isBannerType ? `
+                <div style="width:70px; height:42px; border-radius:8px; overflow:hidden; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); flex-shrink:0;">
+                  <img src="${c.imageUrl || ''}" style="width:100%; height:100%; object-fit:cover;" />
+                </div>
+              ` : `
+                <div style="width:40px; height:40px; border-radius:50%; overflow:hidden; background:var(--color-bg-secondary); border:1.5px solid #fbbf24; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  <img src="${c.logoUrl || logoUrl}" style="width:100%; height:100%; object-fit:cover;" />
+                </div>
+              `}
+              <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;">
+                <div style="font-size:12px; color:var(--color-text-secondary);">
+                  Tipo: <b>${isBannerType ? 'Banner Promocional' : 'Comercio Patrocinado (Top)'}</b>
+                </div>
+                <div style="font-size:11px; color:var(--color-text-tertiary);">
+                  Duración: <b>${c.daysPaid} días</b> | Total: <b>${formatPrice(c.pricePaid)}</b>
+                </div>
+                ${c.rejectionReason ? `
+                  <div style="font-size:11px; color:#ef4444; margin-top:4px;">
+                    Motivo de rechazo: "${c.rejectionReason}"
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+    } catch (err) {
+      console.error('Error loading ads list:', err);
+      listContainer.innerHTML = '<p style="color:var(--color-danger); text-align:center; padding:20px;">Error al cargar campañas.</p>';
+    }
+  };
+
+  loadCommerceAds();
+
+  // Request new Ad Modal
+  const requestAdBtn = document.getElementById('commerce-request-ad-btn');
+  requestAdBtn.onclick = () => {
+    let adType = 'banner'; // 'banner' or 'sponsored'
+    let selectedDays = 7;
+    let hasGlow = false;
+    let hasDiscount = false;
+    let discountAmount = 500;
+    let discountLimit = 5;
+    let croppedBase64 = '';
+    let logoBase64 = logoUrl;
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative; box-sizing:border-box;';
+
+    const getEstimatedCost = () => {
+      if (adType === 'sponsored') {
+        return selectedDays * pricingSettings.sponsoredBasePrice;
+      }
+      let base = selectedDays * pricingSettings.bannerBasePrice;
+      if (hasGlow) base += selectedDays * pricingSettings.premiumGlowPrice;
+      return base;
+    };
+
+    const updateModalUI = () => {
+      const sponsoredSection = modalContent.querySelector('#request-sponsored-section');
+      const bannerSection = modalContent.querySelector('#request-banner-section');
+      const totalLabel = modalContent.querySelector('#request-total-price');
+
+      if (adType === 'sponsored') {
+        sponsoredSection.style.display = 'flex';
+        bannerSection.style.display = 'none';
+      } else {
+        sponsoredSection.style.display = 'none';
+        bannerSection.style.display = 'flex';
+      }
+
+      totalLabel.innerText = formatPrice(getEstimatedCost());
+    };
+
+    modalContent.innerHTML = `
+      <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; color:white;">
+        <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0;">Nueva Solicitud Publicitaria</h3>
+        <button id="close-request-modal" style="background:transparent; border:none; color:white; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+          ${icon('close', 20)}
+        </button>
+      </div>
+
+      <div style="flex:1; padding:20px; display:flex; flex-direction:column; gap:16px; overflow-y:auto; box-sizing:border-box; -webkit-overflow-scrolling:touch;">
+        
+        <div style="display:flex; flex-direction:column; gap:6px; width:100%; box-sizing:border-box;">
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Nombre de la Campaña</label>
+          <input type="text" id="req-name-input" placeholder="Ej: Promo Finde ${currentComercioName}" style="width:100%; height:44px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" required />
+        </div>
+
+        <div style="display:flex; gap:12px; width:100%; box-sizing:border-box;">
+          <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Tipo de Publicidad</label>
+            <select id="req-type-select" style="width:100%; height:44px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 10px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;">
+              <option value="banner">Banner en Mandados</option>
+              <option value="sponsored">Comercio Patrocinado (Top Lista)</option>
+            </select>
+          </div>
+          <div style="width:110px; display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Días</label>
+            <input type="number" id="req-days-input" value="7" min="1" style="width:100%; height:44px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" required />
+          </div>
+        </div>
+
+        <!-- Banner design section -->
+        <div id="request-banner-section" style="display:flex; flex-direction:column; gap:14px; width:100%; box-sizing:border-box;">
+          <div style="display:flex; gap:12px; width:100%; box-sizing:border-box;">
+            <div style="flex:1; display:flex; flex-direction:column; gap:6px; min-width:0;">
+              <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Título en Banner</label>
+              <input type="text" id="req-title-text" placeholder="Ej: 20% OFF" style="width:100%; height:44px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" />
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; gap:6px; min-width:0;">
+              <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Subtítulo en Banner</label>
+              <input type="text" id="req-subtitle-text" placeholder="Ej: En helados" style="width:100%; height:44px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" />
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:6px; width:100%; box-sizing:border-box;">
+            <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Imagen de Publicidad (Aspecto: 8:5)</label>
+            <div style="display:flex; gap:12px; align-items:center; width:100%; box-sizing:border-box;">
+              <div id="req-banner-preview-container" style="width:100px; height:62px; border-radius:10px; border:1.5px dashed var(--color-border); background:var(--color-bg-secondary); overflow:hidden; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <div style="font-size:9px; color:var(--color-text-tertiary); font-weight:800; text-align:center; padding:2px;">Sin imagen</div>
+              </div>
+              <button type="button" id="btn-req-upload-image" style="height:36px; padding:0 12px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); font-weight:800; font-size:12px; cursor:pointer;">Subir Imagen</button>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:10px; border:1px solid var(--color-border-light); border-radius:16px; padding:14px; background:var(--color-bg-secondary); width:100%; box-sizing:border-box;">
+            <label style="display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer; margin:0; width:100%; box-sizing:border-box;">
+              <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
+                <span style="font-size:13px; font-weight:850; color:var(--color-text-primary); text-align:left;">Destacado Estético (Visual Premium)</span>
+                <span style="font-size:10px; color:var(--color-text-secondary); font-weight:550; text-align:left; white-space:normal; word-break:break-word;">Borde dorado animado (+${formatPrice(pricingSettings.premiumGlowPrice)}/día)</span>
+              </div>
+              <input type="checkbox" id="req-glow-toggle" style="width:20px; height:20px; accent-color:var(--color-primary); flex-shrink:0;" />
+            </label>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:10px; border:1px solid var(--color-border-light); border-radius:16px; padding:14px; background:var(--color-bg-secondary); width:100%; box-sizing:border-box;">
+            <label style="display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer; margin:0; width:100%; box-sizing:border-box;">
+              <span style="font-size:13px; font-weight:850; color:var(--color-text-primary);">Financiar descuento de envío</span>
+              <input type="checkbox" id="req-discount-toggle" style="width:20px; height:20px; accent-color:var(--color-primary); flex-shrink:0;" />
+            </label>
+            <div id="req-discount-subform" style="display:none; gap:12px; margin-top:12px; width:100%; box-sizing:border-box;">
+              <div style="flex:1; display:flex; flex-direction:column; gap:4px; min-width:0;">
+                <label style="font-size:10px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Descuento ($)</label>
+                <input type="number" id="req-discount-amount" value="500" style="width:100%; height:40px; border-radius:10px; border:1.5px solid var(--color-border); padding:0 10px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" />
+              </div>
+              <div style="flex:1; display:flex; flex-direction:column; gap:4px; min-width:0;">
+                <label style="font-size:10px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Límite Diario</label>
+                <input type="number" id="req-discount-limit" value="5" style="width:100%; height:40px; border-radius:10px; border:1.5px solid var(--color-border); padding:0 10px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sponsored listing section -->
+        <div id="request-sponsored-section" style="display:none; flex-direction:column; gap:10px; width:100%; box-sizing:border-box;">
+          <div style="background:rgba(251, 191, 36, 0.08); border:1.5px solid rgba(251, 191, 36, 0.25); border-radius:16px; padding:14px; color:var(--color-text-secondary); font-size:12px; line-height:1.4;">
+            ${icon('star', 16, '#d97706')} Tu comercio aparecerá en las <b>primeras posiciones</b> de la lista horizontal con un elegante borde brillante dorado y un badge de corona destacada.
+          </div>
+        </div>
+
+        <!-- Total Price Summary -->
+        <div style="margin-top:auto; padding:14px; background:var(--color-bg-secondary); border-radius:16px; border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+          <span style="font-size:12px; font-weight:850; color:var(--color-text-secondary); text-transform:uppercase;">Presupuesto Estimado</span>
+          <span id="request-total-price" style="font-size:18px; font-weight:950; color:var(--color-primary);">$0</span>
+        </div>
+
+        <button type="button" id="btn-submit-request" style="height:48px; border-radius:14px; border:none; background:var(--color-primary); color:white; font-weight:950; font-size:14px; cursor:pointer; width:100%; margin-top:8px;">
+          Enviar Solicitud
+        </button>
+      </div>
+    `;
+
+    showModal({
+      title: '',
+      hideHeader: true,
+      height: '82dvh',
+      content: modalContent
+    });
+
+    const closeBtn = modalContent.querySelector('#close-request-modal');
+    closeBtn.onclick = () => closeModal();
+
+    const typeSelect = modalContent.querySelector('#req-type-select');
+    typeSelect.onchange = () => {
+      adType = typeSelect.value;
+      updateModalUI();
+    };
+
+    const daysInput = modalContent.querySelector('#req-days-input');
+    daysInput.oninput = () => {
+      selectedDays = parseInt(daysInput.value) || 1;
+      updateModalUI();
+    };
+
+    const glowToggle = modalContent.querySelector('#req-glow-toggle');
+    glowToggle.onchange = () => {
+      hasGlow = glowToggle.checked;
+      updateModalUI();
+    };
+
+    const discountToggle = modalContent.querySelector('#req-discount-toggle');
+    const discountSubform = modalContent.querySelector('#req-discount-subform');
+    discountToggle.onchange = () => {
+      hasDiscount = discountToggle.checked;
+      discountSubform.style.display = hasDiscount ? 'flex' : 'none';
+      updateModalUI();
+    };
+
+    const uploadImageBtn = modalContent.querySelector('#btn-req-upload-image');
+    uploadImageBtn.onclick = () => {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          try {
+            const base64 = await openCropper(file, { aspectRatio: 8 / 5, maxWidth: 800, maxHeight: 500 });
+            croppedBase64 = base64;
+            const container = modalContent.querySelector('#req-banner-preview-container');
+            if (container) {
+              container.innerHTML = `<img src="${base64}" style="width:100%; height:100%; object-fit:cover;" />`;
+            }
+          } catch (err) {
+            console.error('Error cropping request image:', err);
+          }
+        }
+      };
+      fileInput.click();
+    };
+
+    const submitBtn = modalContent.querySelector('#btn-submit-request');
+    submitBtn.onclick = async () => {
+      const name = modalContent.querySelector('#req-name-input').value.trim();
+      if (!name) {
+        showToast('Completá el nombre de la campaña', 'warning');
+        return;
+      }
+      if (adType === 'banner' && !croppedBase64) {
+        showToast('Subí una imagen para el banner', 'warning');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Enviando...';
+
+      try {
+        const finalPrice = getEstimatedCost();
+        const requestData = {
+          name,
+          type: adType === 'sponsored' ? 'sponsored_listing' : 'banner',
+          daysPaid: selectedDays,
+          pricePaid: finalPrice,
+          comercioId,
+          merchantName: currentComercioName,
+          status: 'pending',
+          hasPremiumGlow: adType === 'banner' ? hasGlow : false,
+          hasDiscount: adType === 'banner' ? hasDiscount : false,
+          discountAmount: (adType === 'banner' && hasDiscount) ? parseInt(modalContent.querySelector('#req-discount-amount').value) || 0 : 0,
+          discountLimitPerDay: (adType === 'banner' && hasDiscount) ? parseInt(modalContent.querySelector('#req-discount-limit').value) || 0 : 0,
+          imageUrl: adType === 'banner' ? croppedBase64 : '',
+          logoUrl: logoBase64,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        };
+
+        await addDoc(collection(db, 'banners_mandados'), requestData);
+        showToast('Solicitud enviada con éxito', 'success');
+        closeModal();
+        loadCommerceAds();
+      } catch (err) {
+        console.error('Error submitting request:', err);
+        showToast('Error al enviar solicitud', 'danger');
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Enviar Solicitud';
+      }
+    };
+
+    updateModalUI();
+  };
+}

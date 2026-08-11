@@ -95,10 +95,21 @@ export async function signInWithGoogle() {
     // Web / PWA Google Sign-In
     googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-    // 1. Detect if app is embedded inside an iframe (e.g. web simulator tool / preview container)
+    // Detect standalone PWA mode on iOS where popups are blocked or non-functional.
+    // In standard iOS browsers (Safari/Chrome), popups work perfectly and are much more reliable than redirects.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     const isInsideIframe = window.top !== window.self;
+    const useRedirect = (isStandalone && isIOS) || isInsideIframe;
 
-    // 2. Direct Web / PWA Standalone: try Popup first, fallback to Redirect if blocked
+    if (useRedirect) {
+      console.log('[Auth] Standalone PWA or Iframe: forcing signInWithRedirect for Google...');
+      showToast('Redirigiendo a Google...', 'info');
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    }
+
+    // 1. Direct Web / PWA: try Popup first, fallback to Redirect if blocked or unsupported
     console.log('[Auth] Initiating Web/PWA Google Sign-In with Popup...');
     showToast('Iniciando sesión con Google...', 'info');
     try {
@@ -117,7 +128,7 @@ export async function signInWithGoogle() {
         return null;
       }
 
-      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/internal-error') {
         showToast('Redirigiendo a Google...', 'info');
         await signInWithRedirect(auth, googleProvider);
         return null;
@@ -189,23 +200,52 @@ export async function signInWithApple() {
       }
     }
 
-    console.log('[Auth] Attempting Apple Sign-In with Popup...');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    const isInsideIframe = window.top !== window.self;
+    const useRedirect = (isStandalone && isIOS) || isInsideIframe;
+    
     const provider = new OAuthProvider('apple.com');
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-    await ensureUserDoc(user);
-    showToast(`¡Bienvenido!`, 'success');
-    return user;
+    
+    if (useRedirect) {
+      console.log('[Auth] Standalone PWA or Iframe: forcing signInWithRedirect for Apple...');
+      showToast('Redirigiendo a Apple...', 'info');
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+
+    console.log('[Auth] Attempting Apple Sign-In with Popup...');
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      await ensureUserDoc(user);
+      showToast(`¡Bienvenido!`, 'success');
+      return user;
+    } catch (popupErr) {
+      console.warn('[Auth] Popup error during Apple Sign-In:', popupErr);
+      const code = popupErr?.code || '';
+
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        showToast('Inicio de sesión cancelado', 'info');
+        return null;
+      }
+
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/internal-error') {
+        showToast('Redirigiendo a Apple...', 'info');
+        await signInWithRedirect(auth, provider);
+        return null;
+      }
+
+      if (code === 'auth/operation-not-allowed' || popupErr.message?.includes('operation-not-allowed')) {
+        showToast('El inicio de sesión con Apple requiere estar habilitado en Firebase Console', 'error');
+        return null;
+      }
+
+      showToast('Error al iniciar sesión con Apple: ' + (popupErr.message || 'Desconocido'), 'error');
+      return null;
+    }
   } catch (error) {
     console.error('Apple Auth error:', error);
-    if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-      showToast('Inicio de sesión cancelado', 'info');
-      return null;
-    }
-    if (error.code === 'auth/operation-not-allowed' || error.message?.includes('operation-not-allowed')) {
-      showToast('El inicio de sesión con Apple requiere estar habilitado en Firebase Console', 'error');
-      return null;
-    }
     showToast('Error al iniciar sesión con Apple: ' + (error.message || 'Desconocido'), 'error');
     return null;
   }
@@ -219,28 +259,35 @@ export async function signOut() {
       userDocUnsub = null;
     }
     
-    // Also sign out from native Google Auth if platform is native
+    // Fire-and-forget native Google Auth sign out to prevent native promise deadlocks on mobile
     try {
       const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
       if (isNativeApp) {
-        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-        await GoogleAuth.signOut();
+        import('@codetrix-studio/capacitor-google-auth').then(m => {
+          m.GoogleAuth.signOut().catch(e => console.warn('Native Google Auth signOut failed:', e));
+        }).catch(err => console.warn('Failed to import native GoogleAuth:', err));
       }
     } catch (e) {
       console.warn('Native Google Auth sign out failed:', e);
     }
     
-    await fbSignOut(auth);
+    // Await Firebase signOut so the IndexedDB token is fully deleted, but catch errors to prevent blocking
+    await fbSignOut(auth).catch(err => {
+      console.warn('[Auth] Firebase signOut error:', err);
+    });
+
+    // Unconditionally clear local state immediately
     clearUserState();
     sessionStorage.clear();
     showToast('Sesión cerrada', 'info');
-    setTimeout(() => {
-      window.location.hash = '#/';
-      window.location.reload();
-    }, 400);
+    
+    // Redirect to home cleanly without hard window reload to prevent app from closing/minimizing on mobile
+    window.location.hash = '#/';
   } catch (error) {
     console.error('Sign out error:', error);
-    showToast('Error al cerrar sesión', 'error');
+    clearUserState();
+    sessionStorage.clear();
+    window.location.hash = '#/';
   }
 }
 
@@ -523,7 +570,7 @@ export function isAdmin() {
   
   // Hardcoded whitelist check for emergency recovery
   const email = (user.email || '').toLowerCase();
-  const isWhitelisted = ADMIN_EMAILS.includes(user.email) || 
+  const isWhitelisted = ADMIN_EMAILS.includes(email) || 
                         email === 'testgodeliveryios@gmail.com';
   
   return !!user.isAdmin || user.role === 'admin' || isWhitelisted;

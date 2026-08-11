@@ -1,6 +1,6 @@
 
 import { db } from '../firebase.js';
-import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { getState, setState } from '../state.js';
 import { formatPrice, calculateScheduleSurcharge } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
@@ -8,6 +8,107 @@ import { icon } from '../utils/icons.js';
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
+import { getDistance, calculateDynamicFee } from '../utils/geo.js';
+
+const BANNER_STORAGE_KEY = 'godelivery_active_banner_v2';
+let cachedActiveBanner = null;
+let cachedLimitExceeded = false;
+
+// Load banner from localStorage SYNCHRONOUSLY at module init — zero latency
+(function loadBannerFromStorage() {
+  try {
+    const stored = localStorage.getItem(BANNER_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && parsed.banner) {
+        cachedActiveBanner = parsed.banner;
+        cachedLimitExceeded = !!parsed.limitExceeded;
+        // Preload image from disk cache immediately
+        if (parsed.banner.imageUrl) {
+          const img = new window.Image();
+          img.src = parsed.banner.imageUrl;
+        }
+      }
+    }
+  } catch (e) { /* ignore parse errors */ }
+})();
+
+// Inject banner animation CSS once at module load to avoid render flicker
+(function injectBannerStyles() {
+  if (document.getElementById('gofavores-banner-style')) return;
+  const s = document.createElement('style');
+  s.id = 'gofavores-banner-style';
+  s.textContent = `
+    @keyframes bannerEntrance {
+      0%   { opacity: 0; transform: translateY(14px) scale(0.96); }
+      100% { opacity: 1; transform: translateY(0)   scale(1);    }
+    }
+    .wizard-banner-card-premium {
+      animation: bannerEntrance 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.1) forwards;
+      will-change: transform, opacity;
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
+export async function prefetchActiveBanner() {
+  try {
+    const bannerSnap = await getDocs(query(collection(db, 'banners_mandados'), where('status', '==', 'active')));
+    let activeBanner = null;
+    bannerSnap.forEach(d => {
+      activeBanner = { id: d.id, ...d.data() };
+    });
+
+    if (!activeBanner) {
+      cachedActiveBanner = null;
+      cachedLimitExceeded = false;
+      localStorage.removeItem(BANNER_STORAGE_KEY);
+      return;
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const ordersSnap = await getDocs(query(
+      collection(db, 'orders'),
+      where('originBannerId', '==', activeBanner.id)
+    ));
+
+    let todayConversions = 0;
+    ordersSnap.forEach(d => {
+      const oData = d.data();
+      if (oData.createdAt) {
+        const oDate = oData.createdAt.toDate ? oData.createdAt.toDate() : new Date(oData.createdAt);
+        if (oDate >= todayStart && oData.status !== 'cancelled') {
+          todayConversions++;
+        }
+      }
+    });
+
+    cachedActiveBanner = activeBanner;
+    cachedLimitExceeded = activeBanner.hasDiscount && todayConversions >= activeBanner.discountLimitPerDay;
+
+    // Persist to localStorage for instant load next time
+    try {
+      localStorage.setItem(BANNER_STORAGE_KEY, JSON.stringify({
+        banner: activeBanner,
+        limitExceeded: cachedLimitExceeded,
+        cachedAt: Date.now()
+      }));
+    } catch (e) { /* quota exceeded, ignore */ }
+
+    // Preload the banner image into browser cache
+    if (activeBanner.imageUrl) {
+      const img = new window.Image();
+      img.src = activeBanner.imageUrl;
+    }
+  } catch (err) {
+    console.error('Error prefetching active banner:', err);
+  }
+}
+
+// Start prefetching immediately to refresh the stored cache
+setTimeout(() => prefetchActiveBanner(), 300);
 
 export async function renderGoFavores(content) {
   if (!content) content = document.getElementById('app-content');
@@ -354,10 +455,10 @@ export async function renderGoFavores(content) {
     }
   };
 
-  document.getElementById('favor-mandado-btn').onclick = () => checkPhoneAndOpen(showMandadoForm);
-  document.getElementById('favor-compra-btn').onclick = () => checkPhoneAndOpen(showCompraForm);
-  document.getElementById('favor-gocash-btn').onclick = () => checkPhoneAndOpen(showGoCashForm);
-  document.getElementById('favor-pagodeservicios-btn').onclick = () => checkPhoneAndOpen(showPagoServiciosForm);
+  document.getElementById('favor-mandado-btn').onclick = () => openMandadosWizard('encomienda');
+  document.getElementById('favor-compra-btn').onclick = () => openMandadosWizard('mandado');
+  document.getElementById('favor-gocash-btn').onclick = () => openMandadosWizard('gocash');
+  document.getElementById('favor-pagodeservicios-btn').onclick = () => openMandadosWizard('pagodeservicios');
 
   document.getElementById('info-mandado-btn').onclick = (e) => {
     e.stopPropagation();
@@ -486,53 +587,58 @@ function showWarningModal(message) {
   alertEl.querySelector('#alert-ok-btn').onclick = () => alertModal.close();
 }
 
-export async function showMandadoForm() {
+export async function showMandadoForm(targetContainer = null) {
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; max-height: calc(88dvh - 56px);';
+  modalEl.style.cssText = 'padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
   modalEl.innerHTML = `
-    <div style="display: flex; flex-direction: column;">
+    <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0;">
       <!-- Paso 1 Container -->
-      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 14px;">
-        <div style="display: flex; flex-direction: column; gap: 12px; scrollbar-width: none;">
+      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 14px; height: 100%; flex: 1; min-height: 0; justify-content: space-between; overflow:hidden;">
+        <!-- Scrollable fields -->
+        <div style="display: flex; flex-direction: column; gap: 12px; scrollbar-width: none; flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
 
+          <!-- Origen: ¿Dónde recogemos? -->
           <div style="display:flex; flex-direction:column; gap:6px;">
             <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Origen: ¿Dónde recogemos?</label>
-            <button id="pickup-addr-btn" style="width: 100%; height: 50px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-surface); font-size: 13.5px; font-weight: 700; display:flex; align-items:center; gap:10px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:32px; height:32px; border-radius:10px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 18)}</div>
+            <button id="pickup-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:28px; height:28px; border-radius:8px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('mapPin', 16)}</div>
                <span id="pickup-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Elegir dirección en el mapa...</span>
                ${icon('chevronRight', 16)}
             </button>
-            <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+            <input type="text" id="pickup-details" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
 
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
-            <button id="delivery-addr-btn" style="width: 100%; height: 50px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-surface); font-size: 13.5px; font-weight: 700; display:flex; align-items:center; gap:10px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:32px; height:32px; border-radius:10px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 18)}</div>
-               <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-               ${icon('chevronRight', 16)}
-            </button>
-            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
-          </div>
-
+          <!-- Detalles de la Encomienda -->
           <div style="display:flex; flex-direction:column; gap:6px;">
             <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; display:block;">Detalles de la Encomienda</label>
             <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 80px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 10px 12px; background: var(--color-surface); color: var(--color-text-primary); font-size: 12.5px; font-weight: 600; resize: none; outline:none; font-family:inherit; transition:all 0.2s;"></textarea>
           </div>
         </div>
 
+        <!-- Sticky Destino de Entrega (Always Visible at bottom) -->
+        <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
+          <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
+          <button id="delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+             <div style="width:28px; height:28px; border-radius:8px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
+             <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+             ${icon('chevronUp', 16)}
+          </button>
+          <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+        </div>
+
+        <!-- Botón Siguiente -->
         <button type="button" id="step-1-next-btn" style="width: 100%; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 14px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 4px; flex-shrink: 0; box-shadow: 0 6px 16px rgba(var(--color-primary-rgb),0.22);">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px; scrollbar-width: none;">
+      <div id="step-2-container" style="display: none; flex-direction: column; gap: 16px; height: 100%; flex: 1; min-height: 0; justify-content: space-between;">
+        <div style="display: flex; flex-direction: column; gap: 16px; scrollbar-width: none; flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
           <button type="button" id="step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -585,15 +691,20 @@ export async function showMandadoForm() {
     </div>
   `;
 
-  showModal({
-    title: 'Detalles de la Encomienda',
-    content: modalEl,
-    fullscreen: false,
-    height: 'auto',
-    hideHeader: false,
-    headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
-    headerTextColor: '#ffffff'
-  });
+  if (targetContainer) {
+    targetContainer.innerHTML = '';
+    targetContainer.appendChild(modalEl);
+  } else {
+    showModal({
+      title: 'Detalles de la Encomienda',
+      content: modalEl,
+      fullscreen: false,
+      height: 'auto',
+      hideHeader: false,
+      headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
+      headerTextColor: '#ffffff'
+    });
+  }
   const pickupBtn = modalEl.querySelector('#pickup-addr-btn');
   const deliveryBtn = modalEl.querySelector('#delivery-addr-btn');
 
@@ -652,17 +763,10 @@ export async function showMandadoForm() {
       deliveryDetailsInput.placeholder = 'Primero selecciona la dirección de destino...';
     }
 
-    if (pickupData && deliveryData) {
-      favorDetailsInput.disabled = false;
-      favorDetailsInput.style.opacity = '1';
-      favorDetailsInput.style.cursor = 'text';
-      favorDetailsInput.placeholder = 'Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456...';
-    } else {
-      favorDetailsInput.disabled = true;
-      favorDetailsInput.style.opacity = '0.6';
-      favorDetailsInput.style.cursor = 'not-allowed';
-      favorDetailsInput.placeholder = 'Primero selecciona origen y destino...';
-    }
+    favorDetailsInput.disabled = false;
+    favorDetailsInput.style.opacity = '1';
+    favorDetailsInput.style.cursor = 'text';
+    favorDetailsInput.placeholder = 'Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456...';
   };
 
   // Call initially to disable fields
@@ -892,7 +996,8 @@ export async function showMandadoForm() {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: detailsInput.value.trim(),
-            deliveryCost: calculatedFee + rainSurcharge,
+            deliveryCost: calculatedFee,
+            rainSurcharge: rainSurcharge,
             appUsageFee: appFee,
             tip: selectedTip,
             couponCode: appliedCoupon ? appliedCoupon.code : null,
@@ -936,7 +1041,9 @@ async function checkOnlineDrivers() {
 
 async function verifyDriversAndConfirm(confirmOptions) {
   const hasDelivery = await checkOnlineDrivers();
-  if (!hasDelivery) {
+  const isAdmin = getState().user?.isAdmin || getState().user?.role === 'admin';
+
+  if (!hasDelivery && !isAdmin) {
     const { showModal } = await import('../components/modal.js');
     const { close: closeAlert } = showModal({
       title: '',
@@ -960,6 +1067,63 @@ async function verifyDriversAndConfirm(confirmOptions) {
       const btn = document.getElementById('no-drivers-close-btn');
       if (btn) btn.onclick = () => closeAlert();
     }, 50);
+    return;
+  }
+
+  if (isAdmin) {
+    const { getDocs, collection, query } = await import('firebase/firestore');
+    const { db } = await import('../firebase.js');
+    const { showModal, closeModal } = await import('../components/modal.js');
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px;';
+    modalContent.innerHTML = `<div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div>`;
+
+    showModal({
+      title: confirmOptions.title || 'Confirmar Pedido',
+      content: modalContent
+    });
+
+    try {
+      const driversSnap = await getDocs(query(collection(db, 'users')));
+      const drivers = driversSnap.docs
+        .map(d => ({ uid: d.id, ...d.data() }))
+        .filter(u => (u.isDelivery === true || u.role === 'delivery' || u.role === 'chofer' || u.role === 'driver') && u.isOnline === true);
+
+      modalContent.innerHTML = `
+        <div style="font-size:14px; color:var(--color-text-secondary); line-height:1.5;">
+          ${confirmOptions.message}
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:12px; border-top:1px solid var(--color-border-light); padding-top:12px;">
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Asignar Repartidor Directamente (Opcional Admin)</label>
+          <select id="v5-create-assign-driver-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-bg-card); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; border:1.5px solid var(--color-border-light);">
+            <option value="rotation">🔄 Rotación General (Envío a todos)</option>
+            ${drivers.map(d => `
+              <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || '---'})</option>
+            `).join('')}
+          </select>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:16px; border-top:1px solid var(--color-border-light); padding-top:16px;">
+          <button class="btn btn-ghost" id="v5-create-cancel-btn" style="flex:1; height:48px; border-radius:14px; font-weight:800;">CANCELAR</button>
+          <button class="btn btn-primary" id="v5-create-confirm-btn" style="flex:2; height:48px; border-radius:14px; font-weight:900;">CONFIRMAR</button>
+        </div>
+      `;
+
+      modalContent.querySelector('#v5-create-cancel-btn').onclick = () => closeModal();
+      modalContent.querySelector('#v5-create-confirm-btn').onclick = async () => {
+        const select = modalContent.querySelector('#v5-create-assign-driver-select');
+        window._selectedDirectDriverUid = select.value;
+        closeModal();
+        if (confirmOptions.onConfirm) {
+          await confirmOptions.onConfirm();
+        }
+      };
+    } catch (e) {
+      console.error(e);
+      modalContent.innerHTML = `<p style="color:var(--color-danger); text-align:center;">Error al cargar repartidores.</p>`;
+    }
     return;
   }
 
@@ -992,8 +1156,16 @@ async function createFavorOrder(data) {
     tip: data.tip || 0,
     couponCode: data.couponCode || null,
     couponDiscount: data.couponDiscount || 0,
-    receiptDeliveryType: data.receiptDeliveryType || null
+    receiptDeliveryType: data.receiptDeliveryType || null,
+    originBannerId: data.originBannerId || null
   };
+
+  // Inject direct driver assignment if admin selected one
+  const directDriverUid = window._selectedDirectDriverUid;
+  if (directDriverUid && directDriverUid !== 'rotation') {
+    body.directDriverUid = directDriverUid;
+  }
+  window._selectedDirectDriverUid = null;
 
   if (data.isGoCash) {
     body.isGoCash = true;
@@ -1021,137 +1193,135 @@ async function createFavorOrder(data) {
   return resData.orderId;
 }
 
-export async function showCompraForm() {
-  const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
-  const { doc, getDoc } = await import('firebase/firestore');
-  const { db } = await import('../firebase.js');
-
-  let paulosConfig = { enabled: true, promoDeliveryFee: 1200, merchantCoveragePercent: 30 };
-  try {
-    const pSnap = await getDoc(doc(db, 'settings', 'paulos_config'));
-    if (pSnap.exists()) paulosConfig = pSnap.data();
-  } catch(e) {}
+export async function showCompraForm(targetContainer = null) {
+  const paulosConfig = getState().paulosConfig || { enabled: true, promoDeliveryFee: 1200, merchantCoveragePercent: 30 };
 
   const user = getState().user;
   const currentAddress = '';
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; max-height: calc(88dvh - 56px);';
+  modalEl.style.cssText = 'padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
   modalEl.innerHTML = `
-    <!-- Step Indicator -->
-    <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-shrink:0;">
+     <!-- Step Indicator -->
+    <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-shrink:0; margin-bottom: 2px;">
       ${[1,2].map(n => `
-        <div id="compra-step-dot-${n}" style="transition:all 0.3s; width:${n===1?'32px':'8px'}; height:8px; border-radius:99px; background:${n===1?'#E11D48':'var(--color-border-light)'};"></div>
+        <div id="compra-step-dot-${n}" style="transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); width:${n===1?'32px':'8px'}; height:8px; border-radius:99px; background:${n===1?'#E11D48':'rgba(225, 29, 72, 0.25)'};"></div>
       `).join('')}
     </div>
 
     <!-- Steps wrapper: position:relative container -->
-    <div id="compra-steps-wrapper" style="position:relative; flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; min-height:0;">
+    <div id="compra-steps-wrapper" style="position:relative; flex:1; display:flex; flex-direction:column; overflow:hidden; min-height:0; width:100%;">
+      <div id="compra-steps-slides-container" style="display:flex; width:200%; height:100%; transition:transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); will-change:transform;">
 
-      <!-- ── Paso 1: Comercios, Productos y Destino de Entrega ──────────────── -->
-      <div id="compra-step-1-container" style="display:flex; flex-direction:column; gap:10px; width:100%; box-sizing:border-box;">
-        <!-- Preset Banner Premium Maxikiosco Paulos -->
-        <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); border: 1.5px solid rgba(192, 132, 252, 0.35); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: 0 10px 28px rgba(76, 29, 149, 0.4); position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
-          <div style="position: absolute; top: -30%; right: -15%; width: 140px; height: 140px; background: radial-gradient(circle, rgba(236, 72, 153, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
-          <div style="position: absolute; bottom: -30%; left: -10%; width: 120px; height: 120px; background: radial-gradient(circle, rgba(168, 85, 247, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
+        <!-- ── Paso 1: Comercios, Productos y Destino de Entrega ──────────────── -->
+        <div id="compra-step-1-container" style="display:flex; flex-direction:column; height:100%; width:50%; box-sizing:border-box; overflow:hidden; gap:10px; flex-shrink:0;">
+          <!-- Preset Banner Premium Maxikiosco Paulos -->
+          <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); border: 1.5px solid rgba(192, 132, 252, 0.35); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: 0 10px 28px rgba(76, 29, 149, 0.4); position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
+            <div style="position: absolute; top: -30%; right: -15%; width: 140px; height: 140px; background: radial-gradient(circle, rgba(236, 72, 153, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
+            <div style="position: absolute; bottom: -30%; left: -10%; width: 120px; height: 120px; background: radial-gradient(circle, rgba(168, 85, 247, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
 
-          <!-- Header row: Logo + Title (single line) + Badge (top right) -->
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; z-index: 1; width: 100%;">
-            <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
-              <div style="width: 44px; height: 44px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.3); background: #5b1a82;">
-                <img src="/paulos-logo-real.jpg?v=9" alt="Maxikiosco Paulos" style="width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%;" />
+            <!-- Header row: Logo + Title (single line) + Badge (top right) -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; z-index: 1; width: 100%;">
+              <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+                <div style="width: 44px; height: 44px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.3); background: #5b1a82;">
+                  <img src="/paulos-logo-real.jpg?v=9" alt="Maxikiosco Paulos" style="width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%;" />
+                </div>
+
+                <div style="display: flex; flex-direction: column; min-width: 0; flex: 1;">
+                  <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: #ffffff; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; text-shadow: 0 1px 3px rgba(0,0,0,0.4);">
+                    Maxikiosco Paulos
+                  </h3>
+                  <span style="font-size: 11px; font-weight: 700; color: rgba(233, 213, 255, 0.9); margin-top: 1px;">
+                    📍 Chacabuco 451
+                  </span>
+                </div>
               </div>
 
-              <div style="display: flex; flex-direction: column; min-width: 0; flex: 1;">
-                <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: #ffffff; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; text-shadow: 0 1px 3px rgba(0,0,0,0.4);">
-                  Maxikiosco Paulos
-                </h3>
-                <span style="font-size: 11px; font-weight: 700; color: rgba(233, 213, 255, 0.9); margin-top: 1px;">
-                  📍 Chacabuco 451
-                </span>
-              </div>
+              <span style="z-index: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-size: 9px; font-weight: 950; padding: 4px 8px; border-radius: 7px; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 6px rgba(16,185,129,0.35); border: 1px solid rgba(255,255,255,0.2); white-space: nowrap; flex-shrink: 0;">
+                🌙 Abierto 24hs
+              </span>
             </div>
 
-            <span style="z-index: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-size: 9px; font-weight: 950; padding: 4px 8px; border-radius: 7px; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 6px rgba(16,185,129,0.35); border: 1px solid rgba(255,255,255,0.2); white-space: nowrap; flex-shrink: 0;">
-              🌙 Abierto 24hs
-            </span>
+            <!-- Bottom Center Button -->
+            <button type="button" style="z-index: 1; width: 100%; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; border: none; font-size: 12.5px; font-weight: 950; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4); text-transform: uppercase; letter-spacing: 0.05em;">
+              COMPRAR EN PAULOS
+            </button>
           </div>
 
-          <!-- Bottom Center Button -->
-          <button type="button" style="z-index: 1; width: 100%; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; border: none; font-size: 12.5px; font-weight: 950; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4); text-transform: uppercase; letter-spacing: 0.05em;">
-            COMPRAR EN PAULOS
-          </button>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px; flex-shrink:0;">
+            <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
+            <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px; flex-shrink:0;">
+              ${[1,2,3,4,5].map(n => `
+                <button type="button" class="stop-count-btn" data-stops="${n}" style="height:40px; border-radius:14px; border:1.5px solid ${n===1?'var(--color-primary)':'var(--color-border-light)'}; background:${n===1?'var(--color-primary)':'var(--color-surface)'}; color:${n===1?'#ffffff':'var(--color-text-secondary)'}; font-weight:900; font-size:14px; cursor:pointer; transition:all 0.2s; box-shadow: ${n===1?'0 4px 10px rgba(var(--color-primary-rgb, 225, 29, 72), 0.25)':'none'};">
+                  ${n}
+                </button>
+              `).join('')}
+            </div>
+            <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:2px 0 0; font-weight:600; display:none; line-height:1.3;">
+              📍 Se cobra una parada extra por cada comercio adicional al primero.
+            </p>
+          </div>
+
+          <div id="stores-subforms-container" style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:10px; padding-right:2px; min-height:80px;"></div>
+
+          <!-- Destino de Entrega -->
+          <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
+            <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
+            <button id="delivery-addr-btn" type="button" style="width:100%; height:44px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow:var(--shadow-sm);">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home',16)}</div>
+              <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress||'Elegir destino...'}</span>
+              ${icon('chevronUp', 16)}
+            </button>
+            <input type="text" id="delivery-details" value="${currentAddress?(getState().addressNotes||''):''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          </div>
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px; flex-shrink:0;">
-          <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Cuántos comercios querés visitar?</label>
-          <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:6px; flex-shrink:0;">
-            ${[1,2,3,4,5].map(n => `
-              <button type="button" class="stop-count-btn" data-stops="${n}" style="height:38px; border-radius:12px; border:2px solid ${n===1?'var(--color-primary)':'var(--color-border-light)'}; background:${n===1?'rgba(var(--color-primary-rgb),0.08)':'var(--color-surface)'}; color:${n===1?'var(--color-primary)':'var(--color-text-primary)'}; font-weight:900; font-size:13.5px; cursor:pointer; transition:all 0.2s;">
-                ${n}
+        <!-- ── Paso 2: Pago + Costo ────────────────────────────────────────── -->
+        <div id="compra-step-2-container" style="display:flex; flex-direction:column; gap:12px; width:50%; box-sizing:border-box; overflow-y:auto; flex-shrink:0; height:100%;">
+
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
+            <div style="position:relative; display:flex; background:var(--color-bg-secondary); padding:3px; border-radius:14px; border:1.5px solid var(--color-border-light); z-index:1; overflow:hidden; width:100%; height:44px; box-sizing:border-box; align-items:center;">
+              <div id="compra-payment-slider" style="position:absolute; top:3px; left:3px; width:calc(50% - 3px); height:36px; background:linear-gradient(135deg, #E11D48 0%, #F43F5E 100%); border-radius:10px; transition:transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s; z-index:0; box-shadow:0 4px 12px rgba(225, 29, 72, 0.25); opacity:0; pointer-events:none;"></div>
+              <button type="button" id="compra-pay-efectivo" style="position:relative; z-index:1; flex:1; height:36px; border-radius:10px; border:none; font-size:12.5px; font-weight:850; cursor:pointer; transition:all 0.3s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px; outline:none;">
+                ${icon('dollarSign',14)} Efectivo
               </button>
-            `).join('')}
+              <button type="button" id="compra-pay-transfer" style="position:relative; z-index:1; flex:1; height:36px; border-radius:10px; border:none; font-size:12.5px; font-weight:850; cursor:pointer; transition:all 0.3s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px; outline:none;">
+                ${icon('creditCard',14)} Transferencia
+              </button>
+            </div>
           </div>
-          <p id="extra-stop-note" style="font-size:10px; color:var(--color-text-tertiary); margin:2px 0 0; font-weight:600; display:none; line-height:1.3;">
-            📍 Se cobra una parada extra por cada comercio adicional al primero.
-          </p>
-        </div>
 
-        <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:10px; flex-shrink:0;"></div>
+          <div id="compra-benefits-container"></div>
 
-        <!-- Destino de Entrega -->
-        <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
-          <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
-          <button id="delivery-addr-btn" type="button" style="width:100%; height:44px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow:var(--shadow-sm);">
-            <div style="width:28px; height:28px; border-radius:8px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home',16)}</div>
-            <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress||'Elegir destino...'}</span>
-            ${icon('chevronRight',16)}
-          </button>
-          <input type="text" id="delivery-details" value="${currentAddress?(getState().addressNotes||''):''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          <div id="compra-cost-preview" style="background:var(--color-bg-secondary); padding:12px 14px; border-radius:16px; display:none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light);">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:var(--color-text-primary);">
+              <span style="display:flex; align-items:center; gap:6px;">
+                Costo de Envío
+                <button type="button" id="compra-info-btn" style="border:none; background:rgba(225, 29, 72, 0.08); width:20px; height:20px; border-radius:50%; padding:0; cursor:pointer; color:#E11D48; display:flex; align-items:center; justify-content:center; outline:none; transition: all 0.2s; transform: translateY(-1px);">${icon('info',12)}</button>
+              </span>
+              <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
+            </div>
+            <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:#009EE3;">
+              <span style="display:flex; align-items:center; gap:6px;">${icon('cloudRain',15)} Recargo por Lluvia</span>
+              <span id="compra-rain-cost" style="font-weight:900;">$ 0</span>
+            </div>
+            <div id="compra-banner-discount-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:#10B981;">
+              <span style="display:flex; align-items:center; gap:6px;">${icon('tag',15)} Envío Bonificado</span>
+              <span id="compra-banner-discount-cost" style="font-weight:900;">-$ 0</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:950; color:#E11D48; border-top:1.5px dashed var(--color-border-light); padding-top:10px; margin-top:2px;">
+              <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
+            </div>
+            <p style="font-size:9.5px; color:var(--color-text-tertiary); margin-top:2px; line-height:1.3; font-weight:600; text-align:center;">* El valor de los productos se abona al repartidor al recibirlos.</p>
+          </div>
+
         </div>
       </div>
 
-      <!-- ── Paso 2: Pago + Costo ────────────────────────────────────────── -->
-      <div id="compra-step-2-container" style="display:none; flex-direction:column; gap:12px; width:100%; box-sizing:border-box;">
-
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
-          <div style="display:flex; background:var(--color-bg-secondary); padding:3px; border-radius:14px; border:1.5px solid var(--color-border-light);">
-            <button type="button" id="compra-pay-efectivo" style="flex:1; height:38px; border-radius:10px; border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('dollarSign',14)} Efectivo
-            </button>
-            <button type="button" id="compra-pay-transfer" style="flex:1; height:38px; border-radius:10px; border:none; font-size:12.5px; font-weight:800; cursor:pointer; transition:all 0.2s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('creditCard',14)} Transferencia
-            </button>
-          </div>
-        </div>
-
-        <div id="compra-benefits-container"></div>
-
-        <div id="compra-cost-preview" style="background:var(--color-bg-secondary); padding:12px 14px; border-radius:16px; display:none; flex-direction:column; gap:8px; border:1px solid var(--color-border-light);">
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:var(--color-text-primary);">
-            <span style="display:flex; align-items:center; gap:6px;">
-              Costo de Envío
-              <button type="button" id="compra-info-btn" style="border:none; background:transparent; padding:2px; cursor:pointer; color:#E11D48; display:flex; align-items:center; justify-content:center; outline:none;">${icon('info',15)}</button>
-            </span>
-            <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
-          </div>
-          <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:#009EE3;">
-            <span style="display:flex; align-items:center; gap:6px;">${icon('cloudRain',15)} Recargo por Lluvia</span>
-            <span id="compra-rain-cost" style="font-weight:900;">$ 0</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:950; color:#E11D48; border-top:1.5px dashed var(--color-border-light); padding-top:10px; margin-top:2px;">
-            <span>Total Servicio</span><span id="final-service-fee">$ ---</span>
-          </div>
-          <p style="font-size:9.5px; color:var(--color-text-tertiary); margin-top:2px; line-height:1.3; font-weight:600; text-align:center;">* El valor de los productos se abona al repartidor al recibirlos.</p>
-        </div>
-
-        <!-- Hidden submit trigger targeted by footer mainBtn delegate -->
-        <button id="confirm-buy-btn" style="display:none;"></button>
-
-      </div>
-    </div>
+      <!-- Hidden submit trigger targeted by footer mainBtn delegate -->
+      <button id="confirm-buy-btn" style="display:none;"></button>
 
     <!-- ── Footer fijo: botón volver + botón acción principal ────────────── -->
     <div style="display:flex; gap:8px; flex-shrink:0;">
@@ -1164,15 +1334,20 @@ export async function showCompraForm() {
     </div>
   `;
 
-  showModal({
-    title: 'Mandado: Comprar algo',
-    content: modalEl,
-    fullscreen: false,
-    height: 'auto',
-    hideHeader: false,
-    headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
-    headerTextColor: '#ffffff'
-  });
+  if (targetContainer) {
+    targetContainer.innerHTML = '';
+    targetContainer.appendChild(modalEl);
+  } else {
+    showModal({
+      title: 'Mandado: Comprar algo',
+      content: modalEl,
+      fullscreen: false,
+      height: '80vh',
+      hideHeader: false,
+      headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
+      headerTextColor: '#ffffff'
+    });
+  }
 
   const deliveryBtn   = modalEl.querySelector('#delivery-addr-btn');
   const deliveryText  = modalEl.querySelector('#delivery-text');
@@ -1219,21 +1394,18 @@ export async function showCompraForm() {
       const dot = modalEl.querySelector(`#compra-step-dot-${n}`);
       if (!dot) return;
       dot.style.width = n === activeStep ? '32px' : '8px';
-      dot.style.background = n === activeStep ? '#E11D48' : 'var(--color-border-light)';
+      dot.style.background = n === activeStep ? '#E11D48' : 'rgba(225, 29, 72, 0.25)';
     });
   };
 
   const showStep = (targetNum) => {
-    const step1 = modalEl.querySelector('#compra-step-1-container');
-    const step2 = modalEl.querySelector('#compra-step-2-container');
-    if (!step1 || !step2) return;
+    const slidesContainer = modalEl.querySelector('#compra-steps-slides-container');
+    if (!slidesContainer) return;
 
     if (targetNum === 1) {
-      step1.style.display = 'flex';
-      step2.style.display = 'none';
+      slidesContainer.style.transform = 'translateX(0)';
     } else {
-      step1.style.display = 'none';
-      step2.style.display = 'flex';
+      slidesContainer.style.transform = 'translateX(-50%)';
     }
 
     currentStepNum = targetNum;
@@ -1369,6 +1541,28 @@ export async function showCompraForm() {
         `;
       }
 
+      let bannerDiscount = 0;
+      const nameInputsForInfo = Array.from(subformsContainer.querySelectorAll('.store-name-input'));
+      const firstStoreNameForInfo = nameInputsForInfo[0]?.value.trim();
+      const matchesMerchantForInfo = firstStoreNameForInfo?.toLowerCase().includes(window._activeMandadoMerchantName?.toLowerCase() || 'impossible_string');
+      if (matchesMerchantForInfo && window._activeMandadoDiscount) {
+        bannerDiscount = window._activeMandadoDiscount;
+      }
+
+      if (bannerDiscount > 0) {
+        breakdownHtml += `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10B981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon('tag', 14)}
+              </div>
+              <span style="color:var(--color-text-secondary); font-weight:600;">Envío Bonificado (Publicidad)</span>
+            </div>
+            <span style="font-weight:800; color:#10B981;">-${formatPrice(bannerDiscount)}</span>
+          </div>
+        `;
+      }
+
       if (selectedTip > 0) {
         breakdownHtml += `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
@@ -1399,7 +1593,10 @@ export async function showCompraForm() {
       showModal({
         title: 'Detalle del Envío',
         height: 'auto',
-        content: breakdownHtml
+        content: breakdownHtml,
+        hideHeader: false,
+        headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
+        headerTextColor: '#ffffff'
       });
     };
   }
@@ -1416,23 +1613,26 @@ export async function showCompraForm() {
     updateCost();
   }, () => calculatedDistFee);
 
+  const paymentSlider = modalEl.querySelector('#compra-payment-slider');
+
   payEfectivoBtn.onclick = () => {
     selectedPaymentMethod = 'efectivo';
-    payEfectivoBtn.style.background = '#059669';
+    if (paymentSlider) {
+      paymentSlider.style.opacity = '1';
+      paymentSlider.style.transform = 'translateX(0)';
+    }
     payEfectivoBtn.style.color = '#ffffff';
-    payEfectivoBtn.style.boxShadow = '0 4px 12px rgba(5, 150, 105, 0.2)';
-    payTransferBtn.style.background = 'transparent';
     payTransferBtn.style.color = 'var(--color-text-secondary)';
-    payTransferBtn.style.boxShadow = 'none';
   };
 
   payTransferBtn.onclick = () => {
     selectedPaymentMethod = 'mercadopago';
-    payTransferBtn.style.background = '#2563EB';
+    if (paymentSlider) {
+      paymentSlider.style.opacity = '1';
+      paymentSlider.style.transform = 'translateX(100%)';
+    }
     payTransferBtn.style.color = '#ffffff';
-    payEfectivoBtn.style.background = 'transparent';
     payEfectivoBtn.style.color = 'var(--color-text-secondary)';
-    payEfectivoBtn.style.boxShadow = 'none';
   };
 
   let isPaulosPreset = false;
@@ -1464,33 +1664,65 @@ export async function showCompraForm() {
     { name: 'Ej: Farmacia "Pasteur"', details: 'Ej: 1 jabón neutro, 1 pasta dental triple acción...' }
   ];
 
+  const setupScrollFocus = (el) => {
+    if (!el) return;
+    el.addEventListener('focus', () => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 250);
+    });
+  };
+
   const renderSubforms = () => {
     subformsContainer.innerHTML = '';
     for (let i = 0; i < stopsCount; i++) {
       const pl = placeholders[i] || placeholders[0];
       const stopDiv = document.createElement('div');
-      stopDiv.style.cssText = 'display:flex; flex-direction:column; gap:6px; padding:10px 12px; background:var(--color-bg-secondary); border-radius:14px; border:1px solid var(--color-border-light);';
+      stopDiv.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:14px; background:var(--color-surface); border-radius:18px; border:1.5px solid var(--color-border-light); box-shadow:0 4px 14px rgba(0,0,0,0.02); transition:all 0.2s;';
       stopDiv.innerHTML = `
-        <span style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
-        <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:38px; border-radius:10px; border:1.5px solid var(--color-border-light); padding:0 10px; background:var(--color-bg-card); font-size:12.5px; font-weight:700; outline:none;" required />
-        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:54px; border-radius:10px; border:1.5px solid var(--color-border-light); padding:8px 10px; background:var(--color-bg-card); font-size:12.5px; font-weight:600; resize:none; outline:none; font-family:inherit;" required></textarea>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+          <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; font-size:10px; font-weight:950; display:flex; align-items:center; justify-content:center;">${i + 1}</div>
+          <span style="font-size:11px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
+        </div>
+        <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
+        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:60px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:8px 12px; background:var(--color-bg-secondary); font-size:12.5px; font-weight:600; resize:none; outline:none; color:var(--color-text-primary); font-family:inherit; transition:all 0.2s;" required></textarea>
       `;
       subformsContainer.appendChild(stopDiv);
+
+      const nameInput = stopDiv.querySelector('.store-name-input');
+      const detailTextarea = stopDiv.querySelector('.store-detail-textarea');
+      setupScrollFocus(nameInput);
+      setupScrollFocus(detailTextarea);
     }
   };
 
   renderSubforms();
 
+  if (window._prefilledMerchantName) {
+    const nameInput = subformsContainer.querySelector('.store-name-input');
+    const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
+    if (nameInput) nameInput.value = window._prefilledMerchantName;
+    if (detailTextarea) {
+      setTimeout(() => detailTextarea.focus(), 150);
+    }
+    window._prefilledMerchantName = null;
+  }
+
+  const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+  setupScrollFocus(deliveryDetailsInput);
+
   modalEl.querySelectorAll('.stop-count-btn').forEach(btn => {
     btn.onclick = () => {
       modalEl.querySelectorAll('.stop-count-btn').forEach(b => {
-        b.style.border = '2px solid var(--color-border-light)';
-        b.style.background = 'var(--color-bg-card)';
+        b.style.border = '1.5px solid var(--color-border-light)';
+        b.style.background = 'var(--color-surface)';
         b.style.color = 'var(--color-text-secondary)';
+        b.style.boxShadow = 'none';
       });
-      btn.style.border = '2px solid var(--color-primary)';
-      btn.style.background = 'rgba(var(--color-primary-rgb),0.08)';
-      btn.style.color = 'var(--color-primary)';
+      btn.style.border = '1.5px solid var(--color-primary)';
+      btn.style.background = 'var(--color-primary)';
+      btn.style.color = '#ffffff';
+      btn.style.boxShadow = '0 4px 10px rgba(var(--color-primary-rgb, 225, 29, 72), 0.25)';
       stopsCount = parseInt(btn.dataset.stops);
       extraStopNote.style.display = stopsCount > 1 ? 'block' : 'none';
       renderSubforms();
@@ -1527,9 +1759,18 @@ export async function showCompraForm() {
         }
       }
 
+      // Check for Banner Discount
+      let bannerDiscount = 0;
+      const nameInputs = Array.from(subformsContainer.querySelectorAll('.store-name-input'));
+      const firstStoreName = nameInputs[0]?.value.trim();
+      const matchesMerchant = firstStoreName?.toLowerCase().includes(window._activeMandadoMerchantName?.toLowerCase() || 'impossible_string');
+      if (matchesMerchant && window._activeMandadoDiscount) {
+        bannerDiscount = window._activeMandadoDiscount;
+      }
+
       const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
       const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedDistFee);
-      total = Math.max(subtotal + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
+      total = Math.max(subtotal + rainSurcharge + nightSurcharge + appFee - couponDiscount - bannerDiscount + selectedTip, 0);
 
       const summaryTotalEl = modalEl.querySelector('#compra-summary-total');
       if (summaryTotalEl) {
@@ -1543,6 +1784,15 @@ export async function showCompraForm() {
         if (rainCostEl) rainCostEl.textContent = `+ ${formatPrice(rainSurcharge)}`;
       } else {
         if (rainRow) rainRow.style.display = 'none';
+      }
+
+      const bannerDiscountRow = modalEl.querySelector('#compra-banner-discount-row');
+      const bannerDiscountCostEl = modalEl.querySelector('#compra-banner-discount-cost');
+      if (bannerDiscount > 0) {
+        if (bannerDiscountRow) bannerDiscountRow.style.display = 'flex';
+        if (bannerDiscountCostEl) bannerDiscountCostEl.textContent = `-${formatPrice(bannerDiscount)}`;
+      } else {
+        if (bannerDiscountRow) bannerDiscountRow.style.display = 'none';
       }
 
       totalFeeEl.textContent = formatPrice(total);
@@ -1601,8 +1851,18 @@ export async function showCompraForm() {
       }
     }
 
+    // Check for Banner Discount
+    let bannerDiscount = 0;
+    let bannerId = null;
+    const firstStoreName = stopsList[0]?.store?.trim();
+    const matchesMerchant = firstStoreName?.toLowerCase().includes(window._activeMandadoMerchantName?.toLowerCase() || 'impossible_string');
+    if (matchesMerchant && window._activeMandadoDiscount) {
+      bannerDiscount = window._activeMandadoDiscount;
+      bannerId = window._activeMandadoBannerId;
+    }
+
     const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-    const total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+    const total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount - bannerDiscount + selectedTip, 0);
     const stopsLabel = stopsCount === 1 ? '1 comercio' : `${stopsCount} comercios`;
 
     let packagedDetails = stopsList.map((stop, idx) => `🏪 **${idx + 1}. Comercio:** ${stop.store}\n📦 **Pedido:** ${stop.items}`).join('\n\n');
@@ -1625,14 +1885,16 @@ export async function showCompraForm() {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: packagedDetails,
-            deliveryCost: calculatedDistFee + rainSurcharge,
+            deliveryCost: calculatedDistFee,
+            rainSurcharge: rainSurcharge,
             purchaseFee: activePurchaseFee,
             extraStopsFee: extraStopsTotal,
             stopsCount: stopsCount,
             appUsageFee: appFee,
             tip: selectedTip,
             couponCode: appliedCoupon ? appliedCoupon.code : null,
-            couponDiscount: couponDiscount,
+            couponDiscount: couponDiscount + bannerDiscount,
+            originBannerId: bannerId,
             total: total,
             paymentMethod: selectedPaymentMethod,
             includeGestion: hasGestion,
@@ -1649,19 +1911,19 @@ export async function showCompraForm() {
   };
 }
 
-export async function showGoCashForm() {
+export async function showGoCashForm(targetContainer = null) {
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const user = getState().user;
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(20px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
   modalEl.innerHTML = `
-    <div style="display: flex; flex-direction: column;">
+    <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0; justify-content: space-between;">
       
       <!-- Paso 1 Container -->
-      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+      <div id="gocash-step-1-container" style="display: flex; flex-direction: column; gap: 16px; height: 100%; flex: 1; min-height: 0; justify-content: space-between;">
+        <div style="display: flex; flex-direction: column; gap: 16px; scrollbar-width: none; flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
           <!-- Type Selector Segmented Control -->
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Operación</label>
@@ -1686,12 +1948,12 @@ export async function showGoCashForm() {
 
           <div style="display:flex; flex-direction:column; gap:8px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde nos encontramos?</label>
-            <button id="gocash-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:36px; height:36px; border-radius:12px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+            <button id="gocash-delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:28px; height:28px; border-radius:8px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
                <span id="gocash-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-               ${icon('chevronRight', 16)}
+               ${icon('chevronUp', 16)}
             </button>
-            <input type="text" id="gocash-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+            <input type="text" id="gocash-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
         </div>
 
@@ -1701,8 +1963,8 @@ export async function showGoCashForm() {
       </div>
 
       <!-- Paso 2 Container -->
-      <div id="gocash-step-2-container" style="display: none; flex-direction: column; gap: 16px;">
-        <div style="max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom:12px; scrollbar-width: none;">
+      <div id="gocash-step-2-container" style="display: none; flex-direction: column; gap: 16px; height: 100%; flex: 1; min-height: 0; justify-content: space-between;">
+        <div style="display: flex; flex-direction: column; gap: 16px; scrollbar-width: none; flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
           <button type="button" id="gocash-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content;">
             ${icon('chevronLeft', 16)} Volver a Paso 1
           </button>
@@ -1743,15 +2005,20 @@ export async function showGoCashForm() {
     </div>
   `;
 
-  showModal({
-    title: 'Solicitar Go Cash',
-    content: modalEl,
-    fullscreen: false,
-    height: 'auto',
-    hideHeader: false,
-    headerBackground: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
-    headerTextColor: '#ffffff'
-  });
+  if (targetContainer) {
+    targetContainer.innerHTML = '';
+    targetContainer.appendChild(modalEl);
+  } else {
+    showModal({
+      title: 'Solicitar Go Cash',
+      content: modalEl,
+      fullscreen: false,
+      height: 'auto',
+      hideHeader: false,
+      headerBackground: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
+      headerTextColor: '#ffffff'
+    });
+  }
 
   const btnC2t = modalEl.querySelector('#gocash-type-c2t');
   const btnT2c = modalEl.querySelector('#gocash-type-t2c');
@@ -2381,10 +2648,10 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
   render();
 }
 
-export async function showPagoServiciosForm() {
+export async function showPagoServiciosForm(targetContainer = null) {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(16px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(20px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
 
   let currentAddress = '';
   let deliveryData = null;
@@ -2552,12 +2819,12 @@ export async function showPagoServiciosForm() {
           <!-- Physical Delivery Address Details -->
           <div id="ps-address-section" style="display:none; flex-direction:column; gap:8px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Tu Dirección de Entrega</label>
-            <button id="ps-delivery-addr-btn" style="width: 100%; height: 60px; border-radius: 18px; border: 1.5px solid var(--color-border-light); padding: 0 16px; background: var(--color-surface); font-size: 14px; font-weight: 700; display:flex; align-items:center; gap:12px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:36px; height:36px; border-radius:12px; background:rgba(245, 158, 11, 0.1); color:#D97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 20)}</div>
+            <button id="ps-delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:28px; height:28px; border-radius:8px; background:rgba(245, 158, 11, 0.1); color:#D97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
                <span id="ps-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-               ${icon('chevronRight', 16)}
+               ${icon('chevronUp', 16)}
             </button>
-            <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:48px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 14px; background:var(--color-surface); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+            <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
           </div>
         </div>
 
@@ -2613,15 +2880,20 @@ export async function showPagoServiciosForm() {
     </div>
   `;
 
-  showModal({
-    title: 'Solicitar Pago de Servicios',
-    content: modalEl,
-    fullscreen: false,
-    height: '88dvh',
-    hideHeader: false,
-    headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
-    headerTextColor: '#ffffff'
-  });
+  if (targetContainer) {
+    targetContainer.innerHTML = '';
+    targetContainer.appendChild(modalEl);
+  } else {
+    showModal({
+      title: 'Solicitar Pago de Servicios',
+      content: modalEl,
+      fullscreen: false,
+      height: '88vh',
+      hideHeader: false,
+      headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+      headerTextColor: '#ffffff'
+    });
+  }
 
   const serviceGrid = modalEl.querySelector('#ps-service-grid');
   const detailsInput = modalEl.querySelector('#ps-details-input');
@@ -2850,7 +3122,8 @@ export async function showPagoServiciosForm() {
             deliveryAddress: deliveryAddressVal,
             deliveryCoords: deliveryCoordsVal,
             details: detailPayload,
-            deliveryCost: calculatedDistFee + rainSurcharge,
+            deliveryCost: calculatedDistFee,
+            rainSurcharge: rainSurcharge,
             purchaseFee: baseFee,
             appUsageFee: appFee,
             tip: selectedTip,
@@ -2874,4 +3147,442 @@ export async function showPagoServiciosForm() {
   };
 
   updateCost();
+}
+
+export function openMandadosWizard(initialServiceType = null) {
+  const checkPhoneAndOpen = (openFn, serviceName) => {
+    const u = getState().user || {};
+    if (!u.phone || u.phone.trim() === '') {
+      showConfirm({
+        title: '📱 Teléfono Requerido',
+        message: 'Para realizar un favor o mandado es obligatorio configurar un celular de contacto para que el chofer y el soporte se comuniquen.',
+        confirmText: 'Configurar ahora',
+        cancelText: 'Volver',
+        onConfirm: () => {
+          sessionStorage.setItem('open-phone-edit', 'true');
+          location.hash = '#/profile';
+        }
+      });
+    } else {
+      openFn(serviceName);
+    }
+  };
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden;';
+  
+  modalContent.innerHTML = `
+    <!-- Unified Wizard Header -->
+    <div id="wizard-header" style="display:flex; align-items:center; justify-content:space-between; padding:28px 20px 16px 20px; background:#E11D48; flex-shrink:0; color:white; border-bottom:none; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+      <button id="wizard-back-btn" style="background:none; border:none; color:white; cursor:pointer; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; width:36px; height:36px; outline:none; flex-shrink:0;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+      </button>
+      <h3 id="wizard-title" style="font-family:var(--font-display); font-size:1.2rem; font-weight:950; margin:0; color:white; flex:1; text-align:center; letter-spacing:-0.01em;">Mandados</h3>
+      <button id="wizard-close-btn" style="width:36px; height:36px; border:none; background:rgba(255,255,255,0.12); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; color:white; outline:none; flex-shrink:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+
+    <!-- Wizard Slides Carrusel -->
+    <div class="wizard-wrapper" style="flex:1; width: 100%; overflow: hidden; position: relative;">
+      <div id="wizard-slides-container" style="display: flex; width: 200%; height: 100%; transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1); will-change: transform; transform: translateZ(0);">
+          <!-- Slide 1: Menu Selector -->
+          <div id="wizard-slide-selector" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 16px)) 16px; display: flex; flex-direction: column; gap: 6px;">
+            <!-- Option 1: Encomienda -->
+            <div id="wizard-favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
+              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
+              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible;">
+                <img src="/go-pickup-point.png?v=5" style="width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
+              </div>
+              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
+                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Encomienda</h3>
+                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                    Costo normal de envío
+                  </span>
+                  <span id="wizard-info-mandado-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
+                </div>
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+
+            <!-- Option 2: Mandado -->
+            <div id="wizard-favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
+              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible; margin-left: 6px; margin-right: 6px;">
+                <img src="/go-bag.png?v=6" style="width: 96px; height: 96px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
+              </div>
+              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
+                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Mandado</h3>
+                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                    Tarifa de gestión
+                  </span>
+                  <span id="wizard-info-compra-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
+                </div>
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+
+            <!-- Option 3: Go Cash -->
+            <div id="wizard-favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
+              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible;">
+                <img src="/go-cash.png?v=5" style="width: 60px; height: 60px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
+              </div>
+              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
+                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Go Cash</h3>
+                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                    Efectivo ↔ Transferencia
+                  </span>
+                  <span id="wizard-info-gocash-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
+                </div>
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+
+            <!-- Option 4: Pago de Servicios -->
+            <div id="wizard-favor-pagodeservicios-btn" class="gofavores-card card-pagodeservicios glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
+              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
+              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible;">
+                <img src="/go-clipboard.png?v=5" style="width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
+              </div>
+              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
+                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Pago de Servicios</h3>
+                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Pagá tus facturas (ABSA, Canal 4, Cyber, etc) a domicilio o digital.</p>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
+                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
+                    Facturas 📄 Trámites
+                  </span>
+                  <span id="wizard-info-pagodeservicios-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
+                </div>
+              </div>
+              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
+                ${icon('chevronRight', 12)}
+              </div>
+            </div>
+            <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: env(safe-area-inset-bottom, 10px);"></div>
+          </div>
+         <!-- Slide 2: Form Container -->
+         <div id="wizard-slide-form" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow-y: auto; background: var(--color-bg);">
+            <div id="wizard-form-target" style="height:100%; width:100%; display:flex; flex-direction:column;"></div>
+         </div>
+      </div>
+    </div>
+
+    <style>
+      .gofavores-card {
+        flex: 1;
+        min-height: 0;
+        max-height: clamp(68px, 11dvh, 90px) !important;
+        display: flex;
+        align-items: center;
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 16px;
+        padding: 10px 14px !important;
+        gap: 10px !important;
+        position: relative;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.015);
+      }
+      .gofavores-card img {
+        width: clamp(38px, 7dvh, 50px) !important;
+        height: clamp(38px, 7dvh, 50px) !important;
+        object-fit: contain;
+      }
+      .gofavores-card h3 {
+        font-size: clamp(12px, 2.2dvh, 14.5px) !important;
+      }
+      .gofavores-card p {
+        font-size: clamp(9px, 1.6dvh, 10.5px) !important;
+      }
+      .gofavores-card span {
+        font-size: clamp(7.5px, 1.3dvh, 9.0px) !important;
+      }
+      .chevron-icon-container {
+        width: clamp(22px, 4.8dvh, 28px) !important;
+        height: clamp(22px, 4.8dvh, 28px) !important;
+      }
+      .wizard-banner-card-premium {
+        aspect-ratio: auto !important;
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+      }
+      .card-encomienda { background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important; border-color: rgba(16,185,129,0.3) !important; box-shadow: 0 8px 20px rgba(16,185,129,0.15) !important; }
+      .card-mandado { background: linear-gradient(135deg, #E11D48 0%, #F43F5E 100%) !important; border-color: rgba(244,63,94,0.3) !important; box-shadow: 0 8px 20px rgba(244,63,94,0.15) !important; }
+      .card-gocash { background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important; border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 8px 20px rgba(99,102,241,0.15) !important; }
+      .card-pagodeservicios { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important; border-color: rgba(245,158,11,0.3) !important; box-shadow: 0 8px 20px rgba(245,158,11,0.15) !important; }
+      [data-theme="dark"] .card-encomienda { background: linear-gradient(135deg, #064e3b 0%, #047857 100%) !important; }
+      [data-theme="dark"] .card-mandado { background: linear-gradient(135deg, #7f1d1d 0%, #E11D48 100%) !important; }
+      [data-theme="dark"] .card-gocash { background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important; }
+      [data-theme="dark"] .card-pagodeservicios { background: linear-gradient(135deg, #78350F 0%, #D97706 100%) !important; }
+      .gofavores-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12) !important; }
+      .gofavores-card:active { transform: translateY(0) scale(0.98); }
+    </style>
+  `;
+
+  const wizardModal = showModal({
+    title: '',
+    hideHeader: true,
+    height: '85vh',
+    content: modalContent,
+    onOpen: () => {
+      const modalBody = modalContent.closest('.modal-body');
+      if (modalBody) {
+        modalBody.style.overflow = 'hidden';
+        modalBody.style.webkitOverflowScrolling = 'auto';
+      }
+      const slidesContainer = document.getElementById('wizard-slides-container');
+      const backBtn = document.getElementById('wizard-back-btn');
+      const closeBtn = document.getElementById('wizard-close-btn');
+      const titleEl = document.getElementById('wizard-title');
+      const target = document.getElementById('wizard-form-target');
+
+      // Check active banner
+      const loadActiveBanner = async () => {
+        try {
+          const renderBannerHTML = (banner, limitExceeded) => {
+            const displayTitle = banner.title && banner.title.trim() !== '' ? banner.title : banner.name;
+            let displaySubtitle = banner.subtitle && banner.subtitle.trim() !== '' ? banner.subtitle : 'Pedir ahora';
+            if (!banner.subtitle || banner.subtitle.trim() === '') {
+              if (banner.hasDiscount) {
+                displaySubtitle = limitExceeded 
+                  ? 'Cupos de descuento agotados por hoy' 
+                  : `¡Envío Bonificado: -${formatPrice(banner.discountAmount)}!`;
+              }
+            }
+
+            return `
+              ${banner.hasPremiumGlow ? `
+              <style>
+                @keyframes premiumGlow {
+                  0% {
+                    box-shadow: 0 0 6px rgba(252, 211, 77, 0.5), 0 12px 32px rgba(0,0,0,0.15);
+                    border-color: rgba(252, 211, 77, 0.6) !important;
+                  }
+                  50% {
+                    box-shadow: 0 0 22px rgba(252, 211, 77, 0.95), 0 12px 32px rgba(0,0,0,0.15);
+                    border-color: rgba(252, 211, 77, 1) !important;
+                  }
+                  100% {
+                    box-shadow: 0 0 6px rgba(252, 211, 77, 0.5), 0 12px 32px rgba(0,0,0,0.15);
+                    border-color: rgba(252, 211, 77, 0.6) !important;
+                  }
+                }
+                .glowing-premium-card {
+                  animation: premiumGlow 3s infinite ease-in-out !important;
+                  border-width: 2px !important;
+                }
+              </style>
+              ` : ''}
+              <div id="wizard-banner-card" class="wizard-banner-card-premium ${banner.hasPremiumGlow ? 'glowing-premium-card' : ''}" style="border-radius:22px; overflow:hidden; border:1.5px solid rgba(255,255,255,0.18); position:relative; box-shadow: 0 12px 32px rgba(0,0,0,0.15); cursor:pointer; width:100%; aspect-ratio:auto; flex-shrink:1; height:100%; transition:transform 0.2s;">
+                <img src="${banner.imageUrl}" style="width:100%; height:100%; object-fit:cover; display:block;" />
+                
+                <!-- Floating Promo Badge -->
+                <div style="position:absolute; top:12px; left:12px; background:rgba(225,29,72,0.95); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); color:white; font-size:9.5px; font-weight:950; padding:4px 10px; border-radius:8px; text-transform:uppercase; letter-spacing:0.08em; box-shadow:0 4px 12px rgba(225,29,72,0.35); display:flex; align-items:center; gap:4px; z-index:5; border: 1px solid rgba(255,255,255,0.2);">
+                  ${icon('zap', 10)} ${banner.hasPremiumGlow ? 'DESTACADO' : 'PROMO'}
+                </div>
+
+                <!-- Glassmorphic bottom panel -->
+                <div style="position:absolute; bottom:0; left:0; right:0; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); background:linear-gradient(180deg, rgba(15,23,42,0.1) 0%, rgba(15,23,42,0.9) 100%); border-top:1px solid rgba(255,255,255,0.15); padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; box-sizing:border-box;">
+                  <div style="display:flex; align-items:center; gap:12px; min-width:0; z-index:2;">
+                    ${banner.logoUrl ? `
+                      <div style="width:40px; height:40px; border-radius:50%; overflow:hidden; border:2px solid white; flex-shrink:0; background:white; box-shadow:0 4px 10px rgba(0,0,0,0.25);">
+                        <img src="${banner.logoUrl}" style="width:100%; height:100%; object-fit:cover;" />
+                      </div>
+                    ` : ''}
+                    <div style="display:flex; flex-direction:column; min-width:0;">
+                      <span style="color:white; font-size:15px; font-weight:950; letter-spacing:-0.01em; text-shadow:0 1px 4px rgba(0,0,0,0.5);">${displayTitle}</span>
+                      <span style="color:${limitExceeded && banner.hasDiscount ? '#ff6b6b' : '#fcd34d'}; font-size:11px; font-weight:800; margin-top:1px;">
+                        ${displaySubtitle}
+                      </span>
+                    </div>
+                  </div>
+                  <button id="wizard-banner-action-btn" style="height:34px; padding:0 14px; border-radius:8px; border:none; background:var(--color-primary); color:white; font-weight:950; font-size:11.5px; cursor:pointer; text-transform:uppercase; letter-spacing:0.04em; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.4); z-index:10; flex-shrink:0; transition:transform 0.15s;">
+                    Pedir aquí
+                  </button>
+                </div>
+              </div>
+            `;
+          };
+
+          const bindBannerEvents = (banner, limitExceeded) => {
+            const bannerCard = document.getElementById('wizard-banner-card');
+            if (bannerCard) {
+              bannerCard.onclick = async (e) => {
+                e.preventDefault();
+                window._prefilledMerchantName = banner.merchantName;
+                window._activeMandadoDiscount = banner.hasDiscount && !limitExceeded ? banner.discountAmount : 0;
+                window._activeMandadoBannerId = banner.id;
+                window._activeMandadoMerchantName = banner.merchantName;
+
+                const { doc, updateDoc, increment } = await import('firebase/firestore');
+                await updateDoc(doc(db, 'banners_mandados', banner.id), {
+                  'stats.clicks': increment(1)
+                });
+
+                slideToForm('mandado');
+              };
+            }
+          };
+
+          const bannerContainer = document.getElementById('wizard-banner-container');
+          
+          // Render cached banner instantly if available
+          if (cachedActiveBanner && bannerContainer) {
+            bannerContainer.innerHTML = renderBannerHTML(cachedActiveBanner, cachedLimitExceeded);
+            bannerContainer.style.display = 'flex';
+            bindBannerEvents(cachedActiveBanner, cachedLimitExceeded);
+          }
+
+          // Now fetch fresh data asynchronously in the background
+          const { getDocs, query, collection, where, doc, updateDoc, increment } = await import('firebase/firestore');
+          const bannerSnap = await getDocs(query(collection(db, 'banners_mandados'), where('status', '==', 'active')));
+          const activeBanners = [];
+          bannerSnap.forEach(d => {
+            activeBanners.push({ id: d.id, ...d.data() });
+          });
+
+          const activeBanner = activeBanners.length > 0 
+            ? activeBanners[Math.floor(Math.random() * activeBanners.length)] 
+            : null;
+
+          if (!activeBanner) {
+            if (bannerContainer) bannerContainer.style.display = 'none';
+            cachedActiveBanner = null;
+            return;
+          }
+
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+
+          const ordersSnap = await getDocs(query(
+            collection(db, 'orders'),
+            where('originBannerId', '==', activeBanner.id)
+          ));
+
+          let todayConversions = 0;
+          ordersSnap.forEach(d => {
+            const oData = d.data();
+            if (oData.createdAt) {
+              const oDate = oData.createdAt.toDate ? oData.createdAt.toDate() : new Date(oData.createdAt);
+              if (oDate >= todayStart && oData.status !== 'cancelled') {
+                todayConversions++;
+              }
+            }
+          });
+
+          const limitExceeded = activeBanner.hasDiscount && todayConversions >= activeBanner.discountLimitPerDay;
+          
+          // Cache it for the next time
+          cachedActiveBanner = activeBanner;
+          cachedLimitExceeded = limitExceeded;
+
+          if (bannerContainer) {
+            bannerContainer.innerHTML = renderBannerHTML(activeBanner, limitExceeded);
+            bannerContainer.style.display = 'flex';
+            bindBannerEvents(activeBanner, limitExceeded);
+            
+            // Increment impression count
+            await updateDoc(doc(db, 'banners_mandados', activeBanner.id), {
+              'stats.impressions': increment(1)
+            });
+          }
+        } catch (err) {
+          console.error('Error loading active banner:', err);
+        }
+      };
+
+      loadActiveBanner();
+
+      const slideToForm = async (serviceType) => {
+        titleEl.textContent = 'Cargando formulario...';
+        backBtn.style.visibility = 'visible';
+        
+        // Render form in Slide 2 target container
+        if (serviceType === 'encomienda') {
+          titleEl.textContent = 'Detalles de la Encomienda';
+          await showMandadoForm(target);
+        } else if (serviceType === 'mandado') {
+          titleEl.textContent = 'Mandado: Comprar algo';
+          await showCompraForm(target);
+        } else if (serviceType === 'gocash') {
+          titleEl.textContent = 'Go Cash';
+          await showGoCashForm(target);
+        } else if (serviceType === 'pagodeservicios') {
+          titleEl.textContent = 'Pago de Servicios';
+          await showPagoServiciosForm(target);
+        }
+
+        if (slidesContainer) {
+          slidesContainer.style.transform = 'translateX(-50%)';
+        }
+      };
+
+      const slideToSelector = () => {
+        titleEl.textContent = 'Mandados';
+        backBtn.style.visibility = 'hidden';
+        if (slidesContainer) {
+          slidesContainer.style.transform = 'translateX(0)';
+        }
+      };
+
+      // Set up back button
+      if (backBtn) {
+        backBtn.onclick = (e) => {
+          e.preventDefault();
+          slideToSelector();
+        };
+      }
+
+      // Close button
+      if (closeBtn) {
+        closeBtn.onclick = (e) => {
+          e.preventDefault();
+          closeModal();
+        };
+      }
+
+      // Selector options click handlers
+      document.getElementById('wizard-favor-mandado-btn').onclick = (e) => {
+        if (e.target.id === 'wizard-info-mandado-btn') return;
+        checkPhoneAndOpen(slideToForm, 'encomienda');
+      };
+      document.getElementById('wizard-favor-compra-btn').onclick = (e) => {
+        if (e.target.id === 'wizard-info-compra-btn') return;
+        checkPhoneAndOpen(slideToForm, 'mandado');
+      };
+      document.getElementById('wizard-favor-gocash-btn').onclick = (e) => {
+        if (e.target.id === 'wizard-info-gocash-btn') return;
+        checkPhoneAndOpen(slideToForm, 'gocash');
+      };
+      document.getElementById('wizard-favor-pagodeservicios-btn').onclick = (e) => {
+        if (e.target.id === 'wizard-info-pagodeservicios-btn') return;
+        checkPhoneAndOpen(slideToForm, 'pagodeservicios');
+      };
+
+      // Info buttons click handlers
+      document.getElementById('wizard-info-mandado-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('encomienda'); };
+      document.getElementById('wizard-info-compra-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('mandado'); };
+      document.getElementById('wizard-info-gocash-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('gocash'); };
+      document.getElementById('wizard-info-pagodeservicios-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('pagodeservicios'); };
+
+      // Support direct loading if preselected
+      if (initialServiceType) {
+        checkPhoneAndOpen(slideToForm, initialServiceType);
+      } else {
+        slideToSelector();
+      }
+    }
+  });
 }

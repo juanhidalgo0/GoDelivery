@@ -1,0 +1,2080 @@
+import { getState, setState, subscribe, getUserLevel } from "../state.js";
+import { signInWithGoogle, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from "../auth.js";
+import { db, auth } from "../firebase.js";
+import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from "firebase/firestore";
+import { icon } from "../utils/icons.js";
+import { formatPrice } from "../utils/format.js";
+import { showAddressPrompt } from "../components/address-modal.js";
+import { AudioManager } from "../utils/audio-manager.js";
+export async function renderProfile(content) {
+  const { checkIfInstalled, isIOS, showInstallUI } = await import("../components/install-prompt.js");
+  const updateInstallVisibility = () => {
+    const isInstalled = checkIfInstalled();
+    const pwaSkipped = sessionStorage.getItem("pwa_skipped") === "true";
+    const canInstall = window.deferredPrompt !== void 0 || isIOS();
+    const installRow = document.getElementById("install-app-row");
+    if (!isInstalled && !pwaSkipped && canInstall && installRow) {
+      installRow.style.display = "flex";
+    } else if (installRow) {
+      installRow.style.display = "none";
+    }
+  };
+  if (!content) return;
+  renderProfileContent(content, { updateInstallVisibility, showInstallUI });
+  const unsubUser = subscribe("user", () => renderProfileContent(content, { updateInstallVisibility, showInstallUI }));
+  const unsubAddress = subscribe("deliveryAddress", () => renderProfileContent(content, { updateInstallVisibility, showInstallUI }));
+  const unsubLevels = subscribe("levels", () => renderProfileContent(content, { updateInstallVisibility, showInstallUI }));
+  const unsubPointsPerDollar = subscribe("pointsPerDollar", () => renderProfileContent(content, { updateInstallVisibility, showInstallUI }));
+  const unsubDollarPerPoint = subscribe("dollarPerPoint", () => renderProfileContent(content, { updateInstallVisibility, showInstallUI }));
+  const handlePrompt = () => updateInstallVisibility();
+  window.addEventListener("pwa-prompt-available", handlePrompt);
+  return {
+    cleanup: () => {
+      unsubUser();
+      unsubAddress();
+      unsubLevels();
+      unsubPointsPerDollar();
+      unsubDollarPerPoint();
+      window.removeEventListener("pwa-prompt-available", handlePrompt);
+    }
+  };
+}
+async function renderProfileContent(content, { updateInstallVisibility, showInstallUI } = {}) {
+  try {
+    const user = getState().user;
+    if (!user) {
+      content.innerHTML = `
+        <div class="login-page">
+          <div class="login-card page-enter">
+            <img src="/logo-brand.jpg" alt="GoDelivery" class="login-logo circular-logo" />
+            <h2 class="login-title">\xA1Bienvenido!</h2>
+            <p class="login-subtitle">Inici\xE1 sesi\xF3n para empezar a pedir lo que m\xE1s te gusta</p>
+            <button class="btn btn-google btn-block btn-lg" id="google-login-btn">
+              <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+              Continuar con Google
+            </button>
+            <button class="btn btn-block btn-lg" id="apple-login-btn" style="background: black; color: white; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 12px; border-radius: 100px; font-weight: 700; height: 48px; border: none; cursor: pointer; transition: all 0.2s;">
+              <svg width="18" height="22" viewBox="0 0 18 22" fill="white"><path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/></svg>
+              Continuar con Apple
+            </button>
+            <div style="margin-top: 24px; text-align: center;">
+              <button id="reviewer-login-btn" style="background: none; border: none; color: var(--color-text-tertiary); font-size: 11px; font-weight: 750; text-decoration: underline; cursor: pointer; opacity: 0.8; transition: opacity 0.2s;">
+                Acceso para revisores (Google Play)
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById("google-login-btn")?.addEventListener("click", signInWithGoogle);
+      document.getElementById("apple-login-btn")?.addEventListener("click", signInWithApple);
+      document.getElementById("reviewer-login-btn")?.addEventListener("click", () => {
+        const modalEl = document.createElement("div");
+        modalEl.style.cssText = "padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 16px)) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);";
+        modalEl.innerHTML = `
+          <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
+          <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingres\xE1 las credenciales proporcionadas para revisar la aplicaci\xF3n.</p>
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+            <input type="email" id="test-email" placeholder="Correo electr\xF3nico" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
+            <input type="password" id="test-password" placeholder="Contrase\xF1a" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
+          </div>
+          <button id="btn-submit-test-login" style="margin-top: 16px; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.2);">
+            Iniciar Sesi\xF3n
+          </button>
+        `;
+        import("../components/modal.js").then((m) => {
+          m.showModal({
+            title: "",
+            content: modalEl,
+            height: "auto",
+            hideHeader: true,
+            onOpen: () => {
+              modalEl.querySelector("#btn-submit-test-login").onclick = async () => {
+                const email = modalEl.querySelector("#test-email").value.trim();
+                const password = modalEl.querySelector("#test-password").value.trim();
+                if (!email || !password) return;
+                modalEl.querySelector("#btn-submit-test-login").disabled = true;
+                modalEl.querySelector("#btn-submit-test-login").textContent = "Iniciando...";
+                const { signInWithTestAccount } = await import("../auth.js");
+                const success = await signInWithTestAccount(email, password);
+                if (success) {
+                  m.closeModal();
+                } else {
+                  modalEl.querySelector("#btn-submit-test-login").disabled = false;
+                  modalEl.querySelector("#btn-submit-test-login").textContent = "Iniciar Sesi\xF3n";
+                }
+              };
+            }
+          });
+        });
+      });
+      return;
+    }
+    if (user && !user.goId) {
+      const { runTransaction, doc: fDoc } = await import("firebase/firestore");
+      runTransaction(db, async (t) => {
+        const sRef = fDoc(db, "settings", "users");
+        const sSnap = await t.get(sRef);
+        let last = sSnap.exists() ? sSnap.data().lastGoId || 1e3 : 1e3;
+        last++;
+        const goId = `GO-${last}`;
+        t.update(fDoc(db, "users", user.uid), { goId });
+        t.set(sRef, { lastGoId: last }, { merge: true });
+        user.goId = goId;
+      }).catch((err) => console.error("Error assigning goId inside profile:", err));
+    }
+    const { deliveryAddress } = getState();
+    const level = getUserLevel(user.completedOrdersCount || 0);
+    const s = getState();
+    const allLevels = Object.values(s.levels || {}).sort((a, b) => a.minOrders - b.minOrders);
+    const currentLevelIndex = allLevels.findIndex((l) => l.id === level.id);
+    const nextLevel = allLevels[currentLevelIndex + 1] || null;
+    let progressBarHtml = "";
+    let modalProgressBarHtml = "";
+    if (nextLevel) {
+      const completed = user.completedOrdersCount || 0;
+      const target = nextLevel.minOrders;
+      const base = level.minOrders;
+      const range = target - base;
+      const currentProgress = completed - base;
+      const percentage = Math.max(0, Math.min(100, currentProgress / range * 100));
+      const remaining = target - completed;
+      progressBarHtml = `
+        <div style="margin-top: 12px; width: 100%; display: flex; flex-direction: column; gap: 4px; z-index: 1;">
+          <div style="display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 800; opacity: 0.95; letter-spacing: 0.2px;">
+            <span>Progreso a Nivel <strong style="color: ${nextLevel.color || "#fff"}">${nextLevel.name}</strong></span>
+            <span>${completed}/${target} pedidos</span>
+          </div>
+          <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.18); border-radius: 4px; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.15);">
+            <div style="width: ${percentage}%; height: 100%; background: linear-gradient(90deg, #ffffff 0%, rgba(255,255,255,0.85) 100%); border-radius: 4px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 0 6px rgba(255,255,255,0.5);"></div>
+          </div>
+          <div style="font-size: 9.5px; opacity: 0.85; font-weight: 700; margin-top: 1px;">
+            \xA1Te faltan solo ${remaining} ${remaining === 1 ? "pedido" : "pedidos"} para subir a ${nextLevel.name}!
+          </div>
+        </div>
+      `;
+      modalProgressBarHtml = `
+        <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 800; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
+            <span>Tu Progreso de Nivel</span>
+            <span style="color: var(--color-text-primary); font-weight: 900;">${completed} / ${target} Pedidos</span>
+          </div>
+          
+          <div style="display: flex; align-items: center; gap: 10px; margin: 4px 0;">
+            <span style="font-size: 12px; font-weight: 900; color: ${level.color}">${level.name}</span>
+            <div style="flex: 1; height: 8px; background: var(--color-border-light); border-radius: 6px; overflow: hidden; position: relative;">
+              <div style="width: ${percentage}%; height: 100%; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%); border-radius: 6px; transition: width 1s cubic-bezier(0.34, 1.56, 0.64, 1);"></div>
+            </div>
+            <span style="font-size: 12px; font-weight: 900; color: ${nextLevel.color}">${nextLevel.name}</span>
+          </div>
+          
+          <div style="font-size: 12px; color: var(--color-text-secondary); text-align: center; font-weight: 600; line-height: 1.4;">
+            \xA1Te faltan solo <strong style="color: var(--color-primary); font-weight: 800;">${remaining} ${remaining === 1 ? "pedido" : "pedidos"}</strong> para alcanzar el rango <strong style="color: ${nextLevel.color}; font-weight: 800;">${nextLevel.name}</strong> y aumentar tus recompensas!
+          </div>
+        </div>
+      `;
+    } else {
+      progressBarHtml = `
+        <div style="margin-top: 12px; width: 100%; display: flex; flex-direction: column; gap: 4px; z-index: 1;">
+          <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 900; color: #fff;">
+            <span>${icon("sparkles", 12)}</span> \xA1Nivel M\xE1ximo Alcanzado!
+          </div>
+          <div style="width: 100%; height: 6px; background: linear-gradient(90deg, #ffffff 0%, #ffe066 100%); border-radius: 4px; box-shadow: 0 0 8px rgba(255,255,255,0.6);"></div>
+          <div style="font-size: 9.5px; opacity: 0.9; font-weight: 700; margin-top: 1px;">
+            Est\xE1s disfrutando del beneficio m\xE1ximo (+50% GoPoints y promos exclusivas).
+          </div>
+        </div>
+      `;
+      modalProgressBarHtml = `
+        <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; text-align: center;">
+          <div style="color: #f59e0b; font-size: 24px; margin-bottom: 2px;">\u{1F451}</div>
+          <div style="font-family: var(--font-display); font-size: 15px; font-weight: 900; color: var(--color-text-primary);">\xA1Usuario de Rango Supremo!</div>
+          <div style="font-size: 12px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.4;">
+            Alcanzaste el nivel m\xE1ximo <strong>${level.name}</strong>. Ten\xE9s el multiplicador de GoPoints al l\xEDmite y todos los beneficios premium activos. \xA1Gracias por ser parte clave de GoDelivery!
+          </div>
+        </div>
+      `;
+    }
+    content.innerHTML = `
+      <div class="profile-page page-enter" style="background:var(--color-bg);">
+        
+        <style>
+          #page-profile::-webkit-scrollbar {
+            display: none !important;
+          }
+          #page-profile {
+            scrollbar-width: none !important;
+            -ms-overflow-style: none !important;
+          }
+          .profile-page .settings-row {
+            padding: 10px 16px !important;
+            gap: 12px !important;
+          }
+          .profile-page .settings-icon-box {
+            width: 34px !important;
+            height: 34px !important;
+            border-radius: 10px !important;
+          }
+          .profile-page .settings-icon-box svg {
+            width: 16px !important;
+            height: 16px !important;
+          }
+          .profile-page .settings-label {
+            font-size: 13.5px !important;
+            font-weight: 700 !important;
+          }
+          .profile-page .settings-list {
+            gap: 0px !important;
+          }
+          #profile-avatar-container:hover .avatar-edit-overlay {
+            opacity: 1 !important;
+          }
+          @keyframes pulse-orange {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+          }
+        </style>
+
+          
+          <!-- User Profile Info -->
+          <div style="padding:16px 20px; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; gap:14px;">
+            <div style="position:relative; cursor:pointer;" id="profile-avatar-container" title="Cambiar foto de perfil">
+              <img src="${user.photoURL || "/logo.png"}" alt="${user.displayName}" style="width:58px; height:58px; border-radius:18px; object-fit:cover; border:2.5px solid var(--color-bg-secondary); box-shadow:var(--shadow-md);" referrerpolicy="no-referrer" />
+              <div class="avatar-edit-overlay" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); border-radius:18px; display:flex; align-items:center; justify-content:center; color:white; opacity:0; transition:opacity 0.2s;">
+                ${icon("camera", 16)}
+              </div>
+              <!-- Camera badge indicator always visible in top-right -->
+              <div style="position:absolute; top:-4px; right:-4px; width:20px; height:20px; border-radius:50%; background:var(--color-primary); display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface); z-index:2; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                ${icon("camera", 10)}
+              </div>
+              <div style="position:absolute; bottom:-3px; right:-3px; width:22px; height:22px; border-radius:8px; background:${level.color}; display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface); z-index:2;">
+                ${icon(level.icon || "award", 11)}
+              </div>
+            </div>
+            <input type="file" id="profile-avatar-input" accept="image/*" style="display:none;" />
+            <div style="flex:1; min-width:0;">
+              <h2 style="font-family:var(--font-display); font-weight:900; font-size:18px; color:var(--color-text); margin:0; letter-spacing:-0.03em;">${user.displayName || "Usuario"}</h2>
+              <p style="font-size:12px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.email || ""} \u2022 <strong style="color:var(--color-text-primary); font-family:monospace; letter-spacing:0.5px;">${user.goId || "..."}</strong></p>
+              <div style="font-size: 10px; font-weight: 800; color:var(--color-primary); margin-top:4px; text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; gap:4px;">
+                Nivel ${level.name} \u2022 
+                <span style="display:inline-flex; align-items:center; gap:2.5px; background:rgba(245, 158, 11, 0.1); color:#f59e0b; padding:1.5px 5px; border-radius:5px; font-weight:900; text-transform:none;">
+                  ${icon("goPointsLogo", 10)} ${user.points || 0} pts
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Premium GoPoints Badge / Card -->
+          <div id="gopoints-badge-card" style="margin: 10px 20px; background: linear-gradient(145deg, #1a0a00 0%, #2d1400 40%, #3d1f00 100%); border-radius: 22px; padding: 0; color: white; display: flex; flex-direction: column; cursor: pointer; box-shadow: 0 12px 40px -8px rgba(245,158,11,0.45), 0 0 0 1px rgba(245,158,11,0.2); position: relative; overflow: hidden; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); border: 1px solid rgba(245,158,11,0.3);" onmouseover="this.style.transform='translateY(-2px) scale(1.01)'; this.style.boxShadow='0 20px 50px -8px rgba(245,158,11,0.55), 0 0 0 1px rgba(245,158,11,0.35)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 12px 40px -8px rgba(245,158,11,0.45), 0 0 0 1px rgba(245,158,11,0.2)';">
+            <!-- Decorative circles -->
+            <div style="position: absolute; right: -30px; top: -30px; width: 130px; height: 130px; background: radial-gradient(circle, rgba(245,158,11,0.25) 0%, transparent 70%); border-radius: 50%; pointer-events:none;"></div>
+            <div style="position: absolute; left: -20px; bottom: -30px; width: 100px; height: 100px; background: radial-gradient(circle, rgba(245,158,11,0.12) 0%, transparent 70%); border-radius: 50%; pointer-events:none;"></div>
+            <!-- Shimmer line -->
+            <div style="position:absolute; top:0; left:0; right:0; height:1px; background: linear-gradient(90deg, transparent 0%, rgba(245,158,11,0.8) 50%, transparent 100%); pointer-events:none;"></div>
+
+            <!-- Header Row -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; z-index: 1; position:relative;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 42px; height: 42px; background: linear-gradient(135deg, rgba(245,158,11,0.4) 0%, rgba(180,100,0,0.3) 100%); border-radius: 13px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(245,158,11,0.5); box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                  ${icon("goPointsLogo", 22)}
+                </div>
+                <div>
+                  <div style="font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: rgba(245,158,11,0.7); margin-bottom: 2px;">Club GO \xB7 Mis Puntos</div>
+                  <div style="font-size: 26px; font-weight: 950; letter-spacing: -1px; line-height: 1; display: flex; align-items: baseline; gap: 4px;">
+                    <span style="background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 60%, #d97706 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;">${(user.points || 0).toLocaleString("es-AR")}</span>
+                    <span style="font-size: 11px; font-weight: 900; color: rgba(245,158,11,0.65); -webkit-text-fill-color: rgba(245,158,11,0.65); letter-spacing: 1px;">PTS</span>
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 5px; background: rgba(245,158,11,0.15); padding: 5px 10px; border-radius: 20px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #fbbf24; border: 1px solid rgba(245,158,11,0.3);">
+                  Ver Club ${icon("chevronRight", 8)}
+                </div>
+                <div style="font-size: 9px; color: rgba(255,255,255,0.3); font-weight: 700; letter-spacing: 0.5px;">Nivel ${level.name}</div>
+              </div>
+            </div>
+
+            <!-- Progress Bar Area -->
+            <div style="padding: 0 18px 16px; z-index:1; position:relative;">
+              ${progressBarHtml}
+            </div>
+          </div>
+
+          <!-- Delivery Application Section -->
+            ${!isDelivery() && (user.deliveryStatus === "pending" || user.deliveryStatus === "rejected") ? `
+            <div id="delivery-apply-card" style="margin: 10px 20px; background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
+              ${user.deliveryStatus === "pending" ? `
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(245, 158, 11, 0.1); color: #f59e0b; display: flex; align-items: center; justify-content: center; flex-shrink: 0; animation: pulse-orange 2s infinite;">
+                    ${icon("bike", 22)}
+                  </div>
+                  <div>
+                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">Postulaci\xF3n en Revisi\xF3n</h4>
+                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                      Tu solicitud profesional para ser repartidor est\xE1 siendo evaluada por un administrador. Te notificaremos pronto.
+                    </p>
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; background: rgba(245, 158, 11, 0.08); padding: 6px 12px; border-radius: 8px; color: #f59e0b; font-size: 11px; font-weight: 800; align-self: flex-start;">
+                  <div class="spinner-mini" style="width:12px; height:12px; border-width:2px; border-top-color:#f59e0b; margin:0;"></div>
+                  EN REVISI\xD3N
+                </div>
+              ` : `
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    ${icon("alertCircle", 22)}
+                  </div>
+                  <div>
+                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">Postulaci\xF3n Rechazada</h4>
+                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                      Tu postulaci\xF3n no ha sido aprobada en este momento. Si crees que se trata de un error, contact\xE1 con soporte.
+                    </p>
+                  </div>
+                </div>
+                <button id="reapply-delivery-btn" class="btn btn-outline" style="height: 38px; font-size: 12px; font-weight: 800; border-radius: 8px; align-self: flex-start; padding: 0 16px;">
+                  Volver a Postularse
+                </button>
+              `}
+            </div>
+          ` : isDelivery() ? `
+            <!-- Panel Repartidor Acceso Directo si ya est\xE1 aprobado -->
+            <div style="margin: 10px 20px; background: rgba(34, 197, 94, 0.05); border-radius: 16px; padding: 14px 16px; border: 1.5px solid rgba(34, 197, 94, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center;">
+                  ${icon("bike", 20)}
+                </div>
+                <div>
+                  <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); margin-top:1px;">\xA1Sos Repartidor Activo!</div>
+                  <div style="font-size:11px; color:var(--color-text-secondary); margin-top:1px;">Acced\xE9 a tus herramientas y pedidos.</div>
+                </div>
+              </div>
+              <a href="#/delivery" class="btn btn-success" style="height: 32px; font-size: 11px; font-weight: 900; border-radius: 8px; display:flex; align-items:center; gap:4px; text-transform:uppercase; padding:0 12px; background:#22c55e; border:none; color:white; text-decoration:none;">
+                Entrar ${icon("chevronRight", 10)}
+              </a>
+            </div>
+          ` : ""}
+ 
+          <!-- Commerce Application Section -->
+          ${!isComercio() && (user.commerceStatus === "pending" || user.commerceStatus === "rejected") ? `
+            <div id="commerce-apply-card" style="margin: 10px 20px; background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
+              ${user.commerceStatus === "pending" ? `
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center; flex-shrink: 0; animation: pulse-green 2s infinite;">
+                    ${icon("store", 22)}
+                  </div>
+                  <div>
+                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">Postulaci\xF3n de Comercio en Revisi\xF3n</h4>
+                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                      Tu solicitud para registrar tu comercio est\xE1 siendo evaluada por un administrador. Te notificaremos pronto.
+                    </p>
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; background: rgba(34, 197, 94, 0.08); padding: 6px 12px; border-radius: 8px; color: #22c55e; font-size: 11px; font-weight: 800; align-self: flex-start;">
+                  <div class="spinner-mini" style="width:12px; height:12px; border-width:2px; border-top-color:#22c55e; margin:0;"></div>
+                  EN REVISI\xD3N
+                </div>
+              ` : `
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    ${icon("alertCircle", 22)}
+                  </div>
+                  <div>
+                    <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text); margin: 0 0 4px 0;">Postulaci\xF3n de Comercio Rechazada</h4>
+                    <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                      Tu solicitud de comercio ha sido rechazada. Contact\xE1 con soporte si ten\xE9s dudas o quer\xE9s apelar.
+                    </p>
+                  </div>
+                </div>
+                <button id="reapply-commerce-btn" class="btn btn-outline" style="height: 38px; font-size: 12px; font-weight: 800; border-radius: 8px; align-self: flex-start; padding: 0 16px;">
+                  Volver a Solicitar
+                </button>
+              `}
+            </div>
+          ` : isComercio() ? `
+            <!-- Panel Comercio Acceso Directo si ya est\xE1 aprobado -->
+            <div style="margin: 10px 20px; background: rgba(34, 197, 94, 0.05); border-radius: 16px; padding: 14px 16px; border: 1.5px solid rgba(34, 197, 94, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center;">
+                  ${icon("store", 20)}
+                </div>
+                <div>
+                  <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); margin-top:1px;">\xA1Comercio Activo!</div>
+                  <div style="font-size:11px; color:var(--color-text-secondary); margin-top:1px;">Gestion\xE1 tus productos y ventas directas.</div>
+                </div>
+              </div>
+              <a href="#/comercio-panel" class="btn btn-success" style="height: 32px; font-size: 11px; font-weight: 900; border-radius: 8px; display:flex; align-items:center; gap:4px; text-transform:uppercase; padding:0 12px; background:#22c55e; border:none; color:white; text-decoration:none;">
+                Panel ${icon("chevronRight", 10)}
+              </a>
+            </div>
+          ` : ""}
+          <!-- M\xF3dulo 1.1: Sistema de Referidos & 1.2 Desaf\xEDos y Rachas Semanales -->
+          <div style="margin: 10px 20px; display: flex; flex-direction: column; gap: 12px;">
+            <!-- Referidos Card (Premium) -->
+            <div style="background: linear-gradient(135deg, rgba(245,158,11,0.06) 0%, rgba(217,119,6,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(245,158,11,0.2); box-shadow: 0 4px 16px rgba(245,158,11,0.06); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
+              <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(217,119,6,0.1) 100%); color: #f59e0b; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(245,158,11,0.25); box-shadow: 0 3px 8px rgba(245,158,11,0.1);">
+                  ${icon("gift", 22)}
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 3px 0;">Tra\xE9 a un amigo, \xA1ganan ambos!</h4>
+                  <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+                    Compart\xED tu c\xF3digo. Cuando tu amigo complete su primer pedido, \xA1ambos reciben <strong style="color:#f59e0b;">500 GO Points</strong>!
+                  </p>
+                </div>
+              </div>
+              <div style="background: var(--color-bg-secondary); border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--color-border-light); gap: 8px;">
+                <span style="font-family: var(--font-display); font-weight: 900; font-size: 13px; color: var(--color-text-primary); letter-spacing: 0.5px; white-space: nowrap;">
+                  ${user.referralCode || "GO-REF-XXXXX"}
+                </span>
+                <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                  <button id="copy-ref-btn" class="btn btn-ghost" style="height: 30px; padding: 0 8px; font-size: 10px; font-weight: 800; border-radius: 8px; display: flex; align-items: center; gap: 3px; border: 1px solid var(--color-border-light); color: var(--color-text-secondary); white-space: nowrap;">
+                    ${icon("copy", 12)} Copiar
+                  </button>
+                  <button id="share-ref-btn" style="height: 30px; padding: 0 8px; font-size: 10px; font-weight: 800; border-radius: 8px; display: flex; align-items: center; gap: 3px; border: none; color: white; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); cursor:pointer; white-space: nowrap; box-shadow: 0 2px 8px rgba(245,158,11,0.3);">
+                    ${icon("share", 12)} Compartir
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Desaf\xEDos Card (Premium) -->
+            <div id="weekly-challenges-card" style="background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(59,130,246,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(99,102,241,0.2); box-shadow: 0 4px 16px rgba(99,102,241,0.06); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(99,102,241,0.12)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 16px rgba(99,102,241,0.06)';">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(59,130,246,0.1) 100%); color: #6366f1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(99,102,241,0.25); box-shadow: 0 3px 8px rgba(99,102,241,0.1);">
+                  ${icon("target", 22)}
+                </div>
+                <div>
+                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">Desaf\xEDos Semanales</h4>
+                  <p style="font-size: 11px; color: var(--color-text-secondary); margin: 0;">
+                    Complet\xE1 misiones y sum\xE1 hasta <strong style="color:#6366f1;">10.000 pts</strong> esta semana.
+                  </p>
+                </div>
+              </div>
+              <div style="background: rgba(99,102,241,0.12); border-radius: 10px; padding: 6px 8px; color: #6366f1; border: 1px solid rgba(99,102,241,0.2);">
+                ${icon("chevronRight", 16)}
+              </div>
+            </div>
+
+            <!-- Transferir Puntos Card (Premium) -->
+            <div id="transfer-gopoints-card" style="background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(5,150,105,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(16,185,129,0.2); box-shadow: 0 4px 16px rgba(16,185,129,0.06); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(16,185,129,0.12)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 16px rgba(16,185,129,0.06)';">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(5,150,105,0.1) 100%); color: #10b981; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(16,185,129,0.25); box-shadow: 0 3px 8px rgba(16,185,129,0.1);">
+                  ${icon("share", 22)}
+                </div>
+                <div>
+                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">Regalar GO Points</h4>
+                  <p style="font-size: 11px; color: var(--color-text-secondary); margin: 0;">
+                    Transfer\xED tus puntos a otro usuario por su ID.
+                  </p>
+                </div>
+              </div>
+              <div style="background: rgba(16,185,129,0.12); border-radius: 10px; padding: 6px 8px; color: #10b981; border: 1px solid rgba(16,185,129,0.2);">
+                ${icon("chevronRight", 16)}
+              </div>
+            </div>
+          </div>
+
+        <!-- Settings Menu List -->
+        <div style="margin-top:6px; padding:0 20px;">
+          <div class="settings-list" style="background:var(--color-surface); border-radius:16px; border:1px solid var(--color-border-light); overflow:hidden; box-shadow:var(--shadow-sm);">
+            
+            <a href="#/profile/orders" class="settings-row">
+              <div class="settings-icon-box" style="background:rgba(245, 158, 11, 0.1); color:#f59e0b;">
+                ${icon("shoppingBag", 20)}
+              </div>
+              <span class="settings-label">Mis Pedidos</span>
+              ${icon("chevronRight", 16, "settings-chevron")}
+            </a>
+
+            <a href="#/profile/publications" class="settings-row">
+              <div class="settings-icon-box" style="background:rgba(16, 185, 129, 0.1); color:#10b981;">
+                ${icon("shop", 20) || icon("tag", 20) || "\u{1F3F7}\uFE0F"}
+              </div>
+              <span class="settings-label">Mis Publicaciones (Market)</span>
+              ${icon("chevronRight", 16, "settings-chevron")}
+            </a>
+
+            <div class="settings-row" id="edit-display-name-btn" style="cursor:pointer;">
+              <div class="settings-icon-box" style="background:rgba(225, 29, 72, 0.1); color:var(--color-primary);">
+                ${icon("user", 20)}
+              </div>
+              <div style="flex:1;">
+                <span class="settings-label">Nombre Visible</span>
+                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.displayName || "Establecer nombre"}</p>
+              </div>
+              ${icon("edit", 16, "settings-chevron")}
+            </div>
+
+            <div class="settings-row" id="edit-address-btn" style="cursor:pointer;">
+              <div class="settings-icon-box" style="background:rgba(34, 197, 94, 0.1); color:#10b981;">
+                ${icon("mapPin", 20)}
+              </div>
+              <div style="flex:1;">
+                <span class="settings-label">Tus Direcciones</span>
+                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${deliveryAddress || "No establecida"}</p>
+              </div>
+              ${icon("edit", 16, "settings-chevron")}
+            </div>
+
+            <div class="settings-row" id="edit-phone-btn" style="cursor:pointer;">
+              <div class="settings-icon-box" style="background:rgba(37, 99, 235, 0.1); color:#2563eb;">
+                ${icon("phone", 20)}
+              </div>
+              <div style="flex:1;">
+                <span class="settings-label">N\xFAmero de contacto</span>
+                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis;">
+                  ${user.phone ? `+54 ${user.phone}` : "No configurado"}
+                  ${user.phone ? user.phoneVerified ? `<span style="background:rgba(34, 197, 94, 0.15); color:#22c55e; padding:2px 6px; border-radius:10px; font-size:9px; font-weight:800;">\u2713 Verificado</span>` : `<span style="background:rgba(249, 115, 22, 0.15); color:#f97316; padding:2px 6px; border-radius:10px; font-size:9px; font-weight:800;">\u26A0 Sin Verificar</span>` : ""}
+                </p>
+              </div>
+              ${icon("edit", 16, "settings-chevron")}
+            </div>
+
+
+
+            <div class="settings-row" id="help-terms-btn" style="cursor:pointer;">
+              <div class="settings-icon-box" style="background:rgba(139, 92, 246, 0.1); color:#8b5cf6;">
+                ${icon("info", 20)}
+              </div>
+              <div style="flex:1;">
+                <span class="settings-label">Soporte y T\xE9rminos Legales</span>
+              </div>
+              ${icon("chevronRight", 16, "settings-chevron")}
+            </div>
+
+            ${isAdmin() ? `
+              <a href="#/admin" class="settings-row">
+                <div class="settings-icon-box" style="background:rgba(139, 92, 246, 0.1); color:#8b5cf6;">
+                  ${icon("shield", 20)}
+                </div>
+                <span class="settings-label">Panel Administrativo</span>
+                ${icon("chevronRight", 16, "settings-chevron")}
+              </a>
+            ` : ""}
+
+            <div class="settings-row" id="delete-account-row">
+              <div class="settings-icon-box" style="background:rgba(239, 68, 68, 0.1); color:var(--color-danger);">
+                ${icon("trash", 20)}
+              </div>
+              <span class="settings-label" style="color:var(--color-danger);">Eliminar cuenta</span>
+              ${icon("chevronRight", 16, "settings-chevron")}
+            </div>
+
+            <div class="settings-row" id="install-app-row" style="display:none;">
+              <div class="settings-icon-box" style="background:rgba(236, 72, 153, 0.1); color:#ec4899;">
+                ${icon("plus", 20)}
+              </div>
+              <span class="settings-label">Instalar Aplicaci\xF3n</span>
+              ${icon("plus", 16, "settings-chevron")}
+            </div>
+
+          </div>
+
+          <button class="btn btn-ghost btn-block" id="logout-btn" style="margin-top:14px; height:46px; border-radius:12px; color:var(--color-danger); font-weight:800; background:rgba(var(--color-danger-rgb), 0.05); font-size:14px;">
+            ${icon("logOut", 16)} Cerrar sesi\xF3n
+          </button>
+
+          <p style="text-align:center; margin-top:8px; font-size:10px; color:var(--color-text-tertiary); font-weight:600;">GoDelivery v2.4.0 \u2014 Made with \u2764\uFE0F</p>
+      </div>
+    `;
+    document.getElementById("edit-display-name-btn")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      showEditDisplayNameModal(user);
+    });
+    document.getElementById("edit-address-btn")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      showManageAddressesModal();
+    });
+    document.getElementById("edit-phone-btn")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      showEditPhoneModal(user);
+    });
+    document.getElementById("install-app-row")?.addEventListener("click", () => showInstallUI());
+    document.getElementById("help-terms-btn")?.addEventListener("click", () => showHelpAndTermsModal());
+    document.getElementById("delete-account-row")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      showDeleteAccountConfirmModal();
+    });
+    document.getElementById("profile-avatar-container")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      document.getElementById("profile-avatar-input")?.click();
+    });
+    document.getElementById("profile-avatar-input")?.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        try {
+          const { openCropper } = await import("../utils/cropper.js");
+          const cropped = await openCropper(file, { aspectRatio: 1, circular: true });
+          const { showToast: showToast2 } = await import("../components/toast.js");
+          showToast2("Actualizando foto de perfil...", "info");
+          const { db: db2 } = await import("../firebase.js");
+          const { doc, updateDoc } = await import("firebase/firestore");
+          await updateDoc(doc(db2, "users", user.uid), {
+            photoURL: cropped
+          });
+          const currentUser = getState().user;
+          setState("user", { ...currentUser, photoURL: cropped });
+          showToast2("Foto de perfil actualizada con \xE9xito", "success");
+        } catch (err) {
+          if (err !== "Cancelled") {
+            console.error("Error updating profile picture:", err);
+            const { showToast: showToast2 } = await import("../components/toast.js");
+            showToast2("Error al actualizar la foto de perfil", "error");
+          }
+        }
+      }
+    });
+    document.getElementById("copy-ref-btn")?.addEventListener("click", async () => {
+      AudioManager.hapticLight();
+      const code = user.referralCode || "GO-REF-XXXXX";
+      navigator.clipboard.writeText(code);
+      const { showToast: showToast2 } = await import("../components/toast.js");
+      showToast2("\xA1C\xF3digo de referido copiado!", "success");
+    });
+    document.getElementById("share-ref-btn")?.addEventListener("click", async () => {
+      AudioManager.hapticLight();
+      const code = user.referralCode || "GO-REF-XXXXX";
+      const shareUrl = `${window.location.origin}/?ref=${code}`;
+      const shareData = {
+        title: "GO Delivery \u2014 \xA1Te regalo un descuento!",
+        text: `Registrate en GO Delivery usando mi c\xF3digo ${code} y gan\xE1 $500 en GO Points para tu primera compra:`,
+        url: shareUrl
+      };
+      const { showToast: showToast2 } = await import("../components/toast.js");
+      if (navigator.share) {
+        try {
+          await navigator.share(shareData);
+        } catch (err) {
+          console.warn("Share API failed:", err);
+        }
+      } else {
+        navigator.clipboard.writeText(shareUrl);
+        showToast2("\xA1Enlace de invitaci\xF3n copiado!", "success");
+      }
+    });
+    document.getElementById("weekly-challenges-card")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      document.getElementById("gopoints-badge-card")?.click();
+    });
+    document.getElementById("transfer-gopoints-card")?.addEventListener("click", () => {
+      AudioManager.hapticLight();
+      showTransferGoPointsModal(user);
+    });
+    document.getElementById("gopoints-badge-card")?.addEventListener("click", async () => {
+      const { showModal } = await import("../components/modal.js");
+      const { getState: getState2 } = await import("../state.js");
+      const s2 = getState2();
+      const dollarPerPoint = s2.dollarPerPoint || 1;
+      const pointsPerDollar = s2.pointsPerDollar || 0.01;
+      const purchaseAmountPerPoint = pointsPerDollar > 0 ? Math.round(1 / pointsPerDollar) : 100;
+      const allLevels2 = Object.values(s2.levels || {}).sort((a, b) => a.minOrders - b.minOrders);
+      const levelsHtml = allLevels2.map((lvl) => {
+        const isCurrent = level.id === lvl.id;
+        const multiplierPercent = Math.round((lvl.multiplier - 1) * 100);
+        const multiplierText = lvl.multiplier > 1 ? `+${multiplierPercent}% extra de puntos` : `Tasa base de puntos`;
+        return `
+          <div style="background: ${isCurrent ? "rgba(var(--color-primary-rgb), 0.04)" : "var(--color-bg-page)"}; border: 1.5px solid ${isCurrent ? "var(--color-primary)" : "var(--color-border-light)"}; border-radius: 16px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: all 0.2s;">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+              <div style="width: 32px; height: 32px; background: ${lvl.color || "#ccc"}; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
+                ${icon(lvl.icon || "award", 16)}
+              </div>
+              <div style="min-width: 0; overflow: hidden;">
+                <div style="font-size: 12px; font-weight: 900; color: var(--color-text-primary); display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                  ${lvl.name}
+                  ${isCurrent ? `<span style="background:var(--color-primary); color:white; font-size:8px; font-weight:900; padding:1px 5px; border-radius:4px; text-transform:uppercase; letter-spacing:0.02em;">T\xFA</span>` : ""}
+                </div>
+                <div style="font-size: 10px; color: var(--color-text-secondary); opacity: 0.8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  Desde ${lvl.minOrders} pedidos
+                </div>
+              </div>
+            </div>
+            <div style="text-align: right; flex-shrink: 0;">
+              <div style="font-size: 12px; font-weight: 900; color: var(--color-success);">${lvl.multiplier}x Puntos</div>
+              <div style="font-size: 9px; color: var(--color-text-tertiary); font-weight: 700; margin-top: 1px;">${multiplierText}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+      showModal({
+        title: "Club GO Points",
+        height: "auto",
+        content: `
+          <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 20px; max-height: 75dvh; overflow-y: auto;">
+            
+            <!-- Hero Header -->
+            <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 4px;">
+              <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; border-radius: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3);">
+                ${icon("goPointsLogo", 38)}
+              </div>
+              <h4 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; margin: 0; letter-spacing: -0.5px;">\xA1Bienvenido a GO Points!</h4>
+              <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; max-width: 280px; opacity: 0.85;">
+                El programa de fidelidad de GO Delivery que te devuelve dinero en cada compra.
+              </p>
+            </div>
+
+            <!-- Gamified Progress Bar Inside Modal -->
+            ${modalProgressBarHtml}
+
+            <!-- Desaf\xEDos Semanales Section (Dynamic) -->
+            <div id="modal-challenges-container" style="display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">
+                Desaf\xEDos de la Semana
+              </div>
+              <div style="display: flex; align-items: center; justify-content: center; padding: 20px; gap: 8px; color: var(--color-text-secondary); font-size: 12px; font-weight: 700;">
+                <div class="spinner-mini" style="width:14px; height:14px; border-width:2.5px; border-top-color:var(--color-primary); margin:0;"></div>
+                Cargando desaf\xEDos...
+              </div>
+            </div>
+
+            <!-- Bullet Points info -->
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              
+              <!-- Suma -->
+              <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 32px; height: 32px; background: rgba(245, 158, 11, 0.1); color: #f59e0b; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 900;">
+                  ${icon("trendingUp", 16)}
+                </div>
+                <div>
+                  <h5 style="font-size: 13px; font-weight: 800; margin: 0 0 3px 0;">1. Acumul\xE1s en cada compra</h5>
+                  <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; opacity: 0.85;">
+                    Con cada pedido sum\xE1s autom\xE1ticamente. Gan\xE1s <strong>1 punto por cada $${purchaseAmountPerPoint}</strong> en compras de productos, multiplicado por tu multiplicador de nivel.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Canjea -->
+              <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 32px; height: 32px; background: rgba(16, 185, 129, 0.1); color: #10b981; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 900;">
+                  ${icon("goPointsLogo", 16)}
+                </div>
+                <div>
+                  <h5 style="font-size: 13px; font-weight: 800; margin: 0 0 3px 0;">2. Canje\xE1 directamente en el Carrito</h5>
+                  <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; opacity: 0.85;">
+                    En tu carrito pod\xE9s ingresar el monto exacto de puntos que quer\xE9s usar para descontar dinero de tu compra al instante.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Absorbido -->
+              <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 32px; height: 32px; background: rgba(59, 130, 246, 0.1); color: #3b82f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 900;">
+                  ${icon("shieldCheck", 16)}
+                </div>
+                <div>
+                  <h5 style="font-size: 13px; font-weight: 800; margin: 0 0 3px 0;">3. Absorbido por GO Delivery</h5>
+                  <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; opacity: 0.85;">
+                    El descuento por tus GoPoints es 100% absorbido por la plataforma. Tus repartidores favoritos no pierden ganancias; GO Delivery compensa su trabajo reduciendo su deuda en la app.
+                  </p>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Multiplier Transparent Explainer -->
+            <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, rgba(245, 158, 11, 0.01) 100%); border: 1.5px dashed rgba(245, 158, 11, 0.3); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 10px; margin-top: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px; color: #d97706;">
+                <div style="color: #f59e0b; display: flex; align-items: center;">${icon("sparkles", 16)}</div>
+                <span style="font-size: 13px; font-weight: 900; letter-spacing: -0.2px;">\xBFC\xF3mo funcionan los Multiplicadores?</span>
+              </div>
+              <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.5;">
+                Tu nivel depende de tus pedidos completados. Cada nivel multiplica la tasa base de reembolso de puntos:
+              </p>
+              
+              <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px; background: rgba(0, 0, 0, 0.02); padding: 12px; border-radius: 12px; border: 1px solid var(--color-border-light);">
+                <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">
+                  <span>Concepto</span>
+                  <span>Valor Actual</span>
+                </div>
+                <hr style="border: 0; border-top: 1px solid var(--color-border-light); margin: 4px 0;" />
+                <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                  <span style="color: var(--color-text-secondary); font-weight: 555;">Tasa Reembolso Base:</span>
+                  <span style="font-weight: 800; color: var(--color-text-primary);">${(pointsPerDollar * 100).toFixed(1)}% (en Puntos)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                  <span style="color: var(--color-text-secondary); font-weight: 555;">Tu Nivel Actual:</span>
+                  <span style="font-weight: 800; color: ${level.color || "var(--color-primary)"};">${level.name}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                  <span style="color: var(--color-text-secondary); font-weight: 555;">Tu Multiplicador:</span>
+                  <span style="font-weight: 800; color: var(--color-success);">${level.multiplier}x Puntos</span>
+                </div>
+                <hr style="border: 0; border-top: 1px dashed var(--color-border-light); margin: 4px 0;" />
+                <div style="display: flex; justify-content: space-between; font-size: 12px; align-items: baseline;">
+                  <span style="font-weight: 800; color: var(--color-text-primary);">Reembolso Efectivo (en Pesos):</span>
+                  <span style="font-weight: 950; color: #f59e0b; font-size: 14px;">${(pointsPerDollar * level.multiplier * dollarPerPoint * 100).toFixed(2)}%</span>
+                </div>
+              </div>
+              
+              <div style="font-size: 11.5px; color: var(--color-text-tertiary); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; margin-top: 2px;">
+                <div style="flex-shrink: 0; margin-top: 2px; color: #f59e0b;">${icon("info", 12)}</div>
+                <span>
+                  <strong>Ejemplo real:</strong> Con una compra de <strong>$1.000</strong> en productos, acumul\xE1s <strong>${Math.floor(1e3 * pointsPerDollar * level.multiplier)} puntos</strong> directos. Estos puntos equivalen a <strong>$${(Math.floor(1e3 * pointsPerDollar * level.multiplier) * dollarPerPoint).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> de descuento para usar cuando quieras.
+                </span>
+              </div>
+            </div>
+
+            <!-- Niveles Din\xE1micos -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+              <h5 style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; margin: 0 0 4px 0; letter-spacing: 0.5px;">Tabla de Niveles & Multiplicadores</h5>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                ${levelsHtml}
+              </div>
+            </div>
+
+            <!-- Current status block -->
+            <div style="background: var(--color-bg-secondary); border-radius: 16px; border: 1.5px solid var(--color-border-light); padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Tu saldo de puntos</div>
+                <div style="font-size: 18px; font-weight: 900; color: #f59e0b; display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+                  ${icon("goPointsLogo", 16)} ${user.points || 0} pts
+                </div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Equivalencia en dinero</div>
+                <div style="font-size: 18px; font-weight: 900; color: #10b981; margin-top: 2px;">
+                  ${formatPrice((user.points || 0) * dollarPerPoint)}
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-block" onclick="this.closest('.modal-stack-wrapper').querySelector('.modal-close').click()" style="height: 48px; border-radius: 14px; font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; border: none; margin-top: 4px;">
+              \xA1Entendido!
+            </button>
+            
+          </div>
+        `,
+        onOpen: () => {
+          loadAndRenderModalChallenges(user.uid);
+        }
+      });
+    });
+    document.getElementById("logout-btn")?.addEventListener("click", async () => {
+      const { showConfirm } = await import("../components/modal.js");
+      showConfirm({
+        title: "Cerrar sesi\xF3n",
+        message: "\xBFEst\xE1s seguro de que deseas salir de tu cuenta?",
+        confirmText: "Cerrar sesi\xF3n",
+        danger: true,
+        onConfirm: async () => await signOut()
+      });
+    });
+    document.getElementById("apply-delivery-btn")?.addEventListener("click", () => showDeliveryApplicationModal(user));
+    document.getElementById("reapply-delivery-btn")?.addEventListener("click", () => showDeliveryApplicationModal(user));
+    document.getElementById("apply-commerce-btn")?.addEventListener("click", () => showCommerceApplicationModal(user));
+    document.getElementById("reapply-commerce-btn")?.addEventListener("click", () => showCommerceApplicationModal(user));
+    updateInstallVisibility?.();
+    if (sessionStorage.getItem("open-phone-edit") === "true") {
+      sessionStorage.removeItem("open-phone-edit");
+      showEditPhoneModal(user);
+    }
+  } catch (err) {
+    console.error("Error rendering profile content:", err);
+    content.innerHTML = '<div class="empty-state">Ocurri\xF3 un error al cargar el perfil.</div>';
+  }
+}
+async function showDeliveryApplicationModal(user) {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { doc, setDoc, serverTimestamp: serverTimestamp2 } = await import("firebase/firestore");
+  const { ref, uploadBytes, getDownloadURL } = await import("firebase/storage");
+  const { storage } = await import("../firebase.js");
+  const modalEl = document.createElement("div");
+  modalEl.style.cssText = "padding: 24px; background: var(--color-bg); height: 100%; display: flex; flex-direction: column; gap: 16px; overflow-y: auto;";
+  modalEl.innerHTML = `
+    <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 8px;">
+      <div style="width: 52px; height: 52px; background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); border-radius: 16px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);">
+        ${icon("bike", 32)}
+      </div>
+      <h3 style="font-family: var(--font-display); font-size: 19px; font-weight: 900; color: var(--color-text-primary); margin: 0;">Postulaci\xF3n de Repartidor</h3>
+      <p style="font-size: 12.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; max-width: 280px;">
+        Complet\xE1 este formulario profesional para formar parte de la flota oficial de GoDelivery.
+      </p>
+    </div>
+
+    <form id="delivery-app-form" style="display: flex; flex-direction: column; gap: 14px; padding-bottom: 20px;">
+      
+      <!-- Full Name -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Nombre Completo *</label>
+        <input type="text" id="app-fullname" required placeholder="Ej: Juan P\xE9rez" value="${user.displayName || ""}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Phone -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Tel\xE9fono de Contacto *</label>
+        <input type="tel" id="app-phone" required placeholder="Ej: 2215551234" value="${user.phone || ""}" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Vehicle -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Veh\xEDculo *</label>
+        <select id="app-vehicle" required style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s; color: var(--color-text-primary); font-family: inherit;">
+          <option value="" disabled selected>Seleccion\xE1 tu veh\xEDculo</option>
+          <option value="Moto">Moto</option>
+          <option value="Bicicleta">Bicicleta</option>
+          <option value="Auto">Auto</option>
+        </select>
+      </div>
+
+      <!-- Vehicle Model -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Modelo del Veh\xEDculo *</label>
+        <input type="text" id="app-vehiclemodel" required placeholder="Ej: Honda Wave 110cc / Bicicleta Zenith" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Vehicle Plate -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Patente *</label>
+        <input type="text" id="app-vehicledetails" required placeholder="Ej: A123BCD / 'No aplica' para Bicicletas" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Optional CV Link -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Enlace a tu CV (Opcional)</label>
+        <input type="url" id="app-cv-link" placeholder="Ej: https://drive.google.com/..." style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s;" />
+      </div>
+
+      <!-- Optional CV File Upload -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">O subir CV (Foto o PDF - Opcional)</label>
+        <input type="file" id="app-cv-file" accept=".pdf,image/*" style="display:none;" />
+        <button type="button" id="cv-file-btn" class="btn btn-outline" style="height:46px; display:flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:700; border-radius:12px; cursor:pointer; background:var(--color-bg-card); border:1.5px solid var(--color-border-light); color:var(--color-text-primary);">
+          ${icon("uploadCloud", 16)} <span id="cv-file-label">Seleccionar archivo...</span>
+        </button>
+      </div>
+
+      <!-- Required Driver License Upload -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Foto de Licencia de Conducir *</label>
+        <input type="file" id="app-licencia-file" accept="image/*" style="display:none;" required />
+        <button type="button" id="licencia-file-btn" class="btn btn-outline" style="height:46px; display:flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:700; border-radius:12px; cursor:pointer; background:var(--color-bg-card); border:1.5px solid var(--color-primary-light); color:var(--color-text-primary);">
+          ${icon("camera", 16)} <span id="licencia-file-label">Subir foto de Licencia...</span>
+        </button>
+      </div>
+
+      <!-- Required Vehicle Insurance Upload -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Foto de Seguro del Veh\xEDculo *</label>
+        <input type="file" id="app-seguro-file" accept="image/*" style="display:none;" required />
+        <button type="button" id="seguro-file-btn" class="btn btn-outline" style="height:46px; display:flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:700; border-radius:12px; cursor:pointer; background:var(--color-bg-card); border:1.5px solid var(--color-primary-light); color:var(--color-text-primary);">
+          ${icon("camera", 16)} <span id="seguro-file-label">Subir foto de Seguro...</span>
+        </button>
+      </div>
+
+      <!-- Submit button -->
+      <button type="submit" id="submit-app-btn" class="btn btn-primary" style="width: 100%; height: 50px; border-radius: 14px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 14.5px; cursor: pointer; box-shadow: 0 8px 24px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
+        ${icon("check", 18)} Enviar Postulaci\xF3n
+      </button>
+    </form>
+  `;
+  showModal({ title: "", content: modalEl, height: "80dvh", hideHeader: true });
+  const cvFileInput = modalEl.querySelector("#app-cv-file");
+  const cvBtn = modalEl.querySelector("#cv-file-btn");
+  const cvLabel = modalEl.querySelector("#cv-file-label");
+  const licenciaFileInput = modalEl.querySelector("#app-licencia-file");
+  const licenciaBtn = modalEl.querySelector("#licencia-file-btn");
+  const licenciaLabel = modalEl.querySelector("#licencia-file-label");
+  const seguroFileInput = modalEl.querySelector("#app-seguro-file");
+  const seguroBtn = modalEl.querySelector("#seguro-file-btn");
+  const seguroLabel = modalEl.querySelector("#seguro-file-label");
+  cvBtn.onclick = () => cvFileInput.click();
+  licenciaBtn.onclick = () => licenciaFileInput.click();
+  seguroBtn.onclick = () => seguroFileInput.click();
+  cvFileInput.onchange = () => {
+    if (cvFileInput.files.length > 0) {
+      cvLabel.textContent = cvFileInput.files[0].name;
+      cvBtn.style.borderColor = "#22c55e";
+    }
+  };
+  licenciaFileInput.onchange = () => {
+    if (licenciaFileInput.files.length > 0) {
+      licenciaLabel.textContent = licenciaFileInput.files[0].name;
+      licenciaBtn.style.borderColor = "#22c55e";
+    }
+  };
+  seguroFileInput.onchange = () => {
+    if (seguroFileInput.files.length > 0) {
+      seguroLabel.textContent = seguroFileInput.files[0].name;
+      seguroBtn.style.borderColor = "#22c55e";
+    }
+  };
+  const form = modalEl.querySelector("#delivery-app-form");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fullName = modalEl.querySelector("#app-fullname").value.trim();
+    const phone = modalEl.querySelector("#app-phone").value.trim();
+    const vehicleType = modalEl.querySelector("#app-vehicle").value;
+    const vehicleModel = modalEl.querySelector("#app-vehiclemodel").value.trim();
+    const vehicleDetails = modalEl.querySelector("#app-vehicledetails").value.trim();
+    const cvLink = modalEl.querySelector("#app-cv-link").value.trim();
+    if (!fullName || !phone || !vehicleType || !vehicleModel || !vehicleDetails) {
+      showToast("Por favor, completa todos los campos requeridos.", "warning");
+      return;
+    }
+    if (licenciaFileInput.files.length === 0) {
+      showToast("Por favor, sub\xED la foto de tu licencia de conducir.", "warning");
+      return;
+    }
+    if (seguroFileInput.files.length === 0) {
+      showToast("Por favor, sub\xED la foto del seguro de tu veh\xEDculo.", "warning");
+      return;
+    }
+    const submitBtn = modalEl.querySelector("#submit-app-btn");
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = "0.7";
+    submitBtn.innerHTML = `<div class="spinner-mini" style="width:16px; height:16px; border-width:2px; border-top-color:#fff; margin:0;"></div> Subiendo archivos...`;
+    try {
+      const uploadPromises = [];
+      let cvFileUrl = "";
+      if (cvFileInput.files.length > 0) {
+        const file = cvFileInput.files[0];
+        const fileRef = ref(storage, `delivery_applications/${user.uid}/cv_${Date.now()}_${file.name}`);
+        uploadPromises.push(uploadBytes(fileRef, file).then(async (snap) => {
+          cvFileUrl = await getDownloadURL(snap.ref);
+        }));
+      }
+      let licenciaUrl = "";
+      const licenciaFile = licenciaFileInput.files[0];
+      const licenciaRef = ref(storage, `delivery_applications/${user.uid}/licencia_${Date.now()}_${licenciaFile.name}`);
+      uploadPromises.push(uploadBytes(licenciaRef, licenciaFile).then(async (snap) => {
+        licenciaUrl = await getDownloadURL(snap.ref);
+      }));
+      let seguroUrl = "";
+      const seguroFile = seguroFileInput.files[0];
+      const seguroRef = ref(storage, `delivery_applications/${user.uid}/seguro_${Date.now()}_${seguroFile.name}`);
+      uploadPromises.push(uploadBytes(seguroRef, seguroFile).then(async (snap) => {
+        seguroUrl = await getDownloadURL(snap.ref);
+      }));
+      await Promise.all(uploadPromises);
+      const applicationData = {
+        userId: user.uid,
+        fullName,
+        phone,
+        vehicleType,
+        vehicleModel,
+        vehicleDetails,
+        cvLink: cvLink || "",
+        cvFileUrl,
+        licenciaUrl,
+        seguroUrl,
+        status: "pending",
+        appliedAt: serverTimestamp2()
+      };
+      await setDoc(doc(db, "delivery_applications", user.uid), applicationData);
+      await setDoc(doc(db, "users", user.uid), {
+        deliveryStatus: "pending",
+        deliveryApplication: applicationData,
+        phone
+        // Sync phone to profile
+      }, { merge: true });
+      showToast("\xA1Postulaci\xF3n enviada correctamente! Revisaremos tus documentos a la brevedad.", "success");
+      closeModal();
+    } catch (err) {
+      console.error("Error saving delivery application:", err);
+      showToast("Error al enviar postulaci\xF3n: " + err.message, "error");
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = "1";
+      submitBtn.innerHTML = `${icon("check", 18)} Enviar Postulaci\xF3n`;
+    }
+  };
+}
+async function showHelpAndTermsModal() {
+  const { showModal } = await import("../components/modal.js");
+  showModal({
+    title: "Soporte y T\xE9rminos",
+    height: "85dvh",
+    content: `
+      <div style="padding: 16px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+        
+        <!-- Pesta\xF1as (Tabs Selector) -->
+        <div class="tab-container">
+          <button class="tab-btn active" id="tab-btn-help">
+            ${icon("info", 15)} Ayuda y Gu\xEDa
+          </button>
+          <button class="tab-btn" id="tab-btn-terms">
+            ${icon("shieldCheck", 15)} T\xE9rminos Legales
+          </button>
+        </div>
+
+        <!-- Scrollable Content Wrapper -->
+        <div style="flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; display: flex; flex-direction: column;" id="help-modal-scrollable">
+          
+          <!-- Contenido: Ayuda y Gu\xEDa -->
+          <div class="tab-content active" id="tab-content-help" style="flex: 1;">
+            
+            <h4 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 12px 0;">Preguntas Frecuentes</h4>
+            
+            <div class="help-accordion">
+              <div class="help-accordion-title">
+                <span>\u{1F914} \xBFC\xF3mo realizo un pedido?</span>
+                <span class="help-accordion-icon">${icon("chevronDown", 14)}</span>
+              </div>
+              <div class="help-accordion-content">
+                \xA1Es s\xFAper f\xE1cil! Primero seleccion\xE1 tu categor\xEDa favorita (Restaurantes, Supermercado, GoMarket). Busc\xE1 el comercio que m\xE1s te guste, agreg\xE1 tus productos al carrito, defin\xED tu direcci\xF3n de entrega en el mapa, seleccion\xE1 tu m\xE9todo de pago y confirm\xE1 tu orden. \xA1Y listo! Podr\xE1s seguir al repartidor en vivo.
+              </div>
+            </div>
+
+            <div class="help-accordion">
+              <div class="help-accordion-title">
+                <span>\u{1F4B3} \xBFQu\xE9 medios de pago puedo usar?</span>
+                <span class="help-accordion-icon">${icon("chevronDown", 14)}</span>
+              </div>
+              <div class="help-accordion-content">
+                Aceptamos pagos en <strong>Efectivo</strong> directamente al repartidor al recibir tu pedido, o mediante <strong>Transferencia Directa</strong> (v\xEDa Alias o CBU) al repartidor o al comercio al momento de la entrega. Tambi\xE9n pod\xE9s descontar saldo utilizando tus <strong>GO Points</strong> acumulados. GoDelivery no procesa cobros ni retiene tu dinero, garantizando transacciones 100% directas entre las partes.
+              </div>
+            </div>
+
+            <div class="help-accordion">
+              <div class="help-accordion-title">
+                <span>\u2B50 \xBFQu\xE9 son y c\xF3mo funcionan los GO Points?</span>
+                <span class="help-accordion-icon">${icon("chevronDown", 14)}</span>
+              </div>
+              <div class="help-accordion-content">
+                \xA1GO Points es nuestro Club de Beneficios! Con cada pedido sum\xE1s autom\xE1ticamente puntos en base al monto gastado y tu nivel. Cada punto equivale a dinero real de descuento. Pod\xE9s canjear tus puntos en la pantalla del carrito para pagar menos. \xA1Y lo mejor es que el descuento es 100% compensado por GO Delivery, por lo que el repartidor no pierde ni un centavo!
+              </div>
+            </div>
+
+            <div class="help-accordion">
+              <div class="help-accordion-title">
+                <span>\u{1F326}\uFE0F \xBFPor qu\xE9 hay un cargo extra por lluvia?</span>
+                <span class="help-accordion-icon">${icon("chevronDown", 14)}</span>
+              </div>
+              <div class="help-accordion-content">
+                Cuando llueve, las calles se vuelven peligrosas y resbaladizas. Para incentivar y compensar el esfuerzo extra de nuestros repartidores bajo el agua, el sistema suma un peque\xF1o recargo por clima adverso. <strong>Este plus va 100% al bolsillo del repartidor</strong> como reconocimiento por su labor.
+              </div>
+            </div>
+
+            <div class="help-accordion">
+              <div class="help-accordion-title">
+                <span>\u{1F4DE} \xBFC\xF3mo me contacto con soporte?</span>
+                <span class="help-accordion-icon">${icon("chevronDown", 14)}</span>
+              </div>
+              <div class="help-accordion-content">
+                Si ten\xE9s un problema con un pedido activo, pod\xE9s chatear directamente con el repartidor o con el local desde la pantalla de seguimiento. Para consultas generales, pod\xE9s escribirnos al canal oficial de soporte de GoDelivery a trav\xE9s de WhatsApp o enviarnos un correo electr\xF3nico a soporte@godelivery.com.
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Contenido: T\xE9rminos Legales -->
+          <div class="tab-content" id="tab-content-terms" style="font-size: 12.5px; line-height: 1.6; color: var(--color-text-secondary); text-align: left; padding-bottom: 24px;">
+            
+            <p style="margin-top: 0; font-weight: 800; color: var(--color-text-primary);">T\xE9rminos de Uso y Pol\xEDticas del Servicio \u2014 GoDelivery</p>
+            <p style="font-size: 11px; color: var(--color-text-tertiary); margin-top: -8px; margin-bottom: 16px;">\xDAltima actualizaci\xF3n: Mayo 2026</p>
+
+            <h5 style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); margin: 16px 0 6px 0;">1. Relaci\xF3n Contractual</h5>
+            <p style="margin: 0 0 10px 0;">
+              GoDelivery act\xFAa de manera exclusiva como un canal de intermediaci\xF3n tecnol\xF3gica digital entre Comercios Adheridos, Consumidores Finales y Repartidores Independientes de mensajer\xEDa urbana. Al registrarte y utilizar nuestra plataforma, reconoc\xE9s y acept\xE1s que GoDelivery no elabora los alimentos, no provee servicios de log\xEDstica directa y no es empleador de los repartidores independientes.
+            </p>
+
+            <h5 style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); margin: 16px 0 6px 0;">2. Geolocalizaci\xF3n y Notificaciones Obligatorias</h5>
+            <p style="margin: 0 0 10px 0;">
+              Para el correcto desempe\xF1o de la plataforma (c\xE1lculo automatizado de costos de entrega por el algoritmo de Haversine y optimizaci\xF3n de repartidores asignados), GoDelivery solicita acceso mandatorio a la <strong>Geolocalizaci\xF3n en tiempo real</strong> del dispositivo. Asimismo, para asegurar la comunicaci\xF3n fluida sobre el estado de las \xF3rdenes y chat en vivo, el usuario otorga su expreso consentimiento para recibir <strong>Notificaciones Push</strong> en su navegador/celular. Bloquear estas tecnolog\xEDas puede limitar total o parcialmente el uso de la plataforma.
+            </p>
+
+            <h5 style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); margin: 16px 0 6px 0;">3. Pagos y Transferencias entre Partes</h5>
+            <p style="margin: 0 0 10px 0;">
+              GoDelivery no act\xFAa como pasarela de pagos online ni procesador de cobros. Todos los pagos y transacciones se realizan de manera directa, inmediata y descentralizada entre el Consumidor y el Repartidor/Comercio, ya sea en efectivo f\xEDsico o mediante transferencias electr\xF3nicas bancarias directas (CBU, CVU o Alias). GoDelivery no almacena credenciales financieras, cuentas bancarias ni retiene dinero de las partes. El uso de GO Points se rige bajo la pol\xEDtica de fidelizaci\xF3n oficial, siendo canjeables exclusivamente dentro de la aplicaci\xF3n.
+            </p>
+
+            <h5 style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); margin: 16px 0 6px 0;">4. Limitaci\xF3n de Responsabilidad</h5>
+            <p style="margin: 0 0 10px 0;">
+              GoDelivery deslinda responsabilidad legal por retrasos climatol\xF3gicos severos, accidentes viales durante el env\xEDo, la calidad organol\xE9ptica de los productos suministrados por los locales comerciales, o inconvenientes y errores en las transferencias bancarias directas realizadas entre las partes. Nos comprometemos, sin embargo, a mediar activamente a trav\xE9s de nuestro soporte t\xE9cnico para ayudar a resolver cualquier disputa de forma r\xE1pida, transparente y neutral.
+            </p>
+
+            <p style="margin-top: 24px; font-size: 11px; color: var(--color-text-tertiary); text-align: center; font-weight: 750;">
+              Al utilizar GoDelivery confirm\xE1s tu aceptaci\xF3n a la totalidad de estos t\xE9rminos. \xA1Gracias por confiar en nosotros!
+            </p>
+
+          </div>
+
+        </div>
+
+        <button class="btn btn-primary btn-block" id="btn-close-help-modal" style="height: 48px; border-radius: 14px; font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; border: none; margin-top: 12px; flex-shrink: 0;">
+          Entendido
+        </button>
+
+      </div>
+    `,
+    onOpen: () => {
+      const modalWrapper = document.querySelector(".modal-stack-wrapper");
+      if (!modalWrapper) return;
+      const tabBtnHelp = modalWrapper.querySelector("#tab-btn-help");
+      const tabBtnTerms = modalWrapper.querySelector("#tab-btn-terms");
+      const tabContentHelp = modalWrapper.querySelector("#tab-content-help");
+      const tabContentTerms = modalWrapper.querySelector("#tab-content-terms");
+      if (tabBtnHelp && tabBtnTerms && tabContentHelp && tabContentTerms) {
+        tabBtnHelp.onclick = () => {
+          tabBtnHelp.classList.add("active");
+          tabBtnTerms.classList.remove("active");
+          tabContentHelp.classList.add("active");
+          tabContentTerms.classList.remove("active");
+        };
+        tabBtnTerms.onclick = () => {
+          tabBtnTerms.classList.add("active");
+          tabBtnHelp.classList.remove("active");
+          tabContentTerms.classList.add("active");
+          tabContentHelp.classList.remove("active");
+        };
+      }
+      const accordions = modalWrapper.querySelectorAll(".help-accordion");
+      accordions.forEach((acc) => {
+        const title = acc.querySelector(".help-accordion-title");
+        if (title) {
+          title.onclick = () => {
+            const isOpen = acc.classList.contains("open");
+            accordions.forEach((item) => item.classList.remove("open"));
+            if (!isOpen) acc.classList.add("open");
+          };
+        }
+      });
+      const btnCloseHelp = modalWrapper.querySelector("#btn-close-help-modal");
+      if (btnCloseHelp) {
+        btnCloseHelp.onclick = () => {
+          const closeBtn = modalWrapper.querySelector(".modal-close");
+          if (closeBtn) closeBtn.click();
+        };
+      }
+    }
+  });
+}
+async function loadAndRenderModalChallenges(uid) {
+  const container = document.getElementById("modal-challenges-container");
+  if (!container) return;
+  const getWeekIdentifier = (date) => {
+    const d = date ? new Date(date) : /* @__PURE__ */ new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+    const yearStart = new Date(d.getFullYear(), 0, 1);
+    const weekNo = Math.ceil(((d - yearStart) / 864e5 + 1) / 7);
+    return `${d.getFullYear()}-W${weekNo}`;
+  };
+  const currentWeek = getWeekIdentifier(/* @__PURE__ */ new Date());
+  try {
+    const { collection: collection2, getDocs: getDocs2, setDoc, doc, updateDoc } = await import("firebase/firestore");
+    const collRef = collection2(db, "users", uid, "challenges");
+    const snap = await getDocs2(collRef);
+    let challenges = [];
+    if (!snap.empty) {
+      challenges = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      for (const ch of challenges) {
+        if (ch.weekIdentifier !== currentWeek) {
+          ch.progress = 0;
+          ch.completed = false;
+          ch.completedAt = null;
+          ch.weekIdentifier = currentWeek;
+          try {
+            await updateDoc(doc(db, "users", uid, "challenges", ch.id), {
+              progress: 0,
+              completed: false,
+              completedAt: null,
+              weekIdentifier: currentWeek
+            });
+          } catch (e) {
+            console.error("Error resetting weekly challenge on client:", ch.id, e);
+          }
+        }
+      }
+    } else {
+      const configuredChallenges = getState().weeklyChallenges || [
+        { id: "weekly_3", title: "Desaf\xEDo Bronce", description: "Complet\xE1 3 pedidos esta semana", target: 3, pointsReward: 5e3 },
+        { id: "weekly_5", title: "Desaf\xEDo Plata", description: "Complet\xE1 5 pedidos esta semana", target: 5, pointsReward: 7500 },
+        { id: "weekly_10", title: "Desaf\xEDo Oro", description: "Complet\xE1 10 pedidos esta semana", target: 10, pointsReward: 1e4 }
+      ];
+      challenges = configuredChallenges.map((ch) => ({
+        id: ch.id,
+        title: ch.title,
+        description: ch.description || `Complet\xE1 ${ch.target} pedidos esta semana`,
+        target: Number(ch.target),
+        progress: 0,
+        pointsReward: Number(ch.pointsReward),
+        completed: false,
+        weekIdentifier: currentWeek
+      }));
+      for (const challenge of challenges) {
+        await setDoc(doc(db, "users", uid, "challenges", challenge.id), challenge);
+      }
+    }
+    challenges.sort((a, b) => a.target - b.target);
+    const globalChallenges = getState().weeklyChallenges || [];
+    challenges = challenges.map((ch) => {
+      const globalCh = globalChallenges.find((g) => g.id === ch.id);
+      if (globalCh && globalCh.pointsReward !== ch.pointsReward && !ch.completed) {
+        ch.pointsReward = globalCh.pointsReward;
+      }
+      return ch;
+    });
+    const challengesHtml = challenges.map((ch) => {
+      const percentage = Math.min(100, Math.max(0, (ch.progress || 0) / ch.target * 100));
+      return `
+        <div style="background: var(--color-bg-secondary); border: 1.5px solid ${ch.completed ? "var(--color-success)" : "var(--color-border-light)"}; border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <div style="font-size: 13px; font-weight: 900; color: var(--color-text-primary); display: flex; align-items: center; gap: 6px;">
+                ${ch.title}
+                ${ch.completed ? `<span style="background: var(--color-success); color: white; font-size: 8px; font-weight: 900; padding: 1.5px 5px; border-radius: 4px; text-transform: uppercase;">\xA1Hecho!</span>` : ""}
+              </div>
+              <div style="font-size: 11px; color: var(--color-text-secondary); margin-top: 1px;">
+                ${ch.description}
+              </div>
+            </div>
+            <div style="text-align: right; flex-shrink: 0;">
+              ${ch.completed ? `<span style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; font-size: 9px; font-weight: 900; padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 3px; box-shadow: 0 2px 8px rgba(16,185,129,0.3);">\u2713 COMPLETADO</span>` : `<span style="font-size: 11px; font-weight: 900; color: #f59e0b; background: rgba(245, 158, 11, 0.12); padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid rgba(245,158,11,0.25);">+${(ch.pointsReward || 0).toLocaleString("es-AR")} pts</span>`}
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+            <div style="flex: 1; height: 7px; background: var(--color-border-light); border-radius: 4px; overflow: hidden; position: relative;">
+              <div style="width: ${percentage}%; height: 100%; background: ${ch.completed ? "linear-gradient(90deg, #10b981 0%, #059669 100%)" : "linear-gradient(90deg, #6366f1 0%, #4f46e5 100%)"}; border-radius: 4px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: ${ch.completed ? "0 0 6px rgba(16,185,129,0.4)" : "0 0 6px rgba(99,102,241,0.4)"};"></div>
+            </div>
+            <span style="font-size: 11px; font-weight: 800; color: var(--color-text-secondary); white-space: nowrap;">
+              ${ch.progress || 0} / ${ch.target}
+            </span>
+          </div>
+        </div>
+      `;
+    }).join("");
+    container.innerHTML = `
+      <div style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">
+        Desaf\xEDos de la Semana
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${challengesHtml}
+      </div>
+    `;
+  } catch (error) {
+    console.error("Error loading challenges:", error);
+    container.innerHTML = `
+      <div style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">
+        Desaf\xEDos de la Semana
+      </div>
+      <div style="font-size: 12px; color: var(--color-danger); text-align: center; padding: 10px;">
+        Error al cargar los desaf\xEDos.
+      </div>
+    `;
+  }
+}
+async function showTransferGoPointsModal(currentUser) {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { showToast: showToast2 } = await import("../components/toast.js");
+  const { doc, getDoc, collection: collection2, query: query2, where: where2, getDocs: getDocs2, runTransaction } = await import("firebase/firestore");
+  const modalUid = Math.random().toString(36).substr(2, 5);
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px;">
+      <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <div style="width: 52px; height: 52px; border-radius: 16px; background: rgba(16, 185, 129, 0.1); color: #10b981; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);">
+          ${icon("share", 28)}
+        </div>
+        <h3 style="font-family: var(--font-display); font-size: 19px; font-weight: 900; margin: 0; letter-spacing: -0.5px;">Transferir GO Points</h3>
+        <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; max-width: 260px;">
+          Regalale tus puntos acumulados a otro usuario para que pueda usarlos en su pr\xF3xima compra.
+        </p>
+      </div>
+
+      <div style="background: var(--color-bg-secondary); border-radius: 16px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--color-border-light);">
+        <div>
+          <span style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Tu saldo disponible</span>
+          <div style="font-size: 16px; font-weight: 900; color: #f59e0b; display: flex; align-items: center; gap: 4px; margin-top: 1px;">
+            ${icon("goPointsLogo", 14)} <span id="sender-points-display-${modalUid}">${currentUser.points || 0}</span> pts
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <span style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Tu ID de Usuario</span>
+          <div style="font-size: 15px; font-weight: 900; color: var(--color-text-primary); margin-top: 1px; font-family: monospace; letter-spacing: 0.5px;">
+            ${currentUser.goId || "---"}
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
+        <div>
+          <label style="font-size: 10.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; display: block; margin-bottom: 6px; letter-spacing: 0.3px;">ID del Destinatario (ej. GO-1005)</label>
+          <input type="text" id="transfer-target-id-${modalUid}" placeholder="GO-XXXX" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border); padding: 0 14px; font-weight: 700; font-size: 14px; font-family: monospace; text-transform: uppercase; background: var(--color-surface); color: var(--color-text); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'" />
+        </div>
+        <div>
+          <label style="font-size: 10.5px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; display: block; margin-bottom: 6px; letter-spacing: 0.3px;">Cantidad a Enviar</label>
+          <input type="number" id="transfer-amount-${modalUid}" placeholder="Monto de puntos" min="1" step="1" style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border); padding: 0 14px; font-weight: 700; font-size: 14px; background: var(--color-surface); color: var(--color-text); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'" />
+        </div>
+      </div>
+
+      <button id="btn-execute-transfer-${modalUid}" class="btn btn-primary btn-block" style="height: 48px; border-radius: 14px; font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; border: none; margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        ${icon("check", 16)} Confirmar Transferencia
+      </button>
+    </div>
+  `;
+  showModal({
+    title: "Regalar GO Points",
+    height: "auto",
+    content: modalContent,
+    onOpen: () => {
+      const execBtn = document.getElementById(`btn-execute-transfer-${modalUid}`);
+      execBtn?.addEventListener("click", async () => {
+        const targetIdInput = document.getElementById(`transfer-target-id-${modalUid}`);
+        const amountInput = document.getElementById(`transfer-amount-${modalUid}`);
+        const rawTargetId = targetIdInput.value.trim().toUpperCase();
+        const amount = parseInt(amountInput.value);
+        if (!rawTargetId) {
+          showToast2("Por favor, ingres\xE1 el ID del destinatario", "warning");
+          return;
+        }
+        if (rawTargetId === currentUser.goId) {
+          showToast2("No pod\xE9s enviarte puntos a vos mismo", "warning");
+          return;
+        }
+        if (isNaN(amount) || amount <= 0) {
+          showToast2("Ingres\xE1 una cantidad v\xE1lida mayor a cero", "warning");
+          return;
+        }
+        const senderCurrentPoints = currentUser.points || 0;
+        if (amount > senderCurrentPoints) {
+          showToast2("Saldo insuficiente de GO Points", "error");
+          return;
+        }
+        execBtn.disabled = true;
+        execBtn.innerHTML = `<div class="spinner-mini" style="width:14px; height:14px; border-width:2px; border-top-color:white; margin:0;"></div> Procesando...`;
+        try {
+          const usersRef = collection2(db, "users");
+          const q = query2(usersRef, where2("goId", "==", rawTargetId));
+          const recipientSnap = await getDocs2(q);
+          if (recipientSnap.empty) {
+            showToast2(`No se encontr\xF3 ning\xFAn usuario con el ID ${rawTargetId}`, "error");
+            execBtn.disabled = false;
+            execBtn.innerHTML = `${icon("check", 16)} Confirmar Transferencia`;
+            return;
+          }
+          const recipientDoc = recipientSnap.docs[0];
+          const recipientUid = recipientDoc.id;
+          const recipientData = recipientDoc.data();
+          await runTransaction(db, async (transaction) => {
+            const senderDocRef = doc(db, "users", currentUser.uid);
+            const recipientDocRef = doc(db, "users", recipientUid);
+            const senderFreshSnap = await transaction.get(senderDocRef);
+            if (!senderFreshSnap.exists()) throw new Error("Sender user does not exist");
+            const senderFreshPoints = senderFreshSnap.data().points || 0;
+            if (amount > senderFreshPoints) {
+              throw new Error("Saldo insuficiente detectado en la transacci\xF3n");
+            }
+            transaction.update(senderDocRef, {
+              points: senderFreshPoints - amount
+            });
+            const recipientFreshPoints = recipientData.points || 0;
+            transaction.update(recipientDocRef, {
+              points: recipientFreshPoints + amount
+            });
+            const senderTransRef = doc(collection2(db, "points_transactions"));
+            transaction.set(senderTransRef, {
+              userId: currentUser.uid,
+              type: "transfer_sent",
+              points: -amount,
+              description: `Enviaste puntos a ${recipientData.displayName || "Usuario"} (${rawTargetId})`,
+              createdAt: /* @__PURE__ */ new Date()
+            });
+            const recipientTransRef = doc(collection2(db, "points_transactions"));
+            transaction.set(recipientTransRef, {
+              userId: recipientUid,
+              type: "transfer_received",
+              points: amount,
+              description: `Recibiste puntos de ${currentUser.displayName || "Usuario"} (${currentUser.goId})`,
+              createdAt: /* @__PURE__ */ new Date()
+            });
+            const notificationRef = doc(collection2(db, "users", recipientUid, "notifications"));
+            transaction.set(notificationRef, {
+              type: "points_received",
+              title: "\u{1F381} \xA1Te regalaron GO Points!",
+              body: `${currentUser.displayName || "Un amigo"} te envi\xF3 ${amount} GO Points de regalo. \xA1Disfrutalos!`,
+              status: "unread",
+              url: "#/profile",
+              createdAt: /* @__PURE__ */ new Date()
+            });
+          });
+          showToast2(`\xA1Transferiste ${amount} GO Points con \xE9xito!`, "success");
+          closeModal();
+        } catch (error) {
+          console.error("Transfer failed:", error);
+          showToast2(error.message || "Error al procesar la transferencia", "error");
+          execBtn.disabled = false;
+          execBtn.innerHTML = `${icon("check", 16)} Confirmar Transferencia`;
+        }
+      });
+    }
+  });
+}
+async function showEditDisplayNameModal(user) {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { doc, updateDoc } = await import("firebase/firestore");
+  const { showToast: showToast2 } = await import("../components/toast.js");
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px;">
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Nombre Visible *</label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="text" id="profile-name-input" value="${user.displayName || ""}" placeholder="Tu nombre p\xFAblico" style="flex:1; height:48px; border-radius:12px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; transition:border-color 0.2s;" />
+          <button id="profile-google-name-btn" class="btn btn-outline" style="height:48px; font-size:12px; font-weight:800; border-radius:12px; white-space:nowrap; padding:0 14px; border:1.5px solid var(--color-border-light); cursor:pointer; background:var(--color-bg-secondary); color:var(--color-text-primary);">
+            ${icon("google", 14)} Usar Google
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  showModal({
+    title: "Editar Nombre Visible",
+    height: "auto",
+    content: modalContent,
+    footer: `
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
+        <button id="profile-name-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
+        <button id="profile-name-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Guardar</button>
+      </div>
+    `,
+    onOpen: () => {
+      const input = document.getElementById("profile-name-input");
+      const googleBtn = document.getElementById("profile-google-name-btn");
+      const cancelBtn = document.getElementById("profile-name-cancel-btn");
+      const saveBtn = document.getElementById("profile-name-save-btn");
+      if (input) input.focus();
+      if (googleBtn) {
+        googleBtn.onclick = () => {
+          import("../firebase.js").then(({ auth: auth2 }) => {
+            const googleName = auth2.currentUser?.displayName;
+            if (googleName) {
+              input.value = googleName;
+              showToast2("Nombre de Google recuperado", "success");
+            } else {
+              showToast2("No se encontr\xF3 nombre en la cuenta de Google", "warning");
+            }
+          });
+        };
+      }
+      if (cancelBtn) {
+        cancelBtn.onclick = () => closeModal();
+      }
+      if (saveBtn) {
+        saveBtn.onclick = async () => {
+          const val = input.value.trim();
+          if (!val) {
+            showToast2("El nombre visible no puede estar vac\xEDo", "warning");
+            return;
+          }
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = icon("loader", 14, "animate-spin") + " Guardando...";
+          try {
+            await updateDoc(doc(db, "users", user.uid), {
+              displayName: val
+            });
+            showToast2("Nombre visible actualizado con \xE9xito", "success");
+            closeModal();
+          } catch (err) {
+            console.error("Error saving user display name:", err);
+            showToast2("Error al guardar el nombre", "danger");
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = "Guardar";
+          }
+        };
+      }
+    }
+  });
+}
+async function showEditPhoneModal(user) {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { showToast: showToast2 } = await import("../components/toast.js");
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px;">
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">N\xFAmero de Whatsapp *</label>
+        <div style="display:flex; gap:8px;">
+          <div style="height:48px; padding:0 12px; border:2px solid var(--color-border-light); border-radius:12px; display:flex; align-items:center; background:var(--color-bg-secondary); color: var(--color-text-primary);">
+             <span style="font-size:14px; font-weight:700;">\u{1F1E6}\u{1F1F7} +54</span>
+          </div>
+          <input type="tel" id="profile-phone-input" value="${user.phone || ""}" placeholder="Celular sin el 0" style="flex:1; height:48px; border-radius:12px; border:2px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:14px; font-weight:700; padding:0 14px; outline:none; transition:border-color 0.2s;" />
+        </div>
+        <p style="font-size:11px; color:var(--color-text-tertiary); margin:4px 0 0; line-height:1.4;">Este n\xFAmero es obligatorio para que los comercios y repartidores puedan contactarte.</p>
+      </div>
+    </div>
+  `;
+  showModal({
+    title: "Editar N\xFAmero de Contacto",
+    height: "auto",
+    content: modalContent,
+    footer: `
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
+        <button id="profile-phone-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
+        <button id="profile-phone-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Guardar</button>
+      </div>
+    `,
+    onOpen: () => {
+      const input = document.getElementById("profile-phone-input");
+      const cancelBtn = document.getElementById("profile-phone-cancel-btn");
+      const saveBtn = document.getElementById("profile-phone-save-btn");
+      if (input) input.focus();
+      if (cancelBtn) cancelBtn.onclick = () => closeModal();
+      if (saveBtn) {
+        saveBtn.onclick = async () => {
+          const val = input.value.trim();
+          if (!val) {
+            showToast2("El celular de contacto es obligatorio", "warning");
+            return;
+          }
+          let cleanedPhone = val.replace(/\D/g, "");
+          if (cleanedPhone.length < 10 || cleanedPhone.length > 13) {
+            showToast2("N\xFAmero celular inv\xE1lido. Debe tener entre 10 y 13 d\xEDgitos (ej: 2215551234).", "danger");
+            return;
+          }
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = icon("loader", 14, "animate-spin") + " Guardando...";
+          if (cleanedPhone.startsWith("54")) {
+            cleanedPhone = cleanedPhone.substring(2);
+          }
+          if (cleanedPhone.startsWith("9") && cleanedPhone.length > 10) {
+            cleanedPhone = cleanedPhone.substring(1);
+          }
+          if (cleanedPhone.startsWith("0")) {
+            cleanedPhone = cleanedPhone.substring(1);
+          }
+          if (cleanedPhone.length === 12) {
+            if (cleanedPhone.substring(4, 6) === "15") {
+              cleanedPhone = cleanedPhone.substring(0, 4) + cleanedPhone.substring(6);
+            } else if (cleanedPhone.substring(3, 5) === "15") {
+              cleanedPhone = cleanedPhone.substring(0, 3) + cleanedPhone.substring(5);
+            } else if (cleanedPhone.substring(2, 4) === "15") {
+              cleanedPhone = cleanedPhone.substring(0, 2) + cleanedPhone.substring(4);
+            }
+          } else if (cleanedPhone.length === 11) {
+            if (cleanedPhone.substring(3, 5) === "15") {
+              cleanedPhone = cleanedPhone.substring(0, 3) + cleanedPhone.substring(5);
+            } else if (cleanedPhone.substring(2, 4) === "15") {
+              cleanedPhone = cleanedPhone.substring(0, 2) + cleanedPhone.substring(4);
+            }
+          }
+          try {
+            const { doc, updateDoc } = await import("firebase/firestore");
+            const { db: db2 } = await import("../firebase.js");
+            await updateDoc(doc(db2, "users", user.uid), {
+              phone: cleanedPhone,
+              phoneVerified: true
+            });
+            const currentUser = getState().user;
+            setState("user", { ...currentUser, phone: cleanedPhone, phoneVerified: true });
+            showToast2("N\xFAmero de tel\xE9fono guardado con \xE9xito", "success");
+            closeModal();
+          } catch (error) {
+            console.error("Error saving phone number:", error);
+            showToast2("Error al guardar el n\xFAmero de tel\xE9fono. Reintenta.", "danger");
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = "Guardar";
+          }
+        };
+      }
+    }
+  });
+}
+async function showPhoneVerificationModal(user, phoneVal, confirmationResult) {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { doc, updateDoc } = await import("firebase/firestore");
+  const { showToast: showToast2 } = await import("../components/toast.js");
+  const modalContent = `
+    <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; text-align: center;">
+      <div>
+        <div style="font-size: 40px; margin-bottom: 12px;">\u{1F4F1}</div>
+        <h3 style="font-size: 16px; font-weight: 800; margin: 0 0 8px 0;">Verificaci\xF3n por SMS</h3>
+        <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5;">
+          Hemos enviado un mensaje de texto (SMS) con un c\xF3digo de verificaci\xF3n a tu n\xFAmero <strong>+54 ${phoneVal}</strong>.
+        </p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; margin-top: 8px;">
+        <label style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Ingresa el c\xF3digo de 6 d\xEDgitos</label>
+        <input type="text" id="verification-code-input" maxlength="6" placeholder="------" style="width: 160px; height: 48px; border-radius: 12px; border: 2px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 20px; font-weight: 800; text-align: center; letter-spacing: 4px; outline: none; transition: border-color 0.2s;" />
+      </div>
+    </div>
+  `;
+  showModal({
+    title: "Verificar Tel\xE9fono",
+    height: "auto",
+    content: modalContent,
+    footer: `
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
+        <button id="verification-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
+        <button id="verification-confirm-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Confirmar</button>
+      </div>
+    `,
+    onOpen: () => {
+      const input = document.getElementById("verification-code-input");
+      const cancelBtn = document.getElementById("verification-cancel-btn");
+      const confirmBtn = document.getElementById("verification-confirm-btn");
+      if (input) input.focus();
+      if (cancelBtn) {
+        cancelBtn.onclick = () => {
+          closeModal();
+          const recaptchaContainer = document.getElementById("recaptcha-container");
+          if (recaptchaContainer) recaptchaContainer.remove();
+        };
+      }
+      if (confirmBtn) {
+        confirmBtn.onclick = async () => {
+          const val = input.value.trim();
+          if (val.length !== 6) {
+            showToast2("Ingresa un c\xF3digo de 6 d\xEDgitos v\xE1lido.", "warning");
+            return;
+          }
+          confirmBtn.disabled = true;
+          confirmBtn.innerHTML = icon("loader", 14, "animate-spin") + " Verificando...";
+          try {
+            await confirmationResult.confirm(val);
+            const { db: db2 } = await import("../firebase.js");
+            await updateDoc(doc(db2, "users", user.uid), {
+              phone: phoneVal,
+              phoneVerified: true
+            });
+            const currentUser = getState().user;
+            setState("user", { ...currentUser, phone: phoneVal, phoneVerified: true });
+            closeModal();
+            const recaptchaContainer = document.getElementById("recaptcha-container");
+            if (recaptchaContainer) recaptchaContainer.remove();
+            setTimeout(async () => {
+              const { showModal: showSuccessModal } = await import("../components/modal.js");
+              const successModal = showSuccessModal({
+                title: "\u{1F389} \xA1Celular Verificado!",
+                height: "auto",
+                content: `
+                  <div style="padding: 20px 10px; text-align: center; font-family: var(--font-body); color: var(--color-text-primary);">
+                    <div style="font-size: 48px; margin-bottom: 16px;">\u2705</div>
+                    <p style="font-size: 15px; font-weight: 700; margin-bottom: 8px; color: var(--color-success);">\xA1Tu n\xFAmero de tel\xE9fono ha sido verificado!</p>
+                    <p style="font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; margin: 0;">Ya tienes configurado tu celular de contacto de forma segura y puedes continuar realizando tus pedidos.</p>
+                  </div>
+                `,
+                footer: `
+                  <div style="padding: 0 4px 12px 4px; display: flex; justify-content: center; width: 100%;">
+                    <button id="success-confirm-btn" class="btn btn-primary" style="width: 100%; height: 48px; border-radius: 12px; font-weight: 900; font-size: 14.5px; background: var(--color-primary); border: none; color: white; cursor: pointer;">Entendido</button>
+                  </div>
+                `,
+                onOpen: () => {
+                  const btn = document.getElementById("success-confirm-btn");
+                  if (btn) {
+                    btn.onclick = () => {
+                      successModal.close();
+                      if (location.hash === "#/profile") {
+                        location.reload();
+                      }
+                    };
+                  }
+                }
+              });
+            }, 300);
+          } catch (error) {
+            console.error("Error verifying SMS code:", error);
+            showToast2("El c\xF3digo ingresado es incorrecto o ya expir\xF3.", "danger");
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = "Confirmar";
+          }
+        };
+      }
+    }
+  });
+}
+async function showManageAddressesModal() {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { showAddressPrompt: showAddressPrompt2 } = await import("../components/address-modal.js");
+  const { setDeliveryAddress, getState: getState2, subscribe: subscribe2 } = await import("../state.js");
+  const modalEl = document.createElement("div");
+  modalEl.style.cssText = "padding: 20px 16px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 20px; max-height: 70dvh; overflow-y: auto;";
+  const renderList = () => {
+    const activeAddress = getState2().deliveryAddress;
+    const saved = getState2().savedAddresses || [];
+    modalEl.innerHTML = `
+      <!-- Direcci\xF3n en uso -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Direcci\xF3n en uso</span>
+        ${activeAddress ? `
+          <div class="active-address-card" style="display:flex; align-items:center; justify-content:space-between; background:rgba(34, 197, 94, 0.06); border:1.5px solid #22c55e; border-radius:16px; padding:14px 16px; gap:12px; cursor:pointer;" title="Editar direcci\xF3n o referencia activa">
+            <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+              <div style="width:36px; height:36px; border-radius:10px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon("mapPin", 20)}
+              </div>
+              <div style="min-width:0; flex:1;">
+                <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Activa</div>
+                <div style="font-size:11.5px; color:var(--color-text-secondary); margin-top:2px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.4;">${activeAddress}</div>
+              </div>
+            </div>
+            <div style="color:#22c55e; display:flex; flex-shrink:0;">
+              ${icon("checkCircle", 20)}
+            </div>
+          </div>
+        ` : `
+          <div style="border:1.5px dashed var(--color-border); border-radius:16px; padding:16px; text-align:center; font-size:13px; color:var(--color-text-tertiary); font-weight:700;">
+            No has seleccionado ninguna direcci\xF3n activa.
+          </div>
+        `}
+      </div>
+
+      <!-- Direcciones Guardadas -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Mis direcciones guardadas</span>
+        
+        <div id="saved-addresses-modal-list" style="display:flex; flex-direction:column; gap:10px;">
+          ${saved.length > 0 ? saved.map((addr) => {
+      const isCurrent = activeAddress === addr.address;
+      const isHome = addr.name.toLowerCase().includes("casa");
+      const isWork = addr.name.toLowerCase().includes("trabajo") || addr.name.toLowerCase().includes("oficina");
+      const addrIcon = isHome ? "home" : isWork ? "store" : "mapPin";
+      return `
+              <div class="saved-address-item" data-id="${addr.id}" style="display:flex; align-items:center; justify-content:space-between; background:var(--color-bg-secondary); border:1.5px solid ${isCurrent ? "var(--color-primary)" : "var(--color-border-light)"}; border-radius:16px; padding:14px 16px; gap:12px; cursor:pointer; transition:all 0.2s;">
+                <div class="select-address-trigger" style="display:flex; align-items:center; gap:12px; min-width:0; flex:1; height:100%;">
+                  <div style="width:36px; height:36px; border-radius:10px; background:${isCurrent ? "rgba(var(--color-primary-rgb), 0.1)" : "rgba(120,120,120,0.06)"}; color:${isCurrent ? "var(--color-primary)" : "var(--color-text-secondary)"}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    ${icon(addrIcon, 18)}
+                  </div>
+                  <div style="min-width:0; flex:1;">
+                    <div style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:6px;">
+                      ${addr.name}
+                      ${isCurrent ? `<span style="background:var(--color-primary); color:white; font-size:8px; font-weight:900; padding:1px 5px; border-radius:4px; text-transform:uppercase; letter-spacing:0.02em;">En uso</span>` : ""}
+                    </div>
+                    <div style="font-size:11.5px; color:var(--color-text-secondary); margin-top:2px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.4;">${addr.address}</div>
+                  </div>
+                </div>
+                
+                <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
+                  <button class="edit-addr-modal-btn btn-ghost" data-id="${addr.id}" style="width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border); color:var(--color-text-secondary); cursor:pointer; background:var(--color-surface);">
+                    ${icon("edit", 16)}
+                  </button>
+                  <button class="delete-addr-modal-btn btn-ghost" data-id="${addr.id}" style="width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #ef4444; color:#ef4444; cursor:pointer; background:var(--color-surface);">
+                    ${icon("trash", 16)}
+                  </button>
+                </div>
+              </div>
+            `;
+    }).join("") : `
+            <div style="border:1.5px dashed var(--color-border-light); border-radius:16px; padding:24px; text-align:center; font-size:13px; color:var(--color-text-tertiary); font-weight:600;">
+              No ten\xE9s direcciones guardadas a\xFAn.
+            </div>
+          `}
+        </div>
+      </div>
+
+      <!-- Agregar Nueva -->
+      <button id="add-new-address-modal-btn" class="btn btn-outline" style="width:100%; height:50px; border-radius:14px; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; background:var(--color-surface); border:1.5px solid var(--color-border-light); color:var(--color-text-primary);">
+        ${icon("plus", 16)} Agregar nueva direcci\xF3n
+      </button>
+    `;
+    const activeCard = modalEl.querySelector(".active-address-card");
+    if (activeCard) {
+      activeCard.onclick = () => {
+        showAddressPrompt2(() => {
+          renderList();
+        }, {
+          editAddress: {
+            id: "active",
+            name: "Activa",
+            address: activeAddress,
+            notes: getState2().addressNotes || "",
+            coords: getState2().deliveryCoords
+          }
+        });
+      };
+    }
+    modalEl.querySelectorAll(".select-address-trigger").forEach((trigger) => {
+      trigger.onclick = async (e) => {
+        e.stopPropagation();
+        const parent = trigger.closest(".saved-address-item");
+        const id = parent.dataset.id;
+        const addr = saved.find((a) => a.id === id);
+        if (addr) {
+          const { showConfirm } = await import("../components/modal.js");
+          showConfirm({
+            title: "\u{1F4CD} Cambiar direcci\xF3n activa",
+            message: `\xBFDeseas establecer "${addr.name}" como tu direcci\xF3n activa en uso?`,
+            confirmText: "Establecer",
+            onConfirm: () => {
+              setDeliveryAddress(addr.address, addr.notes || "", addr.coords, "");
+              showToast(`Direcci\xF3n seleccionada: ${addr.name}`, "success");
+              renderList();
+            }
+          });
+        }
+      };
+    });
+    modalEl.querySelectorAll(".edit-addr-modal-btn").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const addr = saved.find((a) => a.id === id);
+        if (addr) {
+          showAddressPrompt2(null, { editAddress: addr });
+        }
+      };
+    });
+    modalEl.querySelectorAll(".delete-addr-modal-btn").forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const addr = saved.find((a) => a.id === id);
+        if (addr) {
+          const { showConfirm } = await import("../components/modal.js");
+          showConfirm({
+            title: "\u{1F5D1}\uFE0F Eliminar direcci\xF3n",
+            message: `\xBFEst\xE1s seguro de que deseas eliminar la direcci\xF3n "${addr.name}"?`,
+            confirmText: "Eliminar",
+            danger: true,
+            onConfirm: async () => {
+              const { removeSavedAddress } = await import("../state.js");
+              await removeSavedAddress(id);
+              showToast("Direcci\xF3n eliminada", "success");
+              renderList();
+            }
+          });
+        }
+      };
+    });
+    const addBtn = modalEl.querySelector("#add-new-address-modal-btn");
+    if (addBtn) {
+      addBtn.onclick = () => {
+        showAddressPrompt2();
+      };
+    }
+  };
+  let unsubSaved = null;
+  let unsubDelivery = null;
+  showModal({
+    title: "Mis Direcciones",
+    height: "auto",
+    content: modalEl,
+    onOpen: () => {
+      renderList();
+      unsubSaved = subscribe2("savedAddresses", () => renderList());
+      unsubDelivery = subscribe2("deliveryAddress", () => renderList());
+    },
+    onClose: () => {
+      if (unsubSaved) unsubSaved();
+      if (unsubDelivery) unsubDelivery();
+    }
+  });
+}
+async function showDeleteAccountConfirmModal() {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const user = getState().user || {};
+  showModal({
+    title: "\u26A0\uFE0F Eliminar Cuenta",
+    height: "auto",
+    content: `
+      <div style="padding: 16px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 14px; text-align: center;">
+        <div style="font-size: 40px;">\u{1F5D1}\uFE0F</div>
+        <p style="font-size: 14px; font-weight: 800; line-height: 1.4; color: var(--color-text-primary); margin: 0;">
+          \xBFEst\xE1s seguro de que deseas eliminar tu cuenta?
+        </p>
+        <p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0; text-align: left;">
+          Esta acci\xF3n es irreversible. Se eliminar\xE1n permanentemente tu perfil, historial de pedidos, puntos de fidelidad y cualquier dato de ubicaci\xF3n asociado a tu usuario en <strong>GO!</strong> en un plazo m\xE1ximo de 72 horas.
+        </p>
+      </div>
+    `,
+    footer: `
+      <div style="padding: 0 4px 12px 4px; display: flex; gap: 12px; width: 100%;">
+        <button id="del-acc-cancel-btn" class="btn btn-ghost" style="flex: 1; height: 48px; border-radius: 12px; font-weight: 800; cursor: pointer; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); color: var(--color-text-primary);">Cancelar</button>
+        <button id="del-acc-confirm-btn" class="btn btn-primary" style="flex: 1.5; height: 48px; border-radius: 12px; font-weight: 900; background: var(--color-danger); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer;">Eliminar Cuenta</button>
+      </div>
+    `,
+    onOpen: () => {
+      document.getElementById("del-acc-cancel-btn").onclick = () => closeModal();
+      document.getElementById("del-acc-confirm-btn").onclick = async () => {
+        try {
+          const { doc, updateDoc, serverTimestamp: serverTimestamp2 } = await import("firebase/firestore");
+          const { db: db2 } = await import("../firebase.js");
+          const { showToast: showToast2 } = await import("../components/toast.js");
+          if (user.uid) {
+            const userRef = doc(db2, "users", user.uid);
+            await updateDoc(userRef, {
+              deletionRequested: true,
+              deletionRequestedAt: serverTimestamp2()
+            });
+          }
+          closeModal();
+          showToast2("Tu solicitud ha sido procesada de forma autom\xE1tica.", "success");
+          signOut();
+        } catch (err) {
+          console.error("Error requesting account deletion:", err);
+          showToast("Error al solicitar la eliminaci\xF3n de cuenta.", "error");
+        }
+      };
+    }
+  });
+}
+async function showCommerceApplicationModal(user) {
+  const { showModal, closeModal } = await import("../components/modal.js");
+  const { doc, updateDoc } = await import("firebase/firestore");
+  const { db: db2 } = await import("../firebase.js");
+  const modalEl = document.createElement("div");
+  modalEl.style.cssText = "padding: 16px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 14px;";
+  modalEl.innerHTML = `
+    <h3 style="font-family: var(--font-display); font-size: 19px; font-weight: 900; color: var(--color-text-primary); margin: 0;">Postulaci\xF3n de Comercio</h3>
+    <p style="font-size: 12.5px; color: var(--color-text-secondary); line-height: 1.45; margin: 0 0 6px 0;">
+      Complet\xE1 los datos de tu comercio. Un administrador revisar\xE1 la solicitud y te dar\xE1 de alta de inmediato.
+    </p>
+
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Nombre del Comercio</label>
+        <input type="text" id="com-app-name" placeholder="Ej. Pizzer\xEDa Don Juan" style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box;" />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Categor\xEDa Principal</label>
+        <select id="com-app-category" style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box; cursor:pointer;">
+          <option value="Restaurantes">Restaurantes</option>
+          <option value="Supermercado">Supermercado</option>
+          <option value="Helader\xEDas">Helader\xEDas</option>
+          <option value="Kioscos / Bebidas">Kioscos / Bebidas</option>
+          <option value="GoMarket">GoMarket</option>
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Tel\xE9fono de Contacto</label>
+        <input type="tel" id="com-app-phone" value="${user.phone || ""}" placeholder="Ej. +549 221 ..." style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box;" />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Direcci\xF3n F\xEDsica</label>
+        <input type="text" id="com-app-address" placeholder="Ej. Calle 12 Nro. 345, Magdalena" style="height:48px; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:0 14px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box;" />
+      </div>
+    </div>
+
+    <button id="com-app-submit-btn" class="btn btn-primary" style="height:48px; border-radius:12px; font-weight:900; background:#22c55e; border:none; color:white; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:8px; cursor:pointer; width:100%;">
+      Enviar Solicitud
+    </button>
+  `;
+  modalEl.querySelector("#com-app-submit-btn").onclick = async (e) => {
+    const nameVal = modalEl.querySelector("#com-app-name").value.trim();
+    const categoryVal = modalEl.querySelector("#com-app-category").value;
+    const phoneVal = modalEl.querySelector("#com-app-phone").value.trim();
+    const addressVal = modalEl.querySelector("#com-app-address").value.trim();
+    if (!nameVal || !phoneVal || !addressVal) {
+      showToast("Por favor completa todos los campos del formulario.", "warning");
+      return;
+    }
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.innerHTML = `${icon("loader", 16, "animate-spin")} Enviando...`;
+    try {
+      await updateDoc(doc(db2, "users", user.uid), {
+        commerceStatus: "pending",
+        commerceApplication: {
+          name: nameVal,
+          category: categoryVal,
+          phone: phoneVal,
+          address: addressVal,
+          status: "pending",
+          createdAt: (/* @__PURE__ */ new Date()).toISOString()
+        }
+      });
+      showToast("\xA1Tu solicitud de comercio fue enviada con \xE9xito!", "success");
+      closeModal();
+      location.reload();
+    } catch (err) {
+      console.error(err);
+      showToast("Error al enviar la solicitud. Por favor intenta de nuevo.", "error");
+      btn.disabled = false;
+      btn.innerHTML = "Enviar Solicitud";
+    }
+  };
+  showModal({
+    title: "Nueva Solicitud",
+    height: "auto",
+    content: modalEl
+  });
+}

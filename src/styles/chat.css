@@ -641,3 +641,146 @@
   padding-left: 12px;
 }
 
+/* ── Modern Premium Chat Adjustments ── */
+.chat-container {
+  transition: padding-bottom 0.1s ease-out; /* Smooth keyboard pop transition */
+}
+
+/* Reaction Picker and Badge Styles */
+.chat-reaction-menu {
+  display: flex;
+  user-select: none;
+}
+@keyframes popIn {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.chat-bubble-reactions {
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chat-bubble-reactions:active {
+  transform: scale(0.9);
+}
+
+/* Premium WhatsApp/Instagram Chat Bubbles Refinements */
+.chat-bubble {
+  border-radius: 18px;
+  box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 10px 16px 8px;
+}
+
+.bubble-mine {
+  background: #121212 !important; /* Premium Obsidian Black */
+  color: #ffffff !important;
+  border-bottom-right-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.bubble-other {
+  background: #ffffff !important; /* Pure White */
+  border: 1px solid var(--color-border-light) !important;
+  color: var(--color-text-primary) !important;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Audio Waveform controls color overrides */
+.wa-audio-player {
+  background: transparent !important;
+  border-radius: 14px;
+  padding: 0;
+}
+
+/* WhatsApp-grade Audio Bubbles */
+.chat-bubble.bubble-audio {
+  padding: 0 !important;
+  box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.08) !important;
+  overflow: visible !important;
+}
+
+.chat-bubble.bubble-audio.bubble-mine {
+  background: #121212 !important;
+  color: #ffffff !important;
+  border-bottom-right-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.chat-bubble.bubble-audio.bubble-other {
+  background: #ffffff !important;
+  color: var(--color-text-primary) !important;
+  border-bottom-left-radius: 4px;
+  border: 1px solid var(--color-border-light) !important;
+}
+
+/* Hide default inside overrides */
+.bubble-audio .wa-audio-player {
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+
+/* Waveform styling */
+.wa-waveform-bar {
+  transition: background-color 0.1s ease;
+}
+
+/* Audio Seekbar slider input overlay styling */
+.wa-waveform-container .wa-audio-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.wa-waveform-container .wa-audio-seek::-webkit-slider-runnable-track {
+  background: transparent !important;
+  border: none !important;
+}
+.wa-waveform-container .wa-audio-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.wa-waveform-container .wa-audio-seek::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  border: none;
+}
+
+/* Better Input design styling */
+.chat-input-bar {
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border-light);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.03);
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.chat-input {
+  border: 1.5px solid var(--color-border-light);
+  font-size: 14.5px;
+  font-weight: 600;
+  height: 42px;
+  border-radius: 20px;
+  background: var(--color-bg-secondary);
+}
+
+.chat-input:focus {
+  background: var(--color-surface);
+  border-color: var(--color-primary);
+}
+
+

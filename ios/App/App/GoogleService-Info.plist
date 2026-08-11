@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>848164656125-39s20b9aib1vs2h4v3skkvuoas7pdb05.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCnN5liYEjAXlnyIAdd-tEQIz2YuV7sark</string>
+	<key>GCM_SENDER_ID</key>
+	<string>848164656125</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.godelivery.magdalena</string>
+	<key>PROJECT_ID</key>
+	<string>godelivery-magdalena</string>
+	<key>STORAGE_BUCKET</key>
+	<string>godelivery-magdalena.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:848164656125:ios:331810931b087ad187ff94</string>
+	<key>DATABASE_URL</key>
+	<string>https://godelivery-magdalena-default-rtdb.firebaseio.com</string>
+</dict>
+</plist>

@@ -85,6 +85,7 @@ function startListener() {
     limit(PAGE_SIZE)
   );
 
+  let isFirstLoad = true;
   unsub = onSnapshot(q, (snap) => {
     const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     lastDoc = snap.docs[snap.docs.length - 1];
@@ -92,13 +93,62 @@ function startListener() {
 
     const unreadCount = items.filter(n => n.status === 'unread').length;
     setState({ notifications: items, unreadNotifications: unreadCount });
+
+    // Live foreground toast/sound alert fallback for system & order notifications
+    if (!isFirstLoad) {
+      snap.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const notif = change.doc.data();
+          if (notif.status === 'unread' && notif.title) {
+            const recentlyNotified = window._recentlyNotifiedNotifications || new Set();
+            const dedupKey = notif.tag || `${notif.title}||${notif.body}`;
+            if (!recentlyNotified.has(dedupKey)) {
+              recentlyNotified.add(dedupKey);
+              setTimeout(() => recentlyNotified.delete(dedupKey), 5000);
+
+              // Render toast
+              showToast(`🔔 ${notif.title}\n${notif.body || ''}`, 'info');
+              
+              // Play sound via AudioManager
+              import('../utils/audio-manager.js').then(({ AudioManager }) => {
+                AudioManager.playSound('/assets/sounds/notification.mp3');
+              }).catch(err => console.warn('AudioManager load failed:', err));
+            }
+          }
+        }
+      });
+    }
+    isFirstLoad = false;
   }, (err) => {
     console.warn('[Notifications] Falling back due to index error:', err);
+    let isFallbackFirstLoad = true;
     onSnapshot(query(collection(db, 'users', user.uid, 'notifications'), limit(PAGE_SIZE)), (snap) => {
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       const unreadCount = items.filter(n => n.status === 'unread').length;
       setState({ notifications: items, unreadNotifications: unreadCount });
+
+      // Live fallback alert
+      if (!isFallbackFirstLoad) {
+        snap.docChanges().forEach(change => {
+          if (change.type === 'added') {
+            const notif = change.doc.data();
+            if (notif.status === 'unread' && notif.title) {
+              const recentlyNotified = window._recentlyNotifiedNotifications || new Set();
+              const dedupKey = notif.tag || `${notif.title}||${notif.body}`;
+              if (!recentlyNotified.has(dedupKey)) {
+                recentlyNotified.add(dedupKey);
+                setTimeout(() => recentlyNotified.delete(dedupKey), 5000);
+                showToast(`🔔 ${notif.title}\n${notif.body || ''}`, 'info');
+                import('../utils/audio-manager.js').then(({ AudioManager }) => {
+                  AudioManager.playSound('/assets/sounds/notification.mp3');
+                }).catch(err => console.warn('AudioManager load failed:', err));
+              }
+            }
+          }
+        });
+      }
+      isFallbackFirstLoad = false;
     });
   });
 }

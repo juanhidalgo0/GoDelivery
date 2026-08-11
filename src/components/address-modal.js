@@ -22,6 +22,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
   let geocodingDisabledTimeout = null;
   let isManualAddress = false;
   let isPreciseLocation = false;
+  let selectedTag = 'Casa';
 
   const updateSelectedAddress = (newAddress) => {
     if (!newAddress) return;
@@ -47,105 +48,185 @@ export function showAddressPrompt(onSuccess, config = {}) {
     }, ms);
   };
 
+  const showMapView = () => {
+    const titleEl = document.getElementById('address-modal-title');
+    const backBtn = document.getElementById('address-modal-back-btn');
+    const closeBtn = document.getElementById('address-modal-close-btn');
+    const slidesContainer = document.getElementById('address-slides-container');
+
+    if (titleEl) titleEl.textContent = 'Ajustar Ubicación';
+    if (backBtn) backBtn.style.visibility = 'visible';
+    if (closeBtn) closeBtn.style.visibility = 'hidden';
+
+    if (slidesContainer) {
+      slidesContainer.style.transform = 'translateX(-50%)';
+    }
+
+    if (!googleMap) {
+      initMap();
+    }
+  };
+
+  const showSearchView = () => {
+    const titleEl = document.getElementById('address-modal-title');
+    const backBtn = document.getElementById('address-modal-back-btn');
+    const closeBtn = document.getElementById('address-modal-close-btn');
+    const slidesContainer = document.getElementById('address-slides-container');
+
+    if (titleEl) titleEl.textContent = '¿Dónde entregamos?';
+    if (backBtn) backBtn.style.visibility = 'hidden';
+    if (closeBtn) closeBtn.style.visibility = 'visible';
+
+    if (slidesContainer) {
+      slidesContainer.style.transform = 'translateX(0)';
+    }
+  };
+
   const renderMainView = () => {
     modalContent.innerHTML = `
-      <!-- Header Red (#E11D48) -->
-      <div id="address-main-header" style="padding: 16px 20px 12px; text-align: center; background: #E11D48; z-index: 10; border-radius: 28px 28px 0 0; flex-shrink:0;">
-        <div style="width: 40px; height: 5px; background: rgba(255, 255, 255, 0.4); border-radius: 10px; margin: 0 auto 10px;"></div>
-        <h1 id="address-modal-title" style="font-family: var(--font-display); font-size: 1.2rem; font-weight: 900; color: white; margin: 0;">Confirma tu dirección</h1>
-      </div>
-
-      <!-- Buscador de Calle y Número -->
-      <div id="search-section" style="padding: 12px 20px 8px; position: relative; background: var(--color-bg); flex-shrink: 0; z-index: 30;">
-        <div style="position: relative;">
-          <input type="text" id="address-search-input" placeholder="Calle y Número (Ejemplo: Brenan 1340)" style="width: 100%; height: 50px; padding: 0 48px 0 16px; border-radius: 16px; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); font-size: 14.5px; font-weight: 700; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-shadow: var(--shadow-sm);">
-          <div id="search-icon-wrapper" style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--color-primary); display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; cursor: pointer;">
-            ${icon('search', 20)}
-          </div>
+      <div id="address-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:30px 20px 16px 20px; background:#E11D48; flex-shrink:0; color:white; border-bottom:none; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+        <!-- Left Slot -->
+        <div style="width:75px; display:flex; justify-content:flex-start; flex-shrink:0;">
+          <button id="address-modal-back-btn" style="background:none; border:none; color:white; cursor:pointer; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; padding:4px 8px; font-weight:800; font-size:13.5px; outline:none; display:flex; gap:4px; margin:0;">
+            ${icon('chevronLeft', 16)} Buscar
+          </button>
         </div>
-        <div id="address-suggestions" class="address-suggestions-list" style="display:none; position:relative; width:100%; max-height:calc(100dvh - 140px); overflow-y:auto; -webkit-overflow-scrolling:touch; background:var(--color-bg); margin-top:8px; z-index:2000;"></div>
-      </div>
-
-      <!-- Saved Addresses Horizontal Quick Chips (si existen) -->
-      ${(getState().savedAddresses || []).length > 0 ? `
-        <div id="saved-addresses-wrapper" style="padding: 0 20px 8px; background: var(--color-bg); flex-shrink: 0;">
-          <div style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">
-            Tus direcciones
-          </div>
-          <div id="saved-addresses-list" style="display:flex; gap:10px; overflow-x:auto; padding-bottom:4px; scrollbar-width: none; -ms-overflow-style: none;">
-            ${(getState().savedAddresses || []).map(addr => `
-              <div class="saved-addr-chip" data-id="${addr.id}" style="flex-shrink:0; padding:8px 14px; background:var(--color-bg-secondary); border-radius:12px; border:1.5px solid var(--color-border-light); display:flex; align-items:center; gap:8px; cursor:pointer; transition:all 0.2s;">
-                <div style="color:var(--color-primary);">${icon(addr.name.toLowerCase().includes('casa') ? 'home' : (addr.name.toLowerCase().includes('trabajo') || addr.name.toLowerCase().includes('oficina') ? 'store' : 'mapPin'), 15)}</div>
-                <div style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); white-space:nowrap;">${addr.name}</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      ` : ''}
-
-      <!-- Map Area (Center Pin + Floating GPS Button 🎯) -->
-      <div id="address-map-container" style="flex: 1; min-height: 220px; position: relative; background: var(--color-bg-secondary);">
-        <div id="address-map-picker" style="width: 100%; height: 100%;"></div>
         
-        <!-- Center Marker Teardrop -->
-        <div id="address-center-marker" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); pointer-events: none; z-index: 10;">
-           <div style="filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));">
-             <svg width="36" height="48" viewBox="0 0 40 52" fill="none">
-               <path d="M20 52C20 52 40 33.7258 40 20C40 8.9543 31.0457 0 20 0C8.9543 0 0 8.9543 0 20C0 33.7258 20 52 20 52Z" fill="#E11D48"/>
-               <circle cx="20" cy="20" r="6" fill="white"/>
-             </svg>
+        <!-- Center Title -->
+        <h3 id="address-modal-title" style="font-family:var(--font-display); font-size:1.2rem; font-weight:950; margin:0; color:white; text-align:center; letter-spacing:-0.01em; flex:1;">¿Dónde entregamos?</h3>
+        
+        <!-- Right Slot -->
+        <div style="width:75px; display:flex; justify-content:flex-end; flex-shrink:0;">
+          <button id="address-modal-close-btn" style="width:36px; height:36px; border:none; background:rgba(255,255,255,0.12); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; color:white; outline:none; margin:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Slides Wrapper -->
+      <div class="address-slides-wrapper" style="flex:1; width: 100%; overflow: hidden; position: relative;">
+        <div id="address-slides-container" style="display: flex; width: 200%; height: 100%; transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform;">
+           
+           <!-- Slide 1: Búsqueda y selección rápida -->
+           <div id="address-search-step" style="width: 50%; height: 100%; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+             <!-- Buscador de Calle y Número -->
+             <div id="search-section" style="padding: 36px 20px 8px; position: relative; background: var(--color-bg); flex-shrink: 0; z-index: 30;">
+               <div style="position: relative;">
+                 <input type="text" id="address-search-input" placeholder="Calle y Número (Ejemplo: Brenan 1340)" style="width: 100%; height: 50px; padding: 0 48px 0 16px; border-radius: 16px; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); font-size: 14.5px; font-weight: 700; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-shadow: var(--shadow-sm);">
+                 <div id="search-icon-wrapper" style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--color-primary); display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; cursor: pointer;">
+                   ${icon('search', 20)}
+                 </div>
+               </div>
+               <div id="address-suggestions" class="address-suggestions-list" style="display:none; position:absolute; left:20px; right:20px; width:calc(100% - 40px); max-height:280px; overflow-y:auto; -webkit-overflow-scrolling:touch; background:var(--color-surface); border-radius:18px; border:1.5px solid var(--color-border-light); margin-top:8px; z-index:2000; box-shadow:0 12px 30px rgba(0,0,0,0.12); padding:8px 0;"></div>
+             </div>
+
+             <!-- Botón para Elegir en el Mapa -->
+             <div id="btn-open-map-direct" style="margin: 12px 20px 20px; padding: 14px 18px; border-radius: 18px; background: linear-gradient(135deg, var(--color-primary, #E11D48) 0%, #F43F5E 100%); border: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; color: white; font-weight: 900; font-size: 14px; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 8px 22px rgba(225, 29, 72, 0.3); flex-shrink: 0;">
+               <div style="display:flex; align-items:center; gap:12px;">
+                 <div style="width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.25); display:flex; align-items:center; justify-content:center; color:white; flex-shrink:0;">
+                   ${icon('mapPin', 16)}
+                 </div>
+                 <span>Seleccionar ubicación en el mapa</span>
+               </div>
+               <div style="color:rgba(255,255,255,0.85); display:flex; align-items:center;">
+                 ${icon('chevronRight', 16)}
+               </div>
+             </div>
+
+             <!-- Saved Addresses — populated dynamically to avoid async race -->
+             <div id="saved-addresses-wrapper" style="padding: 8px 20px 20px; flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; display:flex; flex-direction:column; gap:10px;">
+               <!-- filled by populateSavedAddresses() -->
+             </div>
+           </div>
+
+           <!-- Slide 2: Mapa y confirmación de detalles -->
+           <div id="address-map-step" style="width: 50%; height: 100%; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+             <!-- Map Area (Center Pin + Floating GPS Button 🎯) -->
+             <div id="address-map-container" style="flex: 1; min-height: 220px; position: relative; background: var(--color-bg-secondary);">
+               <div id="address-map-picker" style="width: 100%; height: 100%;"></div>
+               
+               <!-- Center Marker Teardrop -->
+               <div id="address-center-marker" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); pointer-events: none; z-index: 10;">
+                  <div style="filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));">
+                    <svg width="36" height="48" viewBox="0 0 40 52" fill="none">
+                      <path d="M20 52C20 52 40 33.7258 40 20C40 8.9543 31.0457 0 20 0C8.9543 0 0 8.9543 0 20C0 33.7258 20 52 20 52Z" fill="#E11D48"/>
+                      <circle cx="20" cy="20" r="6" fill="white"/>
+                    </svg>
+                  </div>
+               </div>
+
+               <button id="my-location-btn" style="position: absolute; bottom: 12px; right: 12px; width: 44px; height: 44px; border-radius: 12px; background: var(--color-surface); border: 1px solid var(--color-border); box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 15; color: var(--color-primary); transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);">
+                 <div id="loc-btn-icon" style="display:flex; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);">
+                   ${icon('target', 20)}
+                 </div>
+               </button>
+
+               <!-- Professional Loading Overlay -->
+               <div id="map-loading-overlay" style="position:absolute; inset:0; background:rgba(255,255,255,0.7); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:100; transition:opacity 0.4s; pointer-events:none; opacity:0;">
+                 <div class="map-spinner"></div>
+                 <p style="font-weight:700; color:var(--color-text-primary); font-size:14px; margin:0;">Detectando ubicación...</p>
+               </div>
+             </div>
+
+             <!-- Bottom Details Panel -->
+             <div id="address-bottom-panel" style="flex-shrink: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 8px)); background: var(--color-bg); z-index: 20; border-top: 1px solid var(--color-border-light); box-shadow: 0 -4px 16px rgba(0,0,0,0.04); width:100%; box-sizing:border-box;">
+               <!-- Dirección seleccionada -->
+               <div id="current-selected-address-container" style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px; background: var(--color-bg-secondary); padding: 8px 12px; border-radius: 12px; border: 1.5px solid var(--color-border-light);">
+                 <div style="color: var(--color-primary); margin-top: 2px; flex-shrink: 0;">${icon('mapPin', 16)}</div>
+                 <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+                   <span style="font-size: 9.5px; font-weight: 850; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em;">Dirección Seleccionada</span>
+                   <span id="current-selected-address-text" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                     Cargando dirección...
+                   </span>
+                 </div>
+               </div>
+
+               <!-- Stacked Inputs: Piso/Dpto + Referencia (Perfect Alignment & Full Width) -->
+               <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; width: 100%;">
+                 <input type="text" id="address-apt-input" placeholder="Piso / Departamento / Oficina (Opcional)" style="width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1.5px solid var(--color-border); background: var(--color-surface); font-size: 13px; font-weight: 600; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-sizing: border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'" />
+                 <input type="text" id="address-reference-input" placeholder="${config.optionalReference ? 'Referencia / Indicaciones (Opcional)' : 'Referencia / Instrucciones de entrega (Obligatorio)'}" style="width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1.5px solid var(--color-border); background: var(--color-surface); font-size: 13px; font-weight: 600; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-sizing: border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'" value="${getState().addressNotes || ''}" />
+               </div>
+
+               <!-- Address Tag Selection (Clean Equal Flex Layout) -->
+               <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; width: 100%;">
+                 <span style="font-size: 10px; font-weight: 850; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;">Guardar dirección como:</span>
+                 <div style="display: flex; gap: 8px; width: 100%;">
+                   <button type="button" class="addr-tag-btn active" data-tag="Casa" style="flex: 1; height: 38px; border-radius: 10px; border: 1.5px solid var(--color-primary); background: rgba(225, 29, 72, 0.05); font-weight: 750; font-size: 12px; color: var(--color-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; box-sizing: border-box;">
+                     ${icon('home', 12)} Casa
+                   </button>
+                   <button type="button" class="addr-tag-btn" data-tag="Trabajo" style="flex: 1; height: 38px; border-radius: 10px; border: 1.5px solid var(--color-border); background: var(--color-surface); font-weight: 750; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; box-sizing: border-box;">
+                     ${icon('store', 12)} Trabajo
+                   </button>
+                   <button type="button" class="addr-tag-btn" data-tag="Otro" style="flex: 1; height: 38px; border-radius: 10px; border: 1.5px solid var(--color-border); background: var(--color-surface); font-weight: 750; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; box-sizing: border-box;">
+                     ${icon('mapPin', 12)} Otro
+                   </button>
+                 </div>
+               </div>
+
+               <button id="confirm-location-btn" class="btn btn-primary btn-block" style="height: 48px; border-radius: 14px; font-weight: 900; font-size: 15px; background: #E11D48; border: none; color: white; box-shadow: 0 6px 16px rgba(225, 29, 72, 0.22); cursor: pointer; width: 100%;">
+                 Confirmar Dirección
+               </button>
+             </div>
            </div>
         </div>
-
-        <button id="my-location-btn" style="position: absolute; bottom: 12px; right: 12px; width: 44px; height: 44px; border-radius: 12px; background: var(--color-surface); border: 1px solid var(--color-border); box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 15; color: var(--color-primary); transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);">
-          <div id="loc-btn-icon" style="display:flex; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);">
-            ${icon('target', 20)}
-          </div>
-        </button>
-
-        <!-- Professional Loading Overlay -->
-        <div id="map-loading-overlay" style="position:absolute; inset:0; background:rgba(255,255,255,0.7); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:100; transition:opacity 0.4s; pointer-events:none; opacity:0;">
-          <div class="map-spinner"></div>
-          <p style="font-weight:700; color:var(--color-text-primary); font-size:14px; margin:0;">Detectando ubicación...</p>
-        </div>
-
-        <!-- Adjustment Header -->
-        <div id="adjustment-header" style="display:none; position:absolute; top:0; left:0; right:0; background:var(--color-bg); padding:20px; z-index:100; border-radius: 28px 28px 0 0;">
-          <button id="adj-back-btn" style="background:none; border:none; padding:8px; margin-bottom:8px; cursor:pointer; color: var(--color-text-primary);">${icon('arrowLeft', 24)}</button>
-          <h2 style="font-family:var(--font-display); font-size:1.5rem; font-weight:900; color:var(--color-text-primary); margin:0 0 4px;">Ajusta el pin en el mapa</h2>
-          <p style="margin:0; color:var(--color-text-tertiary); font-size:14px; font-weight:500;">Ubícalo en el lugar exacto de tu dirección.</p>
-        </div>
-      </div>
-
-      <!-- Bottom Details Panel -->
-      <div id="address-bottom-panel" style="flex-shrink: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 8px)); background: var(--color-bg); z-index: 20; border-top: 1px solid var(--color-border-light); box-shadow: 0 -4px 16px rgba(0,0,0,0.04);">
-        <!-- Dirección seleccionada -->
-        <div id="current-selected-address-container" style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px; background: var(--color-bg-secondary); padding: 8px 12px; border-radius: 12px; border: 1.5px solid var(--color-border-light);">
-          <div style="color: var(--color-primary); margin-top: 2px; flex-shrink: 0;">${icon('mapPin', 16)}</div>
-          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
-            <span style="font-size: 9.5px; font-weight: 850; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em;">Dirección Seleccionada</span>
-            <span id="current-selected-address-text" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              Cargando dirección...
-            </span>
-          </div>
-        </div>
-
-        <!-- Reference/Notes input -->
-        <div style="margin-bottom: 8px;">
-          <textarea id="address-reference-input" placeholder="${config.optionalReference ? 'Referencia / Indicaciones (Opcional)' : 'Referencia / Indicaciones de entrega (Ej: Portón negro, depto 2) - Obligatorio'}" style="width:100%; height:42px; padding:6px 10px; border-radius:12px; border:1.5px solid var(--color-border); background:var(--color-surface); font-size:12.5px; font-weight:600; outline:none; color:var(--color-text-primary); resize:none; line-height:1.3; transition:all 0.2s; box-sizing:border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'">${getState().addressNotes || ''}</textarea>
-        </div>
-
-        <div id="adj-buttons" style="display:none; flex-direction:column; gap:8px;">
-           <button id="adj-continue-btn" class="btn btn-primary" style="height:48px; border-radius:18px; font-weight:900; background:#E11D48;">Continuar</button>
-           <button id="adj-cancel-btn" style="height:38px; background:none; border:none; color:var(--color-text-primary); font-weight:700; font-size:13px; cursor:pointer;">Cancelar</button>
-        </div>
-
-        <button id="confirm-location-btn" class="btn btn-primary btn-block" style="height: 48px; border-radius: 14px; font-weight: 900; font-size: 15px; background: #E11D48; border: none; color: white; box-shadow: 0 6px 16px rgba(225, 29, 72, 0.22); cursor: pointer;">
-          Confirmar Dirección
-        </button>
       </div>
 
       <style>
+        @media (max-height: 680px) {
+          #address-map-container {
+            height: 150px !important;
+            min-height: 150px !important;
+            flex: none !important;
+          }
+          #address-bottom-panel {
+            padding-top: 8px !important;
+            padding-bottom: 8px !important;
+          }
+          #address-apt-input, #address-reference-input {
+            height: 38px !important;
+          }
+        }
+
         @keyframes refShake {
           0%, 100% { transform: translateX(0); }
           20%, 60% { transform: translateX(-6px); }
@@ -194,15 +275,64 @@ export function showAddressPrompt(onSuccess, config = {}) {
           border-top-color: white;
         }
 
-        [data-theme="dark"] #map-loading-overlay { background: rgba(15, 23, 42, 0.7); }
-        [data-theme="dark"] .delivery-map-modal-v4 { background: #020617; }
-        [data-theme="dark"] #address-main-header, 
+        [data-theme="dark"] #address-map-header, 
         [data-theme="dark"] #address-bottom-panel,
         [data-theme="dark"] #adjustment-header { background: #0F172A; }
+
+        .suggestion-item:hover, .suggestion-item:active {
+          background: var(--color-bg-secondary) !important;
+        }
+        .address-suggestions-list::-webkit-scrollbar {
+          width: 4px;
+        }
+        .address-suggestions-list::-webkit-scrollbar-thumb {
+          background: var(--color-border);
+          border-radius: 4px;
+        }
+        @keyframes addr-modal-in {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .delivery-map-modal-v4 {
+          animation: addr-modal-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
       </style>
     `;
+  };
 
-    initMap();
+  // Populate the saved-addresses section dynamically (avoids async race with Firestore load)
+  const populateSavedAddresses = () => {
+    const wrapper = document.getElementById('saved-addresses-wrapper');
+    if (!wrapper) return;
+    const addresses = getState().savedAddresses || [];
+    if (addresses.length === 0) {
+      wrapper.innerHTML = '';
+      return;
+    }
+    wrapper.innerHTML = `
+      <div style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px;">
+        Tus direcciones guardadas
+      </div>
+      <div id="saved-addresses-list" style="display:flex; flex-direction:column; gap:10px; width:100%;">
+        ${addresses.map(addr => `
+          <div class="saved-addr-chip" data-id="${addr.id}" style="width: 100%; padding:14px 16px; background:var(--color-surface); border-radius:16px; border:1.5px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between; cursor:pointer; transition:all 0.2s; box-sizing:border-box; box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
+            <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+              <div style="color:var(--color-primary); width:32px; height:32px; border-radius:50%; background:rgba(225,29,72,0.08); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                ${icon(addr.name.toLowerCase().includes('casa') ? 'home' : (addr.name.toLowerCase().includes('trabajo') || addr.name.toLowerCase().includes('oficina') ? 'store' : 'mapPin'), 16)}
+              </div>
+              <div style="display:flex; flex-direction:column; gap:2px; text-align:left; min-width:0;">
+                <div style="font-size:14px; font-weight:900; color:var(--color-text-primary);">${addr.name}</div>
+                <div style="font-size:12px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px;">${addr.address}</div>
+              </div>
+            </div>
+            <div style="color:var(--color-text-tertiary); flex-shrink:0; display:flex; align-items:center;">
+              ${icon('chevronRight', 16)}
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    // re-attach click listeners
+    attachSavedAddressListeners(onSuccess);
   };
 
   const initMap = async () => {
@@ -269,6 +399,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
       if (address) {
         // Validation of reference note (Obligatorio unless optionalReference is passed)
         const reference = document.getElementById('address-reference-input')?.value.trim() || '';
+        const apt = document.getElementById('address-apt-input')?.value.trim() || '';
         if (!config.optionalReference && !reference) {
           const refInput = document.getElementById('address-reference-input');
           if (refInput) {
@@ -291,23 +422,25 @@ export function showAddressPrompt(onSuccess, config = {}) {
           return;
         }
 
+        const finalNotes = [apt, reference].filter(Boolean).join(' - ');
+
         if (isGeneric || !config.editAddress) {
            if (config.justReturnAddress) {
              closeModal();
-             if (onSuccess) onSuccess(address, reference, selectedCoords);
+             if (onSuccess) onSuccess(address, finalNotes, selectedCoords);
              return;
            }
            // Save to saved addresses list if we are not editing
            if (!config.editAddress) {
              import('../state.js').then(({ saveUserAddress }) => {
-               saveUserAddress('Dirección', address, reference, selectedCoords);
+               saveUserAddress(selectedTag, address, finalNotes, selectedCoords);
              }).catch(e => console.warn('Could not save user address to list:', e));
            }
-           setDeliveryAddress(address, reference, selectedCoords, '');
+           setDeliveryAddress(address, finalNotes, selectedCoords, '');
            closeModal();
-           if (onSuccess) onSuccess(address, reference, selectedCoords);
+           if (onSuccess) onSuccess(address, finalNotes, selectedCoords);
         } else {
-           showAddressDetails(address, selectedCoords, onSuccess, { ...config, initialReference: reference });
+           showAddressDetails(address, selectedCoords, onSuccess, { ...config, initialReference: finalNotes });
         }
       } else {
         showToast('Elegí una ubicación', 'warning');
@@ -347,48 +480,6 @@ export function showAddressPrompt(onSuccess, config = {}) {
     } else if (!getState().deliveryAddress) {
       centerOnMe(false); // Silent center
     }
-
-    // Handle saved addresses clicks
-    document.querySelectorAll('.saved-addr-chip').forEach(chip => {
-      chip.onclick = () => {
-        const addrId = chip.dataset.id;
-        const saved = (getState().savedAddresses || []).find(a => a.id === addrId);
-        if (saved) {
-          setDeliveryAddress(saved.address, saved.notes || '', saved.coords, '');
-          closeModal();
-          showToast(`Ubicación: ${saved.name}`, 'success');
-          if (onSuccess) onSuccess(saved.address, saved.notes || '', saved.coords);
-        }
-      };
-    });
-
-    const refInput = document.getElementById('address-reference-input');
-    if (refInput) {
-      refInput.addEventListener('focus', () => {
-        const mapBox = document.getElementById('address-map-container');
-        const savedWrapper = document.getElementById('saved-addresses-wrapper');
-        if (mapBox) mapBox.style.display = 'none';
-        if (savedWrapper) savedWrapper.style.display = 'none';
-        refInput.style.borderColor = 'var(--color-primary)';
-      });
-
-      refInput.addEventListener('blur', () => {
-        const mapBox = document.getElementById('address-map-container');
-        const savedWrapper = document.getElementById('saved-addresses-wrapper');
-        if (mapBox) mapBox.style.display = 'block';
-        if (savedWrapper) savedWrapper.style.display = 'block';
-        refInput.style.borderColor = 'var(--color-border)';
-      });
-
-      refInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          refInput.blur();
-        }
-      });
-    }
-
-    initSearch();
   };
 
   const toggleAdjustmentMode = (isAdj) => {
@@ -779,9 +870,17 @@ export function showAddressPrompt(onSuccess, config = {}) {
     setSearchFocusMode(true);
     
     let html = suggestions.map(s => `
-      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="padding:16px 20px; border-bottom:1px solid var(--color-border-light); cursor:pointer; background:var(--color-surface); border-radius:14px; margin-bottom:8px;">
-        <div style="font-weight:800; font-size:14.5px; color:var(--color-text-primary);">${s.address}</div>
-        <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">${s.displayName || ''}</div>
+      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="padding:12px 16px; display:flex; align-items:center; gap:12px; cursor:pointer; background:transparent; transition:all 0.15s ease;">
+        <div style="width:30px; height:30px; border-radius:50%; background:rgba(225, 29, 72, 0.08); color:#E11D48; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          ${icon('mapPin', 15)}
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:750; font-size:13.5px; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.address}</div>
+          <div style="font-size:11.5px; color:var(--color-text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;">${s.displayName || ''}</div>
+        </div>
+        <div style="color:var(--color-text-tertiary); display:flex; align-items:center; flex-shrink:0;">
+          ${icon('chevronRight', 14)}
+        </div>
       </div>
     `).join('');
 
@@ -797,18 +896,11 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const placeId = item.dataset.placeid;
 
         const applyLocation = (finalLat, finalLng) => {
-          if (googleMap) {
-            disableGeocodingTemporarily(1500);
-            googleMap.setCenter(new google.maps.LatLng(finalLat, finalLng));
-            googleMap.setZoom(17);
-          }
-          suggestionsBox.style.display = 'none';
-
-          lastGeocodedAddress = addr;
-          selectedCoords = { lat: finalLat, lng: finalLng };
-          const searchInput = document.getElementById('address-search-input');
-          if (searchInput) searchInput.value = addr;
-          updateSelectedAddress(addr);
+          import('../state.js').then(({ setDeliveryAddress }) => {
+            setDeliveryAddress(addr, '', { lat: finalLat, lng: finalLng }, '');
+          }).catch(e => console.warn(e));
+          closeModal();
+          if (onSuccess) onSuccess(addr, '', { lat: finalLat, lng: finalLng });
         };
 
         if (isNaN(lat) || isNaN(lng)) {
@@ -834,10 +926,61 @@ export function showAddressPrompt(onSuccess, config = {}) {
         }
       };
     });
+  };
 
-    setTimeout(() => {
-      const header = document.getElementById('address-main-header');
-      if (header) {
+  showModal({
+    title: '',
+    hideHeader: true,
+    height: '80vh',
+    content: modalContent,
+    onOpen: () => {
+      // Bind Step Navigation Buttons
+      const openMapBtn = document.getElementById('btn-open-map-direct');
+      if (openMapBtn) {
+        openMapBtn.onclick = (e) => {
+          e.preventDefault();
+          showMapView();
+        };
+      }
+
+      const backToSearchBtn = document.getElementById('address-modal-back-btn');
+      if (backToSearchBtn) {
+        backToSearchBtn.onclick = (e) => {
+          e.preventDefault();
+          showSearchView();
+        };
+      }
+
+      const closeAddressModalBtn = document.getElementById('address-modal-close-btn');
+      if (closeAddressModalBtn) {
+        closeAddressModalBtn.onclick = (e) => {
+          e.preventDefault();
+          closeModal();
+        };
+      }
+
+      // Bind Tag Selection Logic
+      const tagBtns = modalContent.querySelectorAll('.addr-tag-btn');
+      tagBtns.forEach(btn => {
+        btn.onclick = (e) => {
+          e.preventDefault();
+          tagBtns.forEach(b => {
+            b.style.borderColor = 'var(--color-border)';
+            b.style.color = 'var(--color-text-secondary)';
+            b.style.background = 'var(--color-surface)';
+            b.classList.remove('active');
+          });
+          btn.style.borderColor = 'var(--color-primary)';
+          btn.style.color = 'var(--color-primary)';
+          btn.style.background = 'rgba(var(--color-primary-rgb, 225, 29, 72), 0.05)';
+          btn.classList.add('active');
+          selectedTag = btn.dataset.tag;
+        };
+      });
+
+      // Bind drag to close event for unified header!
+      const unifiedHeader = document.getElementById('address-modal-header');
+      if (unifiedHeader) {
         let startY = 0;
         let currentY = 0;
         let isDragging = false;
@@ -845,7 +988,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const dialog = modalContent.closest('.modal');
         const overlay = modalContent.closest('.modal-overlay');
 
-        header.addEventListener('touchstart', (e) => {
+        unifiedHeader.addEventListener('touchstart', (e) => {
           startY = e.touches[0].clientY;
           startTime = Date.now();
           isDragging = true;
@@ -853,7 +996,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           if (overlay) overlay.style.transition = 'none';
         }, { passive: true });
 
-        header.addEventListener('touchmove', (e) => {
+        unifiedHeader.addEventListener('touchmove', (e) => {
           if (!isDragging) return;
           currentY = e.touches[0].clientY;
           const diff = currentY - startY;
@@ -863,7 +1006,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           }
         }, { passive: true });
 
-        header.addEventListener('touchend', () => {
+        unifiedHeader.addEventListener('touchend', () => {
           if (!isDragging) return;
           isDragging = false;
           const diff = currentY - startY;
@@ -881,14 +1024,13 @@ export function showAddressPrompt(onSuccess, config = {}) {
           }
         });
       }
-    }, 100);
-  };
 
-  showModal({
-    title: '',
-    hideHeader: true,
-    content: modalContent,
-    onOpen: () => {
+      // Initialize search listeners immediately on modal open
+      initSearch();
+
+      // Bind saved addresses clicks immediately on modal open
+      attachSavedAddressListeners(onSuccess);
+
       setTimeout(() => {
         const input = document.getElementById('address-search-input');
         if (input) {
@@ -899,6 +1041,25 @@ export function showAddressPrompt(onSuccess, config = {}) {
     }
   });
   renderMainView();
+  // Populate saved addresses AFTER innerHTML is set (avoids async Firestore race condition)
+  populateSavedAddresses();
+}
+
+// Helper: attach click handlers to all .saved-addr-chip elements
+function attachSavedAddressListeners(onSuccess) {
+  document.querySelectorAll('.saved-addr-chip').forEach(chip => {
+    chip.onclick = (e) => {
+      e.preventDefault();
+      const addrId = chip.dataset.id;
+      const saved = (getState().savedAddresses || []).find(a => a.id === addrId);
+      if (saved) {
+        setDeliveryAddress(saved.address, saved.notes || '', saved.coords, '');
+        closeModal();
+        showToast(`Ubicación: ${saved.name}`, 'success');
+        if (onSuccess) onSuccess(saved.address, saved.notes || '', saved.coords);
+      }
+    };
+  });
 }
 
 export function showAddressDetails(address, coords, onSuccess, config = {}) {

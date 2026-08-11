@@ -111,8 +111,58 @@ async function init() {
     console.error('Error removing Pizzería category:', err);
   }
 
-  // Force-update check against version.json (Deferred to run post-load to bypass blocking startup)
-  setTimeout(async () => {
+  // Global updating state to avoid double reloads
+  let isAppUpdating = false;
+  function showUpdateSplashAndReload() {
+    window.showUpdateSplashAndReload = showUpdateSplashAndReload;
+    if (isAppUpdating) return;
+    isAppUpdating = true;
+    
+    // Inject premium fullscreen update overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'gd-update-overlay';
+    overlay.style.cssText = 'position: fixed; inset: 0; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); z-index: 999999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: Outfit, sans-serif;';
+    overlay.innerHTML = `
+      <img src="/logo-pwa.png" style="width: 85px; height: 85px; border-radius: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); margin-bottom: 22px; animation: updatePulse 1.8s infinite ease-in-out;" />
+      <h3 style="font-size: 20px; font-weight: 900; margin: 0 0 6px 0; letter-spacing: -0.03em;">Actualizando GoDelivery</h3>
+      <p style="font-size: 13.5px; opacity: 0.85; margin: 0 0 24px 0; font-weight: 700;">Instalando la última versión...</p>
+      <div style="width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.25); border-top-color: white; border-radius: 50%; animation: updateSpin 0.8s linear infinite;"></div>
+      <style>
+        @keyframes updatePulse {
+          0%, 100% { transform: scale(1); opacity: 0.95; }
+          50% { transform: scale(1.06); opacity: 1; }
+        }
+        @keyframes updateSpin {
+          to { transform: rotate(360deg); }
+        }
+      </style>
+    `;
+    document.body.appendChild(overlay);
+
+    // Perform cleanup and reload after a short delay for smooth animation
+    setTimeout(async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            await r.unregister();
+          }
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            await caches.delete(key);
+          }
+        }
+      } catch (e) {
+        console.warn('Update cleanup failed:', e);
+      }
+      window.location.reload();
+    }, 1200);
+  }
+
+  // Force-update check against version.json (Runs once on load, then checks every 25 seconds in background)
+  const checkAppVersion = async () => {
     try {
       const vRes = await fetch('/version.json?cb=' + Date.now());
       if (vRes.ok) {
@@ -120,28 +170,8 @@ async function init() {
         const currentVer = localStorage.getItem('gd_app_version');
         if (currentVer && currentVer !== String(vData.version)) {
           console.log('[Version] New version detected:', vData.version, '. Clearing app caches and reloading...');
-          
-          // Unregister service workers
-          if ('serviceWorker' in navigator) {
-            const regs = await navigator.serviceWorker.getRegistrations();
-            for (const r of regs) {
-              await r.unregister();
-            }
-          }
-          
-          // Clear all caches
-          if ('caches' in window) {
-            const keys = await caches.keys();
-            for (const key of keys) {
-              await caches.delete(key);
-            }
-          }
-
-          // Update version in localStorage (do NOT clear localStorage/sessionStorage to preserve session and state)
           localStorage.setItem('gd_app_version', String(vData.version));
-          
-          // Force reload bypassing HTTP cache
-          window.location.reload();
+          showUpdateSplashAndReload();
           return;
         } else if (!currentVer) {
           localStorage.setItem('gd_app_version', String(vData.version));
@@ -150,7 +180,9 @@ async function init() {
     } catch (err) {
       console.warn('[Version] Check failed:', err);
     }
-  }, 3000);
+  };
+  setTimeout(checkAppVersion, 3000);
+  setInterval(checkAppVersion, 25000);
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
   const urlParams = new URLSearchParams(window.location.search);
@@ -201,7 +233,7 @@ async function init() {
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (hasExistingController && !refreshing) {
         refreshing = true;
-        window.location.reload();
+        showUpdateSplashAndReload();
       }
     });
 
@@ -472,11 +504,45 @@ async function init() {
 
   async function wrapCommerceRoute(comercioId, container, renderFn) {
     if (comercioId) {
+      window.verifiedCommerceRoutes = window.verifiedCommerceRoutes || {};
+      if (window.verifiedCommerceRoutes[comercioId]) {
+        return renderFn();
+      }
+
+      // Show loader immediately while verifying credentials/PIN
+      const content = container || document.getElementById('app-content');
+      if (content) {
+        content.innerHTML = `
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:80dvh; gap:20px; color:var(--color-text-secondary);">
+            <div class="loader-spinner"></div>
+            <p style="font-weight:700; font-size:14px; animation: pulse 1.5s infinite;">Verificando credenciales...</p>
+          </div>
+          <style>
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .loader-spinner {
+              width: 48px; height: 48px;
+              border: 4px solid var(--color-border-light);
+              border-top-color: var(--color-primary);
+              border-radius: 50%;
+              animation: spin 0.8s linear infinite;
+            }
+          </style>
+        `;
+      }
+
+      const { isAdmin } = await import('./auth.js');
+      if (isAdmin()) {
+        window.verifiedCommerceRoutes[comercioId] = true;
+        ensureAdminOwnership(comercioId);
+        return renderFn();
+      }
+
       await ensureAdminOwnership(comercioId);
       const accessGranted = await checkCommerceAccessPin(comercioId, container);
       if (!accessGranted) {
         return;
       }
+      window.verifiedCommerceRoutes[comercioId] = true;
     }
     return renderFn();
   }
@@ -526,6 +592,27 @@ async function init() {
       const user = getState().user;
       if (!user) { location.hash = '#/profile'; return; }
 
+      // Show loader immediately during redirection check
+      const appContent = document.getElementById('app-content');
+      if (appContent) {
+        appContent.innerHTML = `
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:80dvh; gap:20px; color:var(--color-text-secondary);">
+            <div class="loader-spinner"></div>
+            <p style="font-weight:700; font-size:14px; animation: pulse 1.5s infinite;">Cargando tu panel de comercio...</p>
+          </div>
+          <style>
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .loader-spinner {
+              width: 48px; height: 48px;
+              border: 4px solid var(--color-border-light);
+              border-top-color: var(--color-primary);
+              border-radius: 50%;
+              animation: spin 0.8s linear infinite;
+            }
+          </style>
+        `;
+      }
+
       // Check cached commerce ID for the user
       const cachedCommerceId = localStorage.getItem(`gd_my_commerce_id_${user.uid}`);
       if (cachedCommerceId) {
@@ -558,13 +645,18 @@ async function init() {
 
         // 2. Si no es dueño de ningún comercio pero es Admin, redirigir a Go! Market
         if (isAdmin()) {
-          const allSnap = await getDocs(collection(db, 'comercios'));
+          const { limit } = await import('firebase/firestore');
+          // Limit to 30 documents instead of fetching the entire database collection to ensure sub-100ms load speeds
+          const qGoMarket = query(collection(db, 'comercios'), limit(30));
+          const allSnap = await getDocs(qGoMarket);
           const goMarket = allSnap.docs.find(d => {
             const name = (d.data().name || '').toLowerCase();
             return name.includes('go!') && name.includes('market');
           });
           if (goMarket) {
             localStorage.setItem('gd_gomarket_id', goMarket.id);
+            // Also cache it for the admin user specifically so next time they click, it skips database lookup entirely
+            localStorage.setItem(`gd_my_commerce_id_${user.uid}`, goMarket.id);
             location.hash = `#/mi-comercio/${goMarket.id}/orders`;
             return;
           }
@@ -615,6 +707,10 @@ async function init() {
     '/mi-comercio/:id/coupons': async (c) => {
       const id = window.location.hash.split('/')[2]?.split('?')[0];
       return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/coupons.js').then(m => m.renderComercioCoupons(c)));
+    },
+    '/mi-comercio/:id/ads': async (c) => {
+      const id = window.location.hash.split('/')[2]?.split('?')[0];
+      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/ads.js').then(m => m.renderComercioAds(c)));
     },
     '/notifications': (c) => import('./pages/notifications.js').then(m => m.renderNotifications(c)),
     '/offers': (c) => import('./pages/offers-page.js').then(m => m.renderOffersPage(c)),
@@ -763,8 +859,8 @@ async function init() {
               </button>
 
               <button id="apple-login-btn" style="width:100%; height:56px; background:#000000; border:none; border-radius:100px; display:none; align-items:center; justify-content:center; gap:10px; cursor:pointer; transition: all 0.2s ease; margin-top: 12px; font-family: -apple-system, SF Pro Display, Helvetica Neue, sans-serif;">
-                <svg width="18" height="22" viewBox="0 0 170 170" fill="white" style="margin-bottom:2px;">
-                  <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.72.13-9.56-1.92-14.53-6.15-3.12-2.65-7-7.23-11.64-13.74-6.47-9.06-11.64-19.19-15.51-30.39-3.87-11.2-5.81-22.13-5.81-32.79 0-14.8 3.73-27.14 11.19-37.01 7.46-9.87 16.89-14.98 28.3-15.34 4.85 0 10.14 1.18 15.86 3.55 5.72 2.37 9.5 3.56 11.34 3.56 1.48 0 5.43-1.24 11.86-3.73 6.43-2.49 11.97-3.61 16.62-3.37 12.3.62 22.37 5.14 30.2 13.56-10.97 6.64-16.32 15.8-16.06 27.48.26 9.17 3.86 16.84 10.8 23 6.94 6.16 15.17 9.49 24.69 9.99-2.58 7.57-6.02 15.42-10.33 23.57zM119.22 31.78c0-7.3 2.66-14.37 7.98-21.2 5.32-6.83 12.01-10.58 20.08-11.25.13.9.2 1.74.2 2.52 0 7.17-2.73 14.32-8.19 21.45-5.46 7.13-12.18 10.99-20.17 11.58-.04-1.04-.07-1.89-.07-2.55z"/>
+                <svg width="18" height="22" viewBox="0 0 18 22" fill="white" style="margin-bottom:2px;">
+                  <path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/>
                 </svg>
                 <span style="font-weight:600; color:white; font-size:16px; letter-spacing: -0.2px;">Iniciar sesión con Apple</span>
               </button>

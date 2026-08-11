@@ -32,6 +32,10 @@ const state = {
   dynamicDistances: JSON.parse(localStorage.getItem('gd-cached-distances') || '{}'),
   savedAddresses: JSON.parse(localStorage.getItem('gd-saved-addresses') || '[]'),
 
+  canonAmount: 2000,
+  bankAlias: 'godelivery.oficial',
+  paulosConfig: { enabled: true, promoDeliveryFee: 1200, merchantCoveragePercent: 30 },
+
   commissionRate: 0.10, // Global commission percentage (default 10%)
   appUsageFeeRate: 0.05, // Global app usage fee for client (default 5%)
   whatsappPayments: '5491123456789', // WhatsApp number for payment proofs
@@ -41,9 +45,9 @@ const state = {
   dollarPerPoint: 1.00,  // Exchange rate (e.g. 1 point = $1)
   referralPoints: 500,   // Points rewarded per referral code
   weeklyChallenges: [
-    { id: 'weekly_3', title: 'Desafío Bronce', description: 'Completá 3 pedidos esta semana', target: 3, pointsReward: 150 },
-    { id: 'weekly_5', title: 'Desafío Plata', description: 'Completá 5 pedidos esta semana', target: 5, pointsReward: 300 },
-    { id: 'weekly_10', title: 'Desafío Oro', description: 'Completá 10 pedidos esta semana', target: 10, pointsReward: 600 }
+    { id: 'weekly_3', title: 'Desafío Bronce', description: 'Completá 3 pedidos esta semana', target: 3, pointsReward: 5000 },
+    { id: 'weekly_5', title: 'Desafío Plata', description: 'Completá 5 pedidos esta semana', target: 5, pointsReward: 7500 },
+    { id: 'weekly_10', title: 'Desafío Oro', description: 'Completá 10 pedidos esta semana', target: 10, pointsReward: 10000 }
   ],
   userPoints: 0,
   appliedDiscount: 0,
@@ -54,6 +58,9 @@ const state = {
   notifications: [], // List of user notifications
   unreadNotifications: 0, // Count of unread notifications
   loading: true,
+  maintenanceMode: false,
+  maintenanceMessage: '',
+  maintenanceAllowedEmails: [],
 
   // GoLevels System (Configurable)
   levels: {
@@ -67,7 +74,12 @@ const state = {
   // Dynamic schedule pricing
   nightSurchargeConfig: { enabled: false, start: '00:00', end: '06:00', type: 'fixed', value: 0 },
   driverIncentiveConfig: { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 },
-  serverTimeOffset: 0
+  serverTimeOffset: 0,
+  canonAmount: 2000,
+  bankAlias: 'godelivery.oficial',
+  bankOwner: 'GoDelivery S.R.L.',
+  maxDebtLimit: 15000,
+  debtLimitEnabled: false
 };
 
 export function getUserLevel(orderCount = 0) {
@@ -132,11 +144,17 @@ export async function initSettings() {
         state.servicePaymentErrandFee = data.servicePaymentErrandFee !== undefined ? data.servicePaymentErrandFee : 2000;
         state.maintenanceMode = data.maintenanceMode !== undefined ? data.maintenanceMode : false;
         state.maintenanceMessage = data.maintenanceMessage || 'La aplicación se encuentra en mantenimiento temporal para realizar mejoras. Volvemos en unos minutos.';
+        state.maintenanceAllowedEmails = data.maintenanceAllowedEmails || [];
         state.servicesAppFeeConfig = data.servicesAppFeeConfig || {
           gofavor: { type: 'percentage', value: 1.2 },
           gocash: { type: 'percentage', value: 1.2 },
           goviaje: { type: 'percentage', value: 1.2 }
         };
+        state.canonAmount = data.canonAmount !== undefined ? data.canonAmount : 2000;
+        state.bankAlias = data.bankAlias || 'godelivery.oficial';
+        state.bankOwner = data.bankOwner || 'GoDelivery S.R.L.';
+        state.maxDebtLimit = data.maxDebtLimit !== undefined ? data.maxDebtLimit : 15000;
+        state.debtLimitEnabled = data.debtLimitEnabled !== undefined ? data.debtLimitEnabled : false;
 
         // Dynamically apply brand theme
         const primaryColor = state.useDarkBrandTheme ? '#0F172A' : '#E11D48';
@@ -181,10 +199,16 @@ export async function initSettings() {
           'tripBasePrice', 'tripPricePerKm',
           'tripMinPrice', 'commissionRate', 'appUsageFeeRate', 'pointsPerDollar',
           'dollarPerPoint', 'referralPoints', 'weeklyChallenges', 'whatsappPayments',
-          'useDarkBrandTheme'
+          'useDarkBrandTheme', 'canonAmount', 'bankAlias', 'maintenanceMode', 'maintenanceMessage', 'maintenanceAllowedEmails'
         ];
         keys.forEach(k => notify(k));
       }
+    });
+
+    // Listen to settings/paulos_config in real-time
+    onSnapshot(doc(db, 'settings', 'paulos_config'), (snap) => {
+      state.paulosConfig = snap.exists() ? snap.data() : { enabled: true, promoDeliveryFee: 1200, merchantCoveragePercent: 30 };
+      notify('paulosConfig');
     });
 
     // Listen to settings/weather in real-time

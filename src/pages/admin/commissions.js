@@ -887,7 +887,8 @@ async function settleDriver(driverId) {
       
       // 1. Subtract the entered amount from user debt
       batch.update(doc(db, 'users', driverId), { 
-        deliveryDebt: increment(-amountToSettle) 
+        deliveryDebt: increment(-amountToSettle),
+        lastLiquidationAt: serverTimestamp()
       });
 
       // 2. Register a settlement for platform revenue tracking (Admin history)

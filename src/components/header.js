@@ -32,7 +32,7 @@ export function renderHeader() {
   const isIosDevice = isIOS();
   const topPadding = isNative 
     ? 'var(--status-bar-height, 24px)' 
-    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+    : (isIosDevice ? 'calc(12px + env(safe-area-inset-top, 20px))' : 'env(safe-area-inset-top, 0px)');
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
@@ -591,13 +591,25 @@ function formatNotifTime(ts) {
 
 let lastUnreadCount = -1;
 let globalNotifUnsub = null;
+let globalNotifUserId = null;
 
 export function initHeader() {
   renderHeader();
 
   const startGlobalNotifListener = (user) => {
+    if (!user) {
+      if (globalNotifUnsub) { globalNotifUnsub(); globalNotifUnsub = null; }
+      globalNotifUserId = null;
+      return;
+    }
+    
+    // Bypass if listener is already active for this exact user ID
+    if (globalNotifUserId === user.uid && globalNotifUnsub) {
+      return;
+    }
+
     if (globalNotifUnsub) { globalNotifUnsub(); globalNotifUnsub = null; }
-    if (!user) return;
+    globalNotifUserId = user.uid;
     
     const q = query(
       collection(db, 'users', user.uid, 'notifications'),

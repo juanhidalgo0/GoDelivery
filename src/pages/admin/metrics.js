@@ -1473,7 +1473,7 @@ function calculateAndRender(range) {
 
   // Update economics section variables
   econComisiones = completedOrders.reduce((sum, o) => sum + (o.commissionAmount || 0), 0);
-  econFees = completedOrders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
+  econFees = completedOrders.reduce((sum, o) => sum + (o.isSettledDriver === true ? (o.appUsageFee || 0) : 0), 0);
   econCoupons = completedOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
   econNet = econComisiones + econFees - econCoupons;
 
@@ -1626,7 +1626,7 @@ function renderActiveSection() {
 
     const pendingSales = pendingOrders.reduce((sum, o) => sum + (o.total || 0), 0);
     const econComisionesPending = pendingOrders.reduce((sum, o) => sum + (o.commissionAmount || 0), 0);
-    const econFeesPending = pendingOrders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
+    const econFeesPending = pendingOrders.reduce((sum, o) => sum + (o.isSettledDriver === true ? (o.appUsageFee || 0) : 0), 0);
     const econCouponsPending = pendingOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
     const pendingProfit = econComisionesPending + econFeesPending - econCouponsPending;
 

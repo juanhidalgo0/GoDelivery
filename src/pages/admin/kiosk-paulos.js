@@ -6,7 +6,10 @@ import { formatPrice } from '../../utils/format.js';
 import { showToast } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
 
-let currentSelectedMonth = new Date().toISOString().slice(0, 7); // e.g. "2026-07"
+const localDate = new Date();
+const year = localDate.getFullYear();
+const month = String(localDate.getMonth() + 1).padStart(2, '0');
+let currentSelectedMonth = `${year}-${month}`; // e.g. "2026-08"
 
 export async function renderAdminKioskPaulos() {
   const content = document.getElementById('app-content');
@@ -47,6 +50,28 @@ async function loadKioskPaulosData() {
   if (!scrollArea) return;
 
   try {
+    // Ensure Maxikiosco Paulos commerce exists in 'comercios' collection
+    const { setDoc } = await import('firebase/firestore');
+    const paulosComRef = doc(db, 'comercios', 'maxikiosco_paulos');
+    const paulosComSnap = await getDoc(paulosComRef);
+    if (!paulosComSnap.exists()) {
+      await setDoc(paulosComRef, {
+        name: 'Maxikiosco Paulos',
+        category: 'Kiosco',
+        description: 'Convenio oficial con Maxikiosco Paulos',
+        deliveryCost: 0,
+        deliveryTime: 25,
+        phone: '5492215555555',
+        address: 'Magdalena',
+        coords: { lat: -35.0811, lng: -57.5146 },
+        ownerId: 'paulos_preset',
+        isActive: true,
+        approvedByAdmin: true,
+        promoted: false, // Publicidad/destaque desactivado
+        createdAt: new Date()
+      });
+    }
+
     // 1. Fetch Configuration
     const configDocRef = doc(db, 'settings', 'paulos_config');
     const configSnap = await getDoc(configDocRef);
@@ -58,7 +83,7 @@ async function loadKioskPaulosData() {
 
     // 2. Fetch Delivered Favor Orders related to Paulos
     const ordersQuery = query(
-      collection(db, 'favor_orders'),
+      collection(db, 'orders'),
       where('status', 'in', ['delivered', 'completed'])
     );
     const querySnap = await getDocs(ordersQuery);

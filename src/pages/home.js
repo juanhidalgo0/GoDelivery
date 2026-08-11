@@ -1,293 +1,39 @@
 // GoDelivery — Home Page
 import { db } from '../firebase.js';
-import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, collectionGroup, limit } from 'firebase/firestore';
 import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js';
 import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
 import { icon, categoryIcon, CATEGORY_ICON_MAP, CATEGORY_PHOSPHOR_MAP } from '../utils/icons.js';
 import { getState, subscribe } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
+import { registerUnsubscribe } from '../utils/cleanup.js';
 
-
+let isLoadingComercios = true;
 
 export async function renderHome(content) {
   if (!content) content = document.getElementById('page-home') || document.getElementById('app-content');
   if (!content) return;
 
-  const loggedIn = isLoggedIn();
-
-  content.innerHTML = `
-    <div class="home-page" style="padding-top: 8px; position: relative; overflow: hidden;">
-      <!-- Ambient Background Blobs (Soft Glows) -->
-      <div class="home-blob home-blob-1"></div>
-      <div class="home-blob home-blob-2"></div>
-      
-
-      <!-- Services & Main Categories Block (Symmetrical 16px Padding & 12px Gaps) -->
-      <div style="display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 0; margin-bottom: 12px;">        <!-- Mandados Hero Card (Full Width Symmetrical & Compact) -->
-        <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover scroll-reveal reveal-fade-down" style="background: linear-gradient(135deg, #FF2E55 0%, #C9002B 100%); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; height: 68px; box-shadow: 0 8px 22px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.22); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
-          <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 60%); pointer-events: none;"></div>
-          <div style="width: 38px; height: 38px; border-radius: 12px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-            <i class="ph-duotone ph-package" style="font-size: 20px;"></i>
-          </div>
-          <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">Mandados</h4>
-              <span style="font-size: 8.5px; font-weight: 900; background: rgba(255,255,255,0.25); color: #FFF; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px; backdrop-filter: blur(4px);">Express</span>
-            </div>
-            <span style="font-size: 11px; color: rgba(255,255,255,0.95); font-weight: 800; letter-spacing: -0.01em; margin-top: 2px; display: block; line-height: 1.2;">¿Qué te traemos? Pedí lo que quieras</span>
-          </div>
-          
-          <span class="badge-pulse-modern" style="position: absolute; top: 10px; right: 12px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #000; font-size: 8px; font-weight: 900; padding: 3px 8px; border-radius: 16px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(255, 215, 0, 0.35); font-family: var(--font-display); line-height: 1; z-index: 3;">¡Más Pedido!</span>
-        </a>
-
-        <!-- Viajes & Market Symmetrical Split Row -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; box-sizing: border-box;">
-          <!-- Viajes Quick Card -->
-          <a href="#/viajes" class="glow-hover spring-hover scroll-reveal reveal-fade-right" style="background: linear-gradient(135deg, #1E40AF 0%, #1D4ED8 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(30, 64, 175, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
-            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-              <i class="ph-duotone ph-car-profile" style="font-size: 18px;"></i>
-            </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-              <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Viajes</h4>
-              <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
-            </div>
-          </a>
-
-          <!-- Market Quick Card -->
-          <a href="#/marketplace" class="glow-hover spring-hover scroll-reveal reveal-fade-left" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(5, 150, 105, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
-            <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-              <i class="ph-duotone ph-storefront" style="font-size: 18px;"></i>
-            </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-              <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Market</h4>
-              <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
-            </div>
-          </a>
-        </div>
-      </div>
-
-
- 
-       <!-- Premium Category Grid (Comida & GoMarket - 100% Full Bleed Coverage) -->
-       <div class="category-grid" style="margin-top: 10px; margin-bottom: 14px;">
-         <a href="#/category/Comida" class="category-card-large glow-hover spring-hover scroll-reveal reveal-fade-right">
-           <div style="position: absolute; top: 10px; left: 10px; background: rgba(225, 29, 72, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
-             Tus antojos, rápido
-           </div>
-           <img src="/images/categories/restaurants.png" alt="Comida" style="object-fit: cover; width: 100%; height: 100%;" />
-           <span class="card-title">Comida</span>
-         </a>
-         <a href="#/category/GoMarket" id="gomarket-card" class="category-card-large glow-hover spring-hover scroll-reveal reveal-fade-left">
-           <div style="position: absolute; top: 10px; left: 10px; background: rgba(13, 148, 136, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
-             Tu súper en minutos
-           </div>
-           <img src="/images/categories/gomarket.png" alt="GoMarket" style="object-fit: cover; width: 100%; height: 100%;" />
-           <span class="card-title">GoMarket</span>
-         </a>
-       </div>
-
-
-
-       
-       <!-- Small Categories Slider Section -->
-       <div class="categories-slider-wrapper scroll-reveal reveal-fade-up" style="position: relative; margin-top: 2px; display: flex; align-items: center; width: 100%;">
-         <button id="cat-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-           ${icon('chevronLeft', 20)}
-         </button>
-         <div class="category-row-small" id="categories-row-small" style="flex: 1; display: flex; gap: 12px; overflow-x: auto; scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none; padding: 6px 16px 12px;">
-           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-           <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
-         </div>
-         <button id="cat-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-           ${icon('chevronRight', 20)}
-         </button>
-       </div>
- 
-       <!-- Brands Slider -->
-       <div id="brands-slider-container" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
- 
-       <!-- Random Products Slider -->
-       <div id="random-products-slider-container" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
- 
-       <!-- Promoted Section -->
-      <div id="promoted-section" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
-
-      <!-- App Only Section -->
-      <div id="app-only-section" class="scroll-reveal reveal-fade-up" style="margin-top: 2px; margin-bottom: 14px;"></div>
-
-
-
-      <!-- Main Content -->
-      <div style="position: absolute; top: -50px; left: -20%; width: 140%; height: 300px; background: radial-gradient(circle at 50% 0%, rgba(225,29,72,0.15), rgba(16,185,129,0.05), transparent 70%); filter: blur(40px); z-index: -1; pointer-events: none;"></div>
-      <div class="home-section scroll-reveal reveal-fade-up" style="margin-top: 18px; padding-top: 8px; position: relative;">
-        <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 18px; padding: 0 16px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-            <h2 class="home-section-title" style="font-size:19px; font-weight:900; letter-spacing:-0.03em; color:var(--color-text-primary); margin:0;">
-              Todos los comercios
-            </h2>
-            <a href="#/category/Todos" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
-          </div>
-        </div>
-        
-        <div class="comercios-slider-wrapper">
-          <button id="com-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-            ${icon('chevronLeft', 20)}
-          </button>
-          <div class="comercios-slider" id="comercios-grid">
-            ${renderSkeletonCards(4)}
-          </div>
-          <button id="com-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-            ${icon('chevronRight', 20)}
-          </button>
-        </div>
-      </div>
-
-      <!-- Want to Join Your Commerce Section -->
-      <div id="join-commerce-banner" class="scroll-reveal reveal-scale-up" style="margin: 20px 16px 10px; background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 8px 25px rgba(225, 29, 72, 0.18); color: white; cursor: pointer; transition: all 0.2s;">
-        <div style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
-          <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
-            🏪
-          </div>
-          <div style="text-align: left;">
-            <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; margin: 0 0 2px 0; color: white;">¿Querés sumar tu comercio?</h4>
-            <p style="font-size: 11px; margin: 0; color: rgba(255,255,255,0.95); font-weight: 600;">Registrá tu negocio y empezá a recibir pedidos.</p>
-          </div>
-        </div>
-        <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;">
-          ${icon('chevronRight', 16)}
-        </div>
-      </div>
-
-      <!-- Want to Work with Us Section -->
-      <div id="join-team-banner" class="scroll-reveal reveal-scale-up" style="margin: 0 16px 10px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 8px 25px rgba(15, 23, 42, 0.15); color: white; cursor: pointer; transition: all 0.2s;">
-        <div style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
-          <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
-            💼
-          </div>
-          <div style="text-align: left;">
-            <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; margin: 0 0 2px 0; color: white; text-transform: uppercase;">¿Querés trabajar con nosotros?</h4>
-            <p style="font-size: 11px; margin: 0; color: rgba(255,255,255,0.9); font-weight: 600;">Sumate al equipo como repartidor, chofer o ambos.</p>
-          </div>
-        </div>
-        <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;">
-          ${icon('chevronRight', 16)}
-        </div>
-      </div>
-
-      <!-- Suggestion & Bug Report Banner Section -->
-      <div id="bug-report-banner" class="scroll-reveal reveal-scale-up" style="margin: 0 16px 20px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: var(--shadow-xs);">
-        <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-          <span style="color: var(--color-primary); display: flex; flex-shrink: 0;">${icon('info', 16)}</span>
-          <span style="font-size: 11.5px; font-weight: 750; color: var(--color-text-secondary); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">¿Sugerencias o algún error en la app?</span>
-        </div>
-        <button id="report-bug-btn" style="height: 28px; border-radius: 8px; font-size: 11px; font-weight: 900; padding: 0 10px; background: rgba(225, 29, 72, 0.08); color: var(--color-primary); display: flex; align-items: center; gap: 4px; border: none; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0;">
-          ${icon('send', 10, '', 'var(--color-primary)')} Reportar
-        </button>
-      </div>
-      
-      ${getFooterHTML()}
-    </div>
-  `;
-
-  // --- IMMEDIATE INTERACTION EVENT LISTENERS ---
-  // Register static element event listeners synchronously so they are active instantly
-  const searchInput = document.getElementById('header-search');
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      renderComercios(comercios, activeCategory, e.target.value, currentFilters);
-    });
-  }
-
-  const reportBugBtn = document.getElementById('report-bug-btn');
-  if (reportBugBtn) {
-    reportBugBtn.onclick = async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para reportar un error.', 'warning');
-        return;
+  // Tab caching check: if already rendered once, keep it as is (do not touch DOM or trigger reloading)
+  if (content.querySelector('#brands-slider-container')) {
+    return {
+      cleanup: () => {
+        if (unsubComercios) unsubComercios();
       }
-      showBugReportModal();
     };
   }
 
-  const joinCommerceBtn = document.getElementById('join-commerce-banner');
-  if (joinCommerceBtn) {
-    joinCommerceBtn.addEventListener('click', async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para solicitar la incorporación de tu comercio.', 'warning');
-        return;
-      }
-      showJoinCommerceModal();
-    });
-  }
-
-  const joinTeamBtn = document.getElementById('join-team-banner');
-  if (joinTeamBtn) {
-    joinTeamBtn.addEventListener('click', async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para postularte.', 'warning');
-        return;
-      }
-      showJoinTeamModal();
-    });
-  }
-
-  const mandadosBtn = document.getElementById('home-mandados-btn');
-  if (mandadosBtn) {
-    mandadosBtn.onclick = async () => {
-      const user = getState().user;
-      if (!user) {
-        const { showToast } = await import('../components/toast.js');
-        showToast('Iniciá sesión para usar el servicio de Mandados.', 'warning');
-        return;
-      }
-      showMandadosOverlayModal();
-    };
-  }
-
-  content.addEventListener('scroll', () => {
-    const fabBtn = document.getElementById('support-bot-fab-btn');
-    const guideFab = document.getElementById('app-guide-fab');
-    const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 160;
-    
-    if (isAtBottom) {
-      if (fabBtn) fabBtn.classList.add('fab-hidden');
-      if (guideFab) guideFab.classList.add('fab-hidden');
-    } else {
-      if (fabBtn) fabBtn.classList.remove('fab-hidden');
-      if (guideFab) guideFab.classList.remove('fab-hidden');
-    }
-  });
-
-  checkAndShowWelcomeModal();
-  checkAndShowWelcomeCouponModal();
-  checkAndShowAppOnlyPromo();
-
-  // Filters state
-  const currentFilters = { openOnly: false, freeShippingOnly: false, topRatedOnly: false };
-
-  // Load data
-  let categories = [];
+  // Load defaults first
+  const defaultNames = ['Almacén', 'Bazar', 'Carnicería', 'Comida', 'Fiambrería', 'Heladeria', 'Kiosco', 'Librería', 'Pollería', 'Postres', 'Supermercado', 'Tecnología', 'Verdulería'];
+  let categories = defaultNames.map((name, i) => ({ id: name.toLowerCase().replace(/\s+/g, '-'), name, icon: '', order: i, isActive: true }));
   let comercios = [];
   let offers = [];
   let activeCategory = 'Todos';
   let unsubComercios = null;
-
   let onlyInAppProducts = [];
 
-  // Instant render categories, offers, onlyInAppProducts, and commerce lists from LocalStorage cache
+  // Try loading complete cache from localStorage
   try {
     const rawOffers = localStorage.getItem('gd_cached_offers');
     if (rawOffers) offers = JSON.parse(rawOffers);
@@ -295,31 +41,326 @@ export async function renderHome(content) {
     const rawAppOnly = localStorage.getItem('gd_cached_only_in_app');
     if (rawAppOnly) onlyInAppProducts = JSON.parse(rawAppOnly);
 
-    const raw = localStorage.getItem('gd_platform_categories');
-    if (raw) {
-      categories = JSON.parse(raw);
-      if (!categories.some(c => c.name === 'GoMarket')) {
-        categories.push({ id: 'gomarket', name: 'GoMarket', icon: 'shoppingBag', order: 0 });
-      }
-      setTimeout(() => {
-        renderCategories(categories, activeCategory);
-      }, 50);
-    }
+    const rawCats = localStorage.getItem('gd_platform_categories');
+    if (rawCats) categories = JSON.parse(rawCats);
 
     const rawComercios = localStorage.getItem('gd_cached_comercios');
     if (rawComercios) {
-      comercios = JSON.parse(rawComercios);
-      setTimeout(() => {
-        renderBrandsSlider(comercios);
-        renderRandomProductsSlider(comercios, offers);
-        renderPromotedSection(comercios);
-        renderAppOnlySection(onlyInAppProducts, comercios, offers);
-        const searchVal = document.getElementById('header-search')?.value || '';
-        renderComercios(comercios, activeCategory, searchVal, currentFilters);
-      }, 75);
+      const parsed = JSON.parse(rawComercios);
+      // Only treat cache as valid and complete if it has >= 3 shops (avoids 1-shop glitches)
+      if (parsed && parsed.length >= 3) {
+        comercios = parsed;
+        isLoadingComercios = false;
+      }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Error loading localStorage cache:', e);
+  }
 
+  const currentFilters = { openOnly: false, freeShippingOnly: false, topRatedOnly: false };
+
+  // Core rendering callback once data is ready
+  const doActualHomeRender = () => {
+    content.innerHTML = `
+      <div class="home-page" style="padding-top: 8px; position: relative; overflow: hidden;">
+        <!-- Ambient Background Blobs (Soft Glows) -->
+        <div class="home-blob home-blob-1"></div>
+        <div class="home-blob home-blob-2"></div>
+        
+        <!-- Services & Main Categories Block (Symmetrical 16px Padding & 12px Gaps) -->
+        <div style="display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 0; margin-bottom: 12px;">
+          <!-- Mandados Hero Card -->
+          <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #FF2E55 0%, #C9002B 100%); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; height: 68px; box-shadow: 0 8px 22px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.22); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
+            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 60%); pointer-events: none;"></div>
+            <div style="width: 38px; height: 38px; border-radius: 12px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
+              <i class="ph-duotone ph-package" style="font-size: 20px;"></i>
+            </div>
+            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">Mandados</h4>
+                <span style="font-size: 8.5px; font-weight: 900; background: rgba(255,255,255,0.25); color: #FFF; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px; backdrop-filter: blur(4px);">Express</span>
+              </div>
+              <span style="font-size: 11px; color: rgba(255,255,255,0.95); font-weight: 800; letter-spacing: -0.01em; margin-top: 2px; display: block; line-height: 1.2;">¿Qué te traemos? Pedí lo que quieras</span>
+            </div>
+            <span class="badge-pulse-modern" style="position: absolute; top: 10px; right: 12px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #000; font-size: 8px; font-weight: 900; padding: 3px 8px; border-radius: 16px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(255, 215, 0, 0.35); font-family: var(--font-display); line-height: 1; z-index: 3;">¡Más Pedido!</span>
+          </a>
+  
+          <!-- Viajes & Market Split Row -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; box-sizing: border-box;">
+            <!-- Viajes Card -->
+            <a href="#/viajes" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #1E40AF 0%, #1D4ED8 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(30, 64, 175, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
+              <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
+                <i class="ph-duotone ph-car-profile" style="font-size: 18px;"></i>
+              </div>
+              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+                <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Viajes</h4>
+                <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
+              </div>
+            </a>
+  
+            <!-- Market Card -->
+            <a href="#/marketplace" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(5, 150, 105, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
+              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
+              <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
+                <i class="ph-duotone ph-storefront" style="font-size: 18px;"></i>
+              </div>
+              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
+                <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Market</h4>
+                <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
+              </div>
+            </a>
+          </div>
+        </div>
+   
+        <!-- Premium Category Grid (Comida & GoMarket) -->
+        <div class="category-grid" style="margin-top: 10px; margin-bottom: 14px;">
+          <a href="#/category/Comida" class="category-card-large glow-hover spring-hover">
+            <div style="position: absolute; top: 10px; left: 10px; background: rgba(225, 29, 72, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
+              Tus antojos, rápido
+            </div>
+            <img src="/images/categories/restaurants.png" alt="Comida" style="object-fit: cover; width: 100%; height: 100%;" />
+            <span class="card-title">Comida</span>
+          </a>
+          <a href="#/category/GoMarket" id="gomarket-card" class="category-card-large glow-hover spring-hover">
+            <div style="position: absolute; top: 10px; left: 10px; background: rgba(13, 148, 136, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
+              Tu súper en minutos
+            </div>
+            <img src="/images/categories/gomarket.png" alt="GoMarket" style="object-fit: cover; width: 100%; height: 100%;" />
+            <span class="card-title">GoMarket</span>
+          </a>
+        </div>
+  
+        <!-- Small Categories Slider Section -->
+        <div class="categories-slider-wrapper" style="position: relative; margin-top: 2px; display: flex; align-items: center; width: 100%;">
+          <button id="cat-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+            ${icon('chevronLeft', 20)}
+          </button>
+          <div class="category-row-small" id="categories-row-small" style="flex: 1; display: flex; gap: 12px; overflow-x: auto; scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none; padding: 6px 16px 12px;">
+            <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+            <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+            <div class="category-card-small skeleton" style="min-width:110px; height:140px;"></div>
+          </div>
+          <button id="cat-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+            ${icon('chevronRight', 20)}
+          </button>
+        </div>
+   
+        <!-- Brands Slider -->
+        <div id="brands-slider-container" style="margin-top: 2px; margin-bottom: 14px;">
+          <div style="display: flex; gap: 14px; padding: 12px 16px; overflow: hidden;">
+            ${renderSkeletonCircles(5)}
+          </div>
+        </div>
+  
+        <!-- Random Products Slider -->
+        <div id="random-products-slider-container" style="margin-top: 2px; margin-bottom: 14px;">
+          <div style="display: flex; gap: 12px; padding: 12px 16px; overflow: hidden;">
+            ${renderSkeletonCards(3)}
+          </div>
+        </div>
+  
+        <!-- Promoted Section -->
+        <div id="promoted-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
+  
+        <!-- App Only Section -->
+        <div id="app-only-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
+  
+        <!-- Main Content (Comercios Grid) -->
+        <div style="position: absolute; top: -50px; left: -20%; width: 140%; height: 300px; background: radial-gradient(circle at 50% 0%, rgba(225,29,72,0.15), rgba(16,185,129,0.05), transparent 70%); filter: blur(40px); z-index: -1; pointer-events: none;"></div>
+        <div class="home-section" style="margin-top: 18px; padding-top: 8px; position: relative;">
+          <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 18px; padding: 0 16px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+              <h2 class="home-section-title" style="font-size:19px; font-weight:900; letter-spacing:-0.03em; color:var(--color-text-primary); margin:0;">
+                Todos los comercios
+              </h2>
+              <a href="#/category/Todos" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
+            </div>
+          </div>
+          
+          <div class="comercios-slider-wrapper">
+            <button id="com-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+              ${icon('chevronLeft', 20)}
+            </button>
+            <div class="comercios-slider" id="comercios-grid">
+              ${renderSkeletonCards(4)}
+            </div>
+            <button id="com-next-btn" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+              ${icon('chevronRight', 20)}
+            </button>
+          </div>
+        </div>
+  
+        <!-- Join Commerce Banner -->
+        <div id="join-commerce-banner" class="scroll-reveal reveal-scale-up" style="margin: 20px 16px 10px; background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 8px 25px rgba(225, 29, 72, 0.18); color: white; cursor: pointer; transition: all 0.2s;">
+          <div style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
+            <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
+              🏪
+            </div>
+            <div style="text-align: left;">
+              <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; margin: 0 0 2px 0; color: white;">¿Querés sumar tu comercio?</h4>
+              <p style="font-size: 11px; margin: 0; color: rgba(255,255,255,0.95); font-weight: 600;">Registrá tu negocio y empezá a recibir pedidos.</p>
+            </div>
+          </div>
+          <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;">
+            ${icon('chevronRight', 16)}
+          </div>
+        </div>
+  
+        <!-- Work with us Banner -->
+        <div id="join-team-banner" class="scroll-reveal reveal-scale-up" style="margin: 0 16px 10px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 8px 25px rgba(15, 23, 42, 0.15); color: white; cursor: pointer; transition: all 0.2s;">
+          <div style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
+            <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
+              💼
+            </div>
+            <div style="text-align: left;">
+              <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; margin: 0 0 2px 0; color: white; text-transform: uppercase;">¿Querés trabajar con nosotros?</h4>
+              <p style="font-size: 11px; margin: 0; color: rgba(255,255,255,0.9); font-weight: 600;">Sumate al equipo como repartidor, chofer o ambos.</p>
+            </div>
+          </div>
+          <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;">
+            ${icon('chevronRight', 16)}
+          </div>
+        </div>
+  
+        <!-- Bug report Banner -->
+        <div id="bug-report-banner" class="scroll-reveal reveal-scale-up" style="margin: 0 16px 20px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: var(--shadow-xs);">
+          <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+            <span style="color: var(--color-primary); display: flex; flex-shrink: 0;">${icon('info', 16)}</span>
+            <span style="font-size: 11.5px; font-weight: 750; color: var(--color-text-secondary); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">¿Sugerencias o algún error en la app?</span>
+          </div>
+          <button id="report-bug-btn" style="height: 28px; border-radius: 8px; font-size: 11px; font-weight: 900; padding: 0 10px; background: rgba(225, 29, 72, 0.08); color: var(--color-primary); display: flex; align-items: center; gap: 4px; border: none; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0;">
+            ${icon('send', 10, '', 'var(--color-primary)')} Reportar
+          </button>
+        </div>
+        
+        ${getFooterHTML()}
+      </div>
+    `;
+
+    // --- Dynamic DOM Listeners Setup ---
+    const searchInput = document.getElementById('header-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        renderComercios(comercios, activeCategory, e.target.value, currentFilters);
+      });
+    }
+
+    const reportBugBtn = document.getElementById('report-bug-btn');
+    if (reportBugBtn) {
+      reportBugBtn.onclick = async () => {
+        const user = getState().user;
+        if (!user) {
+          const { showToast } = await import('../components/toast.js');
+          showToast('Iniciá sesión para reportar un error.', 'warning');
+          return;
+        }
+        showBugReportModal();
+      };
+    }
+
+    const joinCommerceBtn = document.getElementById('join-commerce-banner');
+    if (joinCommerceBtn) {
+      joinCommerceBtn.addEventListener('click', async () => {
+        const user = getState().user;
+        if (!user) {
+          const { showToast } = await import('../components/toast.js');
+          showToast('Iniciá sesión para solicitar la incorporación de tu comercio.', 'warning');
+          return;
+        }
+        showJoinCommerceModal();
+      });
+    }
+
+    const joinTeamBtn = document.getElementById('join-team-banner');
+    if (joinTeamBtn) {
+      joinTeamBtn.addEventListener('click', async () => {
+        const user = getState().user;
+        if (!user) {
+          const { showToast } = await import('../components/toast.js');
+          showToast('Iniciá sesión para postularte.', 'warning');
+          return;
+        }
+        showJoinTeamModal();
+      });
+    }
+
+    const mandadosBtn = document.getElementById('home-mandados-btn');
+    if (mandadosBtn) {
+      mandadosBtn.onclick = async () => {
+        const user = getState().user;
+        if (!user) {
+          const { showToast } = await import('../components/toast.js');
+          showToast('Iniciá sesión para usar el servicio de Mandados.', 'warning');
+          return;
+        }
+        const { openMandadosWizard } = await import('./gofavores.js');
+        openMandadosWizard();
+      };
+    }
+
+    content.addEventListener('scroll', () => {
+      const fabBtn = document.getElementById('support-bot-fab-btn');
+      const guideFab = document.getElementById('app-guide-fab');
+      const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 160;
+      
+      if (isAtBottom) {
+        if (fabBtn) fabBtn.classList.add('fab-hidden');
+        if (guideFab) guideFab.classList.add('fab-hidden');
+      } else {
+        if (fabBtn) fabBtn.classList.remove('fab-hidden');
+        if (guideFab) guideFab.classList.remove('fab-hidden');
+      }
+    });
+
+    checkAndShowWelcomeModal();
+    checkAndShowWelcomeCouponModal();
+    checkAndShowAppOnlyPromo();
+
+    // Render Sub-components
+    renderCategories(categories, activeCategory);
+    renderBrandsSlider(comercios);
+    renderPopularProductsSlider(comercios, offers);
+    renderPromotedSection(comercios);
+    renderAppOnlySection(onlyInAppProducts, comercios, offers);
+    
+    const searchVal = document.getElementById('header-search')?.value || '';
+    renderComercios(comercios, activeCategory, searchVal, currentFilters);
+
+    // Dynamic link for GoMarket card
+    try {
+      const goMarket = comercios.find(c => {
+        const n = (c.name || '').toLowerCase();
+        return n.includes('go!') && n.includes('market');
+      });
+      if (goMarket) {
+        const goMarketCard = content.querySelector('#gomarket-card');
+        if (goMarketCard) {
+          goMarketCard.href = `#/comercio/${goMarket.id}`;
+        }
+      }
+    } catch (err) {
+      console.warn('Error linking GoMarket:', err);
+    }
+  };
+
+  // Render static shell immediately on load for instant layout and animated skeletons
+  doActualHomeRender();
+
+  // If cache is present, populate the sub-sections in place immediately
+  if (categories && categories.length > 0) {
+    renderCategories(categories, activeCategory);
+  }
+  if (comercios && comercios.length >= 3) {
+    renderBrandsSlider(comercios);
+    renderPopularProductsSlider(comercios, offers);
+    renderPromotedSection(comercios);
+    renderAppOnlySection(onlyInAppProducts, comercios, offers);
+    const searchVal = document.getElementById('header-search')?.value || '';
+    renderComercios(comercios, activeCategory, searchVal, currentFilters);
+  }
+
+  // Load Firestore data in background without blocking layout skeleton
   try {
     const qAppOnly = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
     const [catSnap, offersSnap, appOnlySnap] = await Promise.all([
@@ -329,18 +370,10 @@ export async function renderHome(content) {
     ]);
 
     categories = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
-    
-    // Ensure "Comida" is always available even if not in DB
-    if (!categories.some(c => c.name === 'Comida')) {
-      const existingComidas = categories.find(c => c.name === 'Comidas');
-      if (existingComidas) {
-        existingComidas.name = 'Comida';
-      } else {
-        categories.unshift({ id: 'comida', name: 'Comida', icon: '🍕', order: -1 });
-      }
+    if (categories.length <= 2) {
+      categories = defaultNames.map((name, i) => ({ id: name.toLowerCase().replace(/\s+/g, '-'), name, icon: '', order: i, isActive: true }));
     }
-    
-    // Save to LocalStorage cache
+
     try {
       localStorage.setItem('gd_platform_categories', JSON.stringify(categories));
     } catch (e) {}
@@ -354,129 +387,66 @@ export async function renderHome(content) {
       })
       .filter(p => p.isAvailable !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0));
 
-    // Fetch product details for all products in parallel and expand multi-product offers
-    const expandedOffers = [];
-    await Promise.all(offers.map(async (o) => {
-      if (o.productIds && o.productIds.length > 0 && o.comercioId) {
-        try {
-          const productsData = await Promise.all(o.productIds.map(async (pId) => {
-            try {
-              const pSnap = await getDoc(doc(db, 'comercios', o.comercioId, 'products', pId));
-              if (pSnap.exists()) {
-                return { id: pSnap.id, ...pSnap.data() };
-              }
-            } catch (e) {
-              console.warn(`Error loading product details for offer ${o.id}, product ${pId}:`, e);
-            }
-            return null;
-          }));
-          
-          const validProducts = productsData.filter(Boolean);
-          
-          validProducts.forEach((p) => {
-            expandedOffers.push({
-              ...o,
-              id: `${o.id}-${p.id}`,
-              product: p,
-              targetProductId: p.id
-            });
-          });
-        } catch (e) {
-          console.warn('Error expanding products for offer:', o.id, e);
-          expandedOffers.push(o);
-        }
-      } else {
-        expandedOffers.push(o);
-      }
-    }));
-    offers = expandedOffers;
-
     try {
       localStorage.setItem('gd_cached_offers', JSON.stringify(offers));
       localStorage.setItem('gd_cached_only_in_app', JSON.stringify(onlyInAppProducts));
     } catch (e) {}
 
-    // Add GoMarket to categories if it exists as a concept
     if (!categories.some(c => c.name === 'GoMarket')) {
       categories.push({ id: 'gomarket', name: 'GoMarket', icon: 'shoppingBag', order: 0 });
     }
-
-    // Set up real-time listener for active and inactive comercios
-    unsubComercios = onSnapshot(collection(db, 'comercios'), async (comSnap) => {
-      comercios = comSnap.docs.map(doc => {
-        const data = doc.data();
-        return { id: doc.id, ...data };
-      });
-      try {
-        localStorage.setItem('gd_cached_comercios', JSON.stringify(comercios));
-      } catch (e) {}
-
-      // Render brands slider
-      renderBrandsSlider(comercios);
-
-      // Render random products slider
-      renderRandomProductsSlider(comercios, offers);
-
-      // Render promoted section (Ads)
-      renderPromotedSection(comercios);
-
-      renderAppOnlySection(onlyInAppProducts, comercios, offers);
-
-      // Render categories
-      renderCategories(categories, activeCategory);
-      
-      // Render list of comercios
-      const searchVal = document.getElementById('header-search')?.value || '';
-      renderComercios(comercios, activeCategory, searchVal, currentFilters);
-
-      // Dynamic link and banner for GoMarket
-      try {
-        const goMarket = comercios.find(c => {
-          const n = (c.name || '').toLowerCase();
-          return n.includes('go!') && n.includes('market');
-        });
-        if (goMarket) {
-          const goMarketCard = content.querySelector('#gomarket-card');
-          if (goMarketCard) {
-            goMarketCard.href = `#/comercio/${goMarket.id}`;
-          }
-        }
-      } catch (err) {
-        console.warn('Error linking GoMarket:', err);
-      }
-    });
-
-  } catch (e) {
-    console.error('Error loading home data:', e);
-    // Use default categories as fallback
-    if (categories.length === 0) {
-      const defaultNames = ['Súper', 'Farmacia', 'Kiosco', 'Almacén', 'Carnicería', 'Verdulería', 'Librería', 'Ferretería', 'Mascotas'];
-      categories = defaultNames.map((name, i) => ({ id: name, name, icon: '', order: i }));
-    }
-    renderCategories(categories, activeCategory);
-  }
-
-
-
-  // Dynamic link for GoMarket
-  try {
-    const goMarket = comercios.find(c => {
-      const n = (c.name || '').toLowerCase();
-      return n.includes('go!') && n.includes('market');
-    });
-    if (goMarket) {
-      const goMarketCard = content.querySelector('#gomarket-card');
-      if (goMarketCard) {
-        goMarketCard.href = `#/comercio/${goMarket.id}`;
-      }
-    }
   } catch (err) {
-    console.warn('Error linking GoMarket:', err);
+    console.error('Error fetching dynamic collections:', err);
   }
 
+  // Set up live snapshot listener for comercios
+  try {
+    unsubComercios = onSnapshot(collection(db, 'comercios'), { includeMetadataChanges: true }, async (comSnap) => {
+      const isFromCache = comSnap.metadata.fromCache;
+      const newComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
+      // Skip incomplete offline cache snapshots (less than 3 stores) or snaps smaller than our current list
+      if (isFromCache && (newComercios.length < 3 || comercios.length > newComercios.length)) {
+        console.log(`[Firestore Cache Bypassed] Ignoring incomplete offline cache snap of size ${newComercios.length}`);
+        return;
+      }
 
+      comercios = newComercios;
 
+      const wasLoading = isLoadingComercios;
+      // Only mark loading as complete if data came from server or if we got >=3 cached items
+      if (!isFromCache || newComercios.length >= 3) {
+        isLoadingComercios = false;
+      }
+
+      if (!isFromCache) {
+        try {
+          localStorage.setItem('gd_cached_comercios', JSON.stringify(comercios));
+        } catch (e) {}
+      }
+
+      // If we are rendering for the first time (no valid cache was present on start)
+      if (wasLoading && !isLoadingComercios) {
+        doActualHomeRender();
+      } else if (!isLoadingComercios) {
+        // Update elements in place if already rendered
+        const hasContainer = content.querySelector('#brands-slider-container');
+        if (hasContainer) {
+          renderBrandsSlider(comercios);
+          renderPopularProductsSlider(comercios, offers);
+          renderPromotedSection(comercios);
+          renderAppOnlySection(onlyInAppProducts, comercios, offers);
+          renderCategories(categories, activeCategory);
+          const searchVal = document.getElementById('header-search')?.value || '';
+          renderComercios(comercios, activeCategory, searchVal, currentFilters);
+        } else {
+          doActualHomeRender();
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error setting onSnapshot:', err);
+  }
 
   return {
     cleanup: () => {
@@ -573,7 +543,7 @@ function checkAndShowWelcomeModal() {
   }
 }
 
-function checkAndShowWelcomeCouponModal() {
+async function checkAndShowWelcomeCouponModal() {
   const user = getState().user;
   if (!user) return;
 
@@ -583,6 +553,45 @@ function checkAndShowWelcomeCouponModal() {
   // Show once per account
   const modalShown = localStorage.getItem('welcome_coupon_modal_shown_v1');
   if (modalShown === 'true') return;
+
+  // Check the coupon in Firestore first
+  let wData = null;
+  try {
+    const welcomeRef = doc(db, 'coupons', 'BIENVENIDA');
+    const welcomeSnap = await getDoc(welcomeRef);
+    if (!welcomeSnap.exists()) {
+      // Auto-create welcome coupon if missing in Firestore (same as cart.js)
+      wData = {
+        active: true,
+        ownerId: 'admin',
+        comercioIds: [],
+        scope: 'products',
+        discountType: 'fixed',
+        absorbedBy: 'platform',
+        type: 'fixed',
+        value: 3000,
+        usageLimit: 999999,
+        remaining: 999999,
+        usedCount: 0,
+        createdAt: new Date(),
+        description: 'Cupón automático de bienvenida para tu primer pedido'
+      };
+      const { setDoc } = await import('firebase/firestore');
+      await setDoc(welcomeRef, wData);
+      console.log('[Home] Welcome coupon BIENVENIDA initialized.');
+    } else {
+      wData = welcomeSnap.data();
+    }
+  } catch (err) {
+    console.warn('[Home] Welcome coupon check failed:', err);
+  }
+
+  // If the coupon is not active, do not apply or display anything
+  if (!wData || wData.active !== true) {
+    return;
+  }
+
+  const couponValue = wData.value || 3000;
 
   // Poll until no blocking modal (location picker, push prompt, beta info, onboarding, app guide) is active in DOM
   const checkInterval = setInterval(async () => {
@@ -603,7 +612,7 @@ function checkAndShowWelcomeCouponModal() {
         appSetState('appliedCoupon', {
           id: 'BIENVENIDA',
           code: 'BIENVENIDA',
-          value: 3000,
+          value: couponValue,
           type: 'fixed',
           discountType: 'fixed',
           scope: 'products',
@@ -633,55 +642,55 @@ function checkAndShowWelcomeCouponModal() {
         animation: fadeInWelcome 0.25s ease-out forwards;
       `;
 
-        modalEl.innerHTML = `
-          <div style="background: var(--color-surface, #ffffff); max-width: 400px; width: 100%; border-radius: 28px; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.2); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; position: relative;">
-            
-            <!-- Gift Header visual box -->
-            <div style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); padding: 36px 24px 24px; text-align: center; color: white; position: relative;">
-              <div style="font-size: 56px; line-height: 1; margin-bottom: 12px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15)); display: inline-block;">🎁</div>
-              <h2 style="font-family: var(--font-display, inherit); font-size: 24px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.03em;">¡Tu Regalo de Bienvenida!</h2>
-              <div style="font-size: 13px; font-weight: 800; color: rgba(255,255,255,0.9); margin-top: 6px;">Te regalamos $3000 para tu primer pedido</div>
-            </div>
-            
-            <!-- Body details -->
-            <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;">
-              <p style="font-size: 14.5px; line-height: 1.55; color: var(--color-text-secondary, #475569); margin: 0; font-weight: 650;">
-                Queremos darte una cálida bienvenida a la app. Por eso, tenés disponible un cupón de descuento por <strong>$3000</strong>.
-              </p>
+      modalEl.innerHTML = `
+        <div style="background: var(--color-surface, #ffffff); max-width: 400px; width: 100%; border-radius: 28px; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.2); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; position: relative;">
+          
+          <!-- Gift Header visual box -->
+          <div style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); padding: 36px 24px 24px; text-align: center; color: white; position: relative;">
+            <div style="font-size: 56px; line-height: 1; margin-bottom: 12px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15)); display: inline-block;">🎁</div>
+            <h2 style="font-family: var(--font-display, inherit); font-size: 24px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.03em;">¡Tu Regalo de Bienvenida!</h2>
+            <div style="font-size: 13px; font-weight: 800; color: rgba(255,255,255,0.9); margin-top: 6px;">Te regalamos $${couponValue} para tu primer pedido</div>
+          </div>
+          
+          <!-- Body details -->
+          <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;">
+            <p style="font-size: 14.5px; line-height: 1.55; color: var(--color-text-secondary, #475569); margin: 0; font-weight: 650;">
+              Queremos darte una cálida bienvenida a la app. Por eso, tenés disponible un cupón de descuento por <strong>$${couponValue}</strong>.
+            </p>
 
-              <!-- Coupon Banner without buttons -->
-              <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px dashed rgba(168, 85, 247, 0.35); border-radius: 16px; padding: 14px 18px; text-align: center; margin: 4px 0;">
-                <div style="font-size: 11px; font-weight: 900; color: #a855f7; letter-spacing: 0.8px; text-transform: uppercase;">CUPÓN DE BIENVENIDA APLICADO</div>
-                <div style="font-size: 24px; font-weight: 950; color: var(--color-text-primary); margin-top: 2px; letter-spacing: 1px;">$3000 OFF</div>
-              </div>
-
-              <div style="font-size: 12.5px; color: var(--color-text-secondary, #475569); font-weight: 750; background: var(--color-bg-secondary, #f8fafc); border-radius: 12px; padding: 12px 14px; line-height: 1.45; border: 1px solid var(--color-border-light, #f1f5f9); text-align: left; display: flex; flex-direction: column; gap: 8px;">
-                <span>✨ <strong>¡Uso Automático!</strong> El descuento se aplicará solo al hacer tu primer pedido a un comercio (no tenés que copiar nada).</span>
-                <span style="font-size: 11px; color: var(--color-text-tertiary);">* No válido para el servicio de mandados ni viajes.</span>
-              </div>
+            <!-- Coupon Banner without buttons -->
+            <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px dashed rgba(168, 85, 247, 0.35); border-radius: 16px; padding: 14px 18px; text-align: center; margin: 4px 0;">
+              <div style="font-size: 11px; font-weight: 900; color: #a855f7; letter-spacing: 0.8px; text-transform: uppercase;">CUPÓN DE BIENVENIDA APLICADO</div>
+              <div style="font-size: 24px; font-weight: 950; color: var(--color-text-primary); margin-top: 2px; letter-spacing: 1px;">$${couponValue} OFF</div>
             </div>
-            
-            <!-- Footer Button -->
-            <div style="padding: 0 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff);">
-              <button id="welcome-coupon-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
-                ¡Buenísimo, comprar!
-              </button>
+
+            <div style="font-size: 12.5px; color: var(--color-text-secondary, #475569); font-weight: 750; background: var(--color-bg-secondary, #f8fafc); border-radius: 12px; padding: 12px 14px; line-height: 1.45; border: 1px solid var(--color-border-light, #f1f5f9); text-align: left; display: flex; flex-direction: column; gap: 8px;">
+              <span>✨ <strong>¡Uso Automático!</strong> El descuento se aplicará solo al hacer tu primer pedido a un comercio (no tenés que copiar nada).</span>
+              <span style="font-size: 11px; color: var(--color-text-tertiary);">* No válido para el servicio de mandados ni viajes.</span>
             </div>
           </div>
-        `;
+          
+          <!-- Footer Button -->
+          <div style="padding: 0 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff);">
+            <button id="welcome-coupon-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
+              ¡Buenísimo, comprar!
+            </button>
+          </div>
+        </div>
+      `;
 
-        document.body.appendChild(modalEl);
+      document.body.appendChild(modalEl);
 
-        const acceptBtn = modalEl.querySelector('#welcome-coupon-accept-btn');
-        if (acceptBtn) {
-          acceptBtn.onclick = () => {
-            localStorage.setItem('welcome_coupon_modal_shown_v1', 'true');
-            modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
-            setTimeout(() => {
-              modalEl.remove();
-            }, 200);
-          };
-        }
+      const acceptBtn = modalEl.querySelector('#welcome-coupon-accept-btn');
+      if (acceptBtn) {
+        acceptBtn.onclick = () => {
+          localStorage.setItem('welcome_coupon_modal_shown_v1', 'true');
+          modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
+          setTimeout(() => {
+            modalEl.remove();
+          }, 200);
+        };
+      }
     }
   }, 150);
 }
@@ -689,6 +698,21 @@ function checkAndShowWelcomeCouponModal() {
 function renderBrandsSlider(comercios) {
   const container = document.getElementById('brands-slider-container');
   if (!container) return;
+
+  // Show skeleton circles if still loading and no data is present
+  if (isLoadingComercios && (!comercios || comercios.length === 0)) {
+    container.style.display = '';
+    container.innerHTML = `
+      <div style="padding: 0 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px;">
+        <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comercios</h3>
+        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Los locales más elegidos por la comunidad</span>
+      </div>
+      <div style="display: flex; gap: 14px; padding: 6px 16px 12px; overflow: hidden;">
+        ${renderSkeletonCircles(5)}
+      </div>
+    `;
+    return;
+  }
 
   // Filter only comercios that have a logo and are distinct by name
   const brands = [];
@@ -708,21 +732,31 @@ function renderBrandsSlider(comercios) {
 
   // Shuffle brands randomly every hour using deterministic seed
   const seed = getHourSeed();
-  const shuffledBrands = seededShuffle(brands, seed);
+  const sponsored = brands.filter(b => b.isSponsored === true);
+  const normal = brands.filter(b => b.isSponsored !== true);
+  const shuffledNormals = seededShuffle(normal, seed);
+  const finalBrands = [...sponsored, ...shuffledNormals];
 
+  container.style.display = ''; // Reset display:none from previous empty-data call
   container.innerHTML = `
     <div style="padding: 0 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px;">
       <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comercios</h3>
       <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Los locales más elegidos por la comunidad</span>
     </div>
     <div style="overflow-x: auto; display: flex; gap: 14px; padding: 6px 16px 12px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
-      ${shuffledBrands.map(brand => {
+      ${finalBrands.map(brand => {
         const isInactive = brand.isActive === false;
         const href = isInactive ? 'javascript:void(0)' : `#/comercio/${brand.id}`;
         return `
           <a href="${href}" style="flex: 0 0 64px; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 6px; ${isInactive ? 'opacity: 0.5; filter: grayscale(1); pointer-events: none;' : ''}">
-            <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;">
+            <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; position: relative;
+              ${brand.isSponsored ? 'border: 2px solid #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.45); animation: goldPulse 2s infinite alternate;' : 'border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06);'}">
               <img src="${brand.logo}" alt="${brand.name}" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+              ${brand.isSponsored ? `
+                <div style="position: absolute; top: -1px; right: -1px; background: #fbbf24; color: #78350f; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 1.5px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.15); font-size: 8px; font-weight: 900; z-index: 2;">
+                  ${icon('star', 8)}
+                </div>
+              ` : ''}
             </div>
             <span style="font-size: 10.5px; font-weight: 750; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 68px; text-align: center;">${brand.name}</span>
           </a>
@@ -732,8 +766,14 @@ function renderBrandsSlider(comercios) {
     <style>
       #brands-slider-container div::-webkit-scrollbar { display: none; }
       #brands-slider-container div a:active { transform: scale(0.92); }
+      @keyframes goldPulse {
+        0% { box-shadow: 0 0 4px rgba(251, 191, 36, 0.35); border-color: #f59e0b; }
+        100% { box-shadow: 0 0 12px rgba(251, 191, 36, 0.75); border-color: #fbbf24; }
+      }
     </style>
   `;
+  // Force reveal: el container puede tener height:0 cuando el observer lo evalúa por primera vez
+  container.classList.add('revealed');
 }
 
 async function renderPromotedSection(comercios) {
@@ -854,6 +894,7 @@ async function renderPromotedSection(comercios) {
   // 7. Combine lists (Priority always first!)
   const finalPromoted = [...shuffledPriority, ...shuffledNormal];
 
+  container.style.display = ''; // Reset display:none from previous empty-data call
   container.innerHTML = `
     <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
       <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
@@ -937,6 +978,8 @@ async function renderPromotedSection(comercios) {
     if (slider._autoplayCleanup) slider._autoplayCleanup();
     slider._autoplayCleanup = initAutoplay(slider, 5000, 300);
   }
+  // Force reveal: container puede tener height:0 cuando el observer lo evalúa por primera vez
+  container.classList.add('revealed');
 }
 
 function renderAppOnlySection(products, comercios, offers = []) {
@@ -1032,6 +1075,8 @@ function renderAppOnlySection(products, comercios, offers = []) {
     if (slider._autoplayCleanup) slider._autoplayCleanup();
     slider._autoplayCleanup = initAutoplay(slider, 5000, 260);
   }
+  // Force reveal: container puede tener height:0 cuando el observer lo evalúa por primera vez
+  container.classList.add('revealed');
 }
 
 const CATEGORY_IMAGE_MAP = {
@@ -1065,17 +1110,25 @@ const CATEGORY_IMAGE_MAP = {
 };
 
 function renderCategories(categories, active) {
+  console.log('[Home Categories] renderCategories received:', categories);
   const container = document.getElementById('categories-row-small');
   if (!container) return;
 
+  // Fallback if list is empty or has only Comida/GoMarket (avoids blank/empty category sliders on local/test databases)
+  let displayList = categories;
+  if (!displayList || displayList.length <= 2) {
+    const defaultNames = ['Almacén', 'Bazar', 'Carnicería', 'Comida', 'Fiambrería', 'Heladeria', 'Kiosco', 'Librería', 'Pollería', 'Postres', 'Supermercado', 'Tecnología', 'Verdulería'];
+    displayList = defaultNames.map((name, i) => ({ id: name.toLowerCase().replace(/\s+/g, '-'), name, icon: '', order: i, isActive: true }));
+  }
+
   // Ensure Postres is present
-  let postresCat = categories.find(c => (c.name || '').toLowerCase().includes('postres'));
+  let postresCat = displayList.find(c => (c.name || '').toLowerCase().includes('postres'));
   if (!postresCat) {
     postresCat = { id: 'postres', name: 'Postres', order: 0 };
   }
 
   // Filter out Todos, Comida, Restaurante, Restaurantes, GoMarket, Pizzería, and Postres (to place Postres first)
-  const filteredCats = categories.filter(c => 
+  const filteredCats = displayList.filter(c => 
     c.name !== 'Todos' &&
     c.name !== 'Comida' &&
     c.name !== 'Restaurante' &&
@@ -1239,6 +1292,10 @@ async function renderComercios(comercios, category, search, filters) {
   });
 
   if (filtered.length === 0) {
+    if (isLoadingComercios) {
+      grid.innerHTML = renderSkeletonCards(4);
+      return;
+    }
     grid.innerHTML = `
       <div class="empty-state" style="grid-column: 1/-1;">
         <div class="empty-state-icon">${icon('store', 40)}</div>
@@ -1410,6 +1467,16 @@ function renderSkeletonCards(count) {
     </div>
   `).join('');
 }
+
+function renderSkeletonCircles(count) {
+  return Array(count).fill(`
+    <div style="display:flex; flex-direction:column; align-items:center; gap:8px; flex-shrink:0;">
+      <div class="skeleton" style="width: 64px; height: 64px; border-radius: 50%;"></div>
+      <div class="skeleton" style="width: 50px; height: 10px; border-radius: 4px;"></div>
+    </div>
+  `).join('');
+}
+
 
 // Seeded hourly random shuffle utilities
 function createSeededRandom(seed) {
@@ -1837,177 +1904,249 @@ async function showBugReportModal() {
   };
 }
 
-async function renderRandomProductsSlider(comercios, offers = []) {
+async function renderPopularProductsSlider(comercios, offers = []) {
   const container = document.getElementById('random-products-slider-container');
   if (!container) return;
 
-  if (!comercios || comercios.length === 0) {
-    container.style.display = 'none';
-    return;
-  }
-
-  // 1. Get a set of selected comercios (always include GoMarket, and add up to 4 other random shops)
-  const activeShops = comercios.filter(c => c.isActive !== false);
-  if (activeShops.length === 0) {
-    container.style.display = 'none';
-    return;
-  }
-
-  const goMarket = activeShops.find(c => {
-    const n = (c.name || '').toLowerCase();
-    return n.includes('go!') && n.includes('market');
-  });
-
-  const selectedShops = [];
-  if (goMarket) {
-    selectedShops.push(goMarket);
-  }
-
-  // Pick remaining shops randomly
-  const remainingShops = activeShops.filter(c => c.id !== (goMarket ? goMarket.id : ''));
-  const shuffledShops = [...remainingShops].sort(() => 0.5 - Math.random());
-  const maxShops = 4;
-  for (let i = 0; i < Math.min(shuffledShops.length, maxShops); i++) {
-    selectedShops.push(shuffledShops[i]);
-  }
-
-  // 2. Fetch products in parallel for active shops
-  let allProducts = [];
+  let cachedProducts = [];
   try {
-    const promises = activeShops.map(async (shop) => {
-      try {
-        const q = query(collection(db, 'comercios', shop.id, 'products'));
-        // 5-minute TTL cache
-        const pSnap = await getDocsOptimized(q, `products_slider_${shop.id}`, 300000);
-        return pSnap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            comercioId: shop.id,
-            comercioName: shop.name,
-            comercioLogo: shop.logo || '/logo.png',
-            isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
-            ...data
-          };
-        });
-      } catch (err) {
-        console.warn(`Error loading products for shop ${shop.id} in slider:`, err);
-        return [];
-      }
-    });
+    const raw = localStorage.getItem('gd_cached_popular_products');
+    if (raw) {
+      cachedProducts = JSON.parse(raw);
+    }
+  } catch (e) {}
 
-    const results = await Promise.all(promises);
-    allProducts = results.flat().filter(p => p.isActive !== false && !(p.stockMode === 'limited' && !p.useGlobalFlavors && (p.stockQuantity || 0) <= 0));
-  } catch (err) {
-    console.error('Error fetching random slider products:', err);
+  const renderSliderContent = (productsList) => {
+    return productsList.map(p => {
+      const offer = offers.find(o => o.active !== false && o.comercioId === p.comercioId && o.productIds && o.productIds.includes(p.id));
+      const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
+      const discountedPrice = discountPercent > 0 ? p.price * (1 - discountPercent / 100) : p.price;
+      return `
+        <a href="#/comercio/${p.comercioId}?product=${p.id}" class="random-product-card">
+          <div style="position: relative; width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: var(--color-bg-secondary);">
+            <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" />
+            <div style="position: absolute; bottom: 8px; left: 8px; display: flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 8px; box-shadow: var(--shadow-sm); border: 1px solid var(--color-border-light); max-width: 90%;">
+              <img src="${p.comercioLogo}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: contain;" />
+              <span style="font-size: 8px; font-weight: 850; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.comercioName}</span>
+            </div>
+            ${p.isGoMarket ? `<div style="position: absolute; top: 8px; right: 8px; background: rgba(13, 148, 136, 0.9); backdrop-filter: blur(4px); color: white; padding: 2px 6px; border-radius: 6px; font-size: 8.5px; font-weight: 900; box-shadow: var(--shadow-sm); text-transform: uppercase;">GoMarket</div>` : ''}
+            ${discountPercent > 0 ? `<div style="position: absolute; top: 8px; left: 8px; background: var(--color-primary); color: white; padding: 2px 6px; border-radius: 6px; font-size: 8.5px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2;">${discountPercent}% OFF</div>` : ''}
+
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 0 4px;">
+            <span style="font-weight: 850; font-size: 13.5px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 32px; line-height: 1.2;">${p.name}</span>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                ${discountPercent > 0 ? `
+                  <span style="font-weight: 950; font-size: 14.5px; color: var(--color-primary);">${formatPrice(discountedPrice)}</span>
+                  <span style="font-size: 11px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(p.price)}</span>
+                ` : `
+                  <span style="font-weight: 950; font-size: 14.5px; color: var(--color-primary);">${formatPrice(p.price)}</span>
+                `}
+              </div>
+              <span style="background: var(--color-primary-light); color: var(--color-primary); width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px;">
+                ${icon('plus', 10, '', 'var(--color-primary)')}
+              </span>
+            </div>
+          </div>
+        </a>
+      `;
+    }).join('');
+  };
+
+  const setupArrowsAndAutoplay = () => {
+    const slider = container.querySelector('#random-products-slider');
+    const prevBtn = container.querySelector('#prod-prev-btn');
+    const nextBtn = container.querySelector('#prod-prev-btn-next');
+    if (slider && prevBtn && nextBtn) {
+      const updateArrows = () => {
+        prevBtn.style.display = slider.scrollLeft > 5 ? 'flex' : 'none';
+        nextBtn.style.display = slider.scrollLeft + slider.clientWidth < slider.scrollWidth - 5 ? 'flex' : 'none';
+      };
+      slider.addEventListener('scroll', updateArrows);
+      setTimeout(updateArrows, 200);
+      prevBtn.onclick = () => slider.scrollBy({ left: -260, behavior: 'smooth' });
+      nextBtn.onclick = () => slider.scrollBy({ left: 260, behavior: 'smooth' });
+      if (slider._autoplayCleanup) slider._autoplayCleanup();
+      slider._autoplayCleanup = initAutoplay(slider, 3500, 260);
+    }
+  };
+
+  // If cache exists, render immediately to completely bypass skeleton transition
+  if (cachedProducts && cachedProducts.length > 0) {
+    container.innerHTML = `
+      <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px; margin-top: 14px;">
+        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
+          Productos Destacados
+        </h2>
+        <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los más vendidos en tiempo real ${icon('flame', 12)}</span>
+      </div>
+      <div class="random-products-slider-wrapper">
+        <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+          ${icon('chevronLeft', 20)}
+        </button>
+        <div class="random-products-slider" id="random-products-slider">
+          ${renderSliderContent(cachedProducts)}
+        </div>
+        <button id="prod-prev-btn-next" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+          ${icon('chevronRight', 20)}
+        </button>
+      </div>
+    `;
+    setupArrowsAndAutoplay();
+  } else {
+    // Show skeletons initially ONLY if cache is empty
+    container.innerHTML = `
+      <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px; margin-top: 14px;">
+        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
+          Productos Destacados
+        </h2>
+        <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los más vendidos en tiempo real ${icon('flame', 12)}</span>
+      </div>
+      <div class="random-products-slider-wrapper">
+        <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+          ${icon('chevronLeft', 20)}
+        </button>
+        <div class="random-products-slider" id="random-products-slider">
+          ${renderSkeletonCards(3)}
+        </div>
+        <button id="prod-prev-btn-next" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+          ${icon('chevronRight', 20)}
+        </button>
+      </div>
+    `;
   }
 
-  if (allProducts.length === 0) {
-    container.style.display = 'none';
+  if (!comercios || comercios.length === 0) {
+    if (cachedProducts.length === 0) container.style.display = 'none';
     return;
   }
 
-  // Get top 20 most sold products, then shuffle them
-  const top20Prods = allProducts
-    .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
-    .slice(0, 20);
-  const shuffledProds = top20Prods.sort(() => 0.5 - Math.random());
+  // Fetch popular products in background (Stale-While-Revalidate)
+  setTimeout(async () => {
+    try {
+      // 1. Get recent orders to count sales globally across the platform
+      const ordersQ = query(
+        collection(db, 'orders'),
+        orderBy('createdAt', 'desc'),
+        limit(60)
+      );
+      const ordersSnap = await getDocs(ordersQ);
+      
+      const salesMap = new Map();
+      ordersSnap.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.status === 'cancelled') return;
+        const items = data.items || data.productos || [];
+        items.forEach(item => {
+          const name = item.name;
+          const cId = data.comercioId || item.comercioId || (item.product && item.product.comercioId);
+          if (name && cId) {
+            const key = `${cId}_${name.trim()}`;
+            salesMap.set(key, (salesMap.get(key) || 0) + (item.qty || item.quantity || 1));
+          }
+        });
+      });
 
-  container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
-      <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
-        Productos Destacados
-      </h2>
-      <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los artículos más vendidos de tus comercios favoritos</span>
-    </div>
-    <div class="random-products-slider-wrapper">
-      <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-        ${icon('chevronLeft', 20)}
-      </button>
-      <div class="random-products-slider" id="random-products-slider">
-        ${shuffledProds.map(p => {
-          const offer = offers.find(o => o.active !== false && o.comercioId === p.comercioId && o.productIds && o.productIds.includes(p.id));
-          const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
-          const discountedPrice = discountPercent > 0 ? p.price * (1 - discountPercent / 100) : p.price;
-          return `
-            <a href="#/comercio/${p.comercioId}?product=${p.id}" class="random-product-card">
-              <div style="position: relative; width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: var(--color-bg-secondary);">
-                <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" />
-                <!-- Shop logo badge overlay -->
-                <div style="position: absolute; bottom: 8px; left: 8px; display: flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 8px; box-shadow: var(--shadow-sm); border: 1px solid var(--color-border-light); max-width: 90%;">
-                  <img src="${p.comercioLogo}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: contain;" />
-                  <span style="font-size: 8px; font-weight: 850; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.comercioName}</span>
-                </div>
-                ${p.isGoMarket ? `
-                  <div style="position: absolute; top: 8px; right: 8px; background: rgba(13, 148, 136, 0.9); backdrop-filter: blur(4px); color: white; padding: 2px 6px; border-radius: 6px; font-size: 8.5px; font-weight: 900; box-shadow: var(--shadow-sm); text-transform: uppercase;">
-                    GoMarket
-                  </div>
-                ` : ''}
-                ${discountPercent > 0 ? `
-                  <div style="position: absolute; top: 8px; left: 8px; background: var(--color-primary); color: white; padding: 2px 6px; border-radius: 6px; font-size: 8.5px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2;">
-                    ${discountPercent}% OFF
-                  </div>
-                ` : ''}
-              </div>
-              <div style="display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 0 4px;">
-                <span style="font-weight: 850; font-size: 13.5px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 32px; line-height: 1.2;">${p.name}</span>
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
-                  <div style="display: flex; flex-direction: column; gap: 1px;">
-                    ${discountPercent > 0 ? `
-                      <span style="font-weight: 950; font-size: 14.5px; color: var(--color-primary);">${formatPrice(discountedPrice)}</span>
-                      <span style="font-size: 11px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(p.price)}</span>
-                    ` : `
-                      <span style="font-weight: 950; font-size: 14.5px; color: var(--color-primary);">${formatPrice(p.price)}</span>
-                    `}
-                  </div>
-                  <span style="background: var(--color-primary-light); color: var(--color-primary); width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px;">
-                    ${icon('plus', 10, '', 'var(--color-primary)')}
-                  </span>
-                </div>
-              </div>
-            </a>
-          `;
-        }).join('')}
-      </div>
-      <button id="prod-prev-btn-next" class="categories-arrow-btn next-btn" style="display: none; position: absolute; right: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-        ${icon('chevronRight', 20)}
-      </button>
-    </div>
-  `;
+      // 2. Sort to find top sold products
+      const sortedSales = [...salesMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12);
 
-  // Arrow controls for random products slider
-  const slider = container.querySelector('#random-products-slider');
-  const prevBtn = container.querySelector('#prod-prev-btn');
-  const nextBtn = container.querySelector('#prod-prev-btn-next');
-  if (slider && prevBtn && nextBtn) {
-    const updateArrows = () => {
-      if (slider.scrollLeft > 5) {
-        prevBtn.style.display = 'flex';
-      } else {
-        prevBtn.style.display = 'none';
+      // 3. Fetch product details from Firestore for top sold
+      const popularProducts = [];
+      const activeShops = comercios.filter(c => c.isActive !== false);
+
+      await Promise.all(sortedSales.map(async ([key, salesCount]) => {
+        const [cId, productName] = key.split('_');
+        const shop = activeShops.find(c => c.id === cId);
+        if (!shop) return;
+        try {
+          const q = query(
+            collection(db, 'comercios', cId, 'products'),
+            where('name', '==', productName)
+          );
+          const pSnap = await getDocs(q);
+          if (!pSnap.empty) {
+            const pDoc = pSnap.docs[0];
+            const pData = pDoc.data();
+            if (pData.isActive !== false) {
+              popularProducts.push({
+                id: pDoc.id,
+                comercioId: cId,
+                comercioName: shop.name,
+                comercioLogo: shop.logo || '/logo.png',
+                isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
+                salesCount,
+                ...pData
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('Error loading popular product details by name:', key, e);
+        }
+      }));
+
+      // 4. Fallback if popular products are empty or fewer than 5 (fill with random products from GoMarket and others)
+      if (popularProducts.length < 5 && activeShops.length > 0) {
+        const goMarket = activeShops.find(c => {
+          const n = (c.name || '').toLowerCase();
+          return n.includes('go!') && n.includes('market');
+        });
+        const selectedShops = goMarket ? [goMarket] : [];
+        const remaining = activeShops.filter(c => c.id !== (goMarket ? goMarket.id : ''));
+        const shuffled = [...remaining].sort(() => 0.5 - Math.random());
+        for (let i = 0; i < Math.min(shuffled.length, 3); i++) {
+          selectedShops.push(shuffled[i]);
+        }
+
+        const fallbackPromises = selectedShops.map(async (shop) => {
+          try {
+            const q = query(collection(db, 'comercios', shop.id, 'products'), limit(8));
+            const pSnap = await getDocsOptimized(q, `products_slider_limit8_${shop.id}`, 300000);
+            return pSnap.docs.map(d => ({
+              id: d.id,
+              comercioId: shop.id,
+              comercioName: shop.name,
+              comercioLogo: shop.logo || '/logo.png',
+              isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
+              salesCount: 0,
+              ...d.data()
+            }));
+          } catch (e) {
+            return [];
+          }
+        });
+
+        const fallbackResults = await Promise.all(fallbackPromises);
+        const fallbackProducts = fallbackResults.flat().filter(p => p.isActive !== false && !popularProducts.some(pp => pp.id === p.id && pp.comercioId === p.comercioId));
+        // Shuffle fallback and add to popular
+        const shuffledFallbacks = fallbackProducts.sort(() => 0.5 - Math.random());
+        while (popularProducts.length < 12 && shuffledFallbacks.length > 0) {
+          popularProducts.push(shuffledFallbacks.pop());
+        }
       }
-      if (slider.scrollLeft + slider.clientWidth < slider.scrollWidth - 5) {
-        nextBtn.style.display = 'flex';
-      } else {
-        nextBtn.style.display = 'none';
-      }
-    };
-    slider.addEventListener('scroll', updateArrows);
-    setTimeout(updateArrows, 200);
-    prevBtn.onclick = () => {
-      slider.scrollBy({ left: -260, behavior: 'smooth' });
-    };
-    nextBtn.onclick = () => {
-      slider.scrollBy({ left: 260, behavior: 'smooth' });
-    };
 
-    if (slider._autoplayCleanup) {
-      slider._autoplayCleanup();
+      if (popularProducts.length === 0) {
+        if (cachedProducts.length === 0) container.style.display = 'none';
+        return;
+      }
+
+      // Write to cache for next load
+      try {
+        localStorage.setItem('gd_cached_popular_products', JSON.stringify(popularProducts));
+      } catch (e) {}
+
+      // 5. Update slider silently
+      const sliderEl = container.querySelector('#random-products-slider');
+      if (sliderEl) {
+        sliderEl.innerHTML = renderSliderContent(popularProducts);
+        setupArrowsAndAutoplay();
+      }
+    } catch (e) {
+      console.error('Error rendering popular products slider:', e);
     }
-    slider._autoplayCleanup = initAutoplay(slider, 3500, 260);
-  }
-
-  container.style.display = 'block';
+  }, 100);
 }
 
 function initAutoplay(sliderEl, intervalMs = 3500, stepPx = 280) {
@@ -2578,161 +2717,7 @@ async function showJoinTeamModal() {
   });
 }
 
-async function showMandadosOverlayModal() {
-  const { showModal, closeModal, showConfirm } = await import('../components/modal.js');
 
-  const contentEl = document.createElement('div');
-  contentEl.style.cssText = `
-    padding: 12px 16px calc(20px + env(safe-area-inset-bottom, 24px));
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: linear-gradient(to bottom, var(--color-bg), var(--color-bg-secondary));
-    box-sizing: border-box;
-    width: 100%;
-  `;
-
-  contentEl.innerHTML = `
-    <!-- Options List -->
-    <div style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
-      <!-- Option 1: Encomienda -->
-      <div id="modal-favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
-        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
-        <div style="text-align: left; z-index: 2; width: 100%;">
-          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Encomienda</h3>
-          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Costo normal de envío
-            </span>
-            <span id="modal-info-mandado-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Option 2: Mandado -->
-      <div id="modal-favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
-        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
-        <div style="text-align: left; z-index: 2; width: 100%;">
-          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Mandado</h3>
-          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Tarifa de gestión
-            </span>
-            <span id="modal-info-compra-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Option 3: Go Cash -->
-      <div id="modal-favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
-        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-        <div style="text-align: left; z-index: 2; width: 100%;">
-          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Go Cash</h3>
-          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Efectivo ↔ Transferencia
-            </span>
-            <span id="modal-info-gocash-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Option 4: Pago de Servicios -->
-      <div id="modal-favor-pagodeservicios-btn" class="gofavores-card card-pagodeservicios glow-hover spring-hover" style="border-radius: 18px; padding: 16px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.2s;">
-        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-        <div style="text-align: left; z-index: 2; width: 100%;">
-          <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 900; margin: 0 0 4px; color: #ffffff; letter-spacing: -0.02em;">Pago de Servicios</h3>
-          <p style="font-size: 11.5px; color: rgba(255, 255, 255, 0.95); line-height: 1.4; margin: 0 0 10px 0; font-weight: 600;">Pagá tus facturas (ABSA, Canal 4, Cyber, etc) a domicilio o digital.</p>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-            <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-              Facturas 📄 Trámites
-            </span>
-            <span id="modal-info-pagodeservicios-btn" style="color: #ffffff; font-size: 11.5px; font-weight: 800; text-decoration: underline; cursor: pointer; padding: 2px 6px;">Más info</span>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <style>
-      .card-encomienda { background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important; border-color: rgba(16,185,129,0.3) !important; box-shadow: 0 8px 20px rgba(16,185,129,0.15) !important; }
-      .card-mandado { background: linear-gradient(135deg, #E11D48 0%, #F43F5E 100%) !important; border-color: rgba(244,63,94,0.3) !important; box-shadow: 0 8px 20px rgba(244,63,94,0.15) !important; }
-      .card-gocash { background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important; border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 8px 20px rgba(99,102,241,0.15) !important; }
-      .card-pagodeservicios { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important; border-color: rgba(245,158,11,0.3) !important; box-shadow: 0 8px 20px rgba(245,158,11,0.15) !important; }
-      [data-theme="dark"] .card-encomienda { background: linear-gradient(135deg, #064e3b 0%, #047857 100%) !important; }
-      [data-theme="dark"] .card-mandado { background: linear-gradient(135deg, #7f1d1d 0%, #E11D48 100%) !important; }
-      [data-theme="dark"] .card-gocash { background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important; }
-      [data-theme="dark"] .card-pagodeservicios { background: linear-gradient(135deg, #78350F 0%, #D97706 100%) !important; }
-      .gofavores-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12) !important; }
-      .gofavores-card:active { transform: translateY(0) scale(0.98); }
-    </style>
-  `;
-
-  showModal({
-    title: '<div style="margin-top: 14px; font-weight: 950; font-size: 16.5px; letter-spacing: -0.02em;">Mandados (Servicios Especiales)</div>',
-    height: 'auto',
-    content: contentEl,
-    onOpen: async () => {
-      let goFav;
-      try {
-        goFav = await import('./gofavores.js');
-      } catch (err) {
-        console.error('Failed to load gofavores module, reloading to get latest build...', err);
-        const { showToast } = await import('../components/toast.js');
-        showToast('Actualizando aplicación...', 'info');
-        setTimeout(() => { window.location.reload(); }, 600);
-        return;
-      }
-      const { showMandadoForm, showCompraForm, showGoCashForm, showPagoServiciosForm, showServiceInfoModal } = goFav;
-      const { getState } = await import('../state.js');
-
-      const checkPhoneAndOpen = (openFn) => {
-        const u = getState().user || {};
-        if (!u.phone || u.phone.trim() === '') {
-          showConfirm({
-            title: '📱 Teléfono Requerido',
-            message: 'Para realizar un favor o mandado es obligatorio configurar un celular de contacto para que el chofer y el soporte se comuniquen.',
-            confirmText: 'Configurar ahora',
-            cancelText: 'Volver',
-            onConfirm: () => {
-              sessionStorage.setItem('open-phone-edit', 'true');
-              location.hash = '#/profile';
-            }
-          });
-        } else {
-          closeModal();
-          setTimeout(() => {
-            openFn();
-          }, 250);
-        }
-      };
-
-      document.getElementById('modal-favor-mandado-btn').onclick = (e) => {
-        if (e.target.id === 'modal-info-mandado-btn') return;
-        checkPhoneAndOpen(showMandadoForm);
-      };
-      document.getElementById('modal-favor-compra-btn').onclick = (e) => {
-        if (e.target.id === 'modal-info-compra-btn') return;
-        checkPhoneAndOpen(showCompraForm);
-      };
-      document.getElementById('modal-favor-gocash-btn').onclick = (e) => {
-        if (e.target.id === 'modal-info-gocash-btn') return;
-        checkPhoneAndOpen(showGoCashForm);
-      };
-      document.getElementById('modal-favor-pagodeservicios-btn').onclick = (e) => {
-        if (e.target.id === 'modal-info-pagodeservicios-btn') return;
-        checkPhoneAndOpen(showPagoServiciosForm);
-      };
-
-      document.getElementById('modal-info-mandado-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('encomienda'); };
-      document.getElementById('modal-info-compra-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('mandado'); };
-      document.getElementById('modal-info-gocash-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('gocash'); };
-      document.getElementById('modal-info-pagodeservicios-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('pagodeservicios'); };
-    }
-  });
-}
 
 async function checkAndShowAppOnlyPromo() {
   const user = getState().user;

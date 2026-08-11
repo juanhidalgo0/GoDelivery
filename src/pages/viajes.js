@@ -45,7 +45,7 @@ export async function renderViajes(content) {
   }
 
   content.innerHTML = `
-    <div class="viajes-page page-enter" style="display:flex; flex-direction:column; height: 100dvh; background: var(--color-bg); overflow: hidden; position:relative;">
+    <div class="viajes-page" style="display:flex; flex-direction:column; height: 100dvh; background: var(--color-bg); overflow: hidden; position:relative;">
       
       <!-- Premium Unified Blue Header with smooth gradient -->
       <div style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); padding:calc(18px + env(safe-area-inset-top, 0px)) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(37, 99, 235, 0.2); z-index:100;">

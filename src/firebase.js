@@ -1,12 +1,13 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence, connectAuthEmulator } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
   persistentMultipleTabManager,
-  clearIndexedDbPersistence
+  clearIndexedDbPersistence,
+  connectFirestoreEmulator
 } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
 const isTestingHost = typeof window !== 'undefined' && (
@@ -35,7 +36,21 @@ const testingConfig = {
   measurementId: "G-DWNQDRZG27"
 };
 
+const getAuthDomain = (defaultDomain) => {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.includes('local');
+    const isCapacitor = window.Capacitor;
+    if (!isLocal && !isCapacitor && host.includes('.')) {
+      return host;
+    }
+  }
+  return defaultDomain;
+};
+
 const firebaseConfig = isTesting ? testingConfig : prodConfig;
+firebaseConfig.authDomain = getAuthDomain(firebaseConfig.authDomain);
+
 if (isTesting) {
   console.log("🧪 Running in TESTING environment (godelivery-testing)");
 }
@@ -70,6 +85,22 @@ if (localStorage.getItem('gd_clear_persistence') === 'true') {
 
 
 export const storage = getStorage(app);
+
+const isLocalhost = typeof window !== 'undefined' && (
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1' ||
+  window.location.hostname.startsWith('192.168.')
+);
+
+if (isLocalhost) {
+  try {
+    // Connect Firestore to local emulator
+    // connectFirestoreEmulator(db, 'localhost', 8080);
+    console.log("🎮 Firestore Emulator bypassed (Connected to Real Database)!");
+  } catch (err) {
+    console.warn("Firestore Emulator connection warning (likely already connected):", err);
+  }
+}
 
 // Messaging (may not be supported in all browsers)
 let messagingInstance = null;

@@ -69,7 +69,41 @@ let currentETA = '--';
 let isFirstFit = true;
 let isDetailsExpanded = false;
 
-export function renderOrderTracking(orderId, content) {
+// Safe coordinate parsing to handle plain objects, firestore GeoPoints, and string coords
+const parseCoords = (c) => {
+  if (!c) return null;
+  let lat = typeof c.lat === 'number' ? c.lat : (typeof c.latitude === 'number' ? c.latitude : null);
+  let lng = typeof c.lng === 'number' ? c.lng : (typeof c.longitude === 'number' ? c.longitude : null);
+  if (lat === null && c.lat !== undefined) lat = parseFloat(c.lat);
+  if (lng === null && c.lng !== undefined) lng = parseFloat(c.lng);
+  if (lat === null && c.latitude !== undefined) lat = parseFloat(c.latitude);
+  if (lng === null && c.longitude !== undefined) lng = parseFloat(c.longitude);
+  if (lat !== null && !isNaN(lat) && lng !== null && !isNaN(lng)) {
+    return { lat, lng };
+  }
+  return null;
+};
+
+export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false) {
+  // Reset all module-level map references to prevent DOM pollution when modal is opened/closed
+  liveMap = null;
+  riderMarker = null;
+  homeMarker = null;
+  pickupMarker = null;
+  dropoffMarker = null;
+  routeLine = null;
+  routeLineGlow = null;
+  currentETA = '--';
+  isFirstFit = true;
+  isDetailsExpanded = false;
+  lastRouteFetchTime = 0;
+  lastRouteStartCoords = null;
+  lastRouteEndCoords = null;
+
+  if (window.currentTrackingUnsub) {
+    try { window.currentTrackingUnsub(); } catch(e) {}
+    window.currentTrackingUnsub = null;
+  }
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
 
@@ -80,22 +114,46 @@ export function renderOrderTracking(orderId, content) {
     <div class="tracking-v5-viewport">
       <div id="live-tracking-map" class="map-container-v5"></div>
       <div class="tracking-v5-nav">
-        <a href="#/profile/orders" class="v5-back-btn">${icon('chevronLeft', 24)}</a>
+        ${inModal ? `
+          <button id="v5-modal-back-btn" class="v5-back-btn" style="pointer-events:auto; border:1px solid var(--color-border); cursor:pointer;">${icon('chevronLeft', 24)}</button>
+        ` : `
+          <a href="#/profile/orders" class="v5-back-btn">${icon('chevronLeft', 24)}</a>
+        `}
         <div id="v5-header-driver-card" style="flex:1; margin-left:10px; pointer-events:auto; min-width:0;"></div>
       </div>
       
-      <div style="position:absolute; top:calc(82px + env(safe-area-inset-top, 0px)); right:16px; z-index:100; display:flex; flex-direction:row-reverse; align-items:center; gap:10px; pointer-events:auto;">
-        <button id="recenter-map-btn" class="v5-recenter-btn-premium" title="Centrar Recorrido" style="position:static; flex-shrink:0;">
-          <div class="v5-recenter-icon-wrapper">
-            ${icon('navigationArrow', 22)}
+      <div style="position:absolute; top:calc(82px + env(safe-area-inset-top, 0px)); right:16px; z-index:100; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div id="v5-driver-map-tip-badge" style="background:#10b981; color:white; font-size:12.5px; font-weight:900; padding:10px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.25); white-space:nowrap; box-shadow:0 4px 14px rgba(16,185,129,0.35); display:none; align-items:center; gap:6px; font-family:system-ui, -apple-system, sans-serif;">
+            💵 Propina: <span id="v5-driver-map-tip-value">$0</span>
           </div>
-        </button>
+          <button id="recenter-map-btn" class="v5-recenter-btn-premium" title="Centrar Recorrido" style="position:static; flex-shrink:0; margin:0;">
+            <div class="v5-recenter-icon-wrapper">
+              ${icon('navigationArrow', 22)}
+            </div>
+          </button>
+        </div>
+        ${isDriverViewOverride ? `
+          <!-- Support Button -->
+          <button id="v5-support-btn" class="v5-recenter-btn-premium" title="Soporte" style="position:static; flex-shrink:0; color:#ef4444; background:var(--color-surface); margin-top:2px;">
+            <div class="v5-recenter-icon-wrapper">
+              ${icon('helpCircle', 20)}
+            </div>
+          </button>
+          <!-- WhatsApp Button -->
+          <button id="v5-whatsapp-btn" class="v5-recenter-btn-premium" title="WhatsApp" style="position:static; flex-shrink:0; color:#25d366; background:var(--color-surface); margin-top:2px;">
+            <div class="v5-recenter-icon-wrapper">
+              ${icon('whatsapp', 20)}
+            </div>
+          </button>
+        ` : ''}
 
-        <div id="v5-dynamic-eta-container" style="pointer-events:auto;"></div>
+        <div id="v5-dynamic-eta-container" style="pointer-events:auto; margin-top:2px;"></div>
       </div>
 
       <div id="tracking-info-panel" class="v5-info-panel"></div>
       <div id="price-breakdown-modal-container"></div>
+      <div id="details-modal-container"></div>
     </div>
 
     <style>
@@ -137,26 +195,38 @@ export function renderOrderTracking(orderId, content) {
 
       .sonar-pulse-ring-1 {
         position: absolute;
-        top: 50%;
-        left: 50%;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.25);
+        background: rgba(225, 29, 72, 0.08);
+        border: 1px solid rgba(225, 29, 72, 0.15);
         border-radius: 50%;
         transform-origin: center center;
-        animation: radar-ripple-premium 2.2s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
+        animation: radar-ripple-centered 2.2s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
       }
       .sonar-pulse-ring-2 {
         position: absolute;
-        top: 50%;
-        left: 50%;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(var(--color-primary-rgb, 225, 29, 72), 0.2);
+        background: rgba(225, 29, 72, 0.05);
+        border: 1px solid rgba(225, 29, 72, 0.1);
         border-radius: 50%;
         transform-origin: center center;
-        animation: radar-ripple-premium 2.2s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
+        animation: radar-ripple-centered 2.2s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
         animation-delay: 0.6s;
+      }
+      @keyframes radar-ripple-centered {
+        0% {
+          transform: scale(0.5);
+          opacity: 0.95;
+        }
+        100% {
+          transform: scale(2.2);
+          opacity: 0;
+        }
       }
 
       .v5-recenter-btn-premium {
@@ -214,28 +284,27 @@ export function renderOrderTracking(orderId, content) {
         position: relative;
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-start;
         padding: 10px 0 14px 0;
         margin-top: 5px;
       }
       .v5-stepper-line {
         position: absolute;
-        top: 21px; /* Mathematically centered with the 26px circle (10px padding + 13px radius - 2px half-height) */
+        top: 22px; /* Mathematically centered with the 26px circle (10px padding + 13px radius - 1px half-height) */
         left: 10%; /* Starts exactly at center of first circle */
         right: 10%; /* Ends exactly at center of last circle */
-        height: 4px;
-        background: var(--color-border-light);
+        height: 2px;
+        background: rgba(0, 0, 0, 0.06);
         z-index: 1;
-        border-radius: 2px;
+        border-radius: 1px;
       }
       .v5-stepper-line-fill {
         height: 100%;
         width: 0%;
         transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-        border-radius: 2px;
-        background: linear-gradient(270deg, var(--color-primary), #F97316, #8B5CF6, var(--color-primary));
-        background-size: 400% 400%;
-        animation: gradient-shimmer-liquid 4s ease infinite;
+        border-radius: 1px;
+        background: var(--color-primary);
+        opacity: 0.8;
       }
       .v5-stepper-step {
         position: relative;
@@ -277,9 +346,49 @@ export function renderOrderTracking(orderId, content) {
       
       /* Active Step */
       .v5-stepper-step.active .v5-step-circle {
-        border-color: var(--color-primary);
-        background: var(--color-primary);
-        box-shadow: 0 0 12px rgba(var(--color-primary-rgb, 59, 130, 246), 0.4);
+        background: transparent !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+      }
+      .v5-stepper-step.active .v5-step-circle::before {
+        content: '';
+        position: absolute;
+        width: 28px;
+        height: 6px;
+        background: var(--color-surface);
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: -1;
+      }
+      .v5-stepper-step.active .v5-step-circle .v5-step-pulse {
+        display: none !important;
+      }
+      .v5-stepper-step.active .v5-step-circle img {
+        width: 48px !important;
+        height: 48px !important;
+        max-width: none !important;
+        margin-top: -11px;
+        filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15));
+      }
+      .v5-stepper-step.active .v5-step-circle img[src*="hourglass"] {
+        animation: float-and-flip 7s infinite cubic-bezier(0.25, 1, 0.5, 1) !important;
+      }
+      .v5-stepper-step.active .v5-step-circle img[src*="delivery-moto"] {
+        animation: moto-riding 1.4s infinite ease-in-out !important;
+      }
+      @keyframes moto-riding {
+        0%, 100% { transform: translateY(0) rotate(0deg) translateX(0); }
+        10% { transform: translateY(-1px) rotate(-1deg) translateX(0.5px); }
+        20% { transform: translateY(0.5px) rotate(0.5deg) translateX(-0.5px); }
+        30% { transform: translateY(-1.2px) rotate(-1.5deg) translateX(1px); }
+        40% { transform: translateY(0.2px) rotate(0.5deg) translateX(-0.2px); }
+        50% { transform: translateY(-0.8px) rotate(-1deg) translateX(0.6px); }
+        60% { transform: translateY(0.4px) rotate(0.8deg) translateX(-0.4px); }
+        70% { transform: translateY(-1.4px) rotate(-2deg) translateX(1.2px); }
+        80% { transform: translateY(0.1px) rotate(0.5deg) translateX(-0.1px); }
+        90% { transform: translateY(-0.6px) rotate(-0.5deg) translateX(0.4px); }
       }
       .v5-stepper-step.active .v5-step-pulse {
         animation: v5-step-pulse-anim 1.8s infinite ease-in-out;
@@ -291,10 +400,59 @@ export function renderOrderTracking(orderId, content) {
         100% { transform: scale(0.9); opacity: 0; }
       }
 
+      .step-icon-animated {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+      }
+
+      @keyframes bounce-slow {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-3px); }
+      }
+      @keyframes wiggle {
+        0%, 100% { transform: rotate(-6deg); }
+        50% { transform: rotate(6deg); }
+      }
+      @keyframes float {
+        0%, 100% { transform: translateY(0) rotate(0deg); }
+        25% { transform: translateY(-2px) rotate(-2deg); }
+        50% { transform: translateY(-4px) rotate(0deg); }
+        75% { transform: translateY(-2px) rotate(2deg); }
+      }
+      @keyframes float-and-flip {
+        0%, 40% { transform: translateY(0) rotate(0deg); }
+        10% { transform: translateY(-3px) rotate(-2deg); }
+        25% { transform: translateY(-4px) rotate(2deg); }
+        35% { transform: translateY(-2px) rotate(-1deg); }
+        
+        /* First flip (180deg) at 45% */
+        45% { transform: translateY(-1px) rotate(-6deg); }
+        52% { transform: translateY(-5px) rotate(186deg); }
+        55% { transform: translateY(-3px) rotate(176deg); }
+        58%, 85% { transform: translateY(0) rotate(180deg); }
+        
+        /* Float while upside down */
+        65% { transform: translateY(-3px) rotate(182deg); }
+        75% { transform: translateY(-4px) rotate(178deg); }
+        
+        /* Second flip (360deg) back to start at 90% */
+        90% { transform: translateY(-1px) rotate(174deg); }
+        96% { transform: translateY(-5px) rotate(366deg); }
+        98% { transform: translateY(-3px) rotate(358deg); }
+        100% { transform: translateY(0) rotate(360deg); }
+      }
+
       /* Completed Step */
+      .v5-stepper-step.completed {
+        opacity: 0.45;
+        transition: opacity 0.3s ease;
+      }
       .v5-stepper-step.completed .v5-step-circle {
         background: var(--color-primary);
         border-color: var(--color-primary);
+        transform: scale(0.9);
       }
       .v5-stepper-step.completed .v5-step-icon {
         display: flex;
@@ -407,9 +565,36 @@ export function renderOrderTracking(orderId, content) {
     if (!snapshot.exists()) return;
     const order = { id: snapshot.id, ...snapshot.data() };
     
+    // Dynamically retrieve real commerce logo and name from Firestore if needed
+    if (order.comercioId && !order.isFavor && !order.isTrip) {
+      if (!window.commerceCache) window.commerceCache = {};
+      if (window.commerceCache[order.comercioId]) {
+        order.comercioRealLogo = window.commerceCache[order.comercioId].logo;
+        order.comercioRealName = window.commerceCache[order.comercioId].name;
+      } else {
+        import('firebase/firestore').then(async ({ getDoc, doc }) => {
+          try {
+            const comSnap = await getDoc(doc(db, 'comercios', order.comercioId));
+            if (comSnap.exists()) {
+              const comData = comSnap.data();
+              window.commerceCache[order.comercioId] = {
+                logo: comData.logo || comData.image || '/logo.png',
+                name: comData.name || order.comercioName || 'Comercio'
+              };
+              order.comercioRealLogo = window.commerceCache[order.comercioId].logo;
+              order.comercioRealName = window.commerceCache[order.comercioId].name;
+              updateUI(order, isDriverViewOverride);
+            }
+          } catch (e) {
+            console.error("Error fetching commerce real logo:", e);
+          }
+        });
+      }
+    }
+    
     // Auth Check: Prevent driver from viewing the customer tracking view and the verification code
     const user = getState().user;
-    if (user && order.driverId === user.uid && order.userId !== user.uid) {
+    if (!inModal && user && order.driverId === user.uid && order.userId !== user.uid) {
       window.location.hash = '#/delivery';
       return;
     }
@@ -417,14 +602,18 @@ export function renderOrderTracking(orderId, content) {
     const rawStatus = (order.status || '').toString().toLowerCase();
     const isCompleted = rawStatus === 'completed' || rawStatus === 'entregado';
     if (isCompleted) {
-      if (!window[`hasShownCompletedModal_${order.id}`]) {
-        window[`hasShownCompletedModal_${order.id}`] = true;
-        import('../components/delivery-rating.js').then(m => m.showDeliveryRating(order));
+      if (inModal) {
+        import('../components/modal.js').then(m => m.closeModal());
+      } else {
+        if (!window[`hasShownCompletedModal_${order.id}`]) {
+          window[`hasShownCompletedModal_${order.id}`] = true;
+          import('../components/delivery-rating.js').then(m => m.showDeliveryRating(order));
+        }
       }
     }
 
     window.lastOrderData = order;
-    updateUI(order);
+    updateUI(order, isDriverViewOverride);
     updateMap(order);
 
     // Real-time update for Price Breakdown Modal if currently open
@@ -432,7 +621,167 @@ export function renderOrderTracking(orderId, content) {
     if (priceModalBackdrop) {
       openPriceBreakdownModal(order);
     }
+
+    // Bind driver actions
+    const isDriverView = isDriverViewOverride || !!(user && order.driverId === user.uid && order.userId !== user.uid);
+    if (isDriverView) {
+      setTimeout(async () => {
+        try {
+          const { markAsPickedUp, markAsDelivered, openSlideToConfirmModal, showEditFavorPriceModal } = await import('./delivery-panel.js');
+          const { updateDoc, addDoc, doc, serverTimestamp, collection } = await import('firebase/firestore');
+
+          const pickupBtn = document.getElementById('v5-driver-pickup-btn');
+          if (pickupBtn) {
+            pickupBtn.onclick = () => {
+              showConfirm({
+                title: order.isTrip ? '¿Confirmar Inicio de Viaje?' : '¿Confirmar Retiro?',
+                message: order.isTrip ? 'Confirmá que el pasajero ya está a bordo para iniciar el trayecto.' : 'Asegurate de haber recibido todos los productos del local.',
+                confirmText: order.isTrip ? 'Iniciar Viaje' : 'Sí, retirar',
+                onConfirm: async () => {
+                  pickupBtn.disabled = true;
+                  pickupBtn.innerHTML = 'Actualizando...';
+                  await markAsPickedUp(order.id);
+                  if (order.isFavor && order.favorType === 'compra') {
+                    showEditFavorPriceModal(order, true);
+                  }
+                }
+              });
+            };
+          }
+
+          const editPriceBtn = document.getElementById('v5-driver-edit-price-btn');
+          if (editPriceBtn) {
+            editPriceBtn.onclick = () => {
+              showEditFavorPriceModal(order, true);
+            };
+          }
+
+          const notifyBtn = document.getElementById('v5-driver-notify-door-btn');
+          if (notifyBtn) {
+            notifyBtn.onclick = () => {
+              if (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios') && !order.subtotal) {
+                import('../components/toast.js').then(m => m.showToast(
+                  order.favorType === 'pagodeservicios' ? '⚠️ Debes ingresar el valor de las facturas antes de avisar que estás afuera' : '⚠️ Debes ingresar el valor de los productos antes de avisar que estás afuera',
+                  'warning'
+                ));
+                showEditFavorPriceModal(order, true);
+                return;
+              }
+
+              // Optimistic UI updates - Change button to "ENTREGAR" instantly
+              order.isAtDoor = true;
+              updateUI(order);
+
+              // Run database writes in the background (segundo plano)
+              updateDoc(doc(db, 'orders', order.id), {
+                isAtDoor: true,
+                atDoorAt: serverTimestamp()
+              }).catch(err => console.error('Error updating door status in bg:', err));
+
+              if (order.userId) {
+                const isEncomienda = order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda');
+                const codeStr = (order.verificationCode && !isEncomienda) ? ` Tené listo tu código de entrega: ${order.verificationCode}` : '';
+                addDoc(collection(db, 'users', order.userId, 'notifications'), {
+                  title: '¡Tu repartidor está en la puerta!',
+                  body: order.isFavor 
+                    ? `El repartidor llegó con tu favor. ¡Salí a recibirlo!${codeStr}` 
+                    : `Prepárate para recibir tu pedido. ¡Ya llegó!${codeStr}`,
+                  type: 'system',
+                  status: 'unread',
+                  createdAt: serverTimestamp()
+                }).catch(err => console.error('Error sending notification in bg:', err));
+              }
+              import('../components/toast.js').then(m => m.showToast('Cliente notificado', 'success'));
+            };
+          }
+
+          const supportBtn = document.getElementById('v5-support-btn');
+          if (supportBtn) {
+            supportBtn.onclick = async () => {
+              try {
+                const { openSupportTicketModal } = await import('../components/support-bot.js');
+                await openSupportTicketModal(order.id, order.orderId || order.id);
+              } catch (err) {
+                console.error('Error opening support ticket chat:', err);
+                import('../components/toast.js').then(t => t.showToast('Error al abrir chat de soporte', 'danger'));
+              }
+            };
+          }
+
+          const whatsappBtn = document.getElementById('v5-whatsapp-btn');
+          if (whatsappBtn) {
+            whatsappBtn.onclick = () => {
+              const rawPhone = order.userPhone || '';
+              const clientName = order.userName || 'Cliente';
+              const orderNum = order.orderId || order.id || '';
+              if (!rawPhone) {
+                import('../components/toast.js').then(t => t.showToast('El cliente no posee un número de teléfono configurado.', 'warning'));
+                return;
+              }
+              let cleanedPhone = rawPhone.replace(/\D/g, '');
+              if (cleanedPhone.startsWith('54')) {
+                if (!cleanedPhone.startsWith('549')) {
+                  cleanedPhone = '549' + cleanedPhone.substring(2);
+                }
+              } else if (cleanedPhone.startsWith('15')) {
+                cleanedPhone = '549' + cleanedPhone.substring(2);
+              } else if (!cleanedPhone.startsWith('549') && cleanedPhone.length <= 10) {
+                cleanedPhone = '549' + cleanedPhone;
+              }
+              const msg = encodeURIComponent(`Hola ${clientName}, soy el repartidor de GoDelivery en camino con tu pedido #${orderNum}.`);
+              const waUrl = `https://wa.me/${cleanedPhone}?text=${msg}`;
+              window.open(waUrl, '_blank');
+            };
+          }
+
+          const deliverBtn = document.getElementById('v5-driver-deliver-btn');
+          if (deliverBtn) {
+            deliverBtn.onclick = () => {
+              if (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios') && !order.subtotal) {
+                import('../components/toast.js').then(m => m.showToast(
+                  order.favorType === 'pagodeservicios' ? '⚠️ Debes ingresar el valor de las facturas antes de entregar el pedido' : '⚠️ Debes ingresar el valor de los productos antes de entregar el pedido',
+                  'warning'
+                ));
+                showEditFavorPriceModal(order, true);
+                return;
+              }
+
+              const noCodeRequired = order.isManual === true || order.noCodeRequired === true || order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda');
+              openSlideToConfirmModal({
+                isTrip: !!order.isTrip,
+                noCodeRequired,
+                codes: [order.verificationCode || ''],
+                ids: [order.id],
+                orders: [order],
+                onConfirm: async () => {
+                  import('../components/toast.js').then(m => m.showToast(order.isTrip ? 'Finalizando viaje...' : 'Procesando entrega...', 'info'));
+                  await markAsDelivered(order.id);
+                }
+              });
+            };
+          }
+        } catch (e) {
+          console.error('Error binding driver actions:', e);
+        }
+      }, 200);
+    }
   });
+  window.currentTrackingUnsub = unsub;
+  
+  if (inModal) {
+    setTimeout(() => {
+      const modalBackBtn = document.getElementById('v5-modal-back-btn');
+      if (modalBackBtn) {
+        modalBackBtn.onclick = () => {
+          if (window.currentTrackingUnsub) {
+            try { window.currentTrackingUnsub(); } catch(e) {}
+            window.currentTrackingUnsub = null;
+          }
+          closeModal();
+        };
+      }
+    }, 150);
+  }
 
   document.getElementById('recenter-map-btn').onclick = () => {
     if (!liveMap) return;
@@ -440,9 +789,9 @@ export function renderOrderTracking(orderId, content) {
     const order = window.lastOrderData;
     const isTrip = order?.isTrip === true;
     const rawStatus = (order?.status || '').toString().toLowerCase();
-    const riderPos = order?.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
-    const pickupPos = order?.pickupCoords ? { lat: order.pickupCoords.lat, lng: order.pickupCoords.lng } : null;
-    const dropoffPos = order?.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
+    const riderPos = parseCoords(order?.driverLocation);
+    const pickupPos = parseCoords(order?.pickupCoords);
+    const dropoffPos = parseCoords(order?.deliveryCoords);
     const destPos = isTrip
       ? (rawStatus === 'delivering' || rawStatus === 'en camino' ? dropoffPos : pickupPos)
       : dropoffPos;
@@ -488,13 +837,13 @@ export function renderOrderTracking(orderId, content) {
   };
 }
 
-function updateUI(order) {
+function updateUI(order, isDriverViewOverride = false) {
   const container = document.getElementById('tracking-info-panel');
   if (!container) return;
 
   const statusMap = {
-    'pendiente': 'pending', 'confirmado': 'confirmed', 'preparando': 'confirmed',
-    'listo': 'ready', 'en camino': 'delivering', 'entregado': 'completed', 'cancelado': 'cancelled'
+    'pendiente': 'pending', 'confirmado': 'preparing', 'confirmed': 'preparing', 'preparando': 'preparing',
+    'listo': 'ready', 'en camino': 'delivering', 'entregado': 'completed', 'cancelado': 'cancelled', 'accepted': 'delivering'
   };
 
   const rawStatus = (order.status || '').toString().toLowerCase();
@@ -503,6 +852,8 @@ function updateUI(order) {
   if (normalizedStatus.includes('entreg') || normalizedStatus.includes('complet')) normalizedStatus = 'completed';
   if (normalizedStatus.includes('cancel')) normalizedStatus = 'cancelled';
 
+  const user = getState().user;
+  const isDriverView = isDriverViewOverride || !!(user && order.driverId === user.uid && order.userId !== user.uid);
   const itemsCost = order.itemsCost || order.subtotal || order.itemsTotal || (order.items || []).reduce((sum, item) => sum + ((item.price || 0) * (item.qty || 1)), 0);
   const shippingFee = order.shippingFee || order.deliveryFee || order.shippingCost || order.deliveryCost || 0;
   const serviceFee = order.appUsageFee || order.serviceFee || order.platformFee || 0;
@@ -513,7 +864,10 @@ function updateUI(order) {
   const trackingFingerprint = JSON.stringify({
     id: order.id,
     status: normalizedStatus,
+    isAtDoor: !!order.isAtDoor,
     driverId: order.driverId || '',
+    driverName: order.driverName || '',
+    driverPhoto: order.driverPhoto || '',
     driverAlias: order.driverAlias || '',
     code: order.verificationCode || '',
     itemsCost: Number(itemsCost) || 0,
@@ -529,6 +883,18 @@ function updateUI(order) {
     return;
   }
   container.dataset.lastTrackingFingerprint = trackingFingerprint;
+
+  // Update fixed driver tip badge
+  const driverTipBadge = document.getElementById('v5-driver-map-tip-badge');
+  if (driverTipBadge) {
+    const tipVal = Number(order.tip || order.tipAmount || 0) || 0;
+    if (isDriverView && tipVal > 0) {
+      document.getElementById('v5-driver-map-tip-value').textContent = `$${Math.round(tipVal)}`;
+      driverTipBadge.style.display = 'flex';
+    } else {
+      driverTipBadge.style.display = 'none';
+    }
+  }
 
   const isCompleted = normalizedStatus === 'completed';
   const isCancelled = normalizedStatus === 'cancelled';
@@ -550,38 +916,42 @@ function updateUI(order) {
     }
   }
 
-  // Update Top Floating Header Driver Card
+  // Update Top Floating Header Driver/Commerce Card
   const headerDriverCard = document.getElementById('v5-header-driver-card');
   if (headerDriverCard) {
-    if (order.driverId) {
-      const nameForInitials = order.driverName || 'Repartidor';
-      const initialLetter = nameForInitials.charAt(0).toUpperCase();
+    const isTripOrFavor = order.isTrip || order.isFavor;
+    const hasCommerce = !isTripOrFavor && (order.comercioId || order.comercioName);
+
+    if (isDriverView) {
+      // Driver view: show the CLIENT's info + chat button
+      const clientName = order.userName || order.clientName || order.userDisplayName || 'Cliente';
+      const clientPhoto = order.userPhoto || order.clientPhoto || null;
+      const initialLetter = clientName.charAt(0).toUpperCase();
       const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
-      const fallbackColor = colors[nameForInitials.length % colors.length];
-      
-      const driverIdStr = order.driverDeliveryId || (order.driverId ? order.driverId.slice(0, 6).toUpperCase() : '');
-      const avatarHtml = order.driverPhoto ? `
-        <div style="width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: ${fallbackColor}; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-          <img src="${order.driverPhoto}" onerror="this.onerror=null; this.parentNode.innerHTML='<span style=\\'color:white; font-weight:900; font-size:14px;\\'>${initialLetter}</span>';" style="width:100%; height:100%; object-fit:cover;">
+      const fallbackColor = colors[clientName.length % colors.length];
+
+      const avatarHtml = clientPhoto ? `
+        <div style="width:36px; height:36px; border-radius:50%; overflow:hidden; background:${fallbackColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <img src="${clientPhoto}" onerror="this.onerror=null; this.parentNode.innerHTML='<span style=\\'color:white; font-weight:900; font-size:14px;\\'>${initialLetter}</span>';" style="width:100%; height:100%; object-fit:cover;">
         </div>
       ` : `
-        <div style="width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: ${fallbackColor}; display: flex; align-items: center; justify-content: center; color: white; font-weight: 900; font-size: 14px; flex-shrink: 0;">
+        <div style="width:36px; height:36px; border-radius:50%; background:${fallbackColor}; display:flex; align-items:center; justify-content:center; color:white; font-weight:900; font-size:14px; flex-shrink:0;">
           ${initialLetter}
         </div>
       `;
 
       headerDriverCard.innerHTML = `
-        <div style="background: var(--glass-bg, rgba(255, 255, 255, 0.96)); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--glass-border, rgba(0,0,0,0.08)); border-radius: 100px; padding: 4px 6px 4px 5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.12);">
+        <div style="background:var(--glass-bg, rgba(255,255,255,0.96)); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid var(--glass-border, rgba(0,0,0,0.08)); border-radius:100px; padding:4px 6px 4px 5px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 20px rgba(0,0,0,0.12);">
           ${avatarHtml}
-          <div style="min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px;">
-            <span style="font-size: 14.5px; font-weight: 900; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2;">${order.driverName || 'Repartidor'}</span>
-            ${driverIdStr ? `<span style="font-size: 10px; font-weight: 850; color: var(--color-text-tertiary); background: var(--color-bg-secondary); padding: 2px 6px; border-radius: 6px; border: 1px solid var(--color-border-light); flex-shrink: 0;">ID: ${driverIdStr}</span>` : ''}
+          <div style="min-width:0; flex:1; display:flex; align-items:center; gap:6px;">
+            <span style="font-size:14.5px; font-weight:900; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;">${clientName}</span>
           </div>
-          <button id="header-chat-v5-btn" style="background: var(--color-primary); color: white; border: none; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; box-shadow: 0 4px 14px rgba(225, 29, 72, 0.45); transition: transform 0.2s ease;">
+          <button id="header-chat-v5-btn" style="background:var(--color-primary); color:white; border:none; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; box-shadow:0 4px 14px rgba(225,29,72,0.45); transition:transform 0.2s ease;">
             ${icon('chatBubble', 17)}
           </button>
         </div>
       `;
+
       const chatBtn = document.getElementById('header-chat-v5-btn');
       if (chatBtn) {
         chatBtn.onclick = (e) => {
@@ -590,17 +960,94 @@ function updateUI(order) {
           openChat({
             orderId: targetOrder.id,
             type: 'client-delivery',
-            otherName: targetOrder.driverName || 'Repartidor',
+            otherName: clientName,
             orderNum: targetOrder.orderId
           });
         };
       }
+
     } else {
-      headerDriverCard.innerHTML = `
-        <div style="background: var(--glass-bg, rgba(255, 255, 255, 0.95)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--glass-border, rgba(0,0,0,0.08)); border-radius: 100px; padding: 6px 14px; display: flex; align-items: center; justify-content: center; font-weight: 850; font-size: 13px; color: var(--color-text-primary); box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
-          ⚡ Seguimiento en Vivo
-        </div>
-      `;
+      // Client view: show driver info as soon as a driver is assigned
+      const showDriverInfo = !!order.driverId;
+
+      if (showDriverInfo) {
+        const nameForInitials = order.driverName || 'Repartidor';
+        const initialLetter = nameForInitials.charAt(0).toUpperCase();
+        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+        const fallbackColor = colors[nameForInitials.length % colors.length];
+        
+        const driverIdStr = order.driverDeliveryId || (order.driverId ? order.driverId.slice(0, 6).toUpperCase() : '');
+        const avatarHtml = order.driverPhoto ? `
+          <div style="width:36px; height:36px; border-radius:50%; overflow:hidden; background:${fallbackColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <img src="${order.driverPhoto}" onerror="this.onerror=null; this.parentNode.innerHTML='<span style=\\'color:white; font-weight:900; font-size:14px;\\'>${initialLetter}</span>';" style="width:100%; height:100%; object-fit:cover;">
+          </div>
+        ` : `
+          <div style="width:36px; height:36px; border-radius:50%; overflow:hidden; background:${fallbackColor}; display:flex; align-items:center; justify-content:center; color:white; font-weight:900; font-size:14px; flex-shrink:0;">
+            ${initialLetter}
+          </div>
+        `;
+
+        headerDriverCard.innerHTML = `
+          <div style="background:var(--glass-bg, rgba(255,255,255,0.96)); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid var(--glass-border, rgba(0,0,0,0.08)); border-radius:100px; padding:4px 6px 4px 5px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 20px rgba(0,0,0,0.12);">
+            ${avatarHtml}
+            <div style="min-width:0; flex:1; display:flex; align-items:center; gap:6px;">
+              <span style="font-size:14.5px; font-weight:900; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;">${order.driverName || 'Repartidor'}</span>
+              ${driverIdStr ? `<span style="font-size:10px; font-weight:850; color:var(--color-text-tertiary); background:var(--color-bg-secondary); padding:2px 6px; border-radius:6px; border:1px solid var(--color-border-light); flex-shrink:0;">ID: ${driverIdStr}</span>` : ''}
+            </div>
+            <button id="header-chat-v5-btn" style="background:var(--color-primary); color:white; border:none; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; box-shadow:0 4px 14px rgba(225,29,72,0.45); transition:transform 0.2s ease;">
+              ${icon('chatBubble', 17)}
+            </button>
+          </div>
+        `;
+        const chatBtn = document.getElementById('header-chat-v5-btn');
+        if (chatBtn) {
+          chatBtn.onclick = (e) => {
+            e.stopPropagation();
+            const targetOrder = window.lastOrderData || order;
+            openChat({
+              orderId: targetOrder.id,
+              type: 'client-delivery',
+              otherName: targetOrder.driverName || 'Repartidor',
+              orderNum: targetOrder.orderId
+            });
+          };
+        }
+      } else if (hasCommerce) {
+        const commerceLogo = order.comercioRealLogo || order.comercioLogo || '/logo.png';
+        const commerceName = order.comercioRealName || order.comercioName || 'Comercio';
+        headerDriverCard.innerHTML = `
+          <div style="background:var(--glass-bg, rgba(255,255,255,0.96)); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid var(--glass-border, rgba(0,0,0,0.08)); border-radius:100px; padding:4px 6px 4px 5px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 20px rgba(0,0,0,0.12);">
+            <div style="width:36px; height:36px; border-radius:50%; overflow:hidden; background:#f3f4f6; display:flex; align-items:center; justify-content:center; flex-shrink:0; border:1px solid var(--color-border-light);">
+              <img src="${commerceLogo}" onerror="this.onerror=null; this.src='/logo.png';" style="width:100%; height:100%; object-fit:cover;">
+            </div>
+            <div style="min-width:0; flex:1; display:flex; align-items:center; gap:6px;">
+              <span style="font-size:14.5px; font-weight:900; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;">${commerceName}</span>
+            </div>
+            <button id="header-chat-v5-btn" style="background:var(--color-primary); color:white; border:none; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; box-shadow:0 4px 14px rgba(225,29,72,0.45); transition:transform 0.2s ease;">
+              ${icon('chatBubble', 17)}
+            </button>
+          </div>
+        `;
+        const chatBtn = document.getElementById('header-chat-v5-btn');
+        if (chatBtn) {
+          chatBtn.onclick = (e) => {
+            e.stopPropagation();
+            const targetOrder = window.lastOrderData || order;
+            openChat({
+              orderId: targetOrder.id,
+              type: 'client-commerce',
+              otherName: targetOrder.comercioName || 'Comercio',
+              orderNum: targetOrder.orderId
+            });
+          };
+        }
+      } else {
+        headerDriverCard.innerHTML = `
+          <div style="background:var(--glass-bg, rgba(255,255,255,0.95)); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); border:1px solid var(--glass-border, rgba(0,0,0,0.08)); border-radius:100px; padding:6px 14px; display:flex; align-items:center; justify-content:center; font-weight:850; font-size:13px; color:var(--color-text-primary); box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+            ⚡ Seguimiento en Vivo
+          </div>
+        `;
+      }
     }
   }
 
@@ -609,47 +1056,45 @@ function updateUI(order) {
   if (order.isTrip) {
     titleText = isCompleted ? '¡Viaje Finalizado!' :
                 isCancelled ? 'Viaje Cancelado' :
-                order.isAtDoor ? '¡El chofer está en la puerta!' :
+                order.isAtDoor ? (isDriverView ? '¡Llegaste al destino!' : '¡El chofer está en la puerta!') :
                 isDelivering ? 'Viaje en curso (Pasajero a bordo)' :
                 (!order.driverId ? 'Buscando chofer...' : 'El chofer va hacia tu ubicación');
   } else if (order.isFavor) {
     titleText = isCompleted ? '¡Favor Finalizado!' : 
                 isCancelled ? 'Favor Cancelado' : 
-                order.isAtDoor ? '¡El repartidor está en la puerta!' :
-                isDelivering ? 'El repartidor lleva tu pedido' : 
-                (order.driverId ? 'Yendo a buscar tu pedido' : 'Buscando repartidor...');
-  } else {
+                order.isAtDoor ? (isDriverView ? '¡Estás en la puerta!' : '¡El repartidor está en la puerta!') :
+                isDelivering ? '' : 
+                (order.driverId ? '' : '');
+    const hasCommerce = !order.isTrip && !order.isFavor && (order.comercioId || order.comercioName);
     titleText = isCompleted ? '¡Pedido Finalizado!' : 
                 isCancelled ? 'Pedido Cancelado' : 
-                order.isAtDoor ? '¡El repartidor está en la puerta!' :
+                order.isAtDoor ? (isDriverView ? '¡Estás en la puerta!' : '¡El repartidor está en la puerta!') :
                 isDelivering ? 'El repartidor va hacia vos' : 
-                (normalizedStatus === 'pending' ? 'Esperando confirmación' :
-                 normalizedStatus === 'ready' ? (order.driverId ? (order.isGoCash ? 'Yendo a tu ubicación' : 'Yendo a buscar tu pedido') : 'Buscando repartidor...') : 
+                (normalizedStatus === 'pending' ? (hasCommerce ? '' : 'Esperando confirmación') :
+                 normalizedStatus === 'ready' ? (order.driverId ? (order.isGoCash ? 'Yendo a tu ubicación' : '') : 'Buscando repartidor...') : 
                  'Preparando tu pedido');
   }
 
   let subtitleHtml = '';
+  const hasCommerce = !order.isTrip && !order.isFavor && (order.comercioId || order.comercioName);
   if (order.isAtDoor && !isCompleted && !isCancelled) {
-    subtitleHtml = `
-      <p class="v5-status-subtitle" style="font-size: 13px; color: #d97706; margin: 6px 0 0 0; font-weight: 700; line-height: 1.4;">
-        Por favor, salí a recibir ${order.isTrip ? 'al chofer' : 'tu pedido'} para evitar demoras.
-      </p>
-    `;
-  } else if (!order.driverId && (order.isTrip || order.isFavor || normalizedStatus === 'pending' || normalizedStatus === 'ready' || normalizedStatus === 'confirmed')) {
-    if (order.queueTargetDriverName) {
+    if (isDriverView) {
+      titleText = '';
+      subtitleHtml = '';
+    } else {
       subtitleHtml = `
-        <div style="margin-top: 6px; padding: 10px 14px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-          <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 800; color: #d97706;">
-            <span style="font-size: 15px;">⏳</span>
-            <span>Ofreciendo a: <strong style="color: var(--color-text-primary); font-weight: 900;">${order.queueTargetDriverName}</strong></span>
-          </div>
-          <div class="client-queue-timer" data-offered-at="${order.queueOfferedAt?.toMillis ? order.queueOfferedAt.toMillis() : (order.queueOfferedAt ? new Date(order.queueOfferedAt).getTime() : Date.now())}" style="font-size: 11px; font-weight: 900; background: #d97706; color: white; padding: 3px 8px; border-radius: 99px;">
-            60s
-          </div>
-        </div>
+        <p class="v5-status-subtitle" style="font-size: 13px; color: #d97706; margin: 6px 0 0 0; font-weight: 700; line-height: 1.4;">
+          Por favor, salí a recibir ${order.isTrip ? 'al chofer' : 'tu pedido'} para evitar demoras.
+        </p>
       `;
+    }
+  } else if (!order.driverId && (order.isTrip || order.isFavor || normalizedStatus === 'pending' || normalizedStatus === 'ready' || normalizedStatus === 'confirmed')) {
+    if (order.isFavor && normalizedStatus === 'pending') {
+      subtitleHtml = '';
+    } else if (order.queueTargetDriverName) {
+      subtitleHtml = '';
     } else if (normalizedStatus === 'pending') {
-      subtitleHtml = `
+      subtitleHtml = hasCommerce ? '' : `
         <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
           Por favor espera a que el comercio confirme tu pedido, tomará solo un momento.
         </p>
@@ -674,8 +1119,10 @@ function updateUI(order) {
   }
 
   container.innerHTML = `
+    ${getStatusBannerHTML(order, normalizedStatus, isDriverView)}
     <div class="v5-status-header">
       <div class="v5-status-content">
+        ${titleText ? `
         <h2 class="v5-status-title">
           ${titleText.includes('Buscando') ? `
             <div class="radar-search-wrapper">
@@ -686,10 +1133,10 @@ function updateUI(order) {
           ` : ''}
           ${titleText}
         </h2>
+        ` : ''}
         ${subtitleHtml}
         <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
       </div>
-      <div style="font-size:9px; font-weight:800; color: var(--color-text-tertiary); padding:5px 10px; background: var(--color-bg-secondary); border-radius:8px; border: 1px solid var(--color-border-light);">#${order.orderId || '...'}</div>
     </div>
     
     ${order.isTrip ? `
@@ -700,7 +1147,7 @@ function updateUI(order) {
         
         <div class="v5-stepper-step ${getTripStepClass(order, 0)}">
           <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-icon">${icon('check', 13)}</span>
             <span class="v5-step-pulse"></span>
           </div>
           <span class="v5-step-label">Buscando</span>
@@ -708,7 +1155,7 @@ function updateUI(order) {
  
         <div class="v5-stepper-step ${getTripStepClass(order, 1)}">
           <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-icon">${icon('check', 13)}</span>
             <span class="v5-step-pulse"></span>
           </div>
           <span class="v5-step-label">Asignado</span>
@@ -716,7 +1163,7 @@ function updateUI(order) {
  
         <div class="v5-stepper-step ${getTripStepClass(order, 2)}">
           <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-icon">${icon('check', 13)}</span>
             <span class="v5-step-pulse"></span>
           </div>
           <span class="v5-step-label">En camino</span>
@@ -724,7 +1171,7 @@ function updateUI(order) {
  
         <div class="v5-stepper-step ${getTripStepClass(order, 3)}">
           <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-icon">${icon('check', 13)}</span>
             <span class="v5-step-pulse"></span>
           </div>
           <span class="v5-step-label">En viaje</span>
@@ -732,7 +1179,7 @@ function updateUI(order) {
  
         <div class="v5-stepper-step ${getTripStepClass(order, 4)}">
           <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 10)}</span>
+            <span class="v5-step-icon">${icon('check', 13)}</span>
             <span class="v5-step-pulse"></span>
           </div>
           <span class="v5-step-label">Llegaste</span>
@@ -741,52 +1188,79 @@ function updateUI(order) {
     ` : `
       <div class="v5-stepper-container">
         <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus, order.isFavor)}%;"></div>
+          <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus, order.isFavor, order)}%;"></div>
         </div>
         
         ${order.isFavor ? `
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, true)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, true, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Solicitado</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, true)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, true, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Buscando</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, true)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, true, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Yendo al punto</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, true)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, true, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">En camino</span>
           </div>
         ` : `
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, false, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Pendiente</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, false, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Aprobado</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, false, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Preparando</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, false, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">Listo</span>
           </div>
 
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4)}">
-            <div class="v5-step-circle"><span class="v5-step-icon">${icon('check', 10)}</span><span class="v5-step-pulse"></span></div>
+          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4, false, order)}">
+            <div class="v5-step-circle">
+              ${getStepCircleContent(order, 4, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-pulse"></span>
+            </div>
             <span class="v5-step-label">En camino</span>
           </div>
         `}
@@ -813,48 +1287,72 @@ function updateUI(order) {
 
 
 
-    ${isDelivering && !order.isTrip ? `
+    ${!isDriverView && isDelivering && !order.isTrip ? `
       <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
     ` : ''}
 
-    ${(order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf'))) ? `
-      <!-- Card de Transferencia con Alias del Repartidor -->
-      <div style="background:rgba(124,58,237,0.08); border:1.5px solid rgba(124,58,237,0.25); border-radius:18px; padding:12px 14px; margin-top:2px; display:flex; flex-direction:column; gap:8px; width:100%; box-sizing:border-box;">
-        <div style="display:flex; align-items:center; justify-content:space-between;">
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-size:15px;">🏦</span>
-            <span style="font-size:11px; font-weight:850; color:#6d28d9; text-transform:uppercase; letter-spacing:0.04em;">Pago por Transferencia</span>
-          </div>
-          <span style="font-size:10px; font-weight:800; color:#7c3aed; background:rgba(124,58,237,0.12); padding:2px 8px; border-radius:6px;">Alias Repartidor</span>
+    ${(!isDriverView && order.driverId && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
+      <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
+      <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
+        <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
+          <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias del Repartidor</span>
+          <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || 'Esperando asignación...'}</span>
         </div>
-        <div style="display:flex; align-items:center; justify-content:space-between; background:var(--color-surface); padding:8px 12px; border-radius:12px; border:1px solid rgba(124,58,237,0.2);">
-          <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:8px;">
-            <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Alias CBU / CVU</span>
-            <span style="font-size:13.5px; font-weight:900; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || 'Consultar al repartidor'}</span>
-          </div>
-          ${order.driverAlias ? `
-            <button id="v5-copy-alias-btn" style="background:linear-gradient(135deg,#7c3aed,#6d28d9); color:white; border:none; padding:7px 14px; border-radius:10px; font-size:11.5px; font-weight:900; cursor:pointer; flex-shrink:0; box-shadow:0 3px 8px rgba(124,58,237,0.3); text-transform:uppercase;">
-              Copiar
+        ${order.driverAlias ? `
+          <button id="v5-copy-alias-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; cursor:pointer; flex-shrink:0; transition:all 0.2s;">
+            Copiar
+          </button>
+        ` : ''}
+      </div>
+    ` : ''}
+
+    ${(isDriverView && !isCompleted && !isCancelled) ? `
+      <!-- Botones de Acción del Repartidor -->
+      <div class="driver-actions-container" style="display:flex; flex-direction:column; gap:10px; width:100%; margin-top:6px; margin-bottom:6px; box-sizing:border-box;">
+        ${!isDelivering ? `
+          <button id="v5-driver-pickup-btn" style="background:var(--color-primary); color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(225, 29, 72, 0.35); display:flex; align-items:center; justify-content:center; gap:8px;">
+            ${icon('bike', 18)} ${order.isTrip ? 'INICIAR VIAJE' : 'RETIRAR PEDIDO'}
+          </button>
+          ${(order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
+            <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('creditCard', 14)} ${order.favorType === 'pagodeservicios' ? 'Ingresar Valor de Facturas' : 'Ingresar Valor de Compra'} (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
             </button>
           ` : ''}
-        </div>
+        ` : `
+          <div style="display:flex; gap:10px; width:100%;">
+            ${!order.isAtDoor ? `
+              <button id="v5-driver-notify-door-btn" style="background:#f59e0b; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:14.5px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap;">
+                ${icon('bell', 16)} AVISAR AFUERA
+              </button>
+            ` : `
+              <button id="v5-driver-deliver-btn" style="background:#10b981; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('checkCircle', 16)} ${order.isTrip ? 'FINALIZAR VIAJE' : 'ENTREGAR'}
+              </button>
+            `}
+          </div>
+        `}
+        ${isDelivering && (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
+          <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px;">
+            ${icon('creditCard', 14)} Modificar precio (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+          </button>
+        ` : ''}
       </div>
     ` : ''}
 
     <!-- Total Price Pill & Details Toggle -->
-    <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:10px 14px; background:var(--color-bg-secondary); border-radius:18px; border:1px solid var(--color-border-light); margin-top:2px; box-sizing:border-box;">
-      <div style="display:flex; align-items:center; gap:6px;">
-        <span style="font-size:12px; font-weight:700; color:var(--color-text-secondary);">Total:</span>
-        <strong id="v5-footer-total-val" style="font-size:18px; font-weight:950; color:var(--color-text-primary); transition: all 0.3s ease;">
+    <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:12px 16px; background:linear-gradient(to right, rgba(255,255,255,0.7), rgba(255,255,255,0.55)); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-radius:20px; border:1px solid rgba(255,255,255,0.6); margin-top:6px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); box-sizing:border-box;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Total:</span>
+        <strong id="v5-footer-total-val" style="font-size:20px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;">
           $${Math.round(totalAmount).toLocaleString('es-AR')}
         </strong>
-        <button id="v5-price-breakdown-info-btn" style="background:rgba(var(--color-primary-rgb, 225, 29, 72), 0.12); color:var(--color-primary); border:none; width:24px; height:24px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:900; cursor:pointer; font-family:sans-serif;" title="Ver desglose del importe">
+        <button id="v5-price-breakdown-info-btn" style="background:var(--color-primary); color:#ffffff; border:none; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900; cursor:pointer; margin-left:2px; transition:all 0.2s;" title="Ver desglose del importe">
           i
         </button>
       </div>
-      <button id="v5-toggle-details-btn" class="v5-toggle-btn" style="margin:0; padding:6px 14px; font-size:11.5px; width:auto; border-radius:10px;">
-        ${isDetailsExpanded ? icon('chevronUp', 13) : icon('chevronDown', 13)} 
-        ${isDetailsExpanded ? 'Ocultar' : 'Ver Detalles'}
+      <button id="v5-toggle-details-btn" class="v5-toggle-btn" style="margin:0; padding:8px 16px; font-size:12px; font-weight:800; width:auto; border-radius:12px; background:var(--color-primary); color:#ffffff; border:none; display:flex; align-items:center; gap:6px; transition:all 0.2s;">
+        <span>Ver Detalles</span>
+        ${icon('clipboard', 12)}
       </button>
     </div>
 
@@ -869,6 +1367,20 @@ function updateUI(order) {
               ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
             </div>
           ` : ''}
+        </div>
+      ` : ''}
+      ${(!order.isFavor && !order.isTrip && order.items && order.items.length > 0) ? `
+        <div style="background:var(--color-surface); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left; display:flex; flex-direction:column; gap:8px;">
+          <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Detalle del Pedido</div>
+          ${order.items.map(item => `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.04);">
+              <div style="flex:1;">
+                <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${item.qty}x</span> ${item.name}</div>
+                ${item.notes ? `<div style="font-size:10px; color:var(--color-text-secondary); margin-top:2px; font-style:italic;">"${item.notes}"</div>` : ''}
+              </div>
+              <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
+            </div>
+          `).join('')}
         </div>
       ` : ''}
       ${(normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus))) ? `
@@ -897,18 +1409,7 @@ function updateUI(order) {
   });
 
   document.getElementById('v5-toggle-details-btn')?.addEventListener('click', () => {
-    isDetailsExpanded = !isDetailsExpanded;
-    const expDiv = document.getElementById('v5-expandable-details');
-    const toggleBtn = document.getElementById('v5-toggle-details-btn');
-    if (expDiv && toggleBtn) {
-      if (isDetailsExpanded) {
-        expDiv.classList.add('expanded');
-        toggleBtn.innerHTML = `<span>Ocultar</span> ${icon('chevronUp', 13)}`;
-      } else {
-        expDiv.classList.remove('expanded');
-        toggleBtn.innerHTML = `<span>Ver Detalles</span> ${icon('chevronDown', 13)}`;
-      }
-    }
+    window.openOrderDetailsModal(order);
   });
 
   document.getElementById('chat-v5-btn')?.addEventListener('click', () => {
@@ -995,7 +1496,7 @@ function updateUI(order) {
     calculatePredictiveETA(order).then(eta => {
       const etaContainer = document.getElementById('v5-dynamic-eta-container');
       if (etaContainer) {
-        if (order.status === 'completed' || order.status === 'cancelled' || isWaitingConfirmation || isSearchingRider) {
+        if (isDriverView || order.status === 'completed' || order.status === 'cancelled' || isWaitingConfirmation || isSearchingRider) {
           etaContainer.innerHTML = '';
         } else {
           const timeStr = eta.label.includes('Llega') ? `<b>${eta.total} min</b>` : `<b>${eta.min}-${eta.max} min</b>`;
@@ -1043,9 +1544,9 @@ function updateMap(order) {
   const rawStatus = (order.status || '').toString().toLowerCase();
 
   if (order.isTrip === true) {
-    const riderPos = order.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
-    const pickupPos = order.pickupCoords ? { lat: order.pickupCoords.lat, lng: order.pickupCoords.lng } : null;
-    const dropoffPos = order.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
+    const riderPos = parseCoords(order.driverLocation);
+    const pickupPos = parseCoords(order.pickupCoords);
+    const dropoffPos = parseCoords(order.deliveryCoords);
 
     if (!liveMap) {
       const theme = document.documentElement.getAttribute('data-theme') || 'light';
@@ -1144,8 +1645,9 @@ function updateMap(order) {
             <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
               <div class="sonar-pulse-ring-1"></div>
               <div class="sonar-pulse-ring-2"></div>
-              <div class="rider-marker-avatar" style="background:#3b82f6; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2.5px solid white; position:relative; z-index:2; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.45); transition: transform 0.8s ease;">
-                ${order.tripType === 'moto' ? icon('bike', 18) : icon('car', 18)}
+              <div class="moto-base-glow" style="position:absolute; width:22px; height:6px; background:rgba(225, 29, 72, 0.45); border-radius:50%; bottom:3px; left:50%; transform:translateX(-50%); filter:blur(1.5px); z-index:1;"></div>
+              <div class="rider-marker-avatar" style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.8s ease;">
+                <img src="/go-delivery-moto.png?v=2" style="width:42px; height:42px; object-fit:contain;" />
               </div>
             </div>`;
           this.getPanes().overlayMouseTarget.appendChild(div);
@@ -1160,7 +1662,9 @@ function updateMap(order) {
             this.div.style.top = (point.y - 20) + 'px';
             const avatar = this.div.querySelector('.rider-marker-avatar');
             if (avatar) {
-              avatar.style.transform = `rotate(${this.angle}deg)`;
+              const is3d = (order.tripType === 'moto' || order.isFavor);
+              const rotation = is3d ? (this.angle - 90) : this.angle;
+              avatar.style.transform = `rotate(${rotation}deg)`;
             }
           }
         };
@@ -1183,12 +1687,7 @@ function updateMap(order) {
           riderMarker.angle += delta;
         }
         riderMarker.pos = riderPos;
-        if (riderMarker.div) {
-          const innerBadge = riderMarker.div.querySelector('.rider-marker-avatar');
-          if (innerBadge) {
-            innerBadge.innerHTML = order.tripType === 'moto' ? icon('bike', 18) : icon('car', 18);
-          }
-        }
+        // DO NOT overwrite with standard SVG icons for 3D marker
         if (riderMarker.draw) riderMarker.draw();
       }
     }
@@ -1209,8 +1708,8 @@ function updateMap(order) {
       }
     }
   } else {
-    const riderPos = order.driverLocation ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng } : null;
-    const destPos = order.deliveryCoords ? { lat: order.deliveryCoords.lat, lng: order.deliveryCoords.lng } : null;
+    const riderPos = parseCoords(order.driverLocation);
+    const destPos = parseCoords(order.deliveryCoords);
 
     if (!liveMap) {
       const theme = document.documentElement.getAttribute('data-theme') || 'light';
@@ -1247,7 +1746,7 @@ function updateMap(order) {
           div.style.zIndex = '50';
           div.innerHTML = `
             <div style="display:flex; flex-direction:column; align-items:center;">
-              <div style="background:#ef4444; width:48px; height:48px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 10px 25px rgba(239,68,68, 0.5);">
+              <div style="background:#111111; width:48px; height:48px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 10px 25px rgba(0,0,0, 0.45);">
                 <div style="transform:rotate(45deg); color:white; display:flex;">${icon('home', 24)}</div>
               </div>
               <div style="width:12px; height:4px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:4px; filter:blur(2px);"></div>
@@ -1284,8 +1783,11 @@ function updateMap(order) {
           div.style.cssText = 'position:absolute; pointer-events:none; z-index:100;';
           div.innerHTML = `
             <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
-              <div class="rider-marker-avatar" style="background:var(--color-primary); color:white; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; position:relative; z-index:2; box-shadow: 0 6px 16px rgba(225, 29, 72, 0.45); transition: transform 0.8s ease;">
-                ${order.tripType === 'moto' ? icon('bike', 20) : icon('car', 20)}
+              <div class="sonar-pulse-ring-1"></div>
+              <div class="sonar-pulse-ring-2"></div>
+              <div class="moto-base-glow" style="position:absolute; width:22px; height:6px; background:rgba(225, 29, 72, 0.45); border-radius:50%; bottom:3px; left:50%; transform:translateX(-50%); filter:blur(1.5px); z-index:1;"></div>
+              <div class="rider-marker-avatar" style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.8s ease;">
+                <img src="/go-delivery-moto.png?v=2" style="width:42px; height:42px; object-fit:contain;" />
               </div>
             </div>`;
           this.getPanes().overlayMouseTarget.appendChild(div);
@@ -1300,7 +1802,9 @@ function updateMap(order) {
             this.div.style.top = (point.y - 20) + 'px';
             const avatar = this.div.querySelector('.rider-marker-avatar');
             if (avatar) {
-              avatar.style.transform = `rotate(${this.angle}deg)`;
+              const is3d = (order.tripType === 'moto' || order.isFavor);
+              const rotation = is3d ? (this.angle - 90) : this.angle;
+              avatar.style.transform = `rotate(${rotation}deg)`;
             }
           }
         };
@@ -1443,9 +1947,9 @@ async function updateRoute(start, end) {
         routeLineGlow = new google.maps.Polyline({
           path: coords,
           geodesic: true,
-          strokeColor: '#3b82f6',
-          strokeOpacity: 0.18,
-          strokeWeight: 10,
+          strokeColor: '#E11D48',
+          strokeOpacity: 0.12,
+          strokeWeight: 6,
           map: liveMap
         });
       } else {
@@ -1454,23 +1958,12 @@ async function updateRoute(start, end) {
 
       if (!routeLine) {
         isNewLine = true;
-        const lineSymbol = {
-          path: google.maps.SymbolPath.CIRCLE,
-          fillOpacity: 1,
-          scale: 4,
-          fillColor: '#3b82f6',
-          strokeColor: '#3b82f6',
-          strokeWeight: 1
-        };
         routeLine = new google.maps.Polyline({
           path: coords,
           geodesic: true,
-          strokeOpacity: 0,
-          icons: [{
-            icon: lineSymbol,
-            offset: '0%',
-            repeat: '18px'
-          }],
+          strokeColor: '#E11D48',
+          strokeOpacity: 0.85,
+          strokeWeight: 3,
           map: liveMap
         });
       } else {
@@ -1618,9 +2111,9 @@ async function calculatePredictiveETA(order) {
   let riderToStoreTime = 5; // 5 minutes default dispatch/travel
   let storeToCustomerTime = 8; // 8 minutes default transit
 
-  const commerceCoords = order.comercioCoords || order.pickupCoords;
-  const deliveryCoords = order.deliveryCoords;
-  const driverCoords = order.driverLocation;
+  const commerceCoords = parseCoords(order.comercioCoords || order.pickupCoords);
+  const deliveryCoords = parseCoords(order.deliveryCoords);
+  const driverCoords = parseCoords(order.driverLocation);
 
   try {
     // A. Commerce to Customer distance
@@ -1695,11 +2188,14 @@ function getProgress(status, isFavor = false) {
   return steps[status] || 0;
 }
 
-function getStepClass(status, index, isFavor = false) {
+function getStepClass(status, index, isFavor = false, order = null) {
   if (isFavor) {
     // Favor steps: 0: Solicitado, 1: Buscando, 2: Yendo al punto, 3: En camino
-    const favorMap = { 'pending': 0, 'confirmed': 1, 'ready': 2, 'delivering': 3, 'completed': 4 };
-    const curr = favorMap[status] ?? 0;
+    const favorMap = { 'pending': 1, 'confirmed': 1, 'preparing': 1, 'ready': 2, 'delivering': 3, 'completed': 4 };
+    let curr = favorMap[status] ?? 0;
+    if (order && order.driverId && (curr === 1 || status === 'preparing' || status === 'confirmed')) {
+      curr = 2; // Yendo al punto
+    }
     if (curr > index) return 'completed';
     if (curr === index) return 'active';
     return 'inactive';
@@ -1714,11 +2210,15 @@ function getStepClass(status, index, isFavor = false) {
   }
 }
 
-function getStepperLinePercent(status, isFavor = false) {
+function getStepperLinePercent(status, isFavor = false, order = null) {
   if (isFavor) {
     // 4 steps -> 3 intervals (0%, 33.3%, 66.6%, 100%)
-    const favorLineMap = { 'pending': 0, 'confirmed': 33.3, 'ready': 66.6, 'delivering': 100, 'completed': 100 };
-    return favorLineMap[status] ?? 0;
+    const favorLineMap = { 'pending': 33.3, 'confirmed': 33.3, 'preparing': 33.3, 'ready': 66.6, 'delivering': 100, 'completed': 100 };
+    let val = favorLineMap[status] ?? 0;
+    if (order && order.driverId && (status === 'confirmed' || status === 'preparing')) {
+      val = 66.6; // Yendo al punto
+    }
+    return val;
   } else {
     // 5 steps -> 4 intervals (0%, 25%, 50%, 75%, 100%)
     const commerceLineMap = { 'pending': 0, 'confirmed': 25, 'preparing': 50, 'ready': 75, 'delivering': 100, 'completed': 100 };
@@ -1776,9 +2276,6 @@ export function showPointsEarnedModal(order) {
         <div id="modal-points-value-container" style="font-size: 32px; font-weight: 950; color: #f59e0b; letter-spacing: -0.5px; display: flex; align-items: center; gap: 4.5px; min-height: 38px;">
           ${hasPoints ? `+${points} <span style="font-size: 14px; font-weight: 850; letter-spacing: 0;">GO PTS</span>` : `<div class="spinner-mini" style="width:20px; height:20px; border-width:3px; border-top-color:#f59e0b; margin:0;"></div>`}
         </div>
-        <div id="modal-points-discount-container" style="font-size: 12px; color: var(--color-text-secondary); font-weight: 700; margin-top: 2px;">
-          ${hasPoints ? `Equivalentes a <strong style="color: var(--color-success); font-weight: 900;">${formatPrice(valueDiscount)}</strong> de descuento directo.` : `Calculando puntos ganados...`}
-        </div>
       </div>
 
       <div id="modal-points-multiplier-container" style="font-size: 11.5px; color: var(--color-text-tertiary); line-height: 1.5; text-align: center; max-width: 280px; font-weight: 600;">
@@ -1822,6 +2319,9 @@ export function showPointsEarnedModal(order) {
       btn?.addEventListener('click', () => {
         localStorage.setItem(`gd_dismissed_points_modal_${order.id}`, 'true');
         closeModal();
+        if (typeof window.checkAndShowCompletedChallenges === 'function') {
+          window.checkAndShowCompletedChallenges();
+        }
       });
     }
   });
@@ -1859,9 +2359,7 @@ export function updatePointsModalValues(order) {
     pointsContainer.style.transform = 'scale(1)';
   }, 150);
   
-  if (discountContainer) {
-    discountContainer.innerHTML = `Equivalentes a <strong style="color: var(--color-success); font-weight: 900;">${formatPrice(valueDiscount)}</strong> de descuento directo.`;
-  }
+
   
   if (multiplierContainer) {
     multiplierContainer.innerHTML = `
@@ -1894,6 +2392,25 @@ if (!window._clientTimerInterval) {
       const remainingSec = Math.max(0, 60 - elapsedSec);
       el.textContent = `${remainingSec}s`;
     });
+
+    document.querySelectorAll('.scheduled-countdown-timer').forEach(el => {
+      const targetTime = parseInt(el.dataset.target || '0', 10);
+      if (!targetTime) return;
+      const now = Date.now();
+      if (now >= targetTime) {
+         el.textContent = "Preparando...";
+         return;
+      }
+      const diffSec = Math.floor((targetTime - now) / 1000);
+      const hrs = Math.floor(diffSec / 3600);
+      const mins = Math.floor((diffSec % 3600) / 60);
+      const secs = diffSec % 60;
+      if (hrs > 0) {
+        el.textContent = `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      } else {
+        el.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+      }
+    });
   }, 1000);
 }
 
@@ -1908,27 +2425,159 @@ window.closePriceBreakdownModal = function() {
   }, 280);
 };
 
+window.closeOrderDetailsModal = function() {
+  const backdrop = document.getElementById('v5-details-modal-backdrop');
+  const sheet = document.getElementById('v5-details-modal-sheet');
+  if (backdrop && sheet) {
+    backdrop.style.opacity = '0';
+    sheet.style.transform = 'translate(-50%, 100%)';
+  }
+  setTimeout(() => {
+    const container = document.getElementById('details-modal-container');
+    if (container) container.innerHTML = '';
+  }, 280);
+};
+
+window.openOrderDetailsModal = function(order) {
+  const o = order || window.lastOrderData;
+  if (!o) return;
+
+  const container = document.getElementById('details-modal-container');
+  if (!container) return;
+
+  const detailsHtml = `
+    ${o.isFavor ? `
+      <div style="background:var(--color-bg-secondary); padding:16px; border-radius:20px; border:1px solid var(--color-border-light); margin-bottom:14px; text-align: left;">
+        <div style="font-size:9.5px; font-weight:900; color:${getFavorTypeMeta(o.favorType).textColor}; text-transform:uppercase; margin-bottom:8px;">${getFavorTypeMeta(o.favorType).headerText}</div>
+        <div style="font-size:13px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${formatFavorDetailsHTML(o.details)}</div>
+        ${o.pickupAddress ? `
+          <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
+            ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${o.pickupAddress}
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
+    ${(!o.isFavor && !o.isTrip && o.items && o.items.length > 0) ? `
+      <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px; text-align: left;">
+        <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Productos del Pedido</div>
+        ${o.items.map(item => `
+          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-bg-secondary); padding:10px 14px; border-radius:14px; border:1px solid var(--color-border-light);">
+            <div style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${item.name} <span style="color:var(--color-primary); font-size:11px;">x${item.qty || 1}</span></div>
+            <div style="font-size:13px; font-weight:900; color:var(--color-text-secondary);">$${(Number(item.price || 0) * Number(item.qty || 1)).toLocaleString('es-AR')}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    ${o.isTrip ? `
+      <div style="background:var(--color-bg-secondary); padding:16px; border-radius:20px; border:1px solid var(--color-border-light); margin-bottom:14px; text-align: left; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:9.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">${o.tripType === 'moto' ? '🏍️' : '🚗'}</span>
+          <span style="font-size:13px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${o.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--color-border-light); padding-top:10px;">
+          <div style="font-size:12px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+            <span style="color:#22c55e;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Origen:</span> ${o.pickupAddress}
+          </div>
+          <div style="font-size:12px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+            <span style="color:#ef4444;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino:</span> ${o.deliveryAddress}
+          </div>
+        </div>
+      </div>
+    ` : ''}
+  `;
+
+  const rawStatus = (o.status || '').toString().toLowerCase();
+  const isPending = rawStatus === 'pending' || rawStatus === 'pendiente';
+
+  container.innerHTML = `
+    <div id="v5-details-modal-backdrop" onclick="window.closeOrderDetailsModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
+    <div id="v5-details-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + env(safe-area-inset-bottom, 14px));">
+      
+      <!-- Premium Red Header Bar -->
+      <div style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 16px; color:white;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
+          <div>
+            <h3 style="margin:0; font-size:16.5px; font-weight:900; color:white; letter-spacing: -0.3px;">Detalles del Pedido</h3>
+            <span style="font-size: 11px; opacity: 0.9; font-weight: 700;">Detalle y direcciones del pedido #${o.orderId || '...'}</span>
+          </div>
+        </div>
+        <button onclick="window.closeOrderDetailsModal()" style="background: none; border: none; color: white; cursor: pointer; padding: 4px; display: flex; opacity: 0.85; transition: opacity 0.2s;">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+ 
+      <!-- Content -->
+      <div style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 70px - env(safe-area-inset-bottom, 14px)); box-sizing: border-box;">
+        ${detailsHtml}
+        ${isPending ? `
+          <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; gap: 8px; width: 100%;">
+            <button id="modal-cancel-order-btn" style="width: 100%; height: 44px; border: 1px solid rgba(239, 68, 68, 0.25); background: rgba(239, 68, 68, 0.08); color: #ef4444; border-radius: 12px; font-weight: 800; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; outline: none; transition: background 0.2s;">
+              🗑️ Cancelar Pedido
+            </button>
+            ${o.pointsRedeemed > 0 ? `
+              <div style="display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; justify-content: center; margin-top: 4px;">
+                🎁 Go Points canjeados serán reintegrados
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+ 
+  setTimeout(() => {
+    const backdrop = document.getElementById('v5-details-modal-backdrop');
+    const sheet = document.getElementById('v5-details-modal-sheet');
+    if (backdrop && sheet) {
+      backdrop.style.opacity = '1';
+      sheet.style.transform = 'translate(-50%, 0)';
+    }
+  }, 10);
+
+  if (isPending) {
+    setTimeout(() => {
+      document.getElementById('modal-cancel-order-btn')?.addEventListener('click', () => {
+        window.closeOrderDetailsModal();
+        document.getElementById('v5-cancel-order-btn')?.click();
+      });
+    }, 50);
+  }
+};
+
 window.openPriceBreakdownModal = function(order) {
   const o = order || window.lastOrderData;
   if (!o) return;
   
   const itemsCost = Number(o.itemsCost || o.subtotal || o.itemsTotal || (o.items || []).reduce((sum, item) => sum + ((item.price || 0) * (item.qty || 1)), 0)) || 0;
-  const shippingFee = Number(o.shippingFee || o.deliveryFee || o.shippingCost || o.deliveryCost || 0) || 0;
+  const rawShippingFee = Number(o.shippingFee || o.deliveryFee || o.shippingCost || o.deliveryCost || 0) || 0;
   const purchaseFee = Number(o.purchaseFee || o.gestorFee || o.managementFee || 0) || 0;
   const extraStopsFee = Number(o.extraStopsFee || 0) || 0;
   const rainSurcharge = Number(o.rainSurcharge || 0) || 0;
-  const serviceFee = Number(o.appUsageFee || o.serviceFee || o.platformFee || 0) || 0;
   const tip = Number(o.tip || 0) || 0;
+  const baseShippingFee = Math.max(0, rawShippingFee - rainSurcharge - tip);
+  const serviceFee = Number(o.appUsageFee || o.serviceFee || o.platformFee || 0) || 0;
   const discount = Number(o.discount || o.discountAmount || o.couponDiscount || 0) || 0;
 
-  const calculatedTotal = itemsCost + shippingFee + purchaseFee + extraStopsFee + rainSurcharge + serviceFee + tip - discount;
+  const calculatedTotal = itemsCost + baseShippingFee + purchaseFee + extraStopsFee + rainSurcharge + serviceFee + tip - discount;
   const totalVal = (o.totalAmount || o.total) ? Number(o.totalAmount || o.total) : calculatedTotal;
   
   const container = document.getElementById('price-breakdown-modal-container');
   if (!container) return;
 
   container.innerHTML = `
-    <div id="v5-price-modal-backdrop" onclick="window.closePriceBreakdownModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.25); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
+    <div id="v5-price-modal-backdrop" onclick="window.closePriceBreakdownModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
     <div id="v5-price-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + env(safe-area-inset-bottom, 14px));">
       
       <!-- Premium Red Header Bar -->
@@ -1961,7 +2610,7 @@ window.openPriceBreakdownModal = function(order) {
         
         <div style="display:flex; justify-content:space-between; color:var(--color-text-secondary);">
           <span>Costo de Envío / Reparto:</span>
-          <span style="color:var(--color-text-primary); font-weight:850;">$${Math.round(shippingFee).toLocaleString('es-AR')}</span>
+          <span style="color:var(--color-text-primary); font-weight:850;">$${Math.round(baseShippingFee).toLocaleString('es-AR')}</span>
         </div>
 
         ${purchaseFee > 0 ? `
@@ -2020,6 +2669,412 @@ window.openPriceBreakdownModal = function(order) {
     if (backdrop) backdrop.style.opacity = '1';
     if (sheet) sheet.style.transform = 'translate(-50%, 0)';
   });
+};
+
+function getActiveIndex(status, isFavor, order = null) {
+  if (isFavor) {
+    const favorMap = { 'pending': 1, 'confirmed': 1, 'preparing': 1, 'ready': 2, 'delivering': 3, 'completed': 4 };
+    let curr = favorMap[status] ?? 0;
+    if (order && order.driverId && (curr === 1 || status === 'preparing' || status === 'confirmed')) {
+      curr = 2; // Yendo al punto
+    }
+    return curr;
+  } else {
+    const commerceMap = { 'pending': 0, 'confirmed': 2, 'preparing': 2, 'ready': 3, 'delivering': 4, 'completed': 5 };
+    return commerceMap[status] ?? 0;
+  }
+}
+
+function getTripActiveIndex(order) {
+  const tripMap = { 'pending': 0, 'accepted': 1, 'arrived': 2, 'started': 3, 'completed': 4 };
+  const rawStatus = (order.status || '').toString().toLowerCase();
+  let normalizedStatus = rawStatus;
+  if (rawStatus.includes('accept') || rawStatus.includes('confirm')) normalizedStatus = 'accepted';
+  if (rawStatus.includes('arriv') || rawStatus.includes('door')) normalizedStatus = 'arrived';
+  if (rawStatus.includes('start') || rawStatus.includes('progress') || rawStatus.includes('course')) normalizedStatus = 'started';
+  if (rawStatus.includes('complet')) normalizedStatus = 'completed';
+  return tripMap[normalizedStatus] ?? 0;
+}
+
+function getStepCircleContent(order, stepIdx, activeIdx, isFavor) {
+  if (stepIdx < activeIdx) {
+    return `<span class="v5-step-icon" style="display: flex;">${icon('check', 13)}</span>`;
+  }
+  if (stepIdx === activeIdx) {
+    if (isFavor) {
+      switch (stepIdx) {
+        case 0: {
+          const type = (order.favorType || '').toString().toLowerCase();
+          if (type === 'gocash') {
+            return `<img src="/go-cash.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: bounce-slow 1.5s infinite; display:block;" />`;
+          } else if (type === 'encomienda') {
+            return `<img src="/go-package.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+          } else {
+            return `<img src="/go-bag.png?v=6" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+          }
+        }
+        case 1: {
+          const type = (order.favorType || '').toString().toLowerCase();
+          const isMandado = type !== 'gocash' && type !== 'encomienda';
+          return `<img src="/go-hourglass.png?v=4" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: float 2.5s infinite ease-in-out; display:block;" />`;
+        }
+        case 2: {
+          const type = (order.favorType || '').toString().toLowerCase();
+          const isMandado = type !== 'gocash' && type !== 'encomienda';
+          if (type === 'encomienda') {
+            return `<img src="/go-pickup-point.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+          }
+          return `<img src="${isMandado ? '/go-delivery-moto.png?v=2' : (order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg')}" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+        }
+        case 3: {
+          const type = (order.favorType || '').toString().toLowerCase();
+          const isMandado = type !== 'gocash' && type !== 'encomienda';
+          if (isMandado) {
+            return `<img src="/go-bag.png?v=6" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
+          }
+          return `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
+        }
+      }
+    } else {
+      switch (stepIdx) {
+        case 0: return `<img src="/go-hourglass.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: float 2.5s infinite ease-in-out; display:block;" />`;
+        case 1: return `<img src="/go-thumbs-up.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+        case 2: return `<img src="/go-bag.png?v=6" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+        case 3: return `<img src="/go-box.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+        case 4: return `<img src="/go-delivery-moto.png?v=2" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
+      }
+    }
+  }
+  return `<span style="width: 6px; height: 6px; background: var(--color-border-light); border-radius: 50%;"></span>`;
+}
+
+function getTripStepCircleContent(order, stepIdx, activeIdx) {
+  if (stepIdx < activeIdx) {
+    return `<span class="v5-step-icon" style="display: flex;">${icon('check', 13)}</span>`;
+  }
+  if (stepIdx === activeIdx) {
+    switch (stepIdx) {
+      case 0: return `<img src="/go-hourglass.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: float 2.5s infinite ease-in-out; display:block;" />`;
+      case 1: return `<img src="/go-thumbs-up.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: bounce-slow 1.5s infinite; display:block;" />`;
+      case 2: return `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: bounce-slow 1.5s infinite; display:block;" />`;
+      case 3: return `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: wiggle 1.2s infinite; display:block;" />`;
+      case 4: return `<img src="/go-thumbs-up.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: bounce-slow 1.5s infinite; display:block;" />`;
+    }
+  }
+  return `<span style="width: 6px; height: 6px; background: var(--color-border-light); border-radius: 50%;"></span>`;
+}
+
+function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
+  if (isDriverView) {
+    const isCompleted = normalizedStatus === 'completed';
+    const isCancelled = normalizedStatus === 'cancelled';
+    if (!isCompleted && !isCancelled) {
+      let bannerIcon = '';
+      let bannerTitle = '';
+      let bannerText = '';
+      let bannerColor = '';
+      let bannerBg = '';
+      let bannerBorder = '';
+      const isDelivering = normalizedStatus === 'delivering' || order.isDelivering;
+      
+      if (!isDelivering) {
+        const commerceName = order.comercioName || order.pickupAddress || 'Comercio';
+        bannerIcon = `<img src="/go-bag.png?v=6" style="width:54px; height:54px; object-fit:contain;" />`;
+        bannerTitle = 'RETIRA EL PEDIDO EN:';
+        bannerText = `<strong style="font-size:15px; display:block; margin-top:2px;">${commerceName}</strong>`;
+        bannerColor = '#0284c7';
+        bannerBg = 'rgba(2, 132, 199, 0.05)';
+        bannerBorder = 'rgba(2, 132, 199, 0.15)';
+      } else {
+        const deliveryAddress = order.deliveryAddress || 'Dirección del cliente';
+        const addressNotes = order.addressNotes ? `<div style="font-size:12.5px; font-weight:700; color:#d97706; margin-top:4px; text-transform:none;">⚠️ Ref: ${order.addressNotes}</div>` : '';
+        bannerIcon = `<img src="/go-delivery-moto.png?v=2" style="width:54px; height:54px; object-fit:contain; margin: -6px 0;" />`;
+        bannerTitle = 'DIRÍGETE A ENTREGAR EL PEDIDO:';
+        bannerText = `
+          <strong style="font-size:15px; display:block; margin-top:2px;">${deliveryAddress}</strong>
+          ${addressNotes}
+        `;
+        bannerColor = '#10b981';
+        bannerBg = 'rgba(16, 185, 129, 0.05)';
+        bannerBorder = 'rgba(16, 185, 129, 0.15)';
+      }
+      return `
+        <div style="background:${bannerBg}; border:1px solid ${bannerBorder}; border-radius:24px; padding:16px 20px; display:flex; align-items:center; gap:16px; width:100%; box-sizing:border-box; margin-bottom:12px; transition:all 0.3s ease;">
+          <div style="width:56px; height:56px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${bannerIcon}
+          </div>
+          <div style="flex:1; min-width:0; text-align:left;">
+            <div style="font-size:10px; font-weight:800; color:${bannerColor}; text-transform:uppercase; letter-spacing:0.05em; line-height:1.2;">${bannerTitle}</div>
+            <div style="font-size:13.5px; font-weight:500; color:var(--color-text-secondary); margin-top:3px; line-height:1.4; white-space:normal; overflow:hidden; text-overflow:ellipsis;">
+              ${bannerText}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+  const isCompleted = normalizedStatus === 'completed';
+  const isCancelled = normalizedStatus === 'cancelled';
+  if (isCompleted || isCancelled) return '';
+  
+  let bannerIcon = '';
+  let bannerTitle = '';
+  let bannerText = '';
+  let bannerColor = 'var(--color-primary)';
+  let bannerBg = 'rgba(var(--color-primary-rgb, 225, 29, 72), 0.05)';
+  let bannerBorder = 'rgba(var(--color-primary-rgb, 225, 29, 72), 0.15)';
+  
+  if (order.isTrip) {
+    if (normalizedStatus === 'pending') {
+      bannerIcon = `<img src="/go-hourglass.jpg" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡Buscando Chofer!';
+      bannerText = 'Estamos buscando al chofer más cercano para iniciar tu viaje.';
+      bannerColor = '#d97706';
+      bannerBg = 'rgba(217, 119, 6, 0.05)';
+      bannerBorder = 'rgba(217, 119, 6, 0.15)';
+    } else {
+      const activeIdx = getTripActiveIndex(order);
+      if (activeIdx === 1) {
+        bannerIcon = `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = '¡Chofer Asignado!';
+        bannerText = 'El chofer se está preparando para ir a buscarte.';
+        bannerColor = '#0284c7';
+        bannerBg = 'rgba(2, 132, 199, 0.05)';
+        bannerBorder = 'rgba(2, 132, 199, 0.15)';
+      } else if (activeIdx === 2) {
+        bannerIcon = `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = '¡Chofer en camino!';
+        bannerText = 'El chofer se dirige hacia tu punto de partida.';
+        bannerColor = '#8B5CF6';
+        bannerBg = 'rgba(139, 92, 246, 0.05)';
+        bannerBorder = 'rgba(139, 92, 246, 0.15)';
+      } else if (activeIdx === 3) {
+        bannerIcon = `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = '¡Viaje en Curso!';
+        bannerText = 'Estás en viaje con el conductor hacia tu destino.';
+        bannerColor = '#10b981';
+        bannerBg = 'rgba(16, 185, 129, 0.05)';
+        bannerBorder = 'rgba(16, 185, 129, 0.15)';
+      } else {
+        bannerIcon = `<img src="/go-thumbs-up.jpg" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = '¡Llegaste!';
+        bannerText = 'Has arribado con éxito a tu destino final.';
+        bannerColor = '#10b981';
+        bannerBg = 'rgba(16, 185, 129, 0.05)';
+        bannerBorder = 'rgba(16, 185, 129, 0.15)';
+      }
+    }
+  } else if (order.isFavor) {
+    const favorType = (order.favorType || '').toString().toLowerCase();
+    const isMandado = favorType !== 'gocash' && favorType !== 'encomienda';
+    if (normalizedStatus === 'pending') {
+      bannerIcon = `<img src="${isMandado ? '/go-bag.png?v=6' : '/go-hourglass.jpg'}" style="width:${isMandado ? '54px' : '38px'}; height:${isMandado ? '54px' : '38px'}; object-fit:contain; ${isMandado ? '' : 'mix-blend-mode:multiply;'}" />`;
+      bannerTitle = isMandado ? '¡Mandado Solicitado!' : (favorType === 'gocash' ? '¡Retiro Solicitado!' : '¡Envío Solicitado!');
+      bannerText = isMandado ? 'Estamos asignando un repartidor para tu mandado.' : (favorType === 'gocash' ? 'Registrando tu solicitud de retiro de dinero.' : 'Registrando tu solicitud de envío de encomienda.');
+      bannerColor = '#d97706';
+      bannerBg = 'rgba(217, 119, 6, 0.05)';
+      bannerBorder = 'rgba(217, 119, 6, 0.15)';
+    } else if (normalizedStatus === 'confirmed' || normalizedStatus === 'preparing') {
+      if (order.driverId) {
+        bannerIcon = `<img src="/go-bag.png?v=6" style="width:54px; height:54px; object-fit:contain;" />`;
+        bannerTitle = 'Yendo al punto';
+        bannerText = 'Tu repartidor está yendo a buscar tu pedido';
+        bannerColor = '#0284c7';
+        bannerBg = 'rgba(2, 132, 199, 0.05)';
+        bannerBorder = 'rgba(2, 132, 199, 0.15)';
+      } else {
+        bannerIcon = `<img src="/go-hourglass.jpg" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = 'Buscando Repartidor';
+        bannerText = 'Buscando al repartidor más cercano disponible.';
+        bannerColor = '#ef4444';
+        bannerBg = 'rgba(239, 68, 68, 0.05)';
+        bannerBorder = 'rgba(239, 68, 68, 0.15)';
+      }
+    } else if (normalizedStatus === 'ready') {
+      bannerIcon = `<img src="${favorType === 'encomienda' ? '/go-pickup-point.png' : (isMandado ? '/go-bag.png?v=6' : (order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'))}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = isMandado ? 'Yendo a comprar' : 'Yendo al origen';
+      bannerText = isMandado ? 'El repartidor está yendo al punto de compra del mandado.' : (favorType === 'gocash' ? 'El repartidor está yendo a buscar el dinero en efectivo.' : 'El repartidor está yendo al punto de retiro del paquete.');
+      bannerColor = '#8B5CF6';
+      bannerBg = 'rgba(139, 92, 246, 0.05)';
+      bannerBorder = 'rgba(139, 92, 246, 0.15)';
+    } else if (normalizedStatus === 'delivering' || order.isDelivering) {
+      if (order.isFavor) {
+        bannerIcon = `<img src="${favorType === 'gocash' ? '/go-cash.png' : '/go-delivery-moto.png'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      } else {
+        bannerIcon = `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      }
+      bannerTitle = isMandado ? '¡Mandado en camino!' : (favorType === 'gocash' ? '¡Efectivo en camino!' : '¡Paquete en camino!');
+      bannerText = isMandado ? 'El repartidor va hacia tu ubicación con la compra.' : (favorType === 'gocash' ? 'El repartidor lleva el dinero a tu ubicación.' : 'El repartidor retiró la encomienda y va hacia el destino.');
+      bannerColor = '#10b981';
+      bannerBg = 'rgba(16, 185, 129, 0.05)';
+      bannerBorder = 'rgba(16, 185, 129, 0.15)';
+    } else if (order.isAtDoor) {
+      bannerIcon = `<img src="/go-thumbs-up.jpg" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡Llegó a tu puerta!';
+      bannerText = isMandado ? 'El repartidor llegó con tus compras. ¡Sal a recibirlo!' : (favorType === 'gocash' ? 'El repartidor llegó con el dinero. ¡Sal a recibirlo!' : 'El repartidor está afuera con la encomienda. ¡Sal a recibirlo!');
+      bannerColor = '#f59e0b';
+      bannerBg = 'rgba(245, 158, 11, 0.05)';
+      bannerBorder = 'rgba(245, 158, 11, 0.15)';
+    } else {
+      bannerIcon = `<img src="/go-hourglass.jpg" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = 'Buscando Repartidor';
+      bannerText = 'Buscando al repartidor más cercano disponible.';
+      bannerColor = '#ef4444';
+      bannerBg = 'rgba(239, 68, 68, 0.05)';
+      bannerBorder = 'rgba(239, 68, 68, 0.15)';
+    }
+  } else {
+    // Normal Commerce Order
+    if (normalizedStatus === 'pending') {
+      bannerIcon = `<img src="/go-hourglass.png" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡Esperando Confirmación!';
+      bannerText = 'El comercio está revisando tu pedido para confirmarlo.';
+      bannerColor = '#d97706';
+      bannerBg = 'rgba(217, 119, 6, 0.05)';
+      bannerBorder = 'rgba(217, 119, 6, 0.15)';
+    } else if (normalizedStatus === 'confirmed') {
+      bannerIcon = `<img src="/go-thumbs-up.png" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡Pedido Aprobado!';
+      bannerText = 'El comercio aceptó tu compra y se dispone a prepararla.';
+      bannerColor = '#0284c7';
+      bannerBg = 'rgba(2, 132, 199, 0.05)';
+      bannerBorder = 'rgba(2, 132, 199, 0.15)';
+    } else if (normalizedStatus === 'preparing') {
+      bannerIcon = `<img src="/go-bag.png?v=6" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡Preparando tu pedido!';
+      if (order.isScheduled && order.scheduledFor) {
+        const targetMillis = order.scheduledFor.toMillis ? order.scheduledFor.toMillis() : (order.scheduledFor.seconds * 1000);
+        bannerText = `
+          <div style="margin-bottom: 6px;">El comercio prepara tu pedido para el horario programado.</div>
+          <div style="background: rgba(139, 92, 246, 0.1); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; border: 1px dashed rgba(139, 92, 246, 0.3);">
+            <div style="font-size: 11px; font-weight: 700; color: #8B5CF6; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
+              <span style="font-size: 14px;">⏱️</span> TIEMPO RESTANTE
+            </div>
+            <div class="scheduled-countdown-timer" style="font-family: var(--font-display); font-size: 16px; font-weight: 900; color: #8B5CF6;" data-target="${targetMillis}">
+              Calculando...
+            </div>
+          </div>
+        `;
+      } else {
+        bannerText = 'El comercio está preparando tus productos con cuidado.';
+      }
+      bannerColor = '#8B5CF6';
+      bannerBg = 'rgba(139, 92, 246, 0.05)';
+      bannerBorder = 'rgba(139, 92, 246, 0.15)';
+    } else if (normalizedStatus === 'ready') {
+      if (!order.driverId) {
+        bannerIcon = `<img src="/go-hourglass.png" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = 'Buscando Repartidor';
+        bannerText = 'Tu pedido está listo. Estamos buscando un repartidor disponible.';
+        bannerColor = '#ef4444';
+        bannerBg = 'rgba(239, 68, 68, 0.05)';
+        bannerBorder = 'rgba(239, 68, 68, 0.15)';
+      } else {
+        bannerIcon = `<img src="/go-box.png" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerTitle = '¡Pedido Listo!';
+        bannerText = 'Tu pedido está listo. El repartidor está retirándolo.';
+        bannerColor = '#10b981';
+        bannerBg = 'rgba(16, 185, 129, 0.05)';
+        bannerBorder = 'rgba(16, 185, 129, 0.15)';
+      }
+    } else if (normalizedStatus === 'delivering' || order.isDelivering) {
+      bannerIcon = `<img src="/go-delivery-moto.png?v=2" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡En camino!';
+      bannerText = 'El repartidor está yendo a tu casa.';
+      bannerColor = '#10b981';
+      bannerBg = 'rgba(16, 185, 129, 0.05)';
+      bannerBorder = 'rgba(16, 185, 129, 0.15)';
+    } else if (order.isAtDoor) {
+      bannerIcon = `<img src="/go-thumbs-up.png" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = '¡Llegó a tu puerta!';
+      bannerText = 'El repartidor se encuentra afuera. ¡Por favor sal a recibirlo!';
+      bannerColor = '#f59e0b';
+      bannerBg = 'rgba(245, 158, 11, 0.05)';
+      bannerBorder = 'rgba(245, 158, 11, 0.15)';
+    } else {
+      bannerIcon = `<img src="/go-hourglass.png" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerTitle = 'Buscando Repartidor';
+      bannerText = 'Estamos buscando al repartidor más cercano para tu entrega.';
+      bannerColor = '#ef4444';
+      bannerBg = 'rgba(239, 68, 68, 0.05)';
+      bannerBorder = 'rgba(239, 68, 68, 0.15)';
+    }
+  }
+
+  return `
+    <div style="background: ${bannerBg}; border: 1.5px solid ${bannerBorder}; border-radius: 18px; padding: 14px; display: flex; align-items: center; gap: 14px; margin-bottom: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.02); text-align:left;">
+      <div style="width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow:visible; animation: float 3s ease-in-out infinite;">
+        ${bannerIcon}
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 13.5px; font-weight: 900; color: ${bannerColor};">${bannerTitle}</span>
+        <span style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.35;">${bannerText}</span>
+      </div>
+    </div>
+  `;
+}
+
+window.checkAndShowCompletedChallenges = async function() {
+  const { getState } = await import('../state.js');
+  const user = getState().user;
+  if (!user?.uid) return;
+  
+  try {
+    const { collection, getDocs, query, where, doc, updateDoc } = await import('firebase/firestore');
+    const challengesRef = collection(db, 'users', user.uid, 'challenges');
+    const q = query(challengesRef, where('completed', '==', true), where('modalShown', '==', false));
+    const snap = await getDocs(q);
+    
+    if (!snap.empty) {
+      // Get the first one to show
+      const docSnap = snap.docs[0];
+      const challenge = docSnap.data();
+      
+      // Update database so we don't show it again
+      await updateDoc(doc(db, 'users', user.uid, 'challenges', docSnap.id), {
+        modalShown: true
+      });
+      
+      // Show Modal
+      const { showModal } = await import('../components/modal.js');
+      showModal({
+        title: '🏆 ¡Desafío Completado!',
+        height: 'auto',
+        content: `
+          <div style="padding: 24px 20px; text-align: center; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; align-items: center; gap: 16px;">
+            <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 30px rgba(16,185,129,0.4); font-size: 40px; animation: points-bounce 1s infinite alternate;">
+              🏆
+            </div>
+            <div>
+              <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 950; margin: 0; letter-spacing: -0.5px;">¡Felicidades!</h3>
+              <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 600; line-height: 1.45;">
+                Completaste el desafío semanal: <br><strong style="color:var(--color-text-primary); font-size: 15px;">${challenge.title}</strong>
+              </p>
+            </div>
+            <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 20px; padding: 18px 24px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: var(--shadow-sm);">
+              <span style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px;">Recompensa Acreditada</span>
+              <div style="font-size: 32px; font-weight: 950; color: #10b981; letter-spacing: -0.5px; display: flex; align-items: center; gap: 4.5px;">
+                +${challenge.pointsReward} <span style="font-size: 14px; font-weight: 850; letter-spacing: 0; color:var(--color-text-secondary);">GO PTS</span>
+              </div>
+            </div>
+            <button id="btn-close-challenge-modal" style="background: var(--color-primary); color: white; border: none; width: 100%; padding: 14px; border-radius: 16px; font-size: 15px; font-weight: 900; cursor: pointer; box-shadow: 0 4px 15px rgba(225, 29, 72, 0.35); margin-top: 10px; font-family:var(--font-display);">
+              ¡Genial, gracias!
+            </button>
+          </div>
+        `,
+        onOpen: () => {
+          document.getElementById('btn-close-challenge-modal')?.addEventListener('click', async () => {
+            const { closeModal } = await import('../components/modal.js');
+            closeModal();
+            // Recurse to show other completed challenges if any
+            window.checkAndShowCompletedChallenges();
+          });
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Error checking completed challenges:", err);
+  }
 };
 
 

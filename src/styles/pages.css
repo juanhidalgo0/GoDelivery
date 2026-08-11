@@ -211,7 +211,18 @@
   pointer-events: auto;
   overflow-y: auto;
   display: none;
-  animation: slideInRight 0.3s ease;
+}
+.slide-overlay.slide-from-right {
+  animation: slideInRight 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.slide-overlay.slide-from-left {
+  animation: slideInLeft 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.slide-overlay.slide-exit-left {
+  animation: slideOutLeft 0.48s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+.slide-overlay.slide-exit-right {
+  animation: slideOutRight 0.48s cubic-bezier(0.16, 1, 0.3, 1) both !important;
 }
 
 .slide-overlay.active {
@@ -233,7 +244,7 @@
 body.header-hidden .slide-overlay {
   top: 0 !important;
   bottom: 0 !important;
-  z-index: 1000 !important;
+  z-index: 10000000 !important;
 }
 
 .hide-mobile {

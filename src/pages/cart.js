@@ -192,7 +192,7 @@ export async function renderCart(content) {
       totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
     }
     
-    const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
+    const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
     const discount = state.appliedDiscount || 0;
     let couponDiscount = 0;
     if (state.appliedCoupon && allFeesReady) {
@@ -657,7 +657,7 @@ function renderCartContent(content) {
             totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
           }
 
-          const appUsageFee = totalProducts * (getState().appUsageFeeRate || 0.05);
+          const appUsageFee = Math.ceil((totalProducts * (getState().appUsageFeeRate || 0.05)) / 10) * 10;
           const discount = getState().appliedDiscount || 0;
           
           const appliedCoupon = getState().appliedCoupon;
@@ -1141,7 +1141,7 @@ function showFeeDetails() {
   }
 
   const totalProducts = getCartTotal();
-  const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
+  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
   if (appUsageFee > 0) {
     html += `
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
@@ -1354,7 +1354,7 @@ function openGoPointsModal() {
     nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
     totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
   }
-  const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
+  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
 
   const preDiscountTotal = totalProducts + totalDelivery + appUsageFee;
   const maxPointsToRedeem = Math.min(userPoints, Math.floor(preDiscountTotal / dollarPerPoint));
@@ -1866,7 +1866,7 @@ async function openCheckoutConfirmationModal() {
   const driverIncentive = calculateScheduleSurcharge(state.driverIncentiveConfig, baseDeliveryFee);
   const totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
 
-  const appUsageFee = totalProducts * (state.appUsageFeeRate || 0.05);
+  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
   const discount = state.appliedDiscount || 0;
 
   const appliedCoupon = state.appliedCoupon;
@@ -1974,7 +1974,7 @@ async function openCheckoutConfirmationModal() {
   modalContent.innerHTML = `
     <style>
       .confirm-order-modal-container {
-        --confirm-padding: 16px 16px 20px;
+        --confirm-padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 20px));
         --confirm-gap: 12px;
         --confirm-card-padding: 10px 12px;
         --confirm-card-gap: 6px;
@@ -2110,22 +2110,6 @@ async function openCheckoutConfirmationModal() {
           }).join('')}
         </div>
       ` : ''}
-    </div>
-
-    <!-- OPCIÓN DE REEMPLAZO DE PRODUCTOS (Reemplazar producto) -->
-    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0;">
-      <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
-        <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
-          🔄 ¿Reemplazar producto?
-        </span>
-        <span style="font-size: var(--confirm-subtitle-size); color: var(--color-text-secondary); font-weight: 600; line-height: 1.3;">
-          Si algún producto no está disponible, autorizo a reemplazarlo por uno similar.
-        </span>
-      </div>
-      <label class="confirm-switch">
-        <input type="checkbox" id="confirm-allow-replacement" checked>
-        <span class="confirm-slider"></span>
-      </label>
     </div>
 
     <!-- PROGRAMACIÓN DE ENTREGA -->

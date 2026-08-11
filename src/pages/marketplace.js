@@ -9,6 +9,18 @@ export async function renderMarketplace(content) {
 
   // Render template layout
   content.innerHTML = `
+    <style>
+      @keyframes marketSpin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes productFadeIn {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .product-card-animated {
+        animation: productFadeIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+    </style>
     <div class="marketplace-container" style="display:flex; flex-direction:column; height:100%; background:var(--color-bg); position:relative;">
       <!-- Header (Green Premium style) -->
       <div style="background:linear-gradient(135deg, #10B981 0%, #059669 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(16, 185, 129, 0.2); z-index:100;">
@@ -48,8 +60,9 @@ export async function renderMarketplace(content) {
 
       <!-- Products Grid -->
       <div id="market-products-list" style="flex:1; overflow-y:auto; padding:16px; display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; align-content:start;">
-        <div style="grid-column:1/-1; text-align:center; padding:40px; color:var(--color-text-secondary);">
-          Cargando publicaciones...
+        <div style="grid-column:1/-1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; color:var(--color-text-secondary); gap:14px;">
+          <div style="width:32px; height:32px; border:3px solid rgba(16,185,129,0.15); border-top-color:#10B981; border-radius:50%; animation:marketSpin 0.75s linear infinite;"></div>
+          <span style="font-size:13px; font-weight:600; color:var(--color-text-secondary);">Cargando publicaciones...</span>
         </div>
       </div>
     </div>
@@ -89,8 +102,8 @@ export async function renderMarketplace(content) {
       return;
     }
 
-    listContainer.innerHTML = filtered.map(p => `
-      <a href="#/marketplace/product/${p.id}" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:16px; overflow:hidden; text-decoration:none; color:inherit; display:flex; flex-direction:column; box-shadow:var(--shadow-sm); transition:transform 0.2s;">
+    listContainer.innerHTML = filtered.map((p, index) => `
+      <a href="#/marketplace/product/${p.id}" class="product-card-animated" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:16px; overflow:hidden; text-decoration:none; color:inherit; display:flex; flex-direction:column; box-shadow:var(--shadow-sm); transition:transform 0.2s; animation-delay:${index * 0.035}s;">
         <div style="position:relative; width:100%; padding-top:100%; background:#f0f0f0;">
           <img src="${p.images?.[0] || '/logo.png'}" style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover;" />
           <div style="position:absolute; top:8px; left:8px; background:${p.condition === 'new' ? '#10B981' : '#F59E0B'}; color:white; font-size:10px; font-weight:800; padding:3px 8px; border-radius:8px; text-transform:uppercase;">

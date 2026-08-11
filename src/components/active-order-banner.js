@@ -95,13 +95,6 @@ function stopListening() {
 }
 
 function updateBannerState(order, allOrders = []) {
-  // Hide customer tracking banner if currently in delivery panel pages to avoid confusion
-  const hash = window.location.hash || '';
-  if (hash.startsWith('#/delivery') || hash.startsWith('#/delivery/')) {
-    clearOrderIndicator();
-    return;
-  }
-
   if (!order) {
     clearOrderIndicator();
     return;
@@ -128,9 +121,20 @@ function updateBannerState(order, allOrders = []) {
 
   switch (order.status) {
     case 'pending':
-      // Do not render any badge or indicator in 'pending' status
-      clearOrderIndicator();
-      return;
+      if (order.isTrip) {
+        color1 = '#EF4444'; color2 = '#DC2626';
+        title = 'Buscando chofer';
+        iconName = 'car';
+      } else if (order.isFavor) {
+        color1 = '#f59e0b'; color2 = '#d97706';
+        title = 'Buscando repartidor';
+        iconName = 'bike';
+      } else {
+        color1 = '#f59e0b'; color2 = '#d97706';
+        title = 'Esperando comercio';
+        iconName = 'shoppingBag';
+      }
+      break;
     case 'confirmed':
       if (order.isTrip) {
         color1 = '#EF4444'; color2 = '#DC2626'; // Bright Red!

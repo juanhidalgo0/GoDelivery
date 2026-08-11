@@ -443,8 +443,26 @@ export async function renderComercioOrders(manualId = null) {
     updateAllUnreadBadges(allOrders);
   });
 
+  const readyCheckerInterval = setInterval(() => {
+    const nowMs = Date.now();
+    allOrders.forEach(o => {
+      if (o.isManual && o.status === 'confirmed' && o.dispatchAt) {
+        const dispatchTime = o.dispatchAt.toMillis ? o.dispatchAt.toMillis() : new Date(o.dispatchAt).getTime();
+        if (nowMs >= dispatchTime) {
+          console.log(`Auto-readying manual order #${o.orderId} (dispatch time reached)`);
+          updateDoc(doc(db, 'orders', o.id), {
+            status: 'ready',
+            readyAt: serverTimestamp()
+          }).catch(err => console.error("Error auto-readying manual order:", err));
+        }
+      }
+    });
+    renderView();
+  }, 30000);
+
   return {
     cleanup: () => {
+      clearInterval(readyCheckerInterval);
       if (ordersUnsub) ordersUnsub();
       if (commerceHeaderUnsub) {
         commerceHeaderUnsub();
@@ -507,6 +525,19 @@ function renderOrderCard(o, isHistory = false) {
     </div>
   ` : '';
 
+  let timerHtml = '';
+  if (o.status === 'confirmed' && o.estimatedReadyAt) {
+    const readyTime = o.estimatedReadyAt.toDate ? o.estimatedReadyAt.toDate() : new Date(o.estimatedReadyAt);
+    const timeStr = readyTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const diffMs = readyTime.getTime() - Date.now();
+    const diffMins = Math.max(0, Math.floor(diffMs / 60000));
+    timerHtml = `
+      <div style="margin-top: 6px; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; color: #3b82f6;">
+        ⏱️ Entregar listo a las ${timeStr} (En ${diffMins} min)
+      </div>
+    `;
+  }
+
   const cardClass = o.isScheduled ? 'scheduled' : o.status;
 
   return `
@@ -523,6 +554,7 @@ function renderOrderCard(o, isHistory = false) {
             <strong>${o.userName || 'Cliente'}</strong>
             <span class="order-exact-time">${icon('clock', 10)} ${formatH(o.createdAt)}</span>
             ${scheduledBadge}
+            ${timerHtml}
           </div>
           <div class="card-right-section">
             <div class="price-main">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</div>
@@ -627,8 +659,8 @@ function showOrderDetailModal(initialOrder) {
                 <div class="customer-id-premium">ID: ${shortUserId}</div>
               </div>
               ${!isHistory ? `
-              <button class="chat-btn-mini chat-order-btn" data-id="${o.id}" data-client="${o.userName}" data-num="${o.orderId}">
-                ${icon('chatBubble', 16)} Chat
+              <button class="chat-btn-mini chat-order-btn" data-id="${o.id}" data-client="${o.userName}" data-num="${o.orderId}" ${o.isManual && !o.driverId ? 'style="opacity:0.5; cursor:not-allowed;" disabled' : ''}>
+                ${icon('chatBubble', 16)} ${o.isManual ? 'Chat Chofer' : 'Chat'}
                 <span class="unread-count-bubble" id="modal-unread-${o.id}" style="${unreadCount > 0 ? 'display:flex;' : 'display:none;'}">${unreadCount}</span>
               </button>
               ` : ''}
@@ -918,7 +950,15 @@ function showOrderDetailModal(initialOrder) {
     });
 
     modalEl.querySelector('.chat-order-btn')?.addEventListener('click', () => {
-      openChat({ orderId: o.id, type: 'client-commerce', otherName: o.userName, orderNum: o.orderId, senderDisplayName: 'Comercio' });
+      if (o.isManual === true) {
+        if (o.driverId) {
+          openChat({ orderId: o.id, type: 'commerce-delivery', otherName: o.driverName || 'Repartidor', orderNum: o.orderId, senderDisplayName: 'Comercio' });
+        } else {
+          showToast('Esperando que un repartidor acepte el pedido para poder chatear', 'warning');
+        }
+      } else {
+        openChat({ orderId: o.id, type: 'client-commerce', otherName: o.userName, orderNum: o.orderId, senderDisplayName: 'Comercio' });
+      }
     });
 
     // Modal Queue Timer Live Countdown
@@ -1724,7 +1764,7 @@ async function showNewManualOrderModal(comercioId) {
           const estimatedReadyAt = new Date(estimatedReadyMs);
           const dispatchAt = new Date(dispatchMs);
 
-          const initialStatus = isImmediate ? 'ready' : 'preparing';
+          const initialStatus = isImmediate ? 'ready' : 'confirmed';
 
           const comRate = 0; // Manual orders carry NO commission for commerce
           const commissionAmount = 0;

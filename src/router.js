@@ -82,35 +82,56 @@ async function handleRoute() {
     const slider = document.getElementById('app-slider');
     const overlay = document.getElementById('app-overlay');
     
-    if (currentCleanup) {
-      currentCleanup();
-      currentCleanup = null;
-    }
-    clearActiveListeners();
-
     if (getState().loading) return;
-
-    const maintenanceMode = getState().maintenanceMode === true;
-    const currentUserEmail = (getState().user?.email || '').toLowerCase().trim();
-    const isSuperOwner = currentUserEmail === 'juanhidalgobass@gmail.com';
-    if (maintenanceMode && !isSuperOwner) {
-      checkMaintenanceState();
-      isRouting = false;
-      return;
-    }
 
     const match = matchRoute(hash);
     if (!match) return;
 
     const { pattern, handler } = match;
-
     const mainRoutes = getMainRoutes();
+    const isToMainRoute = !!mainRoutes[pattern];
+
+    if (currentCleanup) {
+      currentCleanup();
+      currentCleanup = null;
+    }
+    
+    // Only clear active listeners if we are leaving the main tabs (e.g. entering sub-pages/overlays)
+    if (!isToMainRoute) {
+      clearActiveListeners();
+    }
+
+    const maintenanceMode = getState().maintenanceMode === true;
+    const currentUserEmail = (getState().user?.email || '').toLowerCase().trim();
+    const isSuperOwner = currentUserEmail === 'juanhidalgobass@gmail.com';
+    const allowedEmails = (getState().maintenanceAllowedEmails || []).map(e => e.toLowerCase().trim());
+    const isAllowed = isSuperOwner || (currentUserEmail && allowedEmails.includes(currentUserEmail));
+
+    if (maintenanceMode && !isAllowed) {
+      checkMaintenanceState();
+      isRouting = false;
+      return;
+    }
+
+    // Match is already parsed above
 
     if (mainRoutes[pattern]) {
-      overlay.classList.remove('active');
-      overlay.classList.remove('panel-fullscreen');
+      if (overlay && overlay.classList.contains('active')) {
+        if (overlay.classList.contains('slide-from-left')) {
+          overlay.classList.add('slide-exit-left');
+        } else {
+          overlay.classList.add('slide-exit-right');
+        }
+        const currentTarget = overlay;
+        setTimeout(() => {
+          currentTarget.classList.remove('active', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-exit-left', 'slide-exit-right');
+          currentTarget.innerHTML = '';
+        }, 480);
+      } else if (overlay) {
+        overlay.classList.remove('active', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-exit-left', 'slide-exit-right');
+        overlay.innerHTML = '';
+      }
       document.body.classList.remove('overlay-open');
-      overlay.innerHTML = '';
 
       const locationSelector = document.getElementById('header-location-selector');
       if (locationSelector) {
@@ -149,46 +170,62 @@ async function handleRoute() {
       // 2. Then, update the content
       // 2. Then, update the content
       if (panel) {
-        // Pass the panel directly as the container
-        panel.innerHTML = ''; // Clear to ensure animation re-triggers
-        try {
-          const result = await handler(panel);
-          if (result && result.cleanup) {
-            currentCleanup = result.cleanup;
-          }
-        } catch (err) {
-          console.error('Route error (main):', err);
-          if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
-            console.warn('Failed to load main route module. Reloading page...');
-            window.location.reload();
-            return;
-          }
-          panel.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:20px; text-align:center;">
-              <div style="width:64px; height:64px; background:rgba(227,27,35,0.1); color:#E31B23; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
-                <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+        const isHome = pattern === '/';
+        const alreadyRendered = panel.children.length > 0;
+
+        if (isHome && alreadyRendered) {
+          console.log('[Router] Bypassing re-render for home page (already rendered)');
+        } else {
+          // Pass the panel directly as the container
+          panel.innerHTML = ''; // Clear to ensure animation re-triggers
+          try {
+            const result = await handler(panel);
+            if (result && result.cleanup) {
+              currentCleanup = result.cleanup;
+            }
+          } catch (err) {
+            console.error('Route error (main):', err);
+            if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
+              console.warn('Failed to load main route module. Reloading page...');
+              window.location.reload();
+              return;
+            }
+            panel.innerHTML = `
+              <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:20px; text-align:center;">
+                <div style="width:64px; height:64px; background:rgba(227,27,35,0.1); color:#E31B23; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
+                  <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                </div>
+                <h3 style="font-family:var(--font-display); font-size:18px; font-weight:800; margin-bottom:8px;">Error al cargar</h3>
+                <p style="color:var(--color-text-secondary); font-size:14px; margin-bottom:24px;">Hubo un problema al cargar esta sección. Verificá tu conexión a internet.</p>
+                <button onclick="window.location.reload()" style="background:var(--color-primary); color:white; border:none; padding:12px 24px; border-radius:12px; font-weight:700; cursor:pointer;">Recargar página</button>
               </div>
-              <h3 style="font-family:var(--font-display); font-size:18px; font-weight:800; margin-bottom:8px;">Error al cargar</h3>
-              <p style="color:var(--color-text-secondary); font-size:14px; margin-bottom:24px;">Hubo un problema al cargar esta sección. Verificá tu conexión a internet.</p>
-              <button onclick="window.location.reload()" style="background:var(--color-primary); color:white; border:none; padding:12px 24px; border-radius:12px; font-weight:700; cursor:pointer;">Recargar página</button>
-            </div>
-          `;
+            `;
+          }
         }
       }
 
 
     } else {
       // Overlay routes (Sub-pages, Modals, etc.)
-      overlay.classList.add('active');
-      
-      // Sub-pages like /profile/* should be full screen (except support-chats)
-      if (hash.startsWith('/profile/') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
-        overlay.classList.add('panel-fullscreen');
-      } else {
-        overlay.classList.remove('panel-fullscreen');
+      if (overlay) {
+        if (hash.startsWith('/profile/') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
+          overlay.classList.add('panel-fullscreen');
+        } else {
+          overlay.classList.remove('panel-fullscreen');
+        }
+
+        overlay.classList.add('active');
+        if (hash === '/viajes') {
+          overlay.classList.add('slide-from-left');
+          overlay.classList.remove('slide-from-right');
+        } else {
+          overlay.classList.add('slide-from-right');
+          overlay.classList.remove('slide-from-left');
+        }
       }
 
       document.body.classList.add('overlay-open');
+      if (!overlay) { isRouting = false; return; } // Safety guard — DOM not ready
       overlay.innerHTML = '<div id="overlay-render-target" style="width:100%; height:100%;"></div>';
       const target = document.getElementById('overlay-render-target');
       target.id = 'app-content';
@@ -197,7 +234,6 @@ async function handleRoute() {
       overlay.scrollTop = 0;
 
       try {
-        // Pass the overlay target directly
         const result = await handler(target);
         if (result && result.cleanup) {
           const originalCleanup = result.cleanup;
@@ -209,8 +245,12 @@ async function handleRoute() {
       } catch (err) {
         console.error('Route error (overlay):', err);
         if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
-          console.warn('Failed to load overlay route module. Reloading page...');
-          window.location.reload();
+          console.warn('Failed to load overlay route module. Clearing cache and reloading...');
+          if (window.showUpdateSplashAndReload) {
+            window.showUpdateSplashAndReload();
+          } else {
+            window.location.reload();
+          }
           return;
         }
         target.innerHTML = `
@@ -387,10 +427,12 @@ export function checkMaintenanceState() {
   const maintenanceMode = getState().maintenanceMode === true;
   const currentUserEmail = (getState().user?.email || '').toLowerCase().trim();
   const isSuperOwner = currentUserEmail === 'juanhidalgobass@gmail.com';
+  const allowedEmails = (getState().maintenanceAllowedEmails || []).map(e => e.toLowerCase().trim());
+  const isAllowed = isSuperOwner || (currentUserEmail && allowedEmails.includes(currentUserEmail));
   
   let overlay = document.getElementById('maintenance-overlay');
   
-  if (maintenanceMode && !isSuperOwner) {
+  if (maintenanceMode && !isAllowed) {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'maintenance-overlay';

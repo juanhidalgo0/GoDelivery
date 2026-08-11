@@ -75,6 +75,26 @@ export async function processOrderCompletionRewards(batch, customerUid, customer
           description: `¡Bono de bienvenida por usar el código de referido de un amigo!`,
           createdAt: new Date()
         });
+
+        // Push notification for referrer
+        const refNotifRef = doc(collection(db, 'users', referrerUid, 'notifications'));
+        batch.set(refNotifRef, {
+          title: '🎉 ¡Tu amigo hizo su primer pedido!',
+          body: `Tu código de referido fue usado. ¡Ganaste ${refPoints.toLocaleString('es-AR')} GO Points!`,
+          createdAt: new Date(),
+          type: 'referral_bonus',
+          read: false
+        });
+
+        // Push notification for customer (referred user)
+        const custNotifRef = doc(collection(db, 'users', customerUid, 'notifications'));
+        batch.set(custNotifRef, {
+          title: '🎁 ¡Bono de bienvenida acreditado!',
+          body: `Usaste un código de referido. ¡Ganaste ${refPoints.toLocaleString('es-AR')} GO Points de regalo!`,
+          createdAt: new Date(),
+          type: 'referred_welcome',
+          read: false
+        });
       } else {
         console.warn(`[Rewards] Referrer with code ${refCode} not found.`);
       }
@@ -100,6 +120,7 @@ export async function processOrderCompletionRewards(batch, customerUid, customer
           if (isCompleted) {
             updateData.completed = true;
             updateData.completedAt = new Date();
+            updateData.modalShown = false;
             
             console.log(`[Rewards] Challenge ${cDoc.id} COMPLETED by ${customerUid}! Awarding ${challenge.pointsReward} GO Points.`);
 
@@ -116,6 +137,16 @@ export async function processOrderCompletionRewards(batch, customerUid, customer
               points: challenge.pointsReward,
               description: `Completaste el desafío semanal: ${challenge.title}`,
               createdAt: new Date()
+            });
+
+            // Push Notification document for user FCM / sound triggers
+            const notifRef = doc(collection(db, 'users', customerUid, 'notifications'));
+            batch.set(notifRef, {
+              title: '🏆 ¡Desafío Completado!',
+              body: `¡Ganaste ${challenge.pointsReward} GO Points completando el desafío: "${challenge.title}"!`,
+              createdAt: new Date(),
+              type: 'challenge_completion',
+              challengeId: cDoc.id
             });
           }
 

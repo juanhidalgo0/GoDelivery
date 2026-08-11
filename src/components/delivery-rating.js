@@ -118,7 +118,7 @@ export function showDeliveryRating(order) {
     </div>
   </div>
 
-  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; gap:10px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; width:100%; box-sizing:border-box;">
+  <div style="padding:20px; padding-bottom:calc(24px + env(safe-area-inset-bottom, 16px)); display:flex; gap:10px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; width:100%; box-sizing:border-box;">
     <button class="btn btn-ghost" id="rating-skip-btn" style="flex: 1; height: 52px; border-radius: 16px; font-weight: 800; font-size: 13.5px; color: var(--color-text-tertiary); text-transform: uppercase;">
       ${order.driverId ? 'Omitir' : 'Cerrar'}
     </button>

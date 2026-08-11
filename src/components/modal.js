@@ -3,7 +3,7 @@ import { icon } from '../utils/icons.js';
 
 let modalStack = [];
 
-export function showModal({ title, content, footer, onOpen, onClose, hideHeader = false, fullSwipe = false, height = '88dvh', fullscreen = false, persistent = false, headerBackground = '', headerTextColor = '' }) {
+export function showModal({ title, content, footer, onOpen, onClose, hideHeader = false, fullSwipe = false, height = '88vh', fullscreen = false, persistent = false, headerBackground = '', headerTextColor = '', slideFromRight = false }) {
   const container = document.getElementById('modal-container');
   if (!container) return;
 
@@ -12,34 +12,84 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   modalWrapper.id = modalId;
   modalWrapper.className = 'modal-stack-wrapper';
   
-  const zIndex = 2000 + (modalStack.length * 10);
-  modalWrapper.style.cssText = `position:fixed; inset:0; z-index:${zIndex};`;
+  const zIndex = 20000000 + (modalStack.length * 10);
+  modalWrapper.style.cssText = `position:fixed; top:0; left:0; width:100%; height:100lvh; z-index:${zIndex};`;
+
+  if (!window._maxInnerHeight || window.innerHeight > window._maxInnerHeight) {
+    window._maxInnerHeight = window.innerHeight;
+  }
+  const baseHeight = window._maxInnerHeight;
+
+  // Inject slide keyframes if they don't exist
+  if (!document.getElementById('modal-slide-keyframes')) {
+    const styleEl = document.createElement('style');
+    styleEl.id = 'modal-slide-keyframes';
+    styleEl.textContent = `
+      @keyframes slideInRight {
+        from { transform: translateX(100%); }
+        to { transform: translateX(0); }
+      }
+      @keyframes slideOutRight {
+        from { transform: translateX(0); }
+        to { transform: translateX(100%); }
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }
 
   const isFullscreen = fullscreen === true;
-  const finalHeight = isFullscreen ? '100%' : height;
+  let finalHeight = isFullscreen ? '100%' : height;
+  let marginTopStyle = 'margin-top: 0;';
+  let maxHStyle = 'max-height: 94vh !important;';
+  let borderRadiusStyle = isFullscreen ? '0' : '28px 28px 0 0';
+  let modalAnimation = isFullscreen ? 'fadeIn' : 'springUp';
+  let modalMargin = 'margin:0 auto;';
+
+  if (slideFromRight) {
+    finalHeight = '100%';
+    marginTopStyle = 'margin-top: 0;';
+    maxHStyle = 'max-height: none !important;';
+    borderRadiusStyle = '0';
+    modalAnimation = 'slideInRight';
+    modalMargin = 'margin: 0 0 0 auto;';
+  } else if (!isFullscreen) {
+    if (height.endsWith('vh') || height.endsWith('dvh')) {
+      const pct = parseFloat(height) / 100;
+      const pxHeight = Math.round(baseHeight * pct);
+      finalHeight = `${pxHeight}px`;
+      marginTopStyle = `margin-top: ${baseHeight - pxHeight}px;`;
+      maxHStyle = `max-height: ${Math.round(baseHeight * 0.94)}px !important;`;
+    } else if (height === 'auto') {
+      marginTopStyle = 'margin-top: auto;';
+    } else {
+      marginTopStyle = `margin-top: calc(100vh - ${height});`;
+    }
+  }
 
   modalWrapper.innerHTML = `
     <div class="modal-overlay" id="${modalId}-overlay" style="
-      position:fixed; inset:0; background:rgba(0,0,0,${isFullscreen ? '1' : '0.35'}); backdrop-filter:${isFullscreen ? 'none' : 'blur(4px)'}; -webkit-backdrop-filter:${isFullscreen ? 'none' : 'blur(4px)'};
-      animation: fadeIn 0.25s ease-out;
+      position:fixed; top:0; left:0; width:100%; height:100lvh; background:rgba(0,0,0,${slideFromRight ? '0.15' : (isFullscreen ? '1' : '0.45')});
+      display:flex !important; align-items:${slideFromRight ? 'stretch' : (isFullscreen ? 'stretch' : 'flex-start')} !important; justify-content:${slideFromRight ? 'flex-end' : 'center'} !important;
+      animation: fadeIn 0.25s ease-out !important;
       will-change: background;
     ">
       <div class="modal" id="${modalId}-dialog" style="
-        background:var(--color-bg); border-radius:${isFullscreen ? '0' : '28px 28px 0 0'}; width:100%; max-width:${isFullscreen ? 'none' : '500px'}; max-height:${isFullscreen ? 'none' : '94dvh'};
-        height:${finalHeight}; margin:0 auto; overflow:hidden; position:relative; display:flex; flex-direction:column;
-        animation: ${isFullscreen ? 'fadeIn' : 'springUp'} 0.28s cubic-bezier(0.25, 0.8, 0.25, 1);
-        box-shadow: ${isFullscreen ? 'none' : '0 -12px 60px rgba(0,0,0,0.35)'};
-        margin-top: ${isFullscreen ? '0' : (finalHeight === 'auto' ? 'auto' : `calc(100dvh - ${finalHeight})`)};
+        background:transparent !important; border-radius:${borderRadiusStyle} !important; width:100% !important; max-width:${isFullscreen ? 'none' : '500px'} !important; max-height:${isFullscreen ? 'none' : maxHStyle} !important;
+        height:${finalHeight} !important; ${modalMargin.replace(';', ' !important;')} overflow:hidden !important; position:relative !important; display:flex !important; flex-direction:column !important;
+        animation: ${modalAnimation} 0.35s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+        box-shadow: ${isFullscreen ? 'none' : '0 -12px 60px rgba(0,0,0,0.35)'} !important;
+        ${marginTopStyle.replace(';', ' !important;')}
         will-change: transform, opacity;
+        transform: translateZ(0);
       ">
-        ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(120,120,120,0.4); border-radius:var(--radius-full); position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab;"></div>` : ''}
+        ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(255,255,255,0.55); border-radius:var(--radius-full); position:absolute; top:6px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab; box-shadow: 0 1px 2px rgba(0,0,0,0.15);"></div>` : ''}
         ${!hideHeader && !isFullscreen ? `
           <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1.5px solid rgba(0,0,0,0.06); z-index:90; flex-shrink:0; ${headerBackground ? `background:${headerBackground};` : 'background:var(--color-bg-secondary);'}">
             <h3 style="font-family:var(--font-display); font-size:1.2rem; font-weight:900; margin:0; letter-spacing:-0.01em; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-primary);'}">${title}</h3>
             <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
         ` : ''}
-        <div class="modal-body" id="${modalId}-body" style="flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; position:relative; display:flex; flex-direction:column; ${hideHeader || isFullscreen ? 'padding:0;' : ''}">
+        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''}">
           ${typeof content === 'string' ? content : ''}
         </div>
         ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px calc(20px + env(safe-area-inset-bottom, 0px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
@@ -69,11 +119,13 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       window.history.back();
     }
 
-    // Ultra-fluid spring down animation
-    dialog.style.transition = 'transform 0.24s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.2s ease-out';
-    dialog.style.transform = 'translateY(100%) scale(0.95)';
+    dialog.style.animation = 'none';
+    dialog.offsetHeight; // Force reflow
+    dialog.style.transition = 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)';
+    dialog.style.transform = slideFromRight ? 'translateX(100%)' : 'translateY(100%)';
     
-    overlay.style.transition = 'opacity 0.2s ease-out';
+    overlay.style.transition = 'background-color 0.24s ease-out, opacity 0.24s ease-out';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
     overlay.style.opacity = '0';
     
     setTimeout(() => {
@@ -93,35 +145,10 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     }, 240);
   };
 
-  const modalObj = { id: modalId, wrapper: modalWrapper, onClose, close };
+  const modalObj = { id: modalId, wrapper: modalWrapper, onClose, close, slideFromRight };
   modalStack.push(modalObj);
 
-  // Handle VisualViewport for iOS virtual keyboard
-  if (window.visualViewport) {
-    const handleViewportChange = () => {
-      if (!dialog || !overlay) return;
-      const vh = window.visualViewport.height;
-      const vt = window.visualViewport.offsetTop;
-      
-      overlay.style.height = `${vh}px`;
-      overlay.style.top = `${vt}px`;
-
-      if (!isFullscreen) {
-        dialog.style.maxHeight = `${vh - 8}px`;
-      }
-    };
-
-    window.visualViewport.addEventListener('resize', handleViewportChange);
-    window.visualViewport.addEventListener('scroll', handleViewportChange);
-    handleViewportChange();
-
-    const origCloseFunc = close;
-    modalObj.close = (isPopState = false) => {
-      window.visualViewport.removeEventListener('resize', handleViewportChange);
-      window.visualViewport.removeEventListener('scroll', handleViewportChange);
-      origCloseFunc(isPopState);
-    };
-  }
+  // Removed visualViewport resize listener to prevent keyboard-driven dialog resizing, layout shifts and parpadeos.
 
   // Auto scroll focused input into view inside modal
   body.addEventListener('focusin', (e) => {
@@ -143,6 +170,8 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   // Swipe logic
   let startY = 0;
   let currentY = 0;
+  let startX = 0;
+  let currentX = 0;
   let isDragging = false;
   let startTime = 0;
 
@@ -157,45 +186,56 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       }
     }
     
-    startY = e.touches[0].clientY;
+    if (slideFromRight) {
+      startX = e.touches[0].clientX;
+    } else {
+      startY = e.touches[0].clientY;
+    }
     startTime = Date.now();
     isDragging = true;
+    dialog.style.animation = 'none';
     dialog.style.transition = 'none';
     overlay.style.transition = 'none';
   };
 
   const onTouchMove = (e) => {
     if (!isDragging) return;
-    currentY = e.touches[0].clientY;
-    const diff = currentY - startY;
+    let diff = 0;
+    if (slideFromRight) {
+      currentX = e.touches[0].clientX;
+      diff = currentX - startX;
+      const translateX = diff > 0 ? diff : diff * 0.15;
+      dialog.style.transform = `translateX(${translateX}px)`;
+    } else {
+      currentY = e.touches[0].clientY;
+      diff = currentY - startY;
+      const translateY = diff > 0 ? diff : diff * 0.15;
+      dialog.style.transform = `translateY(${translateY}px)`;
+    }
     
-    // Fluid downward translation with resistance on upward pull
-    const translateY = diff > 0 ? diff : diff * 0.15;
-    dialog.style.transform = `translateY(${translateY}px)`;
-    
-    // Dynamic overlay fade
+    const maxOpacity = slideFromRight ? 0.15 : (isFullscreen ? 1 : 0.45);
     const progress = Math.min(Math.max(0, diff) / 450, 1);
-    overlay.style.opacity = 1 - (progress * 0.8);
-    overlay.style.background = `rgba(0,0,0,${0.35 * (1 - progress * 0.5)})`;
+    overlay.style.backgroundColor = `rgba(0, 0, 0, ${maxOpacity * (1 - progress)})`;
   };
 
   const onTouchEnd = () => {
     if (!isDragging) return;
     isDragging = false;
-    const diff = currentY - startY;
+    const diff = slideFromRight ? (currentX - startX) : (currentY - startY);
     const duration = Date.now() - startTime;
     const velocity = diff / duration;
 
     // Standard fluid transition back or away
     dialog.style.transition = 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
-    overlay.style.transition = 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+    overlay.style.transition = 'background-color 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
 
     if (diff > 90 || (velocity > 0.35 && diff > 40)) {
       close();
     } else {
-      dialog.style.transform = 'translateY(0)';
+      const maxOpacity = slideFromRight ? 0.15 : (isFullscreen ? 1 : 0.45);
+      dialog.style.transform = slideFromRight ? 'translateX(0)' : 'translateY(0)';
       overlay.style.opacity = '1';
-      overlay.style.background = 'rgba(0,0,0,0.35)';
+      overlay.style.backgroundColor = `rgba(0, 0, 0, ${maxOpacity})`;
     }
   };
 
@@ -210,7 +250,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     el.addEventListener('touchend', onTouchEnd);
   };
 
-  if (!persistent && !isFullscreen) {
+  if (!persistent && (!isFullscreen || slideFromRight)) {
     addListeners(handle);
     addListeners(headerDrag);
 
@@ -220,7 +260,12 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       dialog.addEventListener('touchstart', (e) => {
         const rect = dialog.getBoundingClientRect();
         const relativeY = e.touches[0].clientY - rect.top;
-        if (relativeY < 60 && !e.target.closest('.pm-scrollable-body, .modal-body, input, select, textarea, button')) {
+        const relativeX = e.touches[0].clientX - rect.left;
+        
+        const isEdgeTouch = slideFromRight ? (relativeX < 40 || e.target.closest('.chat-header-bar')) : (relativeY < 60 || e.target.closest('.chat-header-bar, .ticket-chat-header, .modal-handle'));
+        const isInteractive = e.target.closest('input, select, textarea, button');
+        const isScrollableContent = e.target.closest('.pm-scrollable-body, .chat-messages, #ticket-messages-container');
+        if (isEdgeTouch && !isInteractive && (!isScrollableContent || relativeX < 40)) {
           onTouchStart(e);
         }
       }, { passive: true });
@@ -258,11 +303,14 @@ export function closeMultipleModals(count = 1, isPopState = false) {
     const modalWrapper = modal.wrapper;
 
     if (dialog) {
-      dialog.style.transition = 'transform 0.45s cubic-bezier(0.32, 0, 0.67, 0)';
-      dialog.style.transform = 'translateY(100%)';
+      dialog.style.animation = 'none';
+      dialog.offsetHeight; // Force reflow
+      dialog.style.transition = 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)';
+      dialog.style.transform = modal.slideFromRight ? 'translateX(100%)' : 'translateY(100%)';
     }
     if (overlay) {
-      overlay.style.transition = 'opacity 0.35s ease-out';
+      overlay.style.transition = 'background-color 0.24s ease-out, opacity 0.24s ease-out';
+      overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
       overlay.style.opacity = '0';
     }
 
@@ -271,7 +319,7 @@ export function closeMultipleModals(count = 1, isPopState = false) {
       if (modal.onClose) {
         try { modal.onClose(); } catch (e) { console.error(e); }
       }
-    }, 450);
+    }, 240);
   });
 
   if (modalStack.length <= 1) {

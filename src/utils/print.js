@@ -100,19 +100,29 @@ export function printComanda(order) {
         printWindow.close();
       }, 500);
     } else {
-      // Fallback: temporarily rewrite the current document and trigger print
       const originalBody = document.body.innerHTML;
       const originalStyle = document.body.style.cssText;
       
-      document.body.innerHTML = html;
+      // Inject close button styled for direct visibility on top of print output
+      const buttonHtml = `
+        <div id="print-close-fallback-btn" style="position:fixed; top:20px; right:20px; background:#dc2626; color:white; font-family:sans-serif; font-size:14px; font-weight:bold; padding:12px 24px; border-radius:12px; cursor:pointer; z-index:999999; box-shadow:0 4px 15px rgba(0,0,0,0.3); border:none; text-transform:uppercase;">
+          Volver atrás
+        </div>
+      `;
+      
+      document.body.innerHTML = html + buttonHtml;
+      
+      const doRestore = () => {
+        document.body.innerHTML = originalBody;
+        document.body.style.cssText = originalStyle;
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      };
+
+      document.getElementById('print-close-fallback-btn').onclick = doRestore;
+
       window.focus();
       setTimeout(() => {
         window.print();
-        // Restore page
-        document.body.innerHTML = originalBody;
-        document.body.style.cssText = originalStyle;
-        // Re-trigger router match to bind events back
-        window.dispatchEvent(new HashChangeEvent('hashchange'));
       }, 500);
     }
   } else {

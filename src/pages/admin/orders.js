@@ -1,10 +1,11 @@
 import { db } from '../../firebase.js';
-import { doc, getDoc, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { formatPrice, formatDate } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { getState, subscribe } from '../../state.js';
+import { registerUnsubscribe } from '../../utils/cleanup.js';
 
 const userCache = {};
 let knownOrderIds = null;
@@ -410,7 +411,8 @@ function loadAllOrders() {
   const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(currentLimit));
   
   ordersUnsubscribe = onSnapshot(q, (snap) => {
-    if (dot) {
+  registerUnsubscribe(ordersUnsubscribe);
+  if (dot) {
       dot.style.background = '#00D67F';
       dot.style.boxShadow = '0 0 10px #00D67F';
     }
@@ -450,13 +452,17 @@ function loadAllOrders() {
       } catch(e) {}
     });
 
-    // Sort scheduled orders to the top
+    // Sort active/pending scheduled orders to the top, completed/cancelled scheduled orders fallback chronologically
     allOrders.sort((a, b) => {
-      const aSched = !!a.isScheduled;
-      const bSched = !!b.isScheduled;
-      if (aSched && !bSched) return -1;
-      if (!aSched && bSched) return 1;
-      return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+      const isAActiveScheduled = a.isScheduled && !['delivered', 'completed', 'cancelled', 'entregado'].includes(a.status?.toLowerCase());
+      const isBActiveScheduled = b.isScheduled && !['delivered', 'completed', 'cancelled', 'entregado'].includes(b.status?.toLowerCase());
+      
+      if (isAActiveScheduled && !isBActiveScheduled) return -1;
+      if (!isAActiveScheduled && isBActiveScheduled) return 1;
+      
+      const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return bTime - aTime;
     });
     
     renderOrdersList();
@@ -966,8 +972,8 @@ window.showOrderDetail = async (idOrObject) => {
          </div>
          ${o.pointsRedeemed > 0 ? `
            <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#a855f7;">
-             <span>Puntos Usados</span>
-             <span>-${formatPrice(o.pointsRedeemed)}</span>
+             <span>Puntos Usados (${o.pointsRedeemed.toLocaleString('es-AR')} pts)</span>
+             <span>-${formatPrice(o.discountAmount || 0)}</span>
            </div>
          ` : ''}
          ${o.couponCode ? `
@@ -1196,67 +1202,205 @@ window.showOrderDetail = async (idOrObject) => {
       const releaseBtn = document.getElementById('admin-release-driver-btn');
       if (releaseBtn) {
         releaseBtn.addEventListener('click', async () => {
-          const { showConfirm } = await import('../../components/modal.js');
+          const { getDocs, collection, query, where, doc, getDoc, updateDoc, setDoc, serverTimestamp, arrayUnion } = await import('firebase/firestore');
+          const { db } = await import('../../firebase.js');
+          const { showModal, closeModal } = await import('../../components/modal.js');
           const { showToast } = await import('../../components/toast.js');
-          showConfirm({
-            title: '🔓 Liberar y Reasignar Pedido',
-            message: `¿Estás seguro de que deseas liberar este pedido? El repartidor actual se desvinculará y el pedido volverá a enviarse en rotación a otros choferes disponibles.`,
-            danger: true,
-            onConfirm: async () => {
-              try {
-                const { doc, getDoc, updateDoc } = await import('firebase/firestore');
-                const { db } = await import('../../firebase.js');
-                const oldDriverId = o.driverId;
-                await updateDoc(doc(db, 'orders', o.id), {
-                  driverId: null,
-                  driverName: null,
-                  driverPhoto: null,
-                  driverPhone: null,
-                  queueTargetDriverId: null,
-                  queueTargetDriverName: null,
-                  queueOfferedAt: null,
-                  status: 'ready'
-                });
 
-                try {
-                  const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
-                  const cdSnap = await getDoc(clientChatRef);
-                  if (cdSnap.exists()) {
-                    const cdData = cdSnap.data();
-                    const prevDriver = cdData.driverId || oldDriverId;
-                    const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
-                    await updateDoc(clientChatRef, {
-                      driverId: null,
-                      driverName: null,
-                      participants: newParts
-                    });
+          const modalContent = document.createElement('div');
+          modalContent.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px;';
+          modalContent.innerHTML = `<div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div>`;
+
+          showModal({
+            title: 'Liberar y Asignar Pedido',
+            content: modalContent
+          });
+
+          try {
+            // Fetch all delivery drivers
+            const driversSnap = await getDocs(query(collection(db, 'users')));
+            const drivers = driversSnap.docs
+              .map(d => ({ uid: d.id, ...d.data() }))
+              .filter(u => (u.isDelivery === true || u.role === 'delivery' || u.role === 'chofer' || u.role === 'driver') && u.isOnline === true);
+
+            modalContent.innerHTML = `
+              <div style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.4;">
+                ¿Cómo deseas liberar este pedido? El repartidor actual se desvinculará del pedido.
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+                <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino / Reasignación</label>
+                <select id="v5-assign-driver-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-bg-card); font-size:13.5px; font-weight:600; outline:none; border:1.5px solid var(--color-border-light);">
+                  <option value="rotation">🔄 Devolver a rotación general (ofrecer a otros)</option>
+                  ${drivers.map(d => `
+                    <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || '---'})</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <div style="display:flex; gap:10px; margin-top:16px; border-top:1px solid var(--color-border-light); padding-top:16px;">
+                <button class="btn btn-ghost" id="v5-cancel-release-btn" style="flex:1; height:48px; border-radius:14px; font-weight:800;">CANCELAR</button>
+                <button class="btn btn-primary" id="v5-confirm-release-btn" style="flex:2; height:48px; border-radius:14px; font-weight:900;">CONFIRMAR LIBERACIÓN</button>
+              </div>
+            `;
+
+            modalContent.querySelector('#v5-cancel-release-btn').onclick = () => closeModal();
+            modalContent.querySelector('#v5-confirm-release-btn').onclick = async () => {
+              const select = modalContent.querySelector('#v5-assign-driver-select');
+              const destination = select.value;
+              const confirmBtn = modalContent.querySelector('#v5-confirm-release-btn');
+
+              confirmBtn.disabled = true;
+              confirmBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' PROCESANDO...';
+
+              try {
+                const oldDriverId = o.driverId;
+
+                if (destination === 'rotation') {
+                  // Standard release (rotation)
+                  const updateFields = {
+                    driverId: null,
+                    driverName: null,
+                    driverPhoto: null,
+                    driverPhone: null,
+                    queueTargetDriverId: null,
+                    queueTargetDriverName: null,
+                    queueOfferedAt: null,
+                    status: 'ready'
+                  };
+                  if (oldDriverId) {
+                    updateFields.queueRejectedDrivers = arrayUnion(oldDriverId);
                   }
-                  const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
-                  const comSnap = await getDoc(comChatRef);
-                  if (comSnap.exists()) {
-                    const comData = comSnap.data();
-                    const prevDriver = comData.driverId || oldDriverId;
-                    const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
-                    await updateDoc(comChatRef, {
-                      driverId: null,
-                      driverName: null,
-                      participants: newParts
-                    });
+                  await updateDoc(doc(db, 'orders', o.id), updateFields);
+
+                  // Reset chats
+                  try {
+                    const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
+                    const cdSnap = await getDoc(clientChatRef);
+                    if (cdSnap.exists()) {
+                      const cdData = cdSnap.data();
+                      const prevDriver = cdData.driverId || oldDriverId;
+                      const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+                      await updateDoc(clientChatRef, {
+                        driverId: null,
+                        driverName: null,
+                        participants: newParts
+                      });
+                    }
+                    const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
+                    const comSnap = await getDoc(comChatRef);
+                    if (comSnap.exists()) {
+                      const comData = comSnap.data();
+                      const prevDriver = comData.driverId || oldDriverId;
+                      const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+                      await updateDoc(comChatRef, {
+                        driverId: null,
+                        driverName: null,
+                        participants: newParts
+                      });
+                    }
+                  } catch (e) {
+                    console.warn('[Admin Release] Chat reset error:', e);
                   }
-                } catch (e) {
-                  console.warn('[Admin Release] Error resetting chat references:', e);
+
+                  showToast('🔓 Pedido liberado con éxito. Se volvió a ofertar en rotación.', 'success');
+                  const { updateDispatchQueue } = await import('../delivery-panel.js');
+                  updateDispatchQueue(o.id);
+
+                } else {
+                  // Direct assignment to selected driver
+                  const selectedDriver = drivers.find(d => d.uid === destination);
+                  if (!selectedDriver) throw new Error('Repartidor no encontrado');
+
+                  // Assign fields
+                  const assignFields = {
+                    driverId: selectedDriver.uid,
+                    driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+                    driverPhoto: selectedDriver.photo || selectedDriver.photoURL || '',
+                    driverPhone: selectedDriver.phone || '',
+                    driverDlId: selectedDriver.displayId || '',
+                    driverAlias: selectedDriver.transferAlias || '',
+                    driverVehicleModel: selectedDriver.vehicleModel || '',
+                    driverVehicleColor: selectedDriver.vehicleColor || '',
+                    driverVehiclePatent: selectedDriver.vehicleDetails || selectedDriver.patente || '',
+                    queueTargetDriverId: null,
+                    queueTargetDriverName: null,
+                    queueOfferedAt: null,
+                    status: (o.isFavor || o.isTrip) ? 'confirmed' : 'accepted',
+                    acceptedAt: serverTimestamp()
+                  };
+
+                  await updateDoc(doc(db, 'orders', o.id), assignFields);
+
+                  // Send notification to the newly assigned driver
+                  try {
+                    const orderNum = o.orderId || o.id.slice(-6).toUpperCase();
+                    await addDoc(collection(db, 'users', selectedDriver.uid, 'notifications'), {
+                      title: '⚡ Pedido Asignado por Soporte',
+                      body: `Se te ha asignado manualmente el pedido #${orderNum}. Ingresa a tu Hoja de Ruta para ver los detalles.`,
+                      type: 'order_assigned',
+                      orderId: o.id,
+                      status: 'unread',
+                      createdAt: serverTimestamp()
+                    });
+
+                    // Trigger immediate background push notification via global notifications collection
+                    await addDoc(collection(db, 'notifications'), {
+                      userId: selectedDriver.uid,
+                      title: '⚡ Pedido Asignado por Soporte',
+                      body: `Se te ha asignado manualmente el pedido #${orderNum}.`,
+                      url: `#/delivery`,
+                      type: 'system',
+                      createdAt: serverTimestamp()
+                    });
+                  } catch (notifErr) {
+                    console.warn('Failed to send assignment notification:', notifErr);
+                  }
+
+                  // Setup client-delivery chat
+                  const cdRef = doc(db, 'chats', `${o.id}_client-delivery`);
+                  await setDoc(cdRef, {
+                    orderId: o.id,
+                    type: 'client-delivery',
+                    driverId: selectedDriver.uid,
+                    driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+                    userId: o.userId || null,
+                    participants: [selectedDriver.uid, o.userId].filter(Boolean)
+                  }, { merge: true });
+
+                  // Setup commerce-delivery chat
+                  if (o.comercioId) {
+                    const comdRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
+                    await setDoc(comdRef, {
+                      orderId: o.id,
+                      type: 'commerce-delivery',
+                      driverId: selectedDriver.uid,
+                      driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+                      comercioId: o.comercioId,
+                      participants: [selectedDriver.uid, o.comercioId].filter(Boolean)
+                    }, { merge: true });
+                  }
+
+                  showToast(`⚡ Pedido asignado directamente a ${selectedDriver.displayName || selectedDriver.name || 'Repartidor'}.`, 'success');
                 }
 
                 closeModal();
-                showToast('🔓 Pedido liberado con éxito. Se volvió a ofertar en rotación.', 'success');
-                const { updateDispatchQueue } = await import('../delivery-panel.js');
-                updateDispatchQueue(o.id);
+                // Close the audit modal too
+                document.getElementById('close-audit-modal')?.click();
+                renderOrdersList(); // Refresh list
+
               } catch (err) {
-                console.error('[Admin Release] Error:', err);
-                showToast('Error al liberar pedido: ' + err, 'danger');
+                console.error('[Admin Assign/Release] Error:', err);
+                showToast('Error al reasignar pedido: ' + err, 'danger');
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = 'CONFIRMAR LIBERACIÓN';
               }
-            }
-          });
+            };
+
+          } catch (e) {
+            console.error('Error loading drivers:', e);
+            modalContent.innerHTML = `<p style="color:var(--color-danger); text-align:center;">Error al cargar la lista de repartidores.</p>`;
+          }
         });
       }
 
@@ -1529,6 +1673,7 @@ async function openAdminToDriverSupportChatModal(driverId, driverName, orderId, 
       }
     }
   });
+  registerUnsubscribe(unsub);
 
   // Clean up snapshot listener on modal close
   modalInstance.onClose = () => {

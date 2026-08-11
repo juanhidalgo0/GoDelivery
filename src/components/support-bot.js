@@ -1173,7 +1173,7 @@ export async function openSupportTicketModal(orderId, orderNum) {
     </div>
 
     <!-- Footer Input Area -->
-    <div id="ticket-chat-footer" style="padding:12px 16px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:8px; align-items:center; flex-shrink:0;">
+    <div id="ticket-chat-footer" style="padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px)) 16px; background:var(--color-surface); border-top:1px solid var(--color-border); display:flex; gap:8px; align-items:center; flex-shrink:0;">
       <input type="text" id="ticket-chat-input" placeholder="Escribí tu mensaje aquí..." style="flex:1; min-width:0; border:1.5px solid var(--color-border); border-radius:16px; padding:12px 16px; font-size:13.5px; font-weight:700; outline:none; background:var(--color-bg); color:var(--color-text); transition:border-color 0.2s;" />
       <button id="ticket-chat-send-btn" style="background:var(--color-primary); color:white; border:none; border-radius:16px; width:48px; height:48px; display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; box-shadow:0 4px 12px rgba(var(--color-primary-rgb), 0.2);">
         ${icon('send', 20)}
@@ -1218,12 +1218,13 @@ export async function openSupportTicketModal(orderId, orderNum) {
     </style>
   `;
 
-  // 3. Show fullscreen modal
+  // 3. Show modal as bottom card (respects safe areas)
   showModal({
     title: '',
     content: contentEl,
     hideHeader: true,
-    fullscreen: true,
+    fullscreen: false,
+    height: '85dvh',
     onOpen: () => {
       const messagesBox = document.getElementById('ticket-messages-container');
       const input = document.getElementById('ticket-chat-input');

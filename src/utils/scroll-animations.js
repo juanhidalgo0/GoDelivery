@@ -6,8 +6,8 @@
 
 const observerOptions = {
   root: null, // use viewport
-  rootMargin: '0px 0px -80px 0px', // trigger 80px inside the viewport for highly visible feedback when scrolling
-  threshold: 0.05 // trigger when at least 5% of the element is visible
+  rootMargin: '0px 0px 0px 0px', // no negative margin — ensures elements near bottom of small screens are detected
+  threshold: 0.01 // trigger when at least 1% of the element is visible (more sensitive)
 };
 
 let revealObserver = null;
@@ -27,9 +27,8 @@ export function initScrollAnimations() {
       
       if (entry.isIntersecting && isVisible) {
         entry.target.classList.add('revealed');
-      } else if (!entry.isIntersecting) {
-        // Remove class when out of view so it animates again when scrolling back
-        entry.target.classList.remove('revealed');
+        // Once revealed, stop observing — prevents re-hiding on mobile scroll events
+        revealObserver.unobserve(entry.target);
       }
     });
   }, observerOptions);

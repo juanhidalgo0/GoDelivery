@@ -288,31 +288,39 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           </div>
 
           <!-- Premium GoPoints Badge / Card -->
-          <div id="gopoints-badge-card" style="margin: 10px 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 16px; padding: 14px 16px; color: white; display: flex; flex-direction: column; cursor: pointer; box-shadow: 0 8px 20px -5px rgba(245, 158, 11, 0.3); position: relative; overflow: hidden; transition: all 0.25s; border: 1.5px solid rgba(255,255,255,0.1);" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 10px 24px -5px rgba(245, 158, 11, 0.4)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 8px 20px -5px rgba(245, 158, 11, 0.3)';">
-            <!-- Glow background effects -->
-            <div style="position: absolute; right: -10px; top: -10px; width: 80px; height: 80px; background: rgba(255, 255, 255, 0.15); border-radius: 50%; filter: blur(15px);"></div>
-            <div style="position: absolute; left: -10px; bottom: -20px; width: 60px; height: 60px; background: rgba(0, 0, 0, 0.1); border-radius: 50%; filter: blur(10px);"></div>
-            
-            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; z-index: 1;">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 36px; height: 36px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); box-shadow: 0 3px 8px rgba(0,0,0,0.06);">
-                  ${icon('goPointsLogo', 20)}
+          <div id="gopoints-badge-card" style="margin: 10px 20px; background: linear-gradient(145deg, #FF6B00 0%, #E85D00 45%, #D14E00 100%); border-radius: 22px; padding: 0; color: white; display: flex; flex-direction: column; cursor: pointer; box-shadow: 0 10px 32px -6px rgba(232,93,0,0.45), 0 0 0 1px rgba(255,255,255,0.1) inset; position: relative; overflow: hidden; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); border: none;" onmouseover="this.style.transform='translateY(-2px) scale(1.01)'; this.style.boxShadow='0 18px 44px -6px rgba(232,93,0,0.55), 0 0 0 1px rgba(255,255,255,0.12) inset';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 10px 32px -6px rgba(232,93,0,0.45), 0 0 0 1px rgba(255,255,255,0.1) inset';">
+            <!-- Decorative circles -->
+            <div style="position: absolute; right: -30px; top: -30px; width: 140px; height: 140px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%); border-radius: 50%; pointer-events:none;"></div>
+            <div style="position: absolute; left: -20px; bottom: -30px; width: 110px; height: 110px; background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%); border-radius: 50%; pointer-events:none;"></div>
+            <!-- Shimmer line -->
+            <div style="position:absolute; top:0; left:0; right:0; height:1px; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%); pointer-events:none;"></div>
+
+            <!-- Header Row -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; z-index: 1; position:relative;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 42px; height: 42px; background: rgba(255,255,255,0.2); border-radius: 13px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                  ${icon('goPointsLogo', 22)}
                 </div>
                 <div>
-                  <div style="font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.6px; opacity: 0.9;">Mis GO Points</div>
-                  <div style="font-size: 20px; font-weight: 950; letter-spacing: -0.5px; margin-top: 1px; display: flex; align-items: baseline; gap: 3px;">
-                    ${user.points || 0} 
-                    <span style="font-size: 11px; font-weight: 800; opacity: 0.9; letter-spacing: 0.5px;">PTS</span>
+                  <div style="font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,0.7); margin-bottom: 2px;">Club GO · Mis Puntos</div>
+                  <div style="font-size: 26px; font-weight: 950; letter-spacing: -1px; line-height: 1; display: flex; align-items: baseline; gap: 4px;">
+                    <span style="color: white;">${(user.points || 0).toLocaleString('es-AR')}</span>
+                    <span style="font-size: 11px; font-weight: 900; color: rgba(255,255,255,0.65); letter-spacing: 1px;">PTS</span>
                   </div>
                 </div>
               </div>
-              
-              <div style="display: flex; align-items: center; gap: 3px; background: rgba(255, 255, 255, 0.2); padding: 5px 10px; border-radius: 8px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(4px);">
-                Club GO ${icon('chevronRight', 8)}
+              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 20px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: white; border: 1px solid rgba(255,255,255,0.25);">
+                  Ver Club ${icon('chevronRight', 8)}
+                </div>
+                <div style="font-size: 9px; color: rgba(255,255,255,0.5); font-weight: 700; letter-spacing: 0.5px;">Nivel ${level.name}</div>
               </div>
             </div>
-            
-            ${progressBarHtml}
+
+            <!-- Progress Bar Area -->
+            <div style="padding: 0 18px 16px; z-index:1; position:relative;">
+              ${progressBarHtml}
+            </div>
           </div>
 
           <!-- Delivery Application Section -->
@@ -423,68 +431,87 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
             </div>
           ` : ''}
           <!-- Módulo 1.1: Sistema de Referidos & 1.2 Desafíos y Rachas Semanales -->
-          <div style="margin: 10px 20px; display: flex; flex-direction: column; gap: 10px;">
-            <!-- Referidos Card -->
-            <div style="background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
-              <div style="display: flex; gap: 12px; align-items: flex-start;">
-                <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(245, 158, 11, 0.1); color: #f59e0b; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                  ${icon('gift', 22)}
+          <div style="margin: 10px 20px; display: flex; flex-direction: column; gap: 12px;">
+            <!-- Referidos Card (Premium - warm orange) -->
+            <div style="background: linear-gradient(145deg, #FF6B00 0%, #E85D00 50%, #D14E00 100%); border-radius: 20px; padding: 0; border: none; box-shadow: 0 8px 28px rgba(232,93,0,0.38), 0 0 0 1px rgba(255,255,255,0.1) inset; position: relative; overflow: hidden;">
+              <!-- Top shimmer -->
+              <div style="position:absolute; top:0; left:0; right:0; height:1px; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%); pointer-events:none;"></div>
+              <!-- Glow orb -->
+              <div style="position:absolute; top:-40px; right:-30px; width:130px; height:130px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%); border-radius:50%; pointer-events:none;"></div>
+
+              <div style="padding: 16px 18px 0;">
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                  <div style="width: 44px; height: 44px; border-radius: 14px; background: rgba(255,255,255,0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                    ${icon('gift', 22)}
+                  </div>
+                  <div style="flex: 1; min-width: 0;">
+                    <h4 style="font-size: 14px; font-weight: 900; color: #fff; margin: 0 0 3px 0; letter-spacing: -0.2px;">Traé a un amigo, ¡ganan ambos!</h4>
+                    <p style="font-size: 11.5px; color: rgba(255,255,255,0.72); margin: 0; line-height: 1.5;">
+                      Compartí tu código. Cuando tu amigo complete su primer pedido, ¡ambos reciben puntos!
+                    </p>
+                  </div>
                 </div>
-                <div style="flex: 1; min-width: 0;">
-                  <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text-primary); margin: 0 0 4px 0;">Traé a un amigo, ¡ganan ambos!</h4>
-                  <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
-                    Compartí tu código único. Cuando tu referido complete su primer pedido, ¡les acreditamos <strong>500 GO Points</strong> a cada uno!
-                  </p>
+
+                <!-- Reward badge -->
+                <div style="margin: 14px 0 0; display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 12px; padding: 10px 14px;">
+                  <div style="display:flex; align-items:center; gap:6px; flex:1;">
+                    <div style="font-size:22px; line-height:1;">🎁</div>
+                    <div>
+                      <div style="font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,0.65); margin-bottom: 1px;">Bono para cada uno</div>
+                      <div style="font-size: 17px; font-weight: 950; color: white; letter-spacing: -0.5px;">${(s.referralPoints || 500).toLocaleString('es-AR')} <span style="font-size:10px; font-weight:900; color:rgba(255,255,255,0.7);">GO Points</span></div>
+                    </div>
+                  </div>
+                  <div style="font-size:9px; font-weight:900; color: rgba(255,255,255,0.6); text-align:right; letter-spacing:0.5px;">A VOS<br/>+ A TU AMIGO</div>
                 </div>
               </div>
-              
-              <div style="background: var(--color-bg-secondary); border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--color-border-light); gap: 8px;">
-                <span style="font-family: var(--font-display); font-weight: 900; font-size: 13px; color: var(--color-text-primary); letter-spacing: 0.5px; white-space: nowrap;">
-                  ${user.referralCode || 'GO-REF-XXXXX'}
-                </span>
-                <div style="display: flex; gap: 4px; flex-shrink: 0;">
-                  <button id="copy-ref-btn" class="btn btn-ghost" style="height: 30px; padding: 0 6px; font-size: 10px; font-weight: 800; border-radius: 6px; display: flex; align-items: center; gap: 3px; border: 1px solid var(--color-border-light); color: var(--color-text-secondary); white-space: nowrap;">
-                    ${icon('copy', 12)} Copiar
-                  </button>
-                  <button id="share-ref-btn" class="btn btn-primary" style="height: 30px; padding: 0 6px; font-size: 10px; font-weight: 800; border-radius: 6px; display: flex; align-items: center; gap: 3px; border: none; color: white; background: var(--color-primary); white-space: nowrap;">
-                    ${icon('share', 12)} Compartir
-                  </button>
+
+              <!-- Code row -->
+              <div style="padding: 12px 18px 16px; display: flex; align-items: center; gap: 8px;">
+                <div style="flex:1; background: rgba(0,0,0,0.15); border-radius: 10px; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.2); display:flex; align-items:center; gap:8px; min-width:0;">
+                  <div style="width:6px; height:6px; border-radius:50%; background:white; box-shadow: 0 0 6px rgba(255,255,255,0.8); flex-shrink:0;"></div>
+                  <span style="font-family: monospace; font-weight: 900; font-size: 13px; color: white; letter-spacing: 1px; white-space: nowrap; overflow:hidden; text-overflow:ellipsis;">${user.referralCode || 'GO-REF-XXXXX'}</span>
                 </div>
+                <button id="copy-ref-btn" style="height: 34px; padding: 0 10px; font-size: 10px; font-weight: 800; border-radius: 9px; display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: white; cursor:pointer; white-space: nowrap; flex-shrink:0; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                  ${icon('copy', 12)} Copiar
+                </button>
+                <button id="share-ref-btn" style="height: 34px; padding: 0 12px; font-size: 10px; font-weight: 900; border-radius: 9px; display: flex; align-items: center; gap: 4px; border: none; color: #C23E00; background: white; cursor:pointer; white-space: nowrap; flex-shrink:0; box-shadow: 0 3px 10px rgba(0,0,0,0.2); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 5px 15px rgba(0,0,0,0.25)'" onmouseout="this.style.transform='none'; this.style.boxShadow='0 3px 10px rgba(0,0,0,0.2)'">
+                  ${icon('share', 12)} Compartir
+                </button>
               </div>
             </div>
-            
-            <!-- Desafíos de la Semana Card -->
-            <div id="weekly-challenges-card" style="background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='none'">
+
+            <!-- Desafíos Card (Premium) -->
+            <div id="weekly-challenges-card" style="background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(59,130,246,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(99,102,241,0.2); box-shadow: 0 4px 16px rgba(99,102,241,0.06); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(99,102,241,0.12)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 16px rgba(99,102,241,0.06)';">
               <div style="display: flex; gap: 12px; align-items: center;">
-                <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(59, 130, 246, 0.1); color: #3b82f6; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(59,130,246,0.1) 100%); color: #6366f1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(99,102,241,0.25); box-shadow: 0 3px 8px rgba(99,102,241,0.1);">
                   ${icon('target', 22)}
                 </div>
                 <div>
-                  <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text-primary); margin: 0 0 2px 0;">Desafíos y Rachas Semanales</h4>
+                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">Desafíos Semanales</h4>
                   <p style="font-size: 11px; color: var(--color-text-secondary); margin: 0;">
-                    Completá misiones y sumá bonus de puntos.
+                    Completá misiones y sumá hasta <strong style="color:#6366f1;">10.000 pts</strong> esta semana.
                   </p>
                 </div>
               </div>
-              <div style="color: var(--color-text-tertiary);">
+              <div style="background: rgba(99,102,241,0.12); border-radius: 10px; padding: 6px 8px; color: #6366f1; border: 1px solid rgba(99,102,241,0.2);">
                 ${icon('chevronRight', 16)}
               </div>
             </div>
 
-            <!-- Transferir Puntos Card -->
-            <div id="transfer-gopoints-card" style="background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='none'">
+            <!-- Transferir Puntos Card (Premium) -->
+            <div id="transfer-gopoints-card" style="background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(5,150,105,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(16,185,129,0.2); box-shadow: 0 4px 16px rgba(16,185,129,0.06); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(16,185,129,0.12)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 16px rgba(16,185,129,0.06)';">
               <div style="display: flex; gap: 12px; align-items: center;">
-                <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(16, 185, 129, 0.1); color: #10b981; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(5,150,105,0.1) 100%); color: #10b981; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(16,185,129,0.25); box-shadow: 0 3px 8px rgba(16,185,129,0.1);">
                   ${icon('share', 22)}
                 </div>
                 <div>
-                  <h4 style="font-size: 14.5px; font-weight: 800; color: var(--color-text-primary); margin: 0 0 2px 0;">Regalar GO Points</h4>
+                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">Regalar GO Points</h4>
                   <p style="font-size: 11px; color: var(--color-text-secondary); margin: 0;">
-                    Transferí tus puntos a otro usuario usando su ID.
+                    Transferí tus puntos a otro usuario por su ID.
                   </p>
                 </div>
               </div>
-              <div style="color: var(--color-text-tertiary);">
+              <div style="background: rgba(16,185,129,0.12); border-radius: 10px; padding: 6px 8px; color: #10b981; border: 1px solid rgba(16,185,129,0.2);">
                 ${icon('chevronRight', 16)}
               </div>
             </div>
@@ -792,7 +819,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 <div>
                   <h5 style="font-size: 13px; font-weight: 800; margin: 0 0 3px 0;">2. Canjeá directamente en el Carrito</h5>
                   <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; opacity: 0.85;">
-                    Cada punto vale <strong>${formatPrice(dollarPerPoint)}</strong>. En tu carrito podés ingresar el monto exacto de puntos que querés usar para descontar dinero de tu compra al instante.
+                    En tu carrito podés ingresar el monto exacto de puntos que querés usar para descontar dinero de tu compra al instante.
                   </p>
                 </div>
               </div>
@@ -830,7 +857,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 <hr style="border: 0; border-top: 1px solid var(--color-border-light); margin: 4px 0;" />
                 <div style="display: flex; justify-content: space-between; font-size: 12px;">
                   <span style="color: var(--color-text-secondary); font-weight: 555;">Tasa Reembolso Base:</span>
-                  <span style="font-weight: 800; color: var(--color-text-primary);">${(pointsPerDollar * 100).toFixed(1)}%</span>
+                  <span style="font-weight: 800; color: var(--color-text-primary);">${(pointsPerDollar * 100).toFixed(1)}% (en Puntos)</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 12px;">
                   <span style="color: var(--color-text-secondary); font-weight: 555;">Tu Nivel Actual:</span>
@@ -842,15 +869,15 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 </div>
                 <hr style="border: 0; border-top: 1px dashed var(--color-border-light); margin: 4px 0;" />
                 <div style="display: flex; justify-content: space-between; font-size: 12px; align-items: baseline;">
-                  <span style="font-weight: 800; color: var(--color-text-primary);">Reembolso Efectivo:</span>
-                  <span style="font-weight: 950; color: #f59e0b; font-size: 14px;">${((pointsPerDollar * level.multiplier) * 100).toFixed(2)}%</span>
+                  <span style="font-weight: 800; color: var(--color-text-primary);">Reembolso Efectivo (en Pesos):</span>
+                  <span style="font-weight: 950; color: #f59e0b; font-size: 14px;">${((pointsPerDollar * level.multiplier * dollarPerPoint) * 100).toFixed(2)}%</span>
                 </div>
               </div>
               
               <div style="font-size: 11.5px; color: var(--color-text-tertiary); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; margin-top: 2px;">
                 <div style="flex-shrink: 0; margin-top: 2px; color: #f59e0b;">${icon('info', 12)}</div>
                 <span>
-                  <strong>Ejemplo real:</strong> Con una compra de <strong>$1.000</strong> en productos, acumulás <strong>${Math.floor(1000 * pointsPerDollar * level.multiplier)} puntos</strong> directos. Estos puntos equivalen a <strong>${formatPrice(Math.floor(1000 * pointsPerDollar * level.multiplier) * dollarPerPoint)}</strong> de descuento para usar cuando quieras.
+                  <strong>Ejemplo real:</strong> Con una compra de <strong>$1.000</strong> en productos, acumulás <strong>${Math.floor(1000 * pointsPerDollar * level.multiplier)} puntos</strong> directos. Estos puntos equivalen a <strong>$${(Math.floor(1000 * pointsPerDollar * level.multiplier) * dollarPerPoint).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> de descuento para usar cuando quieras.
                 </span>
               </div>
             </div>
@@ -1374,12 +1401,10 @@ async function loadAndRenderModalChallenges(uid) {
         }
       }
     } else {
-      // Create defaults from getState().weeklyChallenges
-      const { getState } = await import('../state.js');
       const configuredChallenges = getState().weeklyChallenges || [
-        { id: 'weekly_3', title: 'Desafío Bronce', description: 'Completá 3 pedidos esta semana', target: 3, pointsReward: 150 },
-        { id: 'weekly_5', title: 'Desafío Plata', description: 'Completá 5 pedidos esta semana', target: 5, pointsReward: 300 },
-        { id: 'weekly_10', title: 'Desafío Oro', description: 'Completá 10 pedidos esta semana', target: 10, pointsReward: 600 }
+        { id: 'weekly_3', title: 'Desafío Bronce', description: 'Completá 3 pedidos esta semana', target: 3, pointsReward: 5000 },
+        { id: 'weekly_5', title: 'Desafío Plata', description: 'Completá 5 pedidos esta semana', target: 5, pointsReward: 7500 },
+        { id: 'weekly_10', title: 'Desafío Oro', description: 'Completá 10 pedidos esta semana', target: 10, pointsReward: 10000 }
       ];
       challenges = configuredChallenges.map(ch => ({
         id: ch.id,
@@ -1399,6 +1424,16 @@ async function loadAndRenderModalChallenges(uid) {
     // Sort challenges by target
     challenges.sort((a, b) => a.target - b.target);
 
+    // Re-sync stale pointsReward values from global config
+    const globalChallenges = getState().weeklyChallenges || [];
+    challenges = challenges.map(ch => {
+      const globalCh = globalChallenges.find(g => g.id === ch.id);
+      if (globalCh && globalCh.pointsReward !== ch.pointsReward && !ch.completed) {
+        ch.pointsReward = globalCh.pointsReward;
+      }
+      return ch;
+    });
+
     const challengesHtml = challenges.map(ch => {
       const percentage = Math.min(100, Math.max(0, ((ch.progress || 0) / ch.target) * 100));
       return `
@@ -1414,15 +1449,16 @@ async function loadAndRenderModalChallenges(uid) {
               </div>
             </div>
             <div style="text-align: right; flex-shrink: 0;">
-              <span style="font-size: 11px; font-weight: 900; color: #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 2px 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 3px;">
-                +${ch.pointsReward} pts
-              </span>
+              ${ch.completed
+                ? `<span style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; font-size: 9px; font-weight: 900; padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 3px; box-shadow: 0 2px 8px rgba(16,185,129,0.3);">✓ COMPLETADO</span>`
+                : `<span style="font-size: 11px; font-weight: 900; color: #f59e0b; background: rgba(245, 158, 11, 0.12); padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid rgba(245,158,11,0.25);">+${(ch.pointsReward || 0).toLocaleString('es-AR')} pts</span>`
+              }
             </div>
           </div>
 
-          <div style="display: flex; align-items: center; gap: 10px; margin-top: 2px;">
-            <div style="flex: 1; height: 6px; background: var(--color-border-light); border-radius: 3px; overflow: hidden; position: relative;">
-              <div style="width: ${percentage}%; height: 100%; background: ${ch.completed ? 'var(--color-success)' : 'linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)'}; border-radius: 3px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);"></div>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+            <div style="flex: 1; height: 7px; background: var(--color-border-light); border-radius: 4px; overflow: hidden; position: relative;">
+              <div style="width: ${percentage}%; height: 100%; background: ${ch.completed ? 'linear-gradient(90deg, #10b981 0%, #059669 100%)' : 'linear-gradient(90deg, #6366f1 0%, #4f46e5 100%)'}; border-radius: 4px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: ${ch.completed ? '0 0 6px rgba(16,185,129,0.4)' : '0 0 6px rgba(99,102,241,0.4)'};"></div>
             </div>
             <span style="font-size: 11px; font-weight: 800; color: var(--color-text-secondary); white-space: nowrap;">
               ${ch.progress || 0} / ${ch.target}

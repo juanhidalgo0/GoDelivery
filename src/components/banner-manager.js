@@ -48,7 +48,11 @@ export function clearBanner(type) {
 }
 
 export function clearAllBanners() {
-  Object.keys(activeBanners).forEach(type => clearBanner(type));
+  Object.keys(activeBanners).forEach(type => {
+    if (type !== 'customer' && type !== 'delivery') {
+      clearBanner(type);
+    }
+  });
 }
 
 function renderBanners() {
