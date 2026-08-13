@@ -1,6 +1,6 @@
 // GoDelivery — Admin Users Management
 import { db } from '../../firebase.js';
-import { collection, getDocs, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, onSnapshot, query, where } from 'firebase/firestore';
 import { isSuperAdmin, isAdmin } from '../../auth.js';
 
 let usersUnsubscribe = null;
@@ -256,7 +256,9 @@ export async function renderAdminUsers() {
     }
 
     // Set up real-time listener for users
-    usersUnsubscribe = onSnapshot(collection(db, 'users'), async (snap) => {
+    // Use getDocs for users — avoids costly real-time listener on entire collection
+    // Users don't change frequently enough to need real-time in the admin panel
+    usersUnsubscribe = onSnapshot(query(collection(db, 'users'), where('role', 'in', ['delivery', 'admin', 'customer', 'comercio'])), async (snap) => {
       users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
 
       const totalBadge = document.getElementById('users-total-badge');
