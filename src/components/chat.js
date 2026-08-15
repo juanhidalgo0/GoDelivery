@@ -122,6 +122,17 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     return;
   }
 
+  // Privacy protection: Comercio users cannot open or view client-delivery private chat
+  const { isAdmin } = await import('../auth.js');
+  if (type === 'client-delivery' && !isAdmin() && !isAudit) {
+    if (user.role === 'comercio' || user.role === 'commerce' || user.comercioId) {
+      isChatOpening = false;
+      const { showToast } = await import('./toast.js');
+      showToast('⚠️ El chat entre el cliente y el repartidor es privado.', 'warning');
+      return;
+    }
+  }
+
   const chatId = `${orderId}_${type}`;
   const chatRef = doc(db, 'chats', chatId);
   const messagesRef = collection(chatRef, 'messages');

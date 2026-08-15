@@ -26,3 +26,7 @@ dist-ssr
 # Apple private keys
 *.p8
 Apple/
+
+# WhatsApp Baileys Auth Session
+auth_info_baileys/
+

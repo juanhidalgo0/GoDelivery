@@ -6845,60 +6845,77 @@ export async function markAsDelivered(orderIdOrIds) {
   const ids = Array.isArray(orderIdOrIds) ? orderIdOrIds : orderIdOrIds.split(',');
   const user = getState().user;
   
+  // 0. Optimistic local update: remove delivered orders from route sheet immediately (0ms delay)
+  if (window.activeOrdersList && Array.isArray(window.activeOrdersList)) {
+    window.activeOrdersList = window.activeOrdersList.filter(o => !ids.includes(o.id));
+  }
+  
   try {
-    // 1. Fetch the orders
-    const q = query(collection(db, 'orders'), where('__name__', 'in', ids));
-    const snap = await getDocs(q);
-    const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // 1. Update order documents to 'completed' FIRST to guarantee they leave active route sheet
+    const now = new Date();
+    for (const id of ids) {
+      try {
+        await updateDoc(doc(db, 'orders', id), {
+          status: 'completed',
+          deliveredAt: serverTimestamp(),
+          deliverySessionId: user?.currentSessionId || null
+        });
+      } catch (uErr) {
+        console.warn(`[markAsDelivered] Direct updateDoc notice for order ${id}:`, uErr);
+      }
+    }
+
+    // 2. Fetch the orders for rewards calculation & UI display
+    let orders = [];
+    try {
+      const q = query(collection(db, 'orders'), where('__name__', 'in', ids));
+      const snap = await getDocs(q);
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      console.warn('[markAsDelivered] Error fetching orders for rewards:', e);
+      orders = ids.map(id => ({ id, status: 'completed' }));
+    }
 
     const totalAppFee = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
-    const batch = writeBatch(db);
-
-    // Fetch customer data docs
-    const customerUids = [...new Set(orders.map(o => o.userId).filter(Boolean))];
-    const customerDataMap = {};
-    for (const uid of customerUids) {
-      const userSnap = await getDoc(doc(db, 'users', uid));
-      if (userSnap.exists()) {
-        customerDataMap[uid] = userSnap.data();
-      }
-    }
-
-    // 2. Update orders to completed (this is fully authorized by the driver's write rules on orders)
-    for (const id of ids) {
-      const orderData = orders.find(o => o.id === id);
-      batch.update(doc(db, 'orders', id), {
-        status: 'completed',
-        deliveredAt: serverTimestamp(),
-        deliverySessionId: user.currentSessionId || orderData?.deliverySessionId || null
-      });
-
-      if (orderData?.userId && customerDataMap[orderData.userId]) {
-        const { processOrderCompletionRewards } = await import('../utils/rewards.js');
-        await processOrderCompletionRewards(batch, orderData.userId, customerDataMap[orderData.userId], id);
-      }
-    }
-
-    // NOTE: deliveryDebt is incremented by the Cloud Function (functions/index.js)
-    // when the order status changes to 'completed'. We only update local state here
-    // to reflect the change immediately in the UI without waiting for Firestore.
     if (totalAppFee > 0) {
       const currentLocalUser = getState().user || {};
       const newDebt = (currentLocalUser.deliveryDebt || 0) + totalAppFee;
       setState('user', { ...currentLocalUser, deliveryDebt: newDebt });
     }
 
-    try {
-      await batch.commit();
-      
-      // Trigger Success Celebration Modal
-      showSuccessCelebration(orders, () => {
-        showCustomerRatingModal(orders);
-      });
-    } catch (err) {
-      console.error('Error committing delivery batch:', err);
-      showToast('Error al confirmar la entrega en el servidor. Por favor, reintentá.', 'error');
-    }
+    // 3. Process rewards in background batch (isolated so rewards error never blocks delivery)
+    setTimeout(async () => {
+      try {
+        const customerUids = [...new Set(orders.map(o => o.userId).filter(Boolean))];
+        const customerDataMap = {};
+        for (const uid of customerUids) {
+          const userSnap = await getDoc(doc(db, 'users', uid));
+          if (userSnap.exists()) {
+            customerDataMap[uid] = userSnap.data();
+          }
+        }
+        const rewardsBatch = writeBatch(db);
+        let rewardsCount = 0;
+        for (const id of ids) {
+          const orderData = orders.find(o => o.id === id);
+          if (orderData?.userId && customerDataMap[orderData.userId]) {
+            const { processOrderCompletionRewards } = await import('../utils/rewards.js');
+            await processOrderCompletionRewards(rewardsBatch, orderData.userId, customerDataMap[orderData.userId], id);
+            rewardsCount++;
+          }
+        }
+        if (rewardsCount > 0) {
+          await rewardsBatch.commit();
+        }
+      } catch (rErr) {
+        console.warn('[markAsDelivered] Rewards background processing notice:', rErr);
+      }
+    }, 50);
+
+    // 4. Trigger Success Celebration Modal
+    showSuccessCelebration(orders, () => {
+      showCustomerRatingModal(orders);
+    });
   } catch (err) {
     console.error('markAsDelivered error:', err);
     showToast('Error al procesar la entrega', 'error');

@@ -268,6 +268,15 @@ function renderChats(container, user) {
   // 2. Gather Order Chats
   currentOrderChats.forEach(chat => {
     const order = chat.order || { id: chat.orderId || chat.id, orderId: chat.orderId || '---' };
+    
+    // Privacy enforcement: Comercio can ONLY see client-commerce and commerce-delivery chats.
+    // They must NEVER see client-delivery (Cliente ↔ Repartidor) chats!
+    if (chat.type === 'client-delivery' && !isAdmin()) {
+      if (user.uid !== order.userId && user.uid !== order.driverId) {
+        return;
+      }
+    }
+
     const isPrimary = !chat.order || user.uid === order.userId || 
                       user.uid === order.driverId || 
                       user.uid === order.comercioId || 
