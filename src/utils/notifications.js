@@ -63,16 +63,39 @@ export async function initPushNotifications() {
               sound: 'alert.mp3'
             });
             await PushNotifications.createChannel({
-              id: 'auto_accept_alerts',
-              name: 'Auto Aceptar',
-              description: 'Alertas de pedidos auto-aceptados',
+              id: 'order_offers',
+              name: 'Ofertas de Pedidos',
+              description: 'Ofertas de pedidos con botón de aceptación rápida',
               importance: 5,
               visibility: 1,
               vibration: true,
-              sound: 'cash.mp3'
+              sound: 'alert.mp3'
             });
           } catch(e) { console.warn('Channel creation error', e); }
         }
+
+        try {
+          await PushNotifications.registerActionTypes({
+            types: [
+              {
+                id: 'ORDER_OFFER',
+                actions: [
+                  {
+                    id: 'ACCEPT_ORDER',
+                    title: '⚡ ACEPTAR PEDIDO',
+                    foreground: true
+                  },
+                  {
+                    id: 'VIEW_ORDER',
+                    title: 'Ver Detalles',
+                    foreground: true
+                  }
+                ]
+              }
+            ]
+          });
+        } catch(e) { console.warn('Action types registration error:', e); }
+
         await PushNotifications.register();
       } else {
         console.warn('[Push] Push permission denied by user. Proceeding without native push notifications.');
@@ -144,7 +167,20 @@ export async function initPushNotifications() {
 
         PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
           console.log('[Push] Native push action performed:', action);
-          
+
+          const actionId = action.actionId;
+          const n = action.notification || {};
+          const orderId = n.data?.orderId || n.data?.takeOrderId || '';
+
+          if (actionId === 'ACCEPT_ORDER' && orderId) {
+            console.log('[Push] User pressed ⚡ ACEPTAR PEDIDO on notification action button!');
+            window.location.hash = `#/delivery-panel?takeOrderId=${orderId}&autoTake=true`;
+            setTimeout(() => {
+              window.dispatchEvent(new HashChangeEvent('hashchange'));
+            }, 150);
+            return;
+          }
+
           let url = '';
           if (action.notification) {
             const n = action.notification;

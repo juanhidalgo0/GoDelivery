@@ -74,7 +74,7 @@ function matchRoute(hash) {
 let isProgrammaticScroll = false;
 let isRouting = false;
 
-async function handleRoute() {
+export async function handleRoute() {
   isRouting = true;
   try {
     const fullHash = window.location.hash.slice(1) || '/';
@@ -82,6 +82,28 @@ async function handleRoute() {
     const slider = document.getElementById('app-slider');
     const overlay = document.getElementById('app-overlay');
     
+    if (hash.startsWith('/seguimiento/wa')) {
+      // Hide global headers, footers, bottom navs and sliders so tracking page fills full screen
+      const bNav = document.getElementById('bottom-nav');
+      const gHead = document.getElementById('global-header');
+      const slider = document.getElementById('app-slider');
+      if (bNav) bNav.style.display = 'none';
+      if (gHead) gHead.style.display = 'none';
+      if (slider) slider.style.display = 'none';
+      document.body.classList.remove('overlay-open');
+
+      const match = matchRoute(hash);
+      if (match) {
+        const content = document.getElementById('app-content');
+        if (content) {
+          content.style.display = 'block';
+          currentCleanup = await match.handler(content);
+        }
+        isRouting = false;
+        return;
+      }
+    }
+
     if (getState().loading) return;
 
     const match = matchRoute(hash);
@@ -424,13 +446,19 @@ export function initRouter() {
 }
 
 export function checkMaintenanceState() {
+  const hash = window.location.hash || '';
+  let overlay = document.getElementById('maintenance-overlay');
+  
+  if (hash.startsWith('#/seguimiento/wa')) {
+    if (overlay) overlay.style.display = 'none';
+    return;
+  }
+
   const maintenanceMode = getState().maintenanceMode === true;
   const currentUserEmail = (getState().user?.email || '').toLowerCase().trim();
   const isSuperOwner = currentUserEmail === 'juanhidalgobass@gmail.com';
   const allowedEmails = (getState().maintenanceAllowedEmails || []).map(e => e.toLowerCase().trim());
   const isAllowed = isSuperOwner || (currentUserEmail && allowedEmails.includes(currentUserEmail));
-  
-  let overlay = document.getElementById('maintenance-overlay');
   
   if (maintenanceMode && !isAllowed) {
     if (!overlay) {

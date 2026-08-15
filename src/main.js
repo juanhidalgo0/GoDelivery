@@ -1,5 +1,5 @@
 // GoDelivery — Main Entry Point
-import { registerRoutes, initRouter, routerReady } from './router.js';
+import { registerRoutes, initRouter, routerReady, handleRoute } from './router.js';
 import { initAuth, isDelivery, isComercio } from './auth.js';
 import { initTheme, loadCart, getState, initSettings } from './state.js';
 import { initPushNotifications } from './utils/notifications.js';
@@ -22,8 +22,18 @@ async function init() {
     if (isNewSession) {
       localStorage.removeItem('gd_last_hash');
     }
+    if (window.location.hash.includes('/seguimiento/wa/')) {
+      const match = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
+      if (match && match[1]) {
+        window.location.href = '/seguimiento.html?id=' + match[1];
+        return;
+      }
+    }
+    const initialHash = window.location.hash;
     const lastHash = localStorage.getItem('gd_last_hash');
-    if (lastHash && lastHash !== '#/' && lastHash !== '#') {
+    if (initialHash && (initialHash.includes('/seguimiento/') || (initialHash !== '#/' && initialHash !== '#'))) {
+      // Keep initial URL hash opened by user
+    } else if (lastHash && lastHash !== '#/' && lastHash !== '#') {
       window.location.hash = lastHash;
     } else {
       window.location.hash = '#/';
@@ -40,26 +50,27 @@ async function init() {
     document.body.classList.add('platform-capacitor');
     
     // Hide native splash screen immediately to transition to the animated HTML splash / login wall
-    // Hide native splash screen immediately to transition to the animated HTML splash / login wall
     import('@capacitor/splash-screen').then(({ SplashScreen }) => {
-      // Instant native load: Hide native splash screen immediately
       SplashScreen.hide();
     }).catch(err => console.warn('GoDelivery: Failed to hide native splash screen:', err));
     
-    // Check for App Updates in Play Store (Android) asynchronously without blocking startup
-    setTimeout(() => {
-      import('@capawesome/capacitor-app-update').then(async ({ AppUpdate }) => {
-        try {
-          const result = await AppUpdate.getAppUpdateInfo();
-          if (result.updateAvailability === 2) { // 2 = UPDATE_AVAILABLE
-            console.log('[Version] Mandatory update found on Play Store. Forcing update...');
-            await AppUpdate.performImmediateUpdate();
+    // Check for App Updates in Play Store (Android ONLY) asynchronously without blocking startup
+    const platform = window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : '';
+    if (platform === 'android') {
+      setTimeout(() => {
+        import('@capawesome/capacitor-app-update').then(async ({ AppUpdate }) => {
+          try {
+            const result = await AppUpdate.getAppUpdateInfo();
+            if (result.updateAvailability === 2) { // 2 = UPDATE_AVAILABLE
+              console.log('[Version] Mandatory update found on Play Store. Forcing update...');
+              await AppUpdate.performImmediateUpdate();
+            }
+          } catch (err) {
+            console.warn('GoDelivery: Failed to check for Play Store updates:', err);
           }
-        } catch (err) {
-          console.warn('GoDelivery: Failed to check for Play Store updates:', err);
-        }
-      }).catch(err => console.warn('Failed to load AppUpdate plugin:', err));
-    }, 2000);
+        }).catch(err => console.warn('Failed to load AppUpdate plugin:', err));
+      }, 2000);
+    }
 
     import('@capacitor/app').then(({ App }) => {
       App.addListener('backButton', () => {
@@ -80,35 +91,6 @@ async function init() {
         }
       });
     }).catch(err => console.warn('Failed to load Capacitor App plugin:', err));
-  }
-  // Seed Database: Pizzería category and Dany's Pizza categories
-  try {
-    const runOnceKey = 'gd_seed_remove_pizzeria_2026_07_11';
-    if (!localStorage.getItem(runOnceKey)) {
-      const { doc, deleteDoc, collection, getDocs, query, updateDoc } = await import('firebase/firestore');
-      
-      // 1. Delete Pizzería category from platformCategories
-      await deleteDoc(doc(db, 'platformCategories', 'pizzeria'));
-      
-      // 2. Find Dany's Pizza and clean up its categories
-      const comQuery = query(collection(db, 'comercios'));
-      const comSnap = await getDocs(comQuery);
-      for (const d of comSnap.docs) {
-        const cData = d.data();
-        if (cData.name && cData.name.toLowerCase().includes("dany's pizza")) {
-          await updateDoc(doc(db, 'comercios', d.id), {
-            category: 'Comida',
-            categories: ['Comida']
-          });
-          console.log("Updated Dany's Pizza to Comida!");
-        }
-      }
-      
-      localStorage.setItem(runOnceKey, 'true');
-      console.log("Pizzería category deleted and Dany's Pizza cleaned up!");
-    }
-  } catch (err) {
-    console.error('Error removing Pizzería category:', err);
   }
 
   // Global updating state to avoid double reloads
@@ -161,8 +143,11 @@ async function init() {
     }, 1200);
   }
 
-  // Force-update check against version.json (Runs once on load, then checks every 25 seconds in background)
+  const isNativeApp = !!(window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web')));
+
+  // Force-update check against version.json (PWA only - Native App Store updates are handled via Apple/Google Stores)
   const checkAppVersion = async () => {
+    if (isNativeApp) return;
     try {
       const vRes = await fetch('/version.json?cb=' + Date.now());
       if (vRes.ok) {
@@ -181,8 +166,10 @@ async function init() {
       console.warn('[Version] Check failed:', err);
     }
   };
-  setTimeout(checkAppVersion, 3000);
-  setInterval(checkAppVersion, 25000);
+  if (!isNativeApp) {
+    setTimeout(checkAppVersion, 3000);
+    setInterval(checkAppVersion, 25000);
+  }
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
   const urlParams = new URLSearchParams(window.location.search);
@@ -193,8 +180,8 @@ async function init() {
   }
 
   const startTime = Date.now();
-  // Register Service Worker
-  if ('serviceWorker' in navigator) {
+  // Register Service Worker (PWA only - Native mobile apps use native APNS/FCM Push Notifications)
+  if ('serviceWorker' in navigator && !isNativeApp) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/firebase-messaging-sw.js')
         .then(reg => {
@@ -551,6 +538,11 @@ async function init() {
   // Register all routes
   registerRoutes({
     '/': (c) => import('./pages/home.js').then(m => m.renderHome(c)),
+    '/seguimiento/wa/:id': (c) => {
+      const params = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
+      const orderId = params ? params[1] : '';
+      return import('./pages/order-tracking.js').then(m => m.renderOrderTracking(orderId, c, false, false));
+    },
     '/comercio/:id': (c) => import('./pages/comercio.js').then(m => m.renderComercio(c)),
     '/cart': (c) => import('./pages/cart.js').then(m => m.renderCart(c)),
     '/mis-chats': (c) => import('./pages/mis-chats.js').then(m => m.renderMisChats(c)),
@@ -564,6 +556,8 @@ async function init() {
     '/admin/solicitudes-empleo': (c) => import('./pages/admin/solicitudes-empleo.js').then(m => m.renderAdminJobApplications(c)),
     '/admin/reviews': (c) => import('./pages/admin/reviews.js').then(m => m.renderAdminReviews(c)),
     '/admin/support-chats': (c) => import('./pages/admin/support-chats.js').then(m => m.renderAdminSupportChats(c)),
+    '/admin/whatsapp-bot': (c) => import('./pages/admin/whatsapp-bot.js').then(m => m.renderAdminWhatsAppBot(c)),
+    '/admin/control-center': (c) => import('./pages/admin/control-center.js').then(m => m.renderAdminControlCenter(c)),
     '/admin/orders': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
     '/admin/orders/:orderId': (c) => import('./pages/admin/orders.js').then(m => m.renderAdminOrders(c)),
     '/admin/commissions': (c) => import('./pages/admin/comercios.js').then(m => m.renderAdminComercios(c)),
@@ -793,7 +787,7 @@ async function init() {
   if (initialSplash) {
     setTimeout(() => {
       window.dismissSplashScreen();
-    }, 600);
+    }, 300);
   }
 
   // Init auth
@@ -804,6 +798,22 @@ async function init() {
       }
 
       if (!user) {
+        const currentHash = window.location.hash || '';
+        if (currentHash.startsWith('#/seguimiento/wa/')) {
+          const loginWall = document.getElementById('login-wall');
+          if (loginWall) loginWall.remove();
+          const header = document.getElementById('app-header');
+          const navbar = document.getElementById('app-navbar');
+          if (header) header.style.display = 'none';
+          if (navbar) navbar.style.display = 'none';
+          if (!routerReady) {
+            initRouter();
+          } else {
+            handleRoute();
+          }
+          return;
+        }
+
         const isGuestMode = sessionStorage.getItem('gd_guest_mode') === 'true';
         if (isGuestMode) {
           const loginWall = document.getElementById('login-wall');

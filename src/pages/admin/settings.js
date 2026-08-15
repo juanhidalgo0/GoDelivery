@@ -223,7 +223,7 @@ export async function renderAdminLogisticsSettings(container) {
         </div>
         <div>
           <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Parada Extra ($)</label>
-          <input type="number" id="logistics-delivery-extra-stop" value="${s.deliveryExtraStopFee || 500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+          <input type="number" id="logistics-delivery-extra-stop" value="${s.deliveryExtraStopFee || 1500}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
         </div>
         <div>
           <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Recargo por Lluvia ($)</label>
@@ -575,8 +575,30 @@ export async function renderAdminEconomySettings(container) {
           </div>
 
           <div style="border-top:1px dashed var(--color-border-light); padding-top:18px; margin-top:8px;">
+            <h4 style="font-family:var(--font-display); font-size:12px; font-weight:800; margin-bottom:12px; color:#25D366; text-transform:uppercase; letter-spacing:0.04em; display:flex; align-items:center; gap:6px;">
+              ${icon("chat", 16)} Tarifas Bot WhatsApp
+            </h4>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <div>
+                <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Costo Envío WhatsApp ($)</label>
+                <input type="number" class="input" id="global-whatsapp-delivery-fee" value="${s.whatsappDeliveryFee !== undefined ? s.whatsappDeliveryFee : 2000}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+              </div>
+              <div>
+                <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Tarifa App WhatsApp ($)</label>
+                <input type="number" class="input" id="global-whatsapp-app-fee" value="${s.whatsappAppFee !== undefined ? s.whatsappAppFee : 100}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+              </div>
+            </div>
+          </div>
+
+          <div style="border-top:1px dashed var(--color-border-light); padding-top:18px; margin-top:8px;">
             <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">WhatsApp de Pagos y Soporte</label>
             <input type="text" class="input" id="global-whatsapp-payments" value="${s.whatsappPayments || "5491123456789"}" placeholder="Ej: 549221555555" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+          </div>
+
+          <div style="border-top:1px dashed var(--color-border-light); padding-top:18px; margin-top:8px;">
+            <button type="button" id="btn-manage-wa-commerces" style="width:100%; height:50px; border-radius:16px; background:rgba(37, 211, 102, 0.1); border:1.5px solid #25D366; color:#25D366; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+              ${icon("store", 18)} Gestionar Comercios WhatsApp
+            </button>
           </div>
 
           <button id="save-economy-btn" style="margin-top:20px; height:54px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
@@ -608,19 +630,25 @@ export async function renderAdminEconomySettings(container) {
         value: parseFloat(document.getElementById("fee-config-goviaje-value").value) || 0
       }
     };
+    const whatsappDeliveryFee = parseFloat(document.getElementById("global-whatsapp-delivery-fee").value) || 2000;
+    const whatsappAppFee = parseFloat(document.getElementById("global-whatsapp-app-fee").value) || 100;
     try {
       await setDoc(doc(db, "settings", "global"), {
         commissionRate,
         appUsageFeeRate,
         whatsappPayments,
         servicesAppFeeConfig,
-        canonAmount
+        canonAmount,
+        whatsappDeliveryFee,
+        whatsappAppFee
       }, { merge: true });
       setState("commissionRate", commissionRate);
       setState("appUsageFeeRate", appUsageFeeRate);
       setState("whatsappPayments", whatsappPayments);
       setState("servicesAppFeeConfig", servicesAppFeeConfig);
       setState("canonAmount", canonAmount);
+      setState("whatsappDeliveryFee", whatsappDeliveryFee);
+      setState("whatsappAppFee", whatsappAppFee);
       showToast("Ajustes de Econom\xEDa actualizados.", "success");
     } catch (err) {
       console.error(err);
@@ -630,6 +658,110 @@ export async function renderAdminEconomySettings(container) {
       btn.innerHTML = `${icon("check", 20)} Guardar Ajustes`;
     }
   };
+
+  const btnWA = document.getElementById("btn-manage-wa-commerces");
+  if (btnWA) {
+    btnWA.onclick = () => openWACommercesModal();
+  }
+}
+
+export async function openWACommercesModal() {
+  const modalContent = document.createElement("div");
+  modalContent.style.cssText = "padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg); max-height:80vh; overflow-y:auto;";
+  modalContent.innerHTML = `
+    <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:#25D366; display:flex; align-items:center; gap:8px;">
+      ${icon("store", 22)} Comercios Adheridos WhatsApp
+    </h3>
+    <p style="font-size:12px; color:var(--color-text-secondary); margin:0; line-height:1.4;">
+      Registrá comercios con su número de teléfono de WhatsApp para que el Bot reconozca su local automáticamente y no tengan que tippear la dirección de retiro.
+    </p>
+
+    <div style="background:var(--color-surface); padding:16px; border-radius:16px; border:1px solid var(--color-border); display:flex; flex-direction:column; gap:10px;">
+      <h4 style="font-size:12px; font-weight:800; margin:0; color:var(--color-text-primary); text-transform:uppercase;">Agregar Nuevo Comercio</h4>
+      <input type="text" id="wa-comm-name" placeholder="Nombre del Comercio (Ej: Panadería Don Pedro)" style="height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:13px; font-weight:700; background:var(--color-bg-card); color:var(--color-text-primary);" />
+      <input type="text" id="wa-comm-phone" placeholder="Teléfono WhatsApp (Ej: 5492215554433)" style="height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:13px; font-weight:700; background:var(--color-bg-card); color:var(--color-text-primary);" />
+      <input type="text" id="wa-comm-address" placeholder="Dirección del Local (Ej: Calle 11 #450)" style="height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:13px; font-weight:700; background:var(--color-bg-card); color:var(--color-text-primary);" />
+      <button id="btn-save-wa-comm" style="height:44px; border-radius:12px; background:#25D366; color:white; border:none; font-weight:900; font-size:13px; cursor:pointer;">
+        + Agregar a la Lista
+      </button>
+    </div>
+
+    <div style="margin-top:10px;">
+      <h4 style="font-size:12px; font-weight:800; margin-bottom:10px; color:var(--color-text-tertiary); text-transform:uppercase;">Comercios Registrados</h4>
+      <div id="wa-commerces-list" style="display:flex; flex-direction:column; gap:8px;">
+        <div style="font-size:12px; color:var(--color-text-tertiary); text-align:center; padding:12px;">Cargando comercios...</div>
+      </div>
+    </div>
+  `;
+
+  const m = showModal({ title: "", content: modalContent, showConfirm: false });
+
+  const loadList = async () => {
+    const listEl = modalContent.querySelector("#wa-commerces-list");
+    try {
+      const snap = await getDocs(collection(db, "whatsapp_commerces"));
+      if (snap.empty) {
+        listEl.innerHTML = `<div style="font-size:12px; color:var(--color-text-tertiary); text-align:center; padding:16px; background:var(--color-surface); border-radius:12px;">No hay comercios de WhatsApp registrados aún.</div>`;
+        return;
+      }
+      listEl.innerHTML = snap.docs.map(docSnap => {
+        const d = docSnap.data();
+        return `
+          <div style="display:flex; align-items:center; justify-space-between; padding:12px 16px; background:var(--color-surface); border-radius:14px; border:1px solid var(--color-border-light);">
+            <div style="flex:1;">
+              <div style="font-size:14px; font-weight:900; color:var(--color-text-primary);">${d.name}</div>
+              <div style="font-size:11px; color:#25D366; font-weight:700; margin-top:2px;">📱 ${d.phone}</div>
+              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">📍 ${d.address}</div>
+            </div>
+            <button class="delete-wa-comm-btn" data-id="${docSnap.id}" style="width:32px; height:32px; border-radius:10px; background:rgba(239,68,68,0.1); border:none; color:#ef4444; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+              ✕
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      listEl.querySelectorAll('.delete-wa-comm-btn').forEach(b => {
+        b.onclick = async () => {
+          await deleteDoc(doc(db, "whatsapp_commerces", b.dataset.id));
+          showToast("Comercio eliminado", "info");
+          loadList();
+        };
+      });
+    } catch (e) {
+      console.error(e);
+      listEl.innerHTML = `<div style="font-size:12px; color:red;">Error al cargar lista.</div>`;
+    }
+  };
+
+  modalContent.querySelector("#btn-save-wa-comm").onclick = async () => {
+    const name = modalContent.querySelector("#wa-comm-name").value.trim();
+    let phone = modalContent.querySelector("#wa-comm-phone").value.trim().replace(/\D/g, '');
+    const address = modalContent.querySelector("#wa-comm-address").value.trim();
+
+    if (!name || !phone || !address) {
+      showToast("Completá todos los campos", "warning");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "whatsapp_commerces"), {
+        name,
+        phone,
+        address,
+        createdAt: serverTimestamp()
+      });
+      showToast("Comercio agregado con éxito", "success");
+      modalContent.querySelector("#wa-comm-name").value = "";
+      modalContent.querySelector("#wa-comm-phone").value = "";
+      modalContent.querySelector("#wa-comm-address").value = "";
+      loadList();
+    } catch (err) {
+      console.error(err);
+      showToast("Error al guardar comercio", "error");
+    }
+  };
+
+  loadList();
 }
 export async function renderAdminDeliveriesSettings(container) {
   if (!container) container = document.getElementById("app-content");
@@ -708,8 +840,9 @@ export async function renderAdminDeliveriesSettings(container) {
     try {
       const { onSnapshot, collection: collection2, query, where, getDocs: getDocs2 } = await import("firebase/firestore");
       if (unsubUsers) unsubUsers();
-      unsubUsers = onSnapshot(collection2(db, "users"), (usersSnap) => {
-        driversData = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.role === "delivery" || u.isDelivery === true);
+      // Filter only delivery drivers — avoids reading all users
+      unsubUsers = onSnapshot(query(collection2(db, "users"), where("role", "==", "delivery")), (usersSnap) => {
+        driversData = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (activeTab === "drivers") {
           renderTab();
         }
@@ -717,11 +850,15 @@ export async function renderAdminDeliveriesSettings(container) {
         console.warn("Realtime drivers listener error:", err);
       });
       try {
-        const { orderBy, limit } = await import("firebase/firestore");
+        const { orderBy, limit, Timestamp } = await import("firebase/firestore");
+        // Load only last 60 days of orders to reduce reads
+        const sixtyDaysAgo = new Date();
+        sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
         const qOrders = query(
           collection2(db, "orders"),
+          where("createdAt", ">=", Timestamp.fromDate(sixtyDaysAgo)),
           orderBy("createdAt", "desc"),
-          limit(400)
+          limit(200)
         );
         const ordersSnap = await getDocs2(qOrders);
         globalPendingOrders = ordersSnap.docs.map((doc2) => ({ id: doc2.id, ...doc2.data() }));
@@ -729,7 +866,12 @@ export async function renderAdminDeliveriesSettings(container) {
         console.warn("Error loading orders for coupons credit:", err);
       }
       try {
-        const canonSnap = await getDocs2(collection2(db, "delivery_canon_payments"));
+        // Load canon payments for last 60 days only
+        const { Timestamp: TS2 } = await import("firebase/firestore");
+        const sixtyDaysAgo2 = new Date();
+        sixtyDaysAgo2.setDate(sixtyDaysAgo2.getDate() - 60);
+        const canonQ = query(collection2(db, "delivery_canon_payments"), where("createdAt", ">=", TS2.fromDate(sixtyDaysAgo2)));
+        const canonSnap = await getDocs2(canonQ);
         canonPaymentsData = canonSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       } catch (err) {
         console.warn("Error loading cuota payments:", err);

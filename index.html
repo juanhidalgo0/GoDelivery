@@ -2,6 +2,14 @@
 <html lang="es" data-theme="light">
 
 <head>
+  <script>
+    if (window.location.hash.includes('/seguimiento/wa/')) {
+      const match = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
+      if (match && match[1]) {
+        window.location.href = '/seguimiento.html?id=' + match[1];
+      }
+    }
+  </script>
   <!-- Preload key brand icons for instant load -->
   <link rel="preload" as="image" href="/go-bag.png" />
   <link rel="preload" as="image" href="/go-pickup-point.png" />
@@ -425,6 +433,23 @@
     }
   </style>
 
+  <style>
+    /* Safety fallback for iOS: Ensure splash screen ALWAYS disappears within 2.5s max */
+  </style>
+  <script>
+    setTimeout(function() {
+      var splash = document.getElementById('splash-screen');
+      if (splash && !splash.dataset.dismissed) {
+        splash.dataset.dismissed = 'true';
+        splash.style.opacity = '0';
+        splash.style.transition = 'opacity 0.4s ease';
+        setTimeout(function() {
+          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+        }, 400);
+      }
+    }, 2500);
+  </script>
+
 
   <!-- Non-blocking Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -562,6 +587,20 @@
         </div>
         <script>
           window.setSplashProgress = function() {};
+          window.dismissSplashScreen = function() {
+            var s = document.getElementById('splash-screen');
+            if (s && !s.dataset.dismissed) {
+              s.dataset.dismissed = 'true';
+              s.classList.add('fade-out');
+              var appEl = document.getElementById('app');
+              if (appEl) appEl.classList.add('ready');
+              setTimeout(function() { if (s && s.parentNode) s.parentNode.removeChild(s); }, 400);
+            }
+          };
+          // Safety Fallback: Guarantee splash dismissal after 1.5s maximum on iOS/Capacitor/Web
+          setTimeout(function() {
+            if (window.dismissSplashScreen) window.dismissSplashScreen();
+          }, 1500);
         </script>
       </div>
     </div>

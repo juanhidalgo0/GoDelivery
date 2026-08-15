@@ -30,7 +30,10 @@
     "@capawesome/capacitor-app-update": "^8.0.3",
     "@capawesome/capacitor-apple-sign-in": "^0.1.2",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "firebase": "^12.12.1",
-    "jimp": "^1.6.1"
+    "jimp": "^1.6.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
   }
 }

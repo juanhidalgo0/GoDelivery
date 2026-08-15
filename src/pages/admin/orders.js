@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { doc, getDoc, collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { formatPrice, formatDate } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
@@ -10,7 +10,8 @@ import { registerUnsubscribe } from '../../utils/cleanup.js';
 const userCache = {};
 let knownOrderIds = null;
 const newOrderAlerts = {};
-let currentLimit = 50;
+let currentLimit = 30;
+let isHistoryMode = false;
 let infiniteObserver = null;
 let pageLoadTime = 0;
 
@@ -130,7 +131,8 @@ function parseFavorDetails(details) {
 export async function renderAdminOrders() {
   const content = document.getElementById('app-content');
   allOrders = [];
-  currentLimit = 50;
+  isHistoryMode = false;
+  currentLimit = 30;
   pageLoadTime = Date.now();
   
   content.innerHTML = `
@@ -146,20 +148,42 @@ export async function renderAdminOrders() {
         <div style="flex:1; position:relative; z-index:2;">
           <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; letter-spacing:-0.03em;">Registro de Ventas</h1>
           <div style="display:flex; align-items:center; gap:8px; margin-top:2px;">
-            <div id="conn-dot" style="width:8px; height:8px; border-radius:50%; background:#FFA500; box-shadow:0 0 8px #FFA500;"></div>
-            <span id="conn-diag" style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.8); letter-spacing:0.05em; text-transform:uppercase;">AUDITORÍA GLOBAL</span>
+            <div id="conn-dot" style="width:8px; height:8px; border-radius:50%; background:#00D67F; box-shadow:0 0 8px #00D67F;"></div>
+            <span id="conn-diag" style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.8); letter-spacing:0.05em; text-transform:uppercase;">• ACTIVOS EN VIVO</span>
           </div>
         </div>
         <a href="#/admin/support-chats" id="orders-support-chats-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s; position:relative; z-index:2; margin-right:4px;" title="Mesa de Ayuda">
           ${icon('chatBubble', 22)}
         </a>
-        <button id="refresh-orders-btn" style="background:rgba(255,255,255,0.15); border:none; width:40px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; transition:all 0.2s; position:relative; z-index:2;" title="Recargar página">
-          ${icon('refresh', 22)}
+        <button id="toggle-history-btn" style="background:rgba(255,255,255,0.18); border:none; padding:0 12px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; gap:6px; color:white; font-size:12px; font-weight:900; transition:all 0.2s; position:relative; z-index:2; box-shadow:0 2px 8px rgba(0,0,0,0.1);" title="Abrir Historial Completo de Pedidos">
+          ${icon('clock', 16)} <span id="history-btn-label">Historial</span>
         </button>
       </div>
 
-      <!-- Advanced Search -->
+      <!-- Advanced Search & Main 3 Segments (APP / WHATSAPP / CHATS) -->
       <div style="padding:16px 20px; flex-shrink:0; background:linear-gradient(to bottom, var(--color-surface), var(--color-bg));">
+        
+        <!-- Ultra-Premium Segmented Control Bar (APP / WHATSAPP / CHATS) -->
+        <div class="premium-segmented-bar" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:5px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:14px; box-shadow:0 4px 20px rgba(0,0,0,0.03);">
+          <button class="main-segment-btn active" data-segment="app" style="height:44px; border-radius:16px; border:none; background:linear-gradient(135deg, #e11d48, #be123c); color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 4px 14px rgba(225,29,72,0.3); transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+            <div style="width:24px; height:24px; border-radius:8px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('smartphone', 14, '', '#FFF')}</div>
+            <span>App</span>
+            <span id="seg-count-app" style="background:rgba(255,255,255,0.25); color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
+          </button>
+
+          <button class="main-segment-btn" data-segment="whatsapp" style="height:44px; border-radius:16px; border:none; background:transparent; color:var(--color-text-secondary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" style="width:20px; height:20px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(37,211,102,0.2));" alt="WhatsApp" />
+            <span>WhatsApp</span>
+            <span id="seg-count-wa" style="background:#25D366; color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
+          </button>
+
+          <button class="main-segment-btn" data-segment="chats" style="height:44px; border-radius:16px; border:none; background:transparent; color:var(--color-text-secondary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+            <div style="width:24px; height:24px; border-radius:8px; background:rgba(245,158,11,0.15); color:#d97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('headset', 14)}</div>
+            <span>Chats</span>
+            <span id="seg-count-chats" style="background:#f59e0b; color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
+          </button>
+        </div>
+
         <div class="search-box-v4" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:20px; padding:4px 6px; display:flex; align-items:center; box-shadow:var(--shadow-sm); margin-bottom:14px;">
           <div style="padding:0 12px; color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('search', 18)}</div>
           <input type="text" id="order-search" placeholder="Buscar cliente, comercio, ID o monto..." 
@@ -320,14 +344,15 @@ export async function renderAdminOrders() {
 
       .order-card-v4 { 
         background:var(--color-surface); 
-        border:1px solid var(--color-border); 
-        border-radius:24px; 
-        padding:20px; 
-        margin-bottom:16px; 
-        cursor:pointer; 
-        transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position:relative;
-        overflow:hidden;
+        border-radius: 24px;
+        padding: 0 20px 20px 20px;
+        margin-bottom: 16px;
+        border: 1px solid var(--color-border);
+        box-shadow: var(--shadow-sm);
+        position: relative;
+        cursor: pointer;
+        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s, border-color 0.2s;
+        overflow: hidden;
       }
       .order-card-v4:hover { transform: translateY(-3px); box-shadow:var(--shadow-lg); border-color:var(--color-primary); }
       .order-card-v4::before { content:''; position:absolute; left:0; top:0; width:6px; height:100%; background:var(--srv-color, var(--st-color)); }
@@ -352,14 +377,105 @@ export async function renderAdminOrders() {
   }
 }
 
+let currentSegment = 'app';
+let supportUnsubscribe = null;
+let allSupportChats = [];
+
+function loadSupportChats() {
+  if (supportUnsubscribe) supportUnsubscribe();
+  const q = query(collection(db, 'support_chats'));
+  supportUnsubscribe = onSnapshot(q, (snap) => {
+    allSupportChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    allSupportChats.sort((a, b) => {
+      const timeA = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : new Date(a.updatedAt || 0).getTime();
+      const timeB = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : new Date(b.updatedAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    const chatsBadge = document.getElementById('seg-count-chats');
+    if (chatsBadge) chatsBadge.textContent = allSupportChats.length;
+
+    if (currentSegment === 'chats') {
+      renderOrdersList();
+    }
+  }, err => console.error('Error fetching support chats in orders.js:', err));
+}
+
 function setupEventListeners() {
   document.getElementById('order-search')?.addEventListener('input', () => renderOrdersList());
   document.getElementById('filter-status-select')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('filter-type-select')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('filter-date-start')?.addEventListener('change', () => renderOrdersList());
   document.getElementById('filter-date-end')?.addEventListener('change', () => renderOrdersList());
-  const refreshBtn = document.getElementById('refresh-orders-btn');
-  if (refreshBtn) refreshBtn.onclick = () => window.location.reload();
+
+  document.querySelectorAll('.main-segment-btn').forEach(btn => {
+    btn.onclick = () => {
+      const seg = btn.dataset.segment;
+      currentSegment = seg;
+
+      document.querySelectorAll('.main-segment-btn').forEach(b => {
+        b.style.background = 'transparent';
+        b.style.color = 'var(--color-text-secondary)';
+        b.style.boxShadow = 'none';
+        b.classList.remove('active');
+      });
+
+      btn.classList.add('active');
+
+      if (seg === 'app') {
+        btn.style.background = 'linear-gradient(135deg, #e11d48, #be123c)';
+        btn.style.color = 'white';
+        btn.style.boxShadow = '0 4px 14px rgba(225,29,72,0.3)';
+      } else if (seg === 'whatsapp') {
+        btn.style.background = 'linear-gradient(135deg, #25D366, #128C7E)';
+        btn.style.color = 'white';
+        btn.style.boxShadow = '0 4px 14px rgba(37,211,102,0.3)';
+      } else if (seg === 'chats') {
+        btn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+        btn.style.color = 'white';
+        btn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+      }
+
+      renderOrdersList();
+    };
+  });
+
+  const toggleHistoryBtn = document.getElementById('toggle-history-btn');
+  let isLoadingMoreHistory = false;
+
+  if (toggleHistoryBtn) {
+    toggleHistoryBtn.onclick = () => {
+      isHistoryMode = !isHistoryMode;
+      currentLimit = 30;
+      
+      const label = document.getElementById('history-btn-label');
+      if (isHistoryMode) {
+        if (label) label.textContent = 'Ver Activos';
+        toggleHistoryBtn.style.background = '#25D366';
+        showToast('📜 Mostrando Historial Completo (Paginado de a 30 pedidos)', 'info');
+      } else {
+        if (label) label.textContent = 'Historial';
+        toggleHistoryBtn.style.background = 'rgba(255,255,255,0.18)';
+        showToast('🟢 Mostrando únicamente Pedidos Activos', 'info');
+      }
+      loadAllOrders();
+    };
+  }
+
+  const listContainer = document.getElementById('admin-registry-list-container');
+  if (listContainer) {
+    listContainer.onscroll = () => {
+      if (!isHistoryMode || isLoadingMoreHistory) return;
+      const nearBottom = listContainer.scrollTop + listContainer.clientHeight >= listContainer.scrollHeight - 150;
+      if (nearBottom) {
+        isLoadingMoreHistory = true;
+        currentLimit += 30;
+        console.log(`[Orders History] Infinite scroll bottom reached. Increasing limit to ${currentLimit}`);
+        loadAllOrders();
+        setTimeout(() => { isLoadingMoreHistory = false; }, 1200);
+      }
+    };
+  }
 
   // Collapsible Filters Toggle
   const toggleBtn = document.getElementById('toggle-filters-btn');
@@ -368,12 +484,9 @@ function setupEventListeners() {
   if (toggleBtn && filtersContent) {
     toggleBtn.onclick = () => {
       const isHidden = filtersContent.style.display === 'none';
-      if (isHidden) {
-        filtersContent.style.display = 'block';
-        if (chevron) chevron.style.transform = 'rotate(180deg)';
-      } else {
-        filtersContent.style.display = 'none';
-        if (chevron) chevron.style.transform = 'rotate(0deg)';
+      filtersContent.style.display = isHidden ? 'block' : 'none';
+      if (chevron) {
+        chevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
       }
     };
   }
@@ -402,21 +515,256 @@ function setupEventListeners() {
   subscribe('unreadSupportCount', (count) => updateChatBadge(count || 0));
 }
 
+let chatSubFilter = 'all'; // 'all' | 'client' | 'delivery' | 'comercio' | 'whatsapp'
+
+function renderSupportChatsList(container) {
+  const searchText = String(document.getElementById('order-search')?.value || '').toLowerCase();
+  
+  let chats = [...allSupportChats];
+
+  // Apply Subfilter (All, Clientes, Repartidores, Comercios, WhatsApp)
+  if (chatSubFilter === 'whatsapp') {
+    chats = chats.filter(c => c.source === 'whatsapp_bot' || c.isWhatsAppBot === true || /^\d{8,15}$/.test(String(c.userId)));
+  } else if (chatSubFilter === 'delivery') {
+    chats = chats.filter(c => c.userRole === 'delivery' || c.role === 'delivery');
+  } else if (chatSubFilter === 'comercio') {
+    chats = chats.filter(c => c.userRole === 'comercio' || c.userRole === 'commerce' || c.role === 'comercio');
+  } else if (chatSubFilter === 'client') {
+    chats = chats.filter(c => !c.isWhatsAppBot && c.source !== 'whatsapp_bot' && c.userRole !== 'delivery' && c.userRole !== 'comercio' && c.userRole !== 'commerce');
+  }
+
+  // Search text filter
+  if (searchText) {
+    chats = chats.filter(c => 
+      String(c.userName || '').toLowerCase().includes(searchText) ||
+      String(c.lastMessage || '').toLowerCase().includes(searchText) ||
+      String(c.userPhone || c.userId || '').includes(searchText)
+    );
+  }
+
+  let subfilterBarHtml = `
+    <div id="chats-subfilter-bar" style="display:flex; gap:6px; overflow-x:auto; padding-bottom:12px; margin-bottom:14px; border-bottom:1px solid var(--color-border-light); -webkit-overflow-scrolling:touch;">
+      <button class="chat-subfilter-btn ${chatSubFilter === 'all' ? 'active' : ''}" data-subfilter="all" style="font-size:11px; font-weight:900; padding:6px 12px; border-radius:10px; border:none; background:${chatSubFilter === 'all' ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${chatSubFilter === 'all' ? 'white' : 'var(--color-text-secondary)'}; cursor:pointer; flex-shrink:0;">Todos (${allSupportChats.length})</button>
+      <button class="chat-subfilter-btn ${chatSubFilter === 'client' ? 'active' : ''}" data-subfilter="client" style="font-size:11px; font-weight:900; padding:6px 12px; border-radius:10px; border:none; background:${chatSubFilter === 'client' ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${chatSubFilter === 'client' ? 'white' : 'var(--color-text-secondary)'}; cursor:pointer; flex-shrink:0;">👤 Clientes</button>
+      <button class="chat-subfilter-btn ${chatSubFilter === 'delivery' ? 'active' : ''}" data-subfilter="delivery" style="font-size:11px; font-weight:900; padding:6px 12px; border-radius:10px; border:none; background:${chatSubFilter === 'delivery' ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${chatSubFilter === 'delivery' ? 'white' : 'var(--color-text-secondary)'}; cursor:pointer; flex-shrink:0;">🛵 Repartidores</button>
+      <button class="chat-subfilter-btn ${chatSubFilter === 'comercio' ? 'active' : ''}" data-subfilter="comercio" style="font-size:11px; font-weight:900; padding:6px 12px; border-radius:10px; border:none; background:${chatSubFilter === 'comercio' ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${chatSubFilter === 'comercio' ? 'white' : 'var(--color-text-secondary)'}; cursor:pointer; flex-shrink:0;">🏬 Comercios</button>
+      <button class="chat-subfilter-btn ${chatSubFilter === 'whatsapp' ? 'active' : ''}" data-subfilter="whatsapp" style="font-size:11px; font-weight:900; padding:6px 12px; border-radius:10px; border:none; background:${chatSubFilter === 'whatsapp' ? '#25D366' : 'var(--color-surface)'}; color:${chatSubFilter === 'whatsapp' ? 'white' : 'var(--color-text-secondary)'}; cursor:pointer; flex-shrink:0;">💬 WhatsApp</button>
+    </div>
+  `;
+
+  if (chats.length === 0) {
+    container.innerHTML = subfilterBarHtml + `
+      <div style="text-align:center; padding:60px 20px; opacity:0.5;">
+        ${icon('headset', 44)}
+        <p style="font-weight:900; font-size:15px; margin-top:14px;">Sin requerimientos de chat</p>
+        <p style="font-size:12px;">No hay consultas para el filtro seleccionado.</p>
+      </div>
+    `;
+    attachSubfilterEvents(container);
+    return;
+  }
+
+  let html = subfilterBarHtml;
+  chats.forEach(c => {
+    const isWsp = c.source === 'whatsapp_bot' || c.isWhatsAppBot === true || /^\d{8,15}$/.test(String(c.userId));
+    const phone = String(c.userPhone || c.userId || c.phone || '').replace(/\D/g, '');
+    const isUnread = c.unreadByAdmin === true;
+
+    let roleTagBg = '#f59e0b';
+    let roleTagLabel = '📱 TICKET APP';
+    if (isWsp) {
+      roleTagBg = '#25D366';
+      roleTagLabel = '💬 WHATSAPP';
+    } else if (c.userRole === 'delivery' || c.role === 'delivery') {
+      roleTagBg = '#10b981';
+      roleTagLabel = '🛵 REPARTIDOR';
+    } else if (c.userRole === 'comercio' || c.userRole === 'commerce' || c.role === 'comercio') {
+      roleTagBg = '#d97706';
+      roleTagLabel = '🏬 COMERCIO';
+    } else {
+      roleTagBg = '#3b82f6';
+      roleTagLabel = '👤 CLIENTE';
+    }
+
+    html += `
+      <div style="background:var(--color-surface); border-radius:22px; padding:18px; margin-bottom:14px; border:1.5px solid ${isWsp ? '#25D366' : 'var(--color-border-light)'}; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="background:${roleTagBg}; color:white; font-size:9.5px; font-weight:900; padding:2px 8px; border-radius:6px; text-transform:uppercase;">${roleTagLabel}</span>
+            <span style="font-weight:900; font-size:15px; color:var(--color-text-primary);">${c.userName || phone || 'Usuario'}</span>
+          </div>
+          ${isUnread ? `<span style="background:#ef4444; color:white; font-size:9px; font-weight:900; padding:2px 6px; border-radius:100px;">NUEVO</span>` : ''}
+        </div>
+
+        <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600;">
+          <strong>Último Mensaje:</strong> ${c.lastMessage || 'Solicitó atención con operador'}
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:4px;">
+          ${isWsp ? `
+            <button class="btn-open-wsp-direct" data-phone="${phone}" style="flex:1; height:40px; border-radius:12px; background:#25D366; color:white; border:none; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 4px 12px rgba(37,211,102,0.25);">
+              ${icon('whatsapp', 16, '', '#FFF')} Abrir Chat de WhatsApp
+            </button>
+          ` : `
+            <button class="btn-open-app-support" data-user-id="${c.userId || c.id}" style="flex:1; height:40px; border-radius:12px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('chatBubble', 16)} Atender Chat App
+            </button>
+          `}
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+  attachSubfilterEvents(container);
+
+  container.querySelectorAll('.btn-open-wsp-direct').forEach(btn => {
+    btn.onclick = () => {
+      const clean = (btn.dataset.phone || '').replace(/\D/g, '');
+      const full = clean.startsWith('54') ? clean : `549${clean}`;
+      window.open(`https://wa.me/${full}`, '_blank');
+    };
+  });
+
+  container.querySelectorAll('.btn-open-app-support').forEach(btn => {
+    btn.onclick = () => {
+      window.location.hash = `#/admin/support-chats?userId=${btn.dataset.userId}`;
+    };
+  });
+}
+
+function attachSubfilterEvents(container) {
+  container.querySelectorAll('.chat-subfilter-btn').forEach(btn => {
+    btn.onclick = () => {
+      chatSubFilter = btn.dataset.subfilter;
+      renderOrdersList();
+    };
+  });
+}
+
+function renderOrdersList() {
+  const container = document.getElementById('admin-registry-list-container');
+  if (!container) return;
+
+  if (currentSegment === 'chats') {
+    renderSupportChatsList(container);
+    return;
+  }
+
+  const searchText = (document.getElementById('order-search')?.value || '').toLowerCase();
+  const filter = document.getElementById('filter-status-select')?.value || 'all';
+  const typeFilter = document.getElementById('filter-type-select')?.value || 'all';
+  const startDateStr = document.getElementById('filter-date-start')?.value || '';
+  const endDateStr = document.getElementById('filter-date-end')?.value || '';
+
+  let filtered = [...allOrders];
+
+  // Filter by Segment (APP vs WHATSAPP)
+  if (currentSegment === 'app') {
+    filtered = filtered.filter(o => o.source !== 'whatsapp_bot');
+  } else if (currentSegment === 'whatsapp') {
+    filtered = filtered.filter(o => o.source === 'whatsapp_bot');
+  }
+
+  // Update counts on badges
+  const appCount = allOrders.filter(o => o.source !== 'whatsapp_bot').length;
+  const waCount = allOrders.filter(o => o.source === 'whatsapp_bot').length;
+  const badgeApp = document.getElementById('seg-count-app');
+  const badgeWa = document.getElementById('seg-count-wa');
+  if (badgeApp) badgeApp.textContent = appCount;
+  if (badgeWa) badgeWa.textContent = waCount;
+
+  // Filter by search text
+  if (searchText) {
+    filtered = filtered.filter(o => {
+      const matchId = String(o.orderId || '').toLowerCase().includes(searchText) || 
+                      String(o.orderNumber || '').toLowerCase().includes(searchText) || 
+                      String(o.displayId || '').toLowerCase().includes(searchText) || 
+                      String(o.id || '').toLowerCase().includes(searchText);
+      const matchClient = String(o.userName || '').toLowerCase().includes(searchText);
+      const matchCommerce = String(o.comercioName || '').toLowerCase().includes(searchText);
+      const matchAmount = String(o.total || '').toLowerCase().includes(searchText);
+      return matchId || matchClient || matchCommerce || matchAmount;
+    });
+  }
+
+  // Filter by status
+  if (filter !== 'all') {
+    filtered = filtered.filter(o => {
+      const st = (o.status || '').toLowerCase();
+      if (filter === 'pending') return st === 'pending' || st === 'pendiente';
+      if (filter === 'accepted') return st === 'accepted' || st === 'aceptado' || st === 'preparing' || st === 'preparando';
+      if (filter === 'delivering') return st === 'delivering' || st === 'en_camino' || st === 'at_door';
+      if (filter === 'delivered') return st === 'delivered' || st === 'entregado' || st === 'completed';
+      if (filter === 'cancelled') return st === 'cancelled' || st === 'cancelado';
+      if (filter === 'scheduled') return o.isScheduled === true;
+      return true;
+    });
+  }
+
+  // Filter by service type
+  if (typeFilter !== 'all') {
+    filtered = filtered.filter(o => {
+      if (typeFilter === 'whatsapp') return o.source === 'whatsapp_bot';
+      if (typeFilter === 'commerce') return !o.isTrip && !o.isFavor && o.source !== 'whatsapp_bot';
+      if (typeFilter === 'favor') return o.isFavor && o.favorType !== 'gocash' && o.source !== 'whatsapp_bot';
+      if (typeFilter === 'gocash') return o.isFavor && o.favorType === 'gocash';
+      if (typeFilter === 'trip') return o.isTrip;
+      return true;
+    });
+  }
+
+  // Filter by Date Range
+  if (startDateStr) {
+    const startDate = new Date(startDateStr + 'T00:00:00');
+    filtered = filtered.filter(o => {
+      const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : (o.createdAt ? new Date(o.createdAt) : null);
+      return orderDate && orderDate >= startDate;
+    });
+  }
+
+  if (endDateStr) {
+    const endDate = new Date(endDateStr + 'T23:59:59');
+    filtered = filtered.filter(o => {
+      const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : (o.createdAt ? new Date(o.createdAt) : null);
+      return orderDate && orderDate <= endDate;
+    });
+  }
+
+  renderFilteredOrders(container, filtered);
+}
+
 function loadAllOrders() {
   const dot = document.getElementById('conn-dot');
   const diag = document.getElementById('conn-diag');
   
   if (ordersUnsubscribe) ordersUnsubscribe();
 
-  const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(currentLimit));
+  let q;
+  if (!isHistoryMode) {
+    // ACTIVE ORDERS ONLY (Default Mode: Avoids unnecessary reads)
+    q = query(
+      collection(db, 'orders'),
+      where('status', 'in', ['pending', 'confirmed', 'preparing', 'ready', 'accepted', 'delivering', 'on_way'])
+    );
+  } else {
+    // HISTORICAL ORDERS (Paginated 30 at a time on scroll)
+    q = query(
+      collection(db, 'orders'),
+      orderBy('createdAt', 'desc'),
+      limit(currentLimit)
+    );
+  }
   
   ordersUnsubscribe = onSnapshot(q, (snap) => {
-  registerUnsubscribe(ordersUnsubscribe);
-  if (dot) {
-      dot.style.background = '#00D67F';
-      dot.style.boxShadow = '0 0 10px #00D67F';
+    registerUnsubscribe(ordersUnsubscribe);
+    if (dot) {
+      dot.style.background = isHistoryMode ? '#3B82F6' : '#00D67F';
+      dot.style.boxShadow = isHistoryMode ? '0 0 10px #3B82F6' : '0 0 10px #00D67F';
     }
-    if (diag) diag.textContent = `• ONLINE (${snap.size})`;
+    if (diag) {
+      diag.textContent = isHistoryMode ? `• HISTORIAL COMPLETO (${snap.size})` : `• ACTIVOS EN VIVO (${snap.size})`;
+    }
 
     const isFirstLoad = (knownOrderIds === null);
     if (isFirstLoad) {
@@ -472,65 +820,8 @@ function loadAllOrders() {
   });
 }
 
-function renderOrdersList() {
-  const container = document.getElementById('admin-registry-list-container');
+function renderFilteredOrders(container, filtered) {
   if (!container) return;
-
-  const searchText = (document.getElementById('order-search')?.value || '').toLowerCase();
-  const filter = document.getElementById('filter-status-select')?.value || 'all';
-  const typeFilter = document.getElementById('filter-type-select')?.value || 'all';
-  const dateStartVal = document.getElementById('filter-date-start')?.value;
-  const dateEndVal = document.getElementById('filter-date-end')?.value;
-
-  let filtered = allOrders.filter(o => 
-    (o.comercioName || '').toLowerCase().includes(searchText) ||
-    (getComercioDisplayName(o)).toLowerCase().includes(searchText) ||
-    (o.userName || '').toLowerCase().includes(searchText) ||
-    (o.orderId || '').toString().includes(searchText) ||
-    (o.total || '').toString().includes(searchText) ||
-    (o.id || '').toLowerCase().includes(searchText)
-  );
-
-  if (filter !== 'all') {
-    filtered = filtered.filter(o => {
-      const s = (o.status || '').toLowerCase();
-      if (filter === 'pending') return s.includes('pend');
-      if (filter === 'confirmed') return s.includes('confir') || s.includes('prepar');
-      if (filter === 'delivering') return s.includes('camino') || s.includes('delivering');
-      if (filter === 'completed') return s.includes('entreg') || s.includes('complet') || s.includes('ready');
-      if (filter === 'cancelled') return s.includes('cancel');
-      return true;
-    });
-  }
-
-  if (typeFilter !== 'all') {
-    filtered = filtered.filter(o => {
-      if (typeFilter === 'trip') return !!o.isTrip;
-      if (typeFilter === 'gocash') return !!o.isFavor && o.favorType === 'gocash';
-      if (typeFilter === 'encomienda') return !!o.isFavor && o.favorType === 'encomienda';
-      if (typeFilter === 'mandado') return !!o.isFavor && (o.favorType === 'mandado' || o.favorType === 'compra');
-      if (typeFilter === 'comercio') return !o.isTrip && !o.isFavor;
-      return true;
-    });
-  }
-
-  if (dateStartVal) {
-    const parts = dateStartVal.split('-');
-    const startMs = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 0, 0, 0, 0).getTime();
-    filtered = filtered.filter(o => {
-      const orderMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
-      return orderMs >= startMs;
-    });
-  }
-
-  if (dateEndVal) {
-    const parts = dateEndVal.split('-');
-    const endMs = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999).getTime();
-    filtered = filtered.filter(o => {
-      const orderMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
-      return orderMs <= endMs;
-    });
-  }
 
   if (filtered.length === 0) {
     container.innerHTML = `
@@ -569,14 +860,19 @@ function renderOrdersList() {
     const driverPhoto = driverProfile?.photo || null;
     const driverDlId = o.driverDlId || driverProfile?.displayId || '---';
 
-    // Calculate service-specific parameters
     let serviceLabel = 'Comercio';
-    let serviceColor = '#D946EF'; // Magenta
+    let serviceColor = '#D946EF';
     let serviceIconHtml = icon('store', 20);
 
-    if (o.isTrip) {
+    const isWhatsApp = o.source === 'whatsapp_bot';
+    if (isWhatsApp) {
+      serviceLabel = 'MANDADO (WHATSAPP)';
+      serviceColor = '#25D366';
+      const waLogoUrl = 'https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg';
+      serviceIconHtml = `<img src="${waLogoUrl}" style="width:24px; height:24px; object-fit:contain;" alt="WhatsApp" />`;
+    } else if (o.isTrip) {
       serviceLabel = 'Go Viaje';
-      serviceColor = '#3B82F6'; // Blue
+      serviceColor = '#3B82F6';
       if (o.driverId && driverPhoto) {
         serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
       } else {
@@ -585,7 +881,7 @@ function renderOrdersList() {
     } else if (o.isFavor) {
       if (o.favorType === 'gocash') {
         serviceLabel = 'Go Cash';
-        serviceColor = '#6366F1'; // Indigo
+        serviceColor = '#6366F1';
         if (o.driverId && driverPhoto) {
           serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
         } else {
@@ -593,7 +889,7 @@ function renderOrdersList() {
         }
       } else if (o.favorType === 'encomienda' || o.favorType === 'mandado') {
         serviceLabel = 'Encomienda';
-        serviceColor = '#10B981'; // Green
+        serviceColor = '#10B981';
         if (o.driverId && driverPhoto) {
           serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
         } else {
@@ -601,15 +897,15 @@ function renderOrdersList() {
         }
       } else if (o.favorType === 'pagodeservicios') {
         serviceLabel = 'Pago de Servicios';
-        serviceColor = '#F59E0B'; // Gold
+        serviceColor = '#F59E0B';
         if (o.driverId && driverPhoto) {
           serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
         } else {
           serviceIconHtml = icon('bank', 20);
         }
-      } else { // compra / mandado
+      } else {
         serviceLabel = 'Mandado';
-        serviceColor = '#E11D48'; // Red
+        serviceColor = '#E11D48';
         if (o.driverId && driverPhoto) {
           serviceIconHtml = `<img src="${driverPhoto}" style="width:100%; height:100%; border-radius:12px; object-fit:cover;" referrerpolicy="no-referrer" />`;
         } else {
@@ -617,10 +913,8 @@ function renderOrdersList() {
         }
       }
     } else {
-      // Regular commerce order
       serviceLabel = o.comercioName || 'Comercio';
-      serviceColor = '#D946EF'; // Magenta
-      
+      serviceColor = '#D946EF';
       const logoUrl = getState().comerciosData?.[o.comercioId] || commerceLogoCache[o.comercioId];
       if (!logoUrl && o.comercioId) {
         if (commerceLogoCache[o.comercioId] === undefined) {
@@ -636,7 +930,9 @@ function renderOrdersList() {
     }
 
     let serviceHeaderText = 'COMERCIO';
-    if (o.isTrip) {
+    if (isWhatsApp) {
+      serviceHeaderText = 'WHATSAPP';
+    } else if (o.isTrip) {
       serviceHeaderText = 'GO VIAJE';
     } else if (o.isFavor) {
       if (o.favorType === 'gocash') {
@@ -650,29 +946,13 @@ function renderOrdersList() {
       }
     }
 
-    let animationClass = '';
-    if (newOrderAlerts[o.id]) {
-      const elapsed = Date.now() - newOrderAlerts[o.id];
-      if (elapsed < 5000) {
-        animationClass = ' vibrate-new-order';
-        // Automatically schedule a re-render after it stops vibrating
-        setTimeout(() => {
-          if (newOrderAlerts[o.id]) {
-            delete newOrderAlerts[o.id];
-            renderOrdersList();
-          }
-        }, 5100 - elapsed);
-      } else {
-        delete newOrderAlerts[o.id];
-      }
-    }
+    const displayOrderNum = o.orderNumber ? `#${o.orderNumber}` : (o.orderId ? `#${o.orderId}` : (o.displayId ? `#${o.displayId}` : '#---'));
 
     return `
-      <div class="order-card-v4${animationClass}" onclick="window.showOrderDetail('${o.id}')" style="--st-color:${config.color}; --st-bg:${config.bg}; --srv-color:${serviceColor}; padding-top: 0px;">
-        <!-- Header -->
+      <div class="order-card-v4" onclick="window.showOrderDetail('${o.id}')" style="--st-color:${config.color}; --st-bg:${config.bg}; --srv-color:${serviceColor}; padding-top: 0px;">
         <div style="background:var(--srv-color); color:white; padding:10px 20px; margin:0 -20px 16px -20px; border-radius:23px 23px 0 0; font-weight:900; font-size:12px; font-family:var(--font-display); text-transform:uppercase; letter-spacing:0.06em; display:flex; justify-content:space-between; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,0.04);">
           <span>${serviceHeaderText}</span>
-          <span style="opacity:0.9;">#${o.orderId || '---'}</span>
+          <span>${displayOrderNum}</span>
         </div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -693,7 +973,6 @@ function renderOrdersList() {
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px; width:100%; padding-top:14px; border-top:1px solid var(--color-border-light);">
-          <!-- Repartidor / Estado Asignación -->
           ${o.driverId ? `
             <div style="display:flex; align-items:center; gap:8px;">
               ${driverPhoto ? `
@@ -706,21 +985,22 @@ function renderOrdersList() {
           ` : (o.status === 'ready' || o.status === 'confirmed' || o.status === 'preparing' || o.status === 'pending') ? `
             <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:6px 10px; border-radius:10px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); font-size:11.5px; font-weight:800; color:#d97706;">
               <span>
-                ${o.queueTargetDriverName ? `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong>` : (
-                  (o.status === 'confirmed' || o.status === 'preparing') ? `🍳 En preparación` : (
-                    o.status === 'pending' ? `⏳ Esperando confirmación` : `🔍 Buscando repartidor en tiempo real...`
-                  )
-                )}
+                ${(() => {
+                  if (o.queueTargetDriverName) {
+                    const nowMs = Date.now() + (getState().serverTimeOffset || 0);
+                    const offeredAtMs = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : nowMs;
+                    const elapsedSec = Math.floor((nowMs - offeredAtMs) / 1000);
+                    const remainingSec = Math.max(0, 30 - elapsedSec);
+                    return `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong> <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 6px; border-radius:6px; font-weight:900; margin-left:4px;">${remainingSec}s</span>`;
+                  }
+                  if (o.status === 'confirmed' || o.status === 'preparing') return `🍳 En preparación`;
+                  if (o.status === 'pending') return `⏳ Esperando confirmación`;
+                  return `🔍 Buscando repartidor en tiempo real...`;
+                })()}
               </span>
-              ${o.queueOfferedAt ? `
-                <span class="admin-queue-timer" data-expiry="${(o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 60000}" style="font-size:11px; background:rgba(245,158,11,0.2); padding:2px 6px; border-radius:6px; font-weight:900;">
-                  ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 60000 - (Date.now() + (getState().serverTimeOffset || 0))) / 1000))}s
-                </span>
-              ` : ''}
             </div>
           ` : ''}
 
-          <!-- Cliente -->
           <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
             <div style="display:flex; align-items:center; gap:8px;">
               ${clientPhoto ? `
@@ -734,37 +1014,6 @@ function renderOrdersList() {
               ${o.paymentMethod === 'mercadopago' ? 'Transferencia' : 'Efectivo'}
             </div>
           </div>
-          <!-- Cancellation reason banner -->
-          ${(o.status === 'cancelled' || o.status?.includes('cancel')) ? (() => {
-            const cancelledByMap = {
-              'client':   { label: 'Cancelado por el Cliente',     icon: '👤', color: '#EF4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
-              'comercio': { label: 'Cancelado por el Comercio',    icon: '🏪', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)' },
-              'admin':    { label: 'Cancelado por Admin',          icon: '🛡️', color: '#8b5cf6', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.2)' },
-              'system':   { label: 'Cancelado automáticamente',   icon: '🤖', color: '#64748b', bg: 'rgba(100,116,139,0.08)', border: 'rgba(100,116,139,0.2)' },
-            };
-            const actor = cancelledByMap[o.cancelledBy] || { label: o.cancelledBy ? `Por: ${o.cancelledBy}` : 'Motivo desconocido', icon: '❌', color: '#EF4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' };
-            let cancelTimeStr = '';
-            if (o.cancelledAt) {
-              try {
-                const d = o.cancelledAt.toDate ? o.cancelledAt.toDate() : new Date(o.cancelledAt);
-                cancelTimeStr = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-              } catch(e) {}
-            }
-            return `
-              <div style="display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:10px; background:${actor.bg}; border:1px solid ${actor.border}; font-size:11.5px; font-weight:800; color:${actor.color}; width:100%;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span>${actor.icon}</span>
-                  <span>${actor.label}</span>
-                  ${cancelTimeStr ? `<span style="margin-left:auto; font-size:10.5px; opacity:0.7; font-weight:700;">${cancelTimeStr}</span>` : ''}
-                </div>
-                ${o.cancelReason ? `
-                  <div style="font-size:11px; font-weight:600; color:var(--color-text-secondary); opacity:0.9; margin-left:22px; font-style:italic;">
-                    "${o.cancelReason}"
-                  </div>
-                ` : ''}
-              </div>
-            `;
-          })() : ''}
         </div>
       </div>
     `;
@@ -776,28 +1025,21 @@ function renderOrdersList() {
     </div>
   `;
 
-  // Live Timer Interval for Admin Queue Timers
-  if (window._adminTimerInterval) clearInterval(window._adminTimerInterval);
-  window._adminTimerInterval = setInterval(() => {
-    const timerEls = container.querySelectorAll('.admin-queue-timer');
-    if (!timerEls.length) return;
-    const now = Date.now() + (getState().serverTimeOffset || 0);
-    timerEls.forEach(el => {
-      const expiry = parseInt(el.dataset.expiry);
-      const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
-      el.textContent = `${remaining}s`;
-      if (remaining <= 0 && el.dataset.rotated !== 'true') {
-        el.dataset.rotated = 'true';
-        const card = el.closest('.order-card-v4');
-        const orderId = card?.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
-        if (orderId) {
-          import('../delivery-panel.js').then(m => m.updateDispatchQueue(orderId)).catch(e => console.warn('Admin rotation call error:', e));
-        }
-      }
-    });
-  }, 1000);
+  if (!window.adminOfferTimerInterval) {
+    window.adminOfferTimerInterval = setInterval(() => {
+      const timers = document.querySelectorAll('.admin-offer-timer');
+      if (!timers.length) return;
+      const now = Date.now() + (getState().serverTimeOffset || 0);
+      timers.forEach(t => {
+        const offeredAt = parseInt(t.dataset.offeredAt, 10);
+        if (!offeredAt) return;
+        const elapsedSec = Math.floor((now - offeredAt) / 1000);
+        const remainingSec = Math.max(0, 30 - elapsedSec);
+        t.textContent = `${remainingSec}s`;
+      });
+    }, 1000);
+  }
 
-  // Setup infinite scroll IntersectionObserver
   if (infiniteObserver) {
     infiniteObserver.disconnect();
     infiniteObserver = null;
@@ -1080,7 +1322,13 @@ window.showOrderDetail = async (idOrObject) => {
            <div style="min-width:0; flex:1;">
              <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Repartidor</div>
              <div style="font-weight:900; font-size:15px; color:var(--color-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-               ${o.driverName || (o.queueTargetDriverName ? `⏳ Ofrecido: ${o.queueTargetDriverName}` : 'Sin asignar')}
+                ${o.driverName || (o.queueTargetDriverName ? (() => {
+                  const nowMs = Date.now() + (getState().serverTimeOffset || 0);
+                  const offeredAtMs = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : nowMs;
+                  const elapsedSec = Math.floor((nowMs - offeredAtMs) / 1000);
+                  const remainingSec = Math.max(0, 30 - elapsedSec);
+                  return `⏳ Ofrecido: ${o.queueTargetDriverName} <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 6px; border-radius:6px; font-weight:900; margin-left:4px;">${remainingSec}s</span>`;
+                })() : 'Sin asignar')}
              </div>
              <div id="audit-driver-goid" style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">ID: ${o.driverDlId || (o.driverId ? 'Cargando...' : '---')}</div>
            </div>
@@ -1217,11 +1465,12 @@ window.showOrderDetail = async (idOrObject) => {
           });
 
           try {
-            // Fetch all delivery drivers
-            const driversSnap = await getDocs(query(collection(db, 'users')));
+            // Fetch delivery drivers directly with query filter
+            const { where } = await import('firebase/firestore');
+            const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery')));
             const drivers = driversSnap.docs
               .map(d => ({ uid: d.id, ...d.data() }))
-              .filter(u => (u.isDelivery === true || u.role === 'delivery' || u.role === 'chofer' || u.role === 'driver') && u.isOnline === true);
+              .filter(u => u.isOnline === true);
 
             modalContent.innerHTML = `
               <div style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.4;">
@@ -1589,6 +1838,12 @@ window.showOrderDetail = async (idOrObject) => {
 
   detailHtml.querySelectorAll('.btn-chat-audit').forEach(btn => {
     btn.onclick = async () => {
+      if (o.source === 'whatsapp_bot' && o.userPhone) {
+        const cleanPhone = o.userPhone.replace(/\D/g, '');
+        const fullPhone = cleanPhone.startsWith('54') ? cleanPhone : `54${cleanPhone}`;
+        window.open(`https://wa.me/${fullPhone}`, '_blank');
+        return;
+      }
       const { openChat } = await import('../../components/chat.js');
       openChat({
         orderId: o.id,

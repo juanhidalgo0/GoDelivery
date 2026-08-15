@@ -12,6 +12,7 @@ import { showDeliveryMapModal } from './delivery-map-modal.js';
 let availableUnsub = null;
 let activeUnsub = null;
 let lastKnownConfirmedIds = new Set();
+let isDeliveryMutedGlobally = false;
 let currentAvailableOrders = [];
 let currentActiveOrder = null;
 

@@ -4,6 +4,15 @@ import { AudioManager } from './utils/audio-manager.js';
 
 const listeners = new Map();
 
+const safeJsonParse = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+};
+
 const state = {
   user: null,       // Firebase user + Firestore profile
   cart: [],         // { product, comercioId, comercioName, qty, options }
@@ -12,7 +21,7 @@ const state = {
   deliveryAddress: localStorage.getItem('gd-address') || null,
   houseNumber: localStorage.getItem('gd-house-number') || '',
   addressNotes: localStorage.getItem('gd-address-notes') || '',
-  deliveryCoords: JSON.parse(localStorage.getItem('gd-coords') || 'null'),
+  deliveryCoords: safeJsonParse('gd-coords', null),
   deliveryCost: 0,  // Legacy global delivery cost
   deliveryBasePrice: 1500,
   deliveryPricePerKm: 300,
@@ -28,9 +37,9 @@ const state = {
   isRaining: false,
   rainMode: 'auto',
   weatherData: { isRaining: false },
-  dynamicDeliveryFees: JSON.parse(localStorage.getItem('gd-cached-fees') || '{}'),
-  dynamicDistances: JSON.parse(localStorage.getItem('gd-cached-distances') || '{}'),
-  savedAddresses: JSON.parse(localStorage.getItem('gd-saved-addresses') || '[]'),
+  dynamicDeliveryFees: safeJsonParse('gd-cached-fees', {}),
+  dynamicDistances: safeJsonParse('gd-cached-distances', {}),
+  savedAddresses: safeJsonParse('gd-saved-addresses', []),
 
   canonAmount: 2000,
   bankAlias: 'godelivery.oficial',

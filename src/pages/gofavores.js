@@ -1100,7 +1100,7 @@ async function verifyDriversAndConfirm(confirmOptions) {
           <select id="v5-create-assign-driver-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-bg-card); color:var(--color-text-primary); font-size:13.5px; font-weight:600; outline:none; border:1.5px solid var(--color-border-light);">
             <option value="rotation">🔄 Rotación General (Envío a todos)</option>
             ${drivers.map(d => `
-              <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || '---'})</option>
+              <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || d.customId || d.userId || d.driverId || d.uid.slice(0,6)})</option>
             `).join('')}
           </select>
         </div>

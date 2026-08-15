@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, getDocs, where, Timestamp } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../../components/modal.js';
@@ -12,6 +12,9 @@ let currentSettlements = [];
 let currentUsers = [];
 let currentProofs = [];
 let goMarketCatalogProducts = [];
+// Track last loaded month to avoid re-fetching same data
+let _lastLoadedMonth = null;
+let _dataLoading = false;
 
 let activeTab = 'balance'; // 'balance', 'expenses', 'gomarket'
 let selectedCategoryFilter = 'all';
@@ -211,6 +214,9 @@ export function renderAdminExpenses(container) {
       }
     }
     updateDashboardView();
+    // Invalidate cache so new period data is fetched
+    _lastLoadedMonth = null;
+    fetchFilteredData();
   };
 
   btnAll.onclick = () => setFilterState(true);
@@ -239,51 +245,120 @@ export function renderAdminExpenses(container) {
 }
 
 function listenToData() {
+  // company_expenses: small collection, keep real-time listener (few docs)
   const qExp = query(collection(db, 'company_expenses'), orderBy('date', 'desc'));
   expensesUnsub = onSnapshot(qExp, (snap) => {
     currentExpenses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     updateDashboardView();
   });
 
-  onSnapshot(collection(db, 'orders'), (snap) => {
-    currentOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    updateDashboardView();
-  });
+  // Load all other large collections on-demand with date filters
+  fetchFilteredData();
+}
 
-  onSnapshot(collection(db, 'delivery_transactions'), (snap) => {
-    currentTransactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    updateDashboardView();
-  });
+// Build Timestamp range for the current selectedMonthFilter
+function _getDateRange() {
+  if (selectedMonthFilter === 'all') {
+    // Limit to last 6 months to avoid reading thousands of old records
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    sixMonthsAgo.setDate(1);
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+    return { start: Timestamp.fromDate(sixMonthsAgo), end: null };
+  }
+  const [y, m] = selectedMonthFilter.split('-').map(Number);
+  const start = new Date(y, m - 1, 1, 0, 0, 0);
+  const end = new Date(y, m, 1, 0, 0, 0); // first day of next month
+  return { start: Timestamp.fromDate(start), end: Timestamp.fromDate(end) };
+}
 
-  onSnapshot(collection(db, 'settlements'), (snap) => {
-    currentSettlements = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    updateDashboardView();
-  });
+async function fetchFilteredData() {
+  if (_dataLoading) return;
+  const cacheKey = selectedMonthFilter;
+  if (cacheKey === _lastLoadedMonth) return; // already loaded this month
+  _dataLoading = true;
 
-  onSnapshot(collection(db, 'users'), (snap) => {
-    currentUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    updateDashboardView();
-  });
+  try {
+    const { start, end } = _getDateRange();
 
-  onSnapshot(collection(db, 'delivery_settlement_proofs'), (snap) => {
-    currentProofs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    updateDashboardView();
-  });
+    // Build orders query filtered by date
+    let ordersQ;
+    if (end) {
+      ordersQ = query(collection(db, 'orders'),
+        where('createdAt', '>=', start),
+        where('createdAt', '<', end));
+    } else {
+      ordersQ = query(collection(db, 'orders'), where('createdAt', '>=', start));
+    }
 
-  (async () => {
-    try {
-      const comSnap = await getDocs(collection(db, 'comercios'));
-      const goMarketDoc = comSnap.docs.find(d => {
-        const name = (d.data().name || '').toLowerCase();
-        return name.includes('go!') && name.includes('market') || name.includes('gomarket');
-      });
-      if (goMarketDoc) {
-        const pSnap = await getDocs(collection(db, 'comercios', goMarketDoc.id, 'products'));
-        goMarketCatalogProducts = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        updateDashboardView();
-      }
-    } catch (e) {}
-  })();
+    // Build settlements query filtered by date
+    let settlementsQ;
+    if (end) {
+      settlementsQ = query(collection(db, 'settlements'),
+        where('createdAt', '>=', start),
+        where('createdAt', '<', end));
+    } else {
+      settlementsQ = query(collection(db, 'settlements'), where('createdAt', '>=', start));
+    }
+
+    // Build transactions query filtered by date
+    let transQ;
+    if (end) {
+      transQ = query(collection(db, 'delivery_transactions'),
+        where('createdAt', '>=', start),
+        where('createdAt', '<', end));
+    } else {
+      transQ = query(collection(db, 'delivery_transactions'), where('createdAt', '>=', start));
+    }
+
+    // Proofs query filtered by date
+    let proofsQ;
+    if (end) {
+      proofsQ = query(collection(db, 'delivery_settlement_proofs'),
+        where('createdAt', '>=', start),
+        where('createdAt', '<', end));
+    } else {
+      proofsQ = query(collection(db, 'delivery_settlement_proofs'), where('createdAt', '>=', start));
+    }
+
+    // Fetch all in parallel — single batch of reads
+    const [ordersSnap, transSnap, settSnap, usersSnap, proofsSnap] = await Promise.all([
+      getDocs(ordersQ),
+      getDocs(transQ),
+      getDocs(settlementsQ),
+      getDocs(query(collection(db, 'users'), where('role', 'in', ['delivery', 'admin', 'comercio']))),
+      getDocs(proofsQ),
+    ]);
+
+    currentOrders       = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    currentTransactions = transSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    currentSettlements  = settSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    currentUsers        = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    currentProofs       = proofsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    _lastLoadedMonth = cacheKey;
+    updateDashboardView();
+
+    // GoMarket catalog (fetch once, cache across calls)
+    if (goMarketCatalogProducts.length === 0) {
+      try {
+        const comSnap = await getDocs(collection(db, 'comercios'));
+        const goMarketDoc = comSnap.docs.find(d => {
+          const name = (d.data().name || '').toLowerCase();
+          return (name.includes('go!') && name.includes('market')) || name.includes('gomarket');
+        });
+        if (goMarketDoc) {
+          const pSnap = await getDocs(collection(db, 'comercios', goMarketDoc.id, 'products'));
+          goMarketCatalogProducts = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          updateDashboardView();
+        }
+      } catch (e) {}
+    }
+  } catch (e) {
+    console.error('fetchFilteredData error:', e);
+  } finally {
+    _dataLoading = false;
+  }
 }
 
 function formatPrice(val) {

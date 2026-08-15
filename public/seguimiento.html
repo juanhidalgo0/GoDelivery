@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Seguimiento de Pedido — GoDelivery</title>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --color-primary: #e11d48;
+      --color-primary-dark: #be123c;
+      --color-surface: #ffffff;
+      --color-bg: #f8fafc;
+      --color-text: #0f172a;
+      --color-text-secondary: #475569;
+      --color-text-tertiary: #94a3b8;
+      --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html {
+      height: 100dvh;
+      width: 100dvw;
+      overflow: hidden;
+      font-family: var(--font-family);
+      background: #f1f5f9;
+      color: var(--color-text);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .tracking-viewport {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #live-tracking-map {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background: #e2e8f0;
+    }
+
+    /* Top Floating Nav Header */
+    .top-floating-header {
+      position: absolute;
+      top: calc(12px + env(safe-area-inset-top, 0px));
+      left: 14px;
+      right: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    .header-pill-left {
+      pointer-events: auto;
+      background: white;
+      padding: 6px 16px 6px 12px;
+      border-radius: 100px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+    .brand-logo-circle {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: black;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 11px;
+      letter-spacing: -0.5px;
+    }
+    .header-title-text {
+      font-size: 14px;
+      font-weight: 900;
+      color: #0f172a;
+      letter-spacing: -0.3px;
+    }
+
+    .header-eta-pill {
+      pointer-events: auto;
+      background: white;
+      padding: 8px 14px;
+      border-radius: 100px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 850;
+      color: #e11d48;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+    /* Recenter Map Floating Button */
+    .recenter-btn-floating {
+      position: absolute;
+      top: calc(72px + env(safe-area-inset-top, 0px));
+      right: 16px;
+      z-index: 100;
+      width: 48px;
+      height: 48px;
+      background: white;
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.14);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      transition: transform 0.2s ease;
+    }
+    .recenter-btn-floating:active { transform: scale(0.92); }
+
+    /* Bottom Info Card */
+    .bottom-info-card {
+      position: absolute;
+      bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+      left: 14px;
+      right: 14px;
+      background: white;
+      border-radius: 28px;
+      padding: 20px;
+      z-index: 100;
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.16);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+      animation: slideUpCard 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes slideUpCard { from { transform: translateY(110%); } to { transform: translateY(0); } }
+
+    /* Status Banner Box */
+    .status-banner-box {
+      background: #fff5f7;
+      border: 1px solid #ffe4e6;
+      border-radius: 20px;
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .status-banner-icon {
+      font-size: 34px;
+      flex-shrink: 0;
+      animation: floatIcon 2s ease-in-out infinite;
+    }
+    @keyframes floatIcon { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    .status-banner-title {
+      font-size: 15.5px;
+      font-weight: 900;
+      color: #e11d48;
+      margin-bottom: 3px;
+    }
+    .status-banner-sub {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #475569;
+      line-height: 1.35;
+    }
+
+    /* Stepper Timeline */
+    .stepper-timeline {
+      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 12px 0 4px 0;
+    }
+    .stepper-base-line {
+      position: absolute;
+      top: 24px;
+      left: 8%;
+      right: 8%;
+      height: 3px;
+      background: #e2e8f0;
+      z-index: 1;
+      border-radius: 2px;
+    }
+    .stepper-active-line {
+      position: absolute;
+      top: 24px;
+      left: 8%;
+      height: 3px;
+      background: #e11d48;
+      z-index: 2;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .step-item {
+      position: relative;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+    .step-icon-circle {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #f1f5f9;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      border: 2px solid white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      transition: all 0.3s ease;
+    }
+    .step-item.active .step-icon-circle {
+      background: #e11d48;
+      color: white;
+      transform: scale(1.15);
+      box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.2);
+    }
+    .step-item.completed .step-icon-circle {
+      background: #10b981;
+      color: white;
+    }
+    .step-text-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-align: center;
+    }
+    .step-item.active .step-text-label { color: #e11d48; font-weight: 850; }
+    .step-item.completed .step-text-label { color: #0f172a; }
+
+    /* Alias Driver Box */
+    .driver-alias-row {
+      background: #f8fafc;
+      border-radius: 16px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid #f1f5f9;
+    }
+    .driver-alias-title {
+      font-size: 10px;
+      font-weight: 900;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .driver-alias-name {
+      font-size: 14.5px;
+      font-weight: 900;
+      color: #0f172a;
+    }
+    .btn-copy-alias {
+      background: #f1f5f9;
+      color: #334155;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .btn-copy-alias:active { background: #e2e8f0; }
+
+    /* Bottom Action Row */
+    .bottom-action-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 4px;
+    }
+    .total-price-label {
+      font-size: 11px;
+      font-weight: 900;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .total-price-value {
+      font-size: 22px;
+      font-weight: 900;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .info-circle-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #e11d48;
+      color: white;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .btn-view-details {
+      background: #e11d48;
+      color: white;
+      border: none;
+      padding: 14px 24px;
+      border-radius: 100px;
+      font-size: 13.5px;
+      font-weight: 900;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(225, 29, 72, 0.3);
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+    .btn-view-details:active { transform: scale(0.95); background: #be123c; }
+
+    /* Modal Details Window */
+    .details-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .details-modal-overlay.active { display: flex; }
+    .details-modal-card {
+      background: white;
+      width: 100%;
+      max-width: 500px;
+      border-radius: 28px 28px 0 0;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-height: 85vh;
+      overflow-y: auto;
+      animation: slideUpModal 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes slideUpModal { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .modal-close-btn {
+      align-self: flex-end;
+      background: #f1f5f9;
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-weight: 900;
+      font-size: 16px;
+      cursor: pointer;
+      color: #64748b;
+    }
+
+    /* Radar animation for live bike marker */
+    .sonar-pulse-ring-1 {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(225, 29, 72, 0.15);
+      border: 1px solid rgba(225, 29, 72, 0.3);
+      border-radius: 50%;
+      animation: radar-ripple 2s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
+    }
+    .sonar-pulse-ring-2 {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(225, 29, 72, 0.08);
+      border: 1px solid rgba(225, 29, 72, 0.2);
+      border-radius: 50%;
+      animation: radar-ripple 2s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
+      animation-delay: 0.5s;
+    }
+    @keyframes radar-ripple {
+      0% { transform: scale(0.5); opacity: 0.95; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="tracking-viewport">
+    <!-- Google Maps Element -->
+    <div id="live-tracking-map"></div>
+
+    <!-- Top Floating Header Pill -->
+    <div class="top-floating-header">
+      <div class="header-pill-left">
+        <div class="brand-logo-circle">GO!</div>
+        <div id="header-service-title" class="header-title-text">GO! FAVOR</div>
+      </div>
+
+      <div class="header-eta-pill">
+        <span>🕒</span>
+        <span id="header-eta-time">1-3 min</span>
+      </div>
+    </div>
+
+    <!-- Floating Recenter Button -->
+    <button id="btn-recenter-map" class="recenter-btn-floating" title="Centrar mapa">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+      </svg>
+    </button>
+
+    <!-- Bottom Info Card -->
+    <div class="bottom-info-card">
+      <!-- Status Banner -->
+      <div class="status-banner-box">
+        <div id="status-banner-icon" class="status-banner-icon">⏳</div>
+        <div>
+          <div id="status-banner-title" class="status-banner-title">Buscando Repartidor</div>
+          <div id="status-banner-sub" class="status-banner-sub">Estamos buscando al repartidor más cercano para tu entrega.</div>
+        </div>
+      </div>
+
+      <!-- Stepper Timeline -->
+      <div class="stepper-timeline">
+        <div class="stepper-base-line"></div>
+        <div id="stepper-active-line" class="stepper-active-line" style="width: 0%;"></div>
+
+        <div id="step-1" class="step-item active">
+          <div class="step-icon-circle">⏳</div>
+          <div class="step-text-label">Pendiente</div>
+        </div>
+        <div id="step-2" class="step-item">
+          <div class="step-icon-circle">✓</div>
+          <div class="step-text-label">Aprobado</div>
+        </div>
+        <div id="step-3" class="step-item">
+          <div class="step-icon-circle">🍳</div>
+          <div class="step-text-label">Preparando</div>
+        </div>
+        <div id="step-4" class="step-item">
+          <div class="step-icon-circle">🛍️</div>
+          <div class="step-text-label">Listo</div>
+        </div>
+        <div id="step-5" class="step-item">
+          <div class="step-icon-circle">🛵</div>
+          <div class="step-text-label">En camino</div>
+        </div>
+      </div>
+
+      <!-- Driver Alias Row -->
+      <div class="driver-alias-row">
+        <div>
+          <div class="driver-alias-title">ALIAS DEL REPARTIDOR</div>
+          <div id="driver-alias-name" class="driver-alias-name">Cadete por asignar</div>
+        </div>
+        <button id="btn-copy-alias" class="btn-copy-alias">Copiar</button>
+      </div>
+
+      <!-- Bottom Total and Details Button Row -->
+      <div class="bottom-action-row">
+        <div>
+          <div class="total-price-label">TOTAL:</div>
+          <div id="total-price-value" class="total-price-value">
+            $0 <span class="info-circle-icon">i</span>
+          </div>
+        </div>
+
+        <button id="btn-open-details" class="btn-view-details">VER DETALLES</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Details Modal Overlay -->
+  <div id="details-modal-overlay" class="details-modal-overlay">
+    <div class="details-modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="font-size:18px; font-weight:900; color:#0f172a;">Detalles del Mandado</h3>
+        <button id="btn-close-modal" class="modal-close-btn">✕</button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:12px; font-size:13px; color:#475569; background:#f8fafc; padding:16px; border-radius:18px; border:1px solid #f1f5f9;">
+        <div><strong>📝 Detalle:</strong> <span id="modal-order-details">Cargando...</span></div>
+        <div><strong>📍 Retiro:</strong> <span id="modal-pickup-address">Local comercial</span></div>
+        <div><strong>📍 Entrega:</strong> <span id="modal-delivery-address">Cargando...</span></div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #e2e8f0; padding-top:14px; font-size:16px; font-weight:900; color:#0f172a;">
+        <span>Costo de envío / Mandado:</span>
+        <span id="modal-total-price">$0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Maps JS API with correct key -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places"></script>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+    import { getFirestore, doc, onSnapshot, collection, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",
+      authDomain: "godelivery-magdalena.firebaseapp.com",
+      projectId: "godelivery-magdalena",
+      storageBucket: "godelivery-magdalena.firebasestorage.app",
+      messagingSenderId: "848164656125",
+      appId: "1:848164656125:web:eef2314205f5d8f887ff94"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderId = urlParams.get('id') || window.location.hash.replace('#', '').replace('/seguimiento/wa/', '');
+
+    // Element references
+    const statusBannerIcon = document.getElementById('status-banner-icon');
+    const statusBannerTitle = document.getElementById('status-banner-title');
+    const statusBannerSub = document.getElementById('status-banner-sub');
+    const stepperActiveLine = document.getElementById('stepper-active-line');
+    const driverAliasName = document.getElementById('driver-alias-name');
+    const totalPriceValue = document.getElementById('total-price-value');
+    const btnCopyAlias = document.getElementById('btn-copy-alias');
+
+    const modalOverlay = document.getElementById('details-modal-overlay');
+    const btnOpenDetails = document.getElementById('btn-open-details');
+    const btnCloseModal = document.getElementById('btn-close-modal');
+    const modalOrderDetails = document.getElementById('modal-order-details');
+    const modalPickupAddress = document.getElementById('modal-pickup-address');
+    const modalDeliveryAddress = document.getElementById('modal-delivery-address');
+    const modalTotalPrice = document.getElementById('modal-total-price');
+
+    const steps = [
+      document.getElementById('step-1'),
+      document.getElementById('step-2'),
+      document.getElementById('step-3'),
+      document.getElementById('step-4'),
+      document.getElementById('step-5')
+    ];
+
+    // Google Maps Initialization
+    const mapContainer = document.getElementById('live-tracking-map');
+    const magdalenaCenter = { lat: -35.0812, lng: -57.5129 };
+
+    const liveMap = new google.maps.Map(mapContainer, {
+      center: magdalenaCenter,
+      zoom: 15,
+      disableDefaultUI: true,
+      zoomControl: false,
+      styles: [
+        { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
+        { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] }
+      ]
+    });
+
+    let riderMarker = null;
+    let homeMarker = null;
+    let currentRiderPos = null;
+    let isFirstFit = true;
+    let driverUnsub = null;
+
+    function updateTimeline(stepIdx) {
+      const widths = ['0%', '25%', '50%', '75%', '100%'];
+      stepperActiveLine.style.width = widths[stepIdx] || '0%';
+
+      steps.forEach((st, idx) => {
+        if (!st) return;
+        st.classList.remove('active', 'completed');
+        if (idx < stepIdx) st.classList.add('completed');
+        else if (idx === stepIdx) st.classList.add('active');
+      });
+    }
+
+    function createOrUpdateHomeMarker(pos) {
+      if (!google.maps.Marker) return;
+      if (!homeMarker) {
+        const svgHome = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg width="42" height="42" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="21" cy="21" r="19" fill="black" stroke="white" stroke-width="3"/>
+            <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="20">🏠</text>
+          </svg>
+        `);
+        homeMarker = new google.maps.Marker({
+          position: pos,
+          map: liveMap,
+          icon: {
+            url: svgHome,
+            scaledSize: new google.maps.Size(42, 42),
+            anchor: new google.maps.Point(21, 21)
+          },
+          zIndex: 10
+        });
+      } else {
+        homeMarker.setPosition(pos);
+      }
+    }
+
+    function animateMarkerPosition(marker, newPos) {
+      const startPos = marker.getPosition();
+      if (!startPos) {
+        marker.setPosition(newPos);
+        return;
+      }
+      const startLat = startPos.lat();
+      const startLng = startPos.lng();
+      const endLat = newPos.lat;
+      const endLng = newPos.lng;
+      
+      if (Math.abs(startLat - endLat) < 0.000001 && Math.abs(startLng - endLng) < 0.000001) return;
+
+      const startTime = performance.now();
+      const duration = 1200;
+
+      function step(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const currentLat = startLat + (endLat - startLat) * progress;
+        const currentLng = startLng + (endLng - startLng) * progress;
+        marker.setPosition({ lat: currentLat, lng: currentLng });
+
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        }
+      }
+      requestAnimationFrame(step);
+    }
+
+    function createOrUpdateRiderMarker(riderPos) {
+      if (!google.maps.Marker) return;
+
+      if (!riderMarker) {
+        riderMarker = new google.maps.Marker({
+          position: riderPos,
+          map: liveMap,
+          icon: {
+            url: '/go-delivery-moto.png?v=2',
+            scaledSize: new google.maps.Size(46, 46),
+            anchor: new google.maps.Point(23, 23)
+          },
+          zIndex: 20
+        });
+      } else {
+        animateMarkerPosition(riderMarker, riderPos);
+      }
+    }
+
+    function processOrderData(data) {
+      const totalFormatted = '$' + (data.total || 0).toLocaleString('es-AR');
+      totalPriceValue.innerHTML = `${totalFormatted} <span class="info-circle-icon">i</span>`;
+      modalTotalPrice.textContent = totalFormatted;
+
+      modalOrderDetails.textContent = data.details || 'Sin detalles especificados';
+      
+      let pickup = data.pickupAddress || '';
+      if (!pickup || pickup.includes('A definir por el cliente en chat') || pickup.toLowerCase().includes('papa')) {
+        const details = data.details || '';
+        const PRODUCT_WORDS = new Set([
+          'papa', 'papas', 'pan', 'coca', 'huevo', 'huevos', 'carne', 'birra', 'birras', 'cerveza', 'cervezas',
+          'agua', 'pure', 'tomate', 'queso', 'empanada', 'empanadas', 'pizza', 'pizzas', 'helado', 'churrasco',
+          'milanesa', 'milanesas', 'hamburguesa', 'facturas', 'kilo', 'kg', 'g', 'gr', 'litro', 'litros', 'lts',
+          'unidades', 'dos', 'tres', 'cuatro', 'paquete', 'caja', 'miguens', 'ituzaingo', 'san martin', 'lavalle',
+          'avenida', 'calle', 'numero'
+        ]);
+        const matches = [...details.matchAll(/\b(?:de|del|en)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]{2,25})/gi)];
+        if (matches && matches.length > 0) {
+          const extracted = matches
+            .map(m => m[1].trim())
+            .filter(s => {
+              const lower = s.toLowerCase();
+              return s.length >= 2 && !PRODUCT_WORDS.has(lower) && isNaN(lower);
+            });
+          if (extracted.length > 0) {
+            pickup = extracted.map(c => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()).join(', ');
+          }
+        }
+      }
+      modalPickupAddress.textContent = pickup || 'Paulos';
+      modalDeliveryAddress.textContent = data.deliveryAddress || 'Domicilio de entrega';
+
+      if (data.deliveryCoords && data.deliveryCoords.lat && data.deliveryCoords.lng) {
+        createOrUpdateHomeMarker({ lat: Number(data.deliveryCoords.lat), lng: Number(data.deliveryCoords.lng) });
+      }
+
+      if (data.driverName) {
+        driverAliasName.textContent = data.driverName + '.go';
+      } else {
+        driverAliasName.textContent = 'Cadete por asignar';
+      }
+
+      const status = data.status;
+      if (status === 'completed' || status === 'entregado') {
+        statusBannerIcon.textContent = '✅';
+        statusBannerTitle.textContent = '¡Pedido Entregado!';
+        statusBannerSub.textContent = 'Esperamos que disfrutes tu mandado. ¡Muchas gracias por elegirnos!';
+        updateTimeline(4);
+      } else if (status === 'at_door') {
+        statusBannerIcon.textContent = '🔔';
+        statusBannerTitle.textContent = '¡Repartidor en la Puerta!';
+        statusBannerSub.textContent = `${data.driverName || 'Tu cadete'} ya llegó a tu domicilio.`;
+        updateTimeline(4);
+      } else if (status === 'delivering' || status === 'accepted' || data.driverId) {
+        statusBannerIcon.textContent = '🛵';
+        statusBannerTitle.textContent = 'Repartidor en Camino';
+        statusBannerSub.textContent = `${data.driverName || 'El cadete'} aceptó tu pedido y va en camino.`;
+        updateTimeline(4);
+      } else if (status === 'preparing' || status === 'preparando') {
+        statusBannerIcon.textContent = '🍳';
+        statusBannerTitle.textContent = 'En Preparación';
+        statusBannerSub.textContent = 'Tu pedido está siendo preparado para ser despachado.';
+        updateTimeline(2);
+      } else {
+        statusBannerIcon.textContent = '⏳';
+        statusBannerTitle.textContent = 'Buscando Repartidor';
+        statusBannerSub.textContent = 'Estamos buscando al repartidor más cercano para tu entrega.';
+        updateTimeline(0);
+      }
+
+      if (data.driverLocation && data.driverLocation.lat && data.driverLocation.lng) {
+        const riderPos = { lat: Number(data.driverLocation.lat), lng: Number(data.driverLocation.lng) };
+        currentRiderPos = riderPos;
+        createOrUpdateRiderMarker(riderPos);
+
+        if (isFirstFit) {
+          liveMap.setCenter(riderPos);
+          liveMap.setZoom(16);
+          isFirstFit = false;
+        }
+      }
+
+      // If order has driverId, listen directly to user document to track GPS movement
+      if (data.driverId && !driverUnsub) {
+        driverUnsub = onSnapshot(doc(db, 'users', data.driverId), (userSnap) => {
+          if (userSnap.exists()) {
+            const uData = userSnap.data();
+            const loc = uData.location || uData.lastLocation;
+            if (loc && loc.lat && loc.lng) {
+              const riderPos = { lat: Number(loc.lat), lng: Number(loc.lng) };
+              currentRiderPos = riderPos;
+              createOrUpdateRiderMarker(riderPos);
+            }
+          }
+        });
+      }
+    }
+
+    async function initTracking() {
+      if (!orderId) return;
+
+      // 1. Try document by direct ID
+      onSnapshot(doc(db, 'orders', orderId), (snap) => {
+        if (snap.exists()) {
+          processOrderData(snap.data());
+        } else {
+          // 2. Try query by orderNumber
+          const num = Number(orderId);
+          if (!isNaN(num)) {
+            const q = query(collection(db, 'orders'), where('orderNumber', '==', num));
+            onSnapshot(q, (qSnap) => {
+              if (!qSnap.empty) {
+                processOrderData(qSnap.docs[0].data());
+              }
+            });
+          }
+        }
+      });
+    }
+
+    initTracking();
+
+    document.getElementById('btn-recenter-map').addEventListener('click', () => {
+      if (currentRiderPos) {
+        liveMap.panTo(currentRiderPos);
+        liveMap.setZoom(16);
+      } else {
+        liveMap.panTo(magdalenaCenter);
+        liveMap.setZoom(15);
+      }
+    });
+
+    btnCopyAlias.addEventListener('click', () => {
+      const alias = driverAliasName.textContent;
+      navigator.clipboard.writeText(alias).then(() => {
+        btnCopyAlias.textContent = '¡Copiado!';
+        setTimeout(() => btnCopyAlias.textContent = 'Copiar', 2000);
+      });
+    });
+
+    btnOpenDetails.addEventListener('click', () => modalOverlay.classList.add('active'));
+    btnCloseModal.addEventListener('click', () => modalOverlay.classList.remove('active'));
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) modalOverlay.classList.remove('active');
+    });
+  </script>
+</body>
+</html>

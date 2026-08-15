@@ -255,11 +255,10 @@ export async function renderAdminUsers() {
       console.error('Error fetching comercios:', comErr);
     }
 
-    // Set up real-time listener for users
-    // Use getDocs for users — avoids costly real-time listener on entire collection
-    // Users don't change frequently enough to need real-time in the admin panel
-    usersUnsubscribe = onSnapshot(query(collection(db, 'users'), where('role', 'in', ['delivery', 'admin', 'customer', 'comercio'])), async (snap) => {
-      users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    // Fetch all users to display exact total, Android and iOS counts in header
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
 
       const totalBadge = document.getElementById('users-total-badge');
       if (totalBadge) {
@@ -267,12 +266,15 @@ export async function renderAdminUsers() {
         totalBadge.style.display = 'inline-block';
       }
 
-      const androidCount = users.filter(u => u.deviceOS === 'android').length;
-      const iosCount = users.filter(u => u.deviceOS === 'ios').length;
+      const androidCount = users.filter(u => (u.deviceOS || '').toLowerCase() === 'android').length;
+      const iosCount = users.filter(u => (u.deviceOS || '').toLowerCase() === 'ios').length;
       const subtitle = document.getElementById('users-subtitle');
       if (subtitle) {
         subtitle.textContent = `Panel administrativo • ${androidCount} Android • ${iosCount} iOS`;
       }
+    } catch (usersErr) {
+      console.error('Error fetching users:', usersErr);
+    }
 
       // Fetch delivery_transactions to compute liquidations per driver
       try {
@@ -320,7 +322,6 @@ export async function renderAdminUsers() {
 
       // Re-trigger rendering
       updateList();
-    });
 
   } catch (e) { 
     console.error(e); 
@@ -775,9 +776,15 @@ function renderUsersList(users, search, currentUser, canChangeRoles, filter = 'a
       const bStats = calculateStats(b);
       
       if (sortVal === 'newest') {
-        const aTime = a.createdAt ? (a.createdAt.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt).getTime()) : 0;
-        const bTime = b.createdAt ? (b.createdAt.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt).getTime()) : 0;
-        return bTime - aTime;
+        const getTs = (u) => {
+          const dt = u.createdAt || u.created_at || u.registeredAt || u.joinedAt || u.lastLoginAt || u.lastActiveAt;
+          if (!dt) return 0;
+          if (typeof dt.toMillis === 'function') return dt.toMillis();
+          if (dt.seconds !== undefined) return dt.seconds * 1000;
+          const d = new Date(dt);
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+        return getTs(b) - getTs(a);
       }
       if (sortVal === 'rating-desc') {
         if (aStats.count === 0 && bStats.count === 0) return 0;

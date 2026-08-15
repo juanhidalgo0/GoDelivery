@@ -68,10 +68,17 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-// Modern Firestore initialization with Persistent Local Cache
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache()
-});
+// Modern Firestore initialization with Persistent Local Cache (with iOS WKWebView fallback)
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache()
+  });
+} catch (err) {
+  console.warn('[Firebase] persistentLocalCache error, falling back to standard Firestore:', err);
+  dbInstance = initializeFirestore(app, {});
+}
+export const db = dbInstance;
 
 // Clear IndexedDB offline cache if flagged by hard reset
 if (localStorage.getItem('gd_clear_persistence') === 'true') {

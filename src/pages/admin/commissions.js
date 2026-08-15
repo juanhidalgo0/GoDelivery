@@ -99,10 +99,14 @@ let groupedDrivers = {};
 async function loadAndGroupOrders() {
   const container = document.getElementById('comercios-list-container');
   try {
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    const { Timestamp } = await import('firebase/firestore');
+
     const [comerciosSnap, ordersSnap, usersSnap] = await Promise.all([
       getDocs(collection(db, 'comercios')),
-      getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'))),
-      getDocs(collection(db, 'users'))
+      getDocs(query(collection(db, 'orders'), where('createdAt', '>=', Timestamp.fromDate(sixtyDaysAgo)), orderBy('createdAt', 'desc'))),
+      getDocs(query(collection(db, 'users'), where('role', 'in', ['delivery', 'admin'])))
     ]);
 
     groupedComercios = {};

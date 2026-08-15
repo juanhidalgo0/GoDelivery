@@ -130,12 +130,18 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   let orderUnsub = () => {};
   let chatDocUnsub = () => {};
   let otherUserUnsub = () => {};
+  const emojiCategories = {
+    'Caritas': ['😊','😂','🤣','😍','😒','😭','😘','🥰','😎','🤩','🤔','🤨','🙄','😏','😴','🤤','😋','😛','😜','🤪','😇','🥳','🥺','😱','😨','😰','😥','😓','😩','😫','😤','😡','😠','🤬','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🤡','🥳','🤫','🤭','🧐','🤓','😈','👿','👹','👺','💀','👻','👽','🤖','💩','😺','😸','😹','😻','😼','😽','🙀','😿','😾'],
+    'Gesto': ['👋','🤚','🖐️','✋','🖖','👌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦵','🦿','🦶','👣','👂','🦻','👃','🧠','🦷','🦴','👀','👁️','👅','👄','💋'],
+    'Entrega': ['🛵','🚚','🚛','🚲','🏎️','🏍️','📍','🏁','⛽','🚦','🚧','🗺️','📦','🎁','🏠','🏢','🏦','🏪','🛒','👜','🛍️','💰','💵','💳','🧾','⏰','⏳','⏱️','🔋','📶','📱','📞','💬'],
+    'Comida': ['🍕','🍔','🍟','🌭','🥪','🌮','🌯','🍳','🥘','🍲','🥣','🥗','🍿','🍱','🍙','🍚','🍛','🍜','🍝','🍠','🍢','🍣','🍤','🍥','🥮','🍡','🥟','🥠','🍦','🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍫','🍬','🍭','🍮','🍼','🥛','☕','🍵','🥤','🍶','🍺','🍻','🍷','🍸','🍹','🥃','🧉','🥂']
+  };
 
   // Build chat UI shell INSTANTLY
   const chatContainer = document.createElement('div');
   chatContainer.className = 'chat-container';
   chatContainer.innerHTML = `
-    <div class="chat-header-bar" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; border-radius: 0; padding: 14px 16px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.15);">
+    <div class="chat-header-bar" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; border-radius: 0; padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.15); box-sizing: border-box;">
       <button class="chat-back-btn" id="chat-back-${chatId}" style="background: none; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; margin-right: 2px; transition: transform 0.2s;" onmousedown="this.style.transform='scale(0.85)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.85)'" ontouchend="this.style.transform='scale(1)'">
         ${icon('chevronLeft', 24)}
       </button>
@@ -156,10 +162,18 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     <div id="chat-typing-indicator-${chatId}" class="chat-typing-wrapper" style="display:none;"></div>
     <div id="chat-footer-area-${chatId}">
       <div id="emoji-picker-${chatId}" class="chat-emoji-picker-v2" style="display:none;">
+        <div class="emoji-picker-header">
+          ${Object.keys(emojiCategories).map(cat => `<button class="emoji-cat-btn" data-cat="${cat}">${cat}</button>`).join('')}
+        </div>
         <div class="emoji-scroll-area">
-          <div class="emoji-grid-v2">
-            <span>😊</span><span>😂</span><span>👍</span><span>❤️</span><span>🙌</span><span>🎉</span><span>🛵</span><span>📦</span><span>🔥</span><span>👏</span>
-          </div>
+          ${Object.entries(emojiCategories).map(([name, list]) => `
+            <div class="emoji-category-section" id="cat-${name}">
+              <div class="emoji-category-title">${name}</div>
+              <div class="emoji-grid-v2">
+                 ${list.map(e => `<span class="emoji-item-v2">${e}</span>`).join('')}
+              </div>
+            </div>
+          `).join('')}
         </div>
       </div>
       <div class="chat-input-bar" style="position:relative; width:100%; box-sizing:border-box;">
@@ -174,7 +188,7 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
             <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
             <span id="chat-audio-timer-${chatId}" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
           </div>
-          <div style="display:flex; align-items:center; gap:4px; position:absolute; right:125px; color: var(--color-text-primary); font-size: 13px; font-weight: 850; pointer-events:none; animation: slideHint 1.5s infinite; white-space:nowrap;">
+          <div id="chat-audio-slidehint-${chatId}" style="display:flex; align-items:center; gap:4px; position:absolute; right:125px; color: var(--color-text-primary); font-size: 13px; font-weight: 850; pointer-events:none; animation: slideHint 1.5s infinite; white-space:nowrap;">
             <span style="font-size:16px; margin-right:2px; font-weight:900;">‹</span> Desliza para cancelar
           </div>
         </div>
@@ -219,6 +233,9 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
     backBtn.onclick = () => closeModal();
   }
 
+  // Setup input listeners IMMEDIATELY (0ms) on DOM insertion so input doesn't wait for network
+  setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName);
+
   // Visual Viewport Adaptability for Keyboard (WhatsApp style)
   if (window.visualViewport) {
     viewportListener = () => {
@@ -242,8 +259,8 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
   const q = query(messagesRef, orderBy('timestamp', 'asc'));
   let isInitialLoad = true;
   unsub = onSnapshot(q, (snap) => {
-  registerUnsubscribe(unsub);
-  const messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    registerUnsubscribe(unsub);
+    const messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     // Play sound for incoming message
     if (!isInitialLoad && snap.docChanges().length > 0) {
@@ -393,68 +410,20 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
         }).catch(() => {});
       }
 
-      // Update UI with footer and status
+      // Update UI with footer and status ONLY if read-only (do not destroy active DOM input)
       const statusIndicator = document.getElementById(`chat-status-indicator-${chatId}`);
       if (statusIndicator && isReadOnly) {
         statusIndicator.innerHTML = `<div class="chat-status-badge">${icon('lock', 12)} ${isAudit ? 'Auditoría' : 'Finalizado'}</div>`;
       }
 
       const footerArea = document.getElementById(`chat-footer-area-${chatId}`);
-      if (footerArea) {
-        if (isReadOnly) {
-          footerArea.innerHTML = `
-            <div class="chat-closed-bar">
-              ${icon('lock', 16)}
-              <span>${isAudit ? 'Modo Auditoría (Solo Lectura)' : 'Este chat ha finalizado'}</span>
-            </div>
-          `;
-        } else {
-          const emojiCategories = {
-            'Caritas': ['😊','😂','🤣','😍','😒','😭','😘','🥰','😎','🤩','🤔','🤨','🙄','😏','😴','🤤','😋','😛','😜','🤪','😇','🥳','🥺','😱','😨','😰','😥','😓','😩','😫','😤','😡','😠','🤬','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🤡','🥳','🤫','🤭','🧐','🤓','😈','👿','👹','👺','💀','👻','👽','🤖','💩','😺','😸','😹','😻','😼','😽','🙀','😿','😾'],
-            'Gesto': ['👋','🤚','🖐️','✋','🖖','👌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦵','🦿','🦶','👣','👂','🦻','👃','🧠','🦷','🦴','👀','👁️','👅','👄','💋'],
-            'Entrega': ['🛵','🚚','🚛','🚲','🏎️','🏍️','📍','🏁','⛽','🚦','🚧','🗺️','📦','🎁','🏠','🏢','🏦','🏪','🛒','👜','🛍️','💰','💵','💳','🧾','⏰','⏳','⏱️','🔋','📶','📱','📞','💬'],
-            'Comida': ['🍕','🍔','🍟','🌭','🥪','🌮','🌯','🍳','🥘','🍲','🥣','🥗','🍿','🍱','🍘','🍙','🍚','🍛','🍜','🍝','🍠','🍢','🍣','🍤','🍥','🥮','🍡','🥟','🥠','🍦','🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍫','🍬','🍭','🍮','헨','🍼','🥛','☕','🍵','🥤','🍶','🍺','🍻','🍷','🍸','🍹','🥃','🧉','🥂']
-          };
-
-          footerArea.innerHTML = `
-            <div id="emoji-picker-${chatId}" class="chat-emoji-picker-v2" style="display:none;">
-              <div class="emoji-picker-header">
-                ${Object.keys(emojiCategories).map(cat => `<button class="emoji-cat-btn" data-cat="${cat}">${cat}</button>`).join('')}
-              </div>
-              <div class="emoji-scroll-area">
-                ${Object.entries(emojiCategories).map(([name, list]) => `
-                  <div class="emoji-category-section" id="cat-${name}">
-                    <div class="emoji-category-title">${name}</div>
-                    <div class="emoji-grid-v2">
-                       ${list.map(e => `<span class="emoji-item-v2">${e}</span>`).join('')}
-                    </div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-            <div class="chat-input-bar" style="position:relative; width:100%; box-sizing:border-box;">
-              <button class="chat-emoji-btn" id="emoji-btn-${chatId}">${icon('smile', 22)}</button>
-              <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen" style="color:var(--color-text-secondary);">${icon('camera', 22)}</button>
-              <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" />
-              <input type="file" id="chat-file-camera-${chatId}" style="display:none" accept="image/*" capture="environment" />
-              <input type="text" id="chat-input-${chatId}" class="chat-input" placeholder="Escribí un mensaje..." autocomplete="off" />
-              
-              <div id="chat-audio-indicator-${chatId}" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 16px; border-radius:18px; z-index:50; border:1.5px solid var(--color-border);">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <div class="recording-dot" style="width: 8px; height: 8px; background: #e11d48; border-radius: 50%; animation: pulse 1s infinite;"></div>
-                  <span id="chat-audio-timer-${chatId}" style="font-weight: 800; font-size: 14px; color:var(--color-text-primary); font-family:var(--font-display);">0:00</span>
-                </div>
-                <div id="chat-audio-slidehint-${chatId}" style="display:flex; align-items:center; gap:4px; position:absolute; right:125px; color: var(--color-text-primary); font-size: 13px; font-weight: 850; pointer-events:none; animation: slideHint 1.5s infinite; white-space:nowrap;">
-                  <span style="font-size:16px; margin-right:2px; font-weight:900;">‹</span> Desliza para cancelar
-                </div>
-              </div>
-
-              <button class="chat-mic-btn" id="chat-mic-${chatId}" title="Grabar audio" style="color:var(--color-primary); z-index:60; position:relative; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;">${icon('mic', 22)}</button>
-              <button class="chat-send-btn" id="chat-send-${chatId}" style="z-index:60; position:relative;">${icon('send', 20)}</button>
-            </div>
-          `;
-          setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName);
-        }
+      if (footerArea && isReadOnly) {
+        footerArea.innerHTML = `
+          <div class="chat-closed-bar">
+            ${icon('lock', 16)}
+            <span>${isAudit ? 'Modo Auditoría (Solo Lectura)' : 'Este chat ha finalizado'}</span>
+          </div>
+        `;
       }
 
       // 3. Listen for order status changes to auto-lock the chat
@@ -507,28 +476,54 @@ export async function openChat({ orderId, type, otherName, orderNum, senderDispl
 
 async function updateChatMetadata(chatRef, uid, lastMessageText) {
   try {
-    const chatSnap = await getDoc(chatRef);
-    if (!chatSnap.exists()) return;
-    const chatData = chatSnap.data();
-    const participants = chatData.participants || [];
+    let chatSnap = await getDoc(chatRef);
+    let chatData = chatSnap.exists() ? chatSnap.data() : {};
+    let participants = chatData.participants || [uid];
+
+    const chatId = chatRef.id;
+    const parts = chatId.split('_');
+    const orderId = chatData.orderId || parts[0];
+    const chatType = chatData.type || parts[1];
+
+    if (orderId && (!chatSnap.exists() || !chatData.participants || chatData.participants.length < 2)) {
+      try {
+        const orderSnap = await getDoc(doc(db, 'orders', orderId));
+        if (orderSnap.exists()) {
+          const oData = orderSnap.data();
+          const pSet = new Set([uid]);
+          if (oData.userId) pSet.add(oData.userId);
+          if (oData.driverId) pSet.add(oData.driverId);
+          if (oData.comercioId) pSet.add(oData.comercioId);
+          if (oData.comercioOwnerId) pSet.add(oData.comercioOwnerId);
+          participants = Array.from(pSet);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch order for chat metadata fallback:', err);
+      }
+    }
+
     const updates = {
+      orderId: orderId || '',
+      type: chatType || '',
+      participants: arrayUnion(...participants),
       lastMessage: lastMessageText,
       lastMessageAt: serverTimestamp(),
+      lastActivityAt: serverTimestamp(),
       [`unread.${uid}`]: 0
     };
+
     participants.forEach(pId => {
       if (pId !== uid) {
         updates[`unread.${pId}`] = increment(1);
       }
     });
-    await updateDoc(chatRef, updates);
+
+    await setDoc(chatRef, updates, { merge: true });
 
     // Push notification trigger to all other participants
-    const orderId = chatData.orderId;
-    const chatType = chatData.type;
     const { collection, addDoc } = await import('firebase/firestore');
     
-    let displayName = chatType === 'client-commerce' ? (uid === chatData.userId ? 'Cliente' : 'Comercio') : 'Mensaje';
+    let displayName = chatType === 'client-commerce' ? (uid === (chatData.userId || orderId) ? 'Cliente' : 'Comercio') : 'Mensaje';
     if (orderId) {
       const orderSnap = await getDoc(doc(db, 'orders', orderId));
       if (orderSnap.exists()) {
@@ -577,6 +572,8 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   const emojiPicker = document.getElementById(`emoji-picker-${chatId}`);
 
   if (!input || !sendBtn) return;
+  if (input.dataset.bound) return;
+  input.dataset.bound = 'true';
 
   // WhatsApp-Grade Audio Recording State Engine
   let mediaRecorder = null;
@@ -637,7 +634,25 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
         return;
       }
 
-      mediaRecorder = new MediaRecorder(stream);
+      let mimeType = 'audio/webm';
+      let fileExt = 'webm';
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+          fileExt = 'mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+          mimeType = 'audio/aac';
+          fileExt = 'm4a';
+        } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+          fileExt = 'webm';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+          fileExt = 'webm';
+        }
+      }
+
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       audioChunks = [];
 
       mediaRecorder.ondataavailable = ev => {
@@ -681,9 +696,10 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
           try {
              const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
              const storage = getStorage();
-             const fileName = `chats/${chatId}/audio_${Date.now()}.webm`;
+             const finalMime = mediaRecorder.mimeType || mimeType || 'audio/mp4';
+             const fileName = `chats/${chatId}/audio_${Date.now()}.${fileExt}`;
              const storageRef = ref(storage, fileName);
-             const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+             const audioBlob = new Blob(recordedChunks, { type: finalMime });
              
              await uploadBytes(storageRef, audioBlob);
              const downloadURL = await getDownloadURL(storageRef);
@@ -997,12 +1013,66 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     });
   });
 
-  const handleFileSelect = async (file) => {
-    if (!file) return;
+  const compressImage = async (file, maxDimension = 1280, quality = 0.8) => {
+    return new Promise((resolve) => {
+      if (!file || !file.type || !file.type.startsWith('image/')) {
+        resolve(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width <= maxDimension && height <= maxDimension) {
+            resolve(file);
+            return;
+          }
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                const compressed = new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve(compressed);
+              } else {
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileSelect = async (rawFile) => {
+    if (!rawFile) return;
     if (document.querySelector('.chat-closed-bar')) {
       import('./toast.js').then(m => m.showToast('El chat ha finalizado. No podés enviar mensajes.', 'warning'));
       return;
     }
+
+    const file = await compressImage(rawFile);
 
     const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
     const { storage } = await import('../firebase.js');

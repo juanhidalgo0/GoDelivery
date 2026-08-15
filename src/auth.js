@@ -484,8 +484,15 @@ export function initAuth(callback) {
           return;
         }
 
-        // Ensure user document exists in Firestore before starting the listener
-        await ensureUserDoc(user);
+        // Ensure user document exists in Firestore (non-blocking fallback for iOS)
+        try {
+          await Promise.race([
+            ensureUserDoc(user),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('ensureUserDoc timeout')), 1500))
+          ]);
+        } catch (eDocErr) {
+          console.warn('[Auth] ensureUserDoc timeout or non-fatal error:', eDocErr);
+        }
 
         const userRef = doc(db, 'users', user.uid);
         // Start real-time listener for user profile

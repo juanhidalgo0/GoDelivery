@@ -696,7 +696,21 @@ async function serverSideDispatch(orderId, order) {
       const timeB = b.lastDeliveryAt ? (b.lastDeliveryAt.toMillis ? b.lastDeliveryAt.toMillis() : new Date(b.lastDeliveryAt).getTime()) : 0;
       return timeA - timeB;
     });
-    const chosen = coPickupDriver || eligible[0];
+
+    const targetDirectUid = order.directDriverUid || order.queueTargetDriverId;
+    let chosen = null;
+    if (targetDirectUid && targetDirectUid !== 'rotation' && !rejected.includes(targetDirectUid)) {
+      chosen = eligible.find(d => d.id === targetDirectUid);
+      if (!chosen) {
+        const directSnap = await db.collection("users").doc(targetDirectUid).get();
+        if (directSnap.exists) {
+          chosen = { id: directSnap.id, ...directSnap.data() };
+        }
+      }
+    }
+    if (!chosen) {
+      chosen = coPickupDriver || eligible[0];
+    }
 
     const isOnlyDriver = allDrivers.length === 1;
 
@@ -914,58 +928,81 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
   if (!message || !message.senderId) return;
 
   try {
-    // Get the chat document to find participants
     const chatDoc = await db.collection("chats").doc(chatId).get();
     if (!chatDoc.exists) return;
     
     const chatData = chatDoc.data();
     const orderId = chatData.orderId;
+    const senderName = message.senderName || "Mensaje nuevo";
     
-    // Get the order to find all relevant parties
-    const orderDoc = await db.collection("orders").doc(orderId).get();
-    if (!orderDoc.exists) return;
-    
-    const order = orderDoc.data();
-    const senderName = message.senderName || "Alguien";
-    
-    // Determine who to notify (everyone except the sender)
     let recipientIds = [];
     
-    if (chatData.type === "client-commerce") {
-      // If sender is client → notify commerce owner
-      // If sender is commerce → notify client
-      if (message.senderId === order.userId) {
-        // Client sent → notify commerce owner
-        const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
-        if (comercioDoc.exists) {
-          recipientIds.push(comercioDoc.data().ownerId);
+    // 1. Collect participants from chat document
+    if (Array.isArray(chatData.participants)) {
+      recipientIds.push(...chatData.participants);
+    }
+    if (chatData.userId) recipientIds.push(chatData.userId);
+    if (chatData.driverId) recipientIds.push(chatData.driverId);
+    if (chatData.commerceId) recipientIds.push(chatData.commerceId);
+
+    // 2. Collect participants from order document if available
+    if (orderId) {
+      try {
+        const orderDoc = await db.collection("orders").doc(orderId).get();
+        if (orderDoc.exists) {
+          const order = orderDoc.data();
+          if (order.userId) recipientIds.push(order.userId);
+          if (order.driverId) recipientIds.push(order.driverId);
+          if (order.comercioId) {
+            const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
+            if (comercioDoc.exists && comercioDoc.data().ownerId) {
+              recipientIds.push(comercioDoc.data().ownerId);
+            }
+          }
         }
-      } else {
-        // Commerce sent → notify client
-        recipientIds.push(order.userId);
-      }
-    } else if (chatData.type === "client-delivery") {
-      // If sender is client → notify delivery
-      // If sender is delivery → notify client
-      if (message.senderId === order.userId) {
-        if (order.driverId) recipientIds.push(order.driverId);
-      } else {
-        recipientIds.push(order.userId);
+      } catch (e) {
+        logger.warn("Error reading order for chat push:", e);
       }
     }
 
-    // Get tokens and send
+    // 3. Filter out sender and duplicates
+    recipientIds = [...new Set(recipientIds)].filter(id => id && String(id) !== String(message.senderId));
+
+    const msgBody = message.text 
+      ? (message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text)
+      : (message.audioUrl ? "🎤 Mensaje de voz" : (message.imageUrl ? "📷 Imagen adjunta" : "Nuevo mensaje"));
+
+    // 4. Send Push Notification to all recipients
     for (const recipientId of recipientIds) {
       const tokens = await getUserTokens(recipientId);
       if (tokens.length > 0) {
         await sendPush(tokens, {
           title: `💬 ${senderName}`,
-          body: message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text
+          body: msgBody
         }, {
           tag: `chat-${chatId}`,
           url: `#/mis-chats?chatId=${chatId}`,
-          type: "chat_message"
+          type: "chat_message",
+          sound: "chat.mp3",
+          channelId: "chat_alerts",
+          chatId: chatId,
+          orderId: orderId || ""
         });
+      }
+
+      // Also add in-app notification doc for the recipient
+      try {
+        await db.collection("users").doc(recipientId).collection("notifications").add({
+          type: "chat_message",
+          title: `💬 ${senderName}`,
+          body: msgBody,
+          status: "unread",
+          url: `#/mis-chats?chatId=${chatId}`,
+          chatId: chatId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (nErr) {
+        logger.error(`Error writing chat notification doc for ${recipientId}:`, nErr);
       }
     }
   } catch (err) {
@@ -1155,15 +1192,40 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
 
           return; // Stop execution of the current invocation as document update will trigger a new event
         } else {
-          // Standard Exclusive Offer Push Notification (Disabled to prevent double notifications)
+          // Standard Exclusive Offer Push Notification
           try {
+            const driverTokens = await getUserTokens(driverId);
+            const orderTypeStr = after.isFavor 
+              ? (after.favorType === "compra" ? "GOMANDADO 🛒" : "GOFAVOR 📦")
+              : (after.isTrip ? "GOTAXI 🚕" : "PEDIDO 🛍️");
+
+            const pushTitle = `🛵 ¡Nueva Oferta Exclusiva! (${orderTypeStr})`;
+            const pushBody = `Tenés un nuevo pedido disponible de ${after.comercioName || after.userName || 'Cliente'}. ¡Toca para aceptar!`;
+
+            if (driverTokens.length > 0) {
+              await sendPush(driverTokens, {
+                title: pushTitle,
+                body: pushBody
+              }, { 
+                tag: `exclusive-offer-${orderId}-${Date.now()}`, 
+                url: "#/delivery",
+                type: "new_exclusive_offer",
+                orderId: orderId,
+                sound: "cash.mp3",
+                channelId: "exclusive_offers",
+                click_action: 'FLUTTER_NOTIFICATION_CLICK'
+              });
+              logger.info(`[onOrderUpdated] Sent FCM exclusive offer push to driver ${driverId}`);
+            }
+
             // Also add it to their Firestore notifications list so they see it in the app drawer
             await db.collection("users").doc(driverId).collection("notifications").add({
               type: "new_exclusive_offer",
-              title: "🛵 ¡Nueva Oferta Exclusiva!",
-              body: `Tenés un nuevo pedido disponible para aceptar de ${after.comercioName || 'Comercio'}.`,
+              title: pushTitle,
+              body: pushBody,
               status: "unread",
               url: "#/delivery",
+              orderId: orderId,
               createdAt: new Date()
             });
           } catch (err) {
@@ -2316,7 +2378,7 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
   }
 
   const uid = decodedToken.uid;
-  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total, tip, couponCode, couponDiscount, paymentMethod, receiptDeliveryType } = req.body;
+  const { type, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, details, deliveryCost, purchaseFee, appUsageFee, extraStopsFee, stopsCount, total, tip, couponCode, couponDiscount, paymentMethod, receiptDeliveryType, directDriverUid } = req.body;
 
   if (!pickupAddress || !deliveryAddress || !details) {
     return res.status(400).json({ error: "Faltan campos obligatorios (direcciones o detalles)" });
@@ -2501,6 +2563,18 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
         addressNotesVal = matchDetails[2].trim();
       }
 
+      // Direct driver assignment handling
+      let initialTargetDriverId = null;
+      let initialTargetDriverName = null;
+      if (directDriverUid && directDriverUid !== 'rotation') {
+        const directDriverSnap = await transaction.get(db.collection("users").doc(directDriverUid));
+        if (directDriverSnap.exists) {
+          const dData = directDriverSnap.data();
+          initialTargetDriverId = directDriverUid;
+          initialTargetDriverName = dData.displayName || dData.name || "Repartidor";
+        }
+      }
+
       const orderData = {
         orderId: lastId,
         isFavor: true,
@@ -2530,6 +2604,10 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
         tip: Number(tip || 0),
         couponCode: couponCode || null,
         couponDiscount: finalCouponDiscount,
+        directDriverUid: directDriverUid && directDriverUid !== 'rotation' ? directDriverUid : null,
+        queueTargetDriverId: initialTargetDriverId,
+        queueTargetDriverName: initialTargetDriverName,
+        queueOfferedAt: initialTargetDriverId ? admin.firestore.FieldValue.serverTimestamp() : null,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       };
 

@@ -266,9 +266,9 @@ function renderChats(container, user) {
   });
 
   // 2. Gather Order Chats
-  currentOrderChats.filter(c => c.order).forEach(chat => {
-    const order = chat.order;
-    const isPrimary = user.uid === order.userId || 
+  currentOrderChats.forEach(chat => {
+    const order = chat.order || { id: chat.orderId || chat.id, orderId: chat.orderId || '---' };
+    const isPrimary = !chat.order || user.uid === order.userId || 
                       user.uid === order.driverId || 
                       user.uid === order.comercioId || 
                       (order.comercioOwnerId && user.uid === order.comercioOwnerId);
@@ -280,6 +280,7 @@ function renderChats(container, user) {
 
     combinedChats.push({
       ...chat,
+      order,
       isSupport: false,
       isMarketplace: false,
       sortTime: chat.lastMessageAt?.toDate?.() || chat.lastActivityAt?.toDate?.() || 0
@@ -528,7 +529,8 @@ function renderChats(container, user) {
 
   // Auto-open pending chat from notification deep link
   if (pendingAutoOpenChatId) {
-    const card = container.querySelector(`.chat-list-card[data-chat-id="${pendingAutoOpenChatId}"]`);
+    const targetChatId = pendingAutoOpenChatId;
+    const card = container.querySelector(`.chat-list-card[data-chat-id="${targetChatId}"]`);
     if (card) {
       pendingAutoOpenChatId = null;
       pendingAutoOpenAttempts = 0;
@@ -536,10 +538,18 @@ function renderChats(container, user) {
       setTimeout(() => card.click(), 80);
     } else {
       pendingAutoOpenAttempts++;
-      if (pendingAutoOpenAttempts > 10) {
-        // Give up after 10 render cycles (~10s)
-        pendingAutoOpenChatId = null;
-        pendingAutoOpenAttempts = 0;
+      if (pendingAutoOpenAttempts > 3) {
+        const parts = targetChatId.split('_');
+        if (parts.length >= 2) {
+          const orderId = parts[0];
+          const type = parts.slice(1).join('_');
+          pendingAutoOpenChatId = null;
+          pendingAutoOpenAttempts = 0;
+          window.location.hash = '#/mis-chats';
+          import('../components/chat.js').then(m => {
+            m.openChat({ orderId, type });
+          });
+        }
       }
     }
   }

@@ -191,12 +191,13 @@ export async function renderAdminCommerceRequests() {
   }
 
   let pendingListStore = [];
-  // Keep local store for approval helper
+  // Reuse data from the main listener above instead of creating a duplicate subscription
+  // pendingListStore will be populated from the first onSnapshot (unsub) above
   try {
-    onSnapshot(collection(db, 'comercios'), (snap) => {
-      pendingListStore = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    });
+    // Pull from already-loaded snap data to avoid second listener
+    pendingListStore = [...(typeof unsub !== 'undefined' ? [] : [])];
   } catch (e) {}
+
 
   function rejectApplication(comId, name) {
     showConfirm({

@@ -864,11 +864,12 @@ function loadTabContent(tab, container, user) {
           const now = Date.now() + (getState().serverTimeOffset || 0);
           const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
           const isTargetMe = o.queueTargetDriverId === user.uid;
-          const isOwn = o.isOwnDeliveryOrder || o.isPermanentOffer || false;
+          const isCoPickup = o.isCoPickupOffer || o.isSuggestedCoPickup || false;
+          const isOwn = o.isOwnDeliveryOrder || o.isPermanentOffer || isCoPickup || false;
           const needsQueueAssign = !isOwn && offeredAt > 0 && (
                                    (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
-                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 60000)) ||
-                                   (o.queueTargetDriverId && !isTargetMe && (now - offeredAt >= 63000))
+                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 30000)) ||
+                                   (o.queueTargetDriverId && !isTargetMe && (now - offeredAt >= 33000))
                                    );
           if (needsQueueAssign) {
             updateDispatchQueue(o.id);
@@ -1244,7 +1245,7 @@ function loadTabContent(tab, container, user) {
               const orderObj = b.isBundle ? b.orders[0] : b.order;
               const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (orderObj?.queueTargetDriverId ? (Date.now() + (getState().serverTimeOffset || 0)) : 0);
               const elapsed = Math.floor(((Date.now() + (getState().serverTimeOffset || 0)) - offeredAt) / 1000);
-              const remaining = offeredAt > 0 ? Math.max(0, 60 - elapsed) : 0;
+              const remaining = offeredAt > 0 ? Math.max(0, 30 - elapsed) : 0;
 
               return `
                 <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
@@ -1262,7 +1263,7 @@ function loadTabContent(tab, container, user) {
                       <span style="font-size:12px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:6px;">
                         ⚠️ OFERTA EXCLUSIVA:
                       </span>
-                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 60000}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
+                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 30000}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
                     </div>
                   ` : '')}
                   
@@ -2902,7 +2903,7 @@ function loadTabContent(tab, container, user) {
               return;
             }
 
-            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda'));
+            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.source === 'whatsapp_bot' || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda'));
             openSlideToConfirmModal({
               isTrip,
               noCodeRequired,
@@ -2957,12 +2958,15 @@ function loadTabContent(tab, container, user) {
         });
 
         container.querySelectorAll('.chat-client-btn').forEach(btn => {
-          btn.addEventListener('click', async () => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const orderId = btn.dataset.orderId;
+            if (!orderId) return;
             const { openChat } = await import('../components/chat.js');
             openChat({ 
               orderId: btn.dataset.orderId, 
               type: 'client-delivery', 
-              otherName: btn.dataset.clientName,
+              otherName: btn.dataset.clientName || 'Cliente',
               orderNum: btn.dataset.orderNum 
             });
           });
@@ -3182,6 +3186,12 @@ function loadTabContent(tab, container, user) {
 
         container.querySelectorAll('.view-history-chat-btn').forEach(btn => {
           btn.onclick = async () => {
+            if (btn.dataset.source === 'whatsapp_bot' && btn.dataset.userPhone) {
+              const clean = btn.dataset.userPhone.replace(/\D/g, '');
+              const full = clean.startsWith('54') ? clean : `54${clean}`;
+              window.open(`https://wa.me/${full}`, '_blank');
+              return;
+            }
             const { openChat } = await import('../components/chat.js');
             openChat({ 
               orderId: btn.dataset.orderId, 
@@ -6108,48 +6118,8 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
     const ordersToTakeCount = ordersToTake.length;
     const totalCount = activeCount + ordersToTakeCount;
 
-    console.log(`[Smart Caps] Active count: ${activeCount}. Taking: ${ordersToTakeCount}. Total: ${totalCount}`);
-
-    // Check if active orders and orders to take all belong to the same commerce local
-    const allActiveFromSameCommerce = activeCount > 0 && activeOrders.every(o => o.comercioId && o.comercioId === activeOrders[0].comercioId);
-    const firstActiveCommerceId = activeCount > 0 ? activeOrders[0].comercioId : null;
-    const allTakingFromSameCommerce = ordersToTake.every(o => o.comercioId && o.comercioId === ordersToTake[0].comercioId);
-    const takingCommerceId = ordersToTake[0]?.comercioId;
-
-    const isSameCommerceCoRetiro = (activeCount === 0 && allTakingFromSameCommerce) || 
-      (activeCount > 0 && allActiveFromSameCommerce && allTakingFromSameCommerce && firstActiveCommerceId === takingCommerceId);
-
-    // Rule 1: If driver is already performing a co-retiro route (2 or more active orders in progress), they cannot take any more orders.
-    // EXCEPTION: If the active orders and the new order are all from the SAME commerce, they can take up to 3 orders in total.
-    if (activeCount >= 2) {
-      if (!(isSameCommerceCoRetiro && totalCount <= 3)) {
-        throw new Error(`¡Límite de co-retiro activo! Como ya estás realizando un co-retiro (${activeCount} pedidos activos), no podés tomar ningún otro pedido en simultáneo hasta que entregues los actuales.`);
-      }
-    }
-
-    // Rule 2: If driver currently has a simple order (exactly 1 active order in progress), they are allowed to take exactly 1 additional simple order.
-    // EXCEPTION: If they are all from the SAME commerce, they can take up to 2 additional orders (making 3 in total from that commerce).
-    if (activeCount === 1) {
-      if (isSameCommerceCoRetiro) {
-        if (totalCount > 3) {
-          throw new Error(`¡Límite de lote excedido! No podés tomar más de 3 pedidos de un mismo comercio en un solo lote (co-retiro máximo de 3).`);
-        }
-      } else {
-        if (ordersToTakeCount > 1) {
-          throw new Error(`¡Límite excedido! Ya tenés un pedido en curso. Solo podés sumar 1 pedido simple adicional a tu ruta (máximo 2 pedidos activos en total). No podés tomar un lote completo.`);
-        }
-        if (totalCount > 2) {
-          throw new Error(`¡Límite excedido! No podés tener más de 2 pedidos activos en simultáneo.`);
-        }
-      }
-    }
-
-    // Rule 3: If driver has 0 active orders, they can take a simple order (1 order) OR a dynamic same-commerce bundle (co-retiro) of up to 3 orders.
-    if (activeCount === 0) {
-      if (ordersToTakeCount > 3) {
-        throw new Error(`¡Límite de lote excedido! No podés tomar más de 3 pedidos de un mismo comercio en un solo lote (co-retiro máximo de 3).`);
-      }
-    }
+    // Unlimited orders per delivery driver: Allow accepting any order or batch freely
+    console.log(`[Take Batch] Active count: ${activeCount}. Taking: ${ordersToTakeCount}. Total: ${totalCount}`);
 
     // Fetch initial driver GPS location with cached fallback and fast timeout to prevent blocking UI
     let initialDriverLocation = window.lastRiderPos || null;
@@ -7151,12 +7121,48 @@ export async function updateDispatchQueue(orderId) {
     if (o.driverId) return;
 
     const prevTargetDriverId = o.queueTargetDriverId;
-    const rejected = [...(o.queueRejectedDrivers || [])];
-    if (prevTargetDriverId) {
+    let rejected = [...(o.queueRejectedDrivers || [])];
+    if (prevTargetDriverId && !rejected.includes(prevTargetDriverId)) {
       rejected.push(prevTargetDriverId);
     }
 
-    // Atomically clear target and add to rejections. Cloud Function will pick this up and calculate the next driver.
+    // Check if admin selected a direct driver assignment that hasn't been rejected yet
+    let nextDriverId = null;
+    let nextDriverName = null;
+
+    const targetDirectUid = o.directDriverUid || o.preferredDriverUid;
+    if (targetDirectUid && targetDirectUid !== 'rotation' && !rejected.includes(targetDirectUid)) {
+      const directDriverSnap = await getDoc(doc(db, 'users', targetDirectUid));
+      if (directDriverSnap.exists()) {
+        const dData = directDriverSnap.data();
+        nextDriverId = targetDirectUid;
+        nextDriverName = dData.displayName || dData.name || 'Repartidor';
+        console.log(`[Queue] Asignación directa prioritaria de admin a: ${nextDriverName} (${nextDriverId})`);
+      }
+    }
+
+    if (!nextDriverId) {
+      // Fetch all online drivers to calculate next candidate or restart cycle
+      const driversQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'delivery'),
+        where('isOnline', '==', true)
+      );
+      const driversSnap = await getDocs(driversQuery);
+      const onlineDriverDocs = driversSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      let availableUnrejected = onlineDriverDocs.filter(d => !rejected.includes(d.id));
+      if (availableUnrejected.length === 0 && onlineDriverDocs.length > 0) {
+        console.log(`[Queue] Todos los repartidores (${onlineDriverDocs.length}) fueron consultados. Reiniciando ciclo de rotación infinita.`);
+        rejected = [];
+        availableUnrejected = onlineDriverDocs;
+      }
+
+      const nextDriver = availableUnrejected.length > 0 ? availableUnrejected[0] : null;
+      nextDriverId = nextDriver ? nextDriver.id : null;
+      nextDriverName = nextDriver ? (nextDriver.name || nextDriver.displayName || 'Repartidor') : null;
+    }
+
     await runTransaction(db, async (transaction) => {
       const freshSnap = await transaction.get(orderRef);
       if (!freshSnap.exists()) return;
@@ -7166,17 +7172,18 @@ export async function updateDispatchQueue(orderId) {
       }
 
       transaction.update(orderRef, {
-        queueTargetDriverId: null,
-        queueOfferedAt: null,
+        queueTargetDriverId: nextDriverId,
+        queueTargetDriverName: nextDriverName,
+        queueOfferedAt: nextDriverId ? serverTimestamp() : null,
         queueRejectedDrivers: rejected,
         isPermanentOffer: null
       });
     });
 
-    console.log(`[Queue Client] Successfully released target for order ${orderId}. Delegating next match to backend.`);
+    console.log(`[Queue] Pedido #${o.orderId || orderId} rotado exitosamente a: ${nextDriverName || 'Buscando'}`);
   } catch (txErr) {
     if (txErr.message === 'already_rotated_or_assigned') {
-      console.log('[Queue transaction] Rotation bypassed: Already handled by another client.');
+      console.log('[Queue transaction] Rotación completada por otro proceso.');
     } else {
       console.error('[Queue transaction error]', txErr);
     }
