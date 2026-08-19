@@ -1,6 +1,6 @@
 // GoDelivery — Ads Management (Premium Admin Section)
 import { db } from '../../firebase.js';
-import { collection, getDocs, getDoc, doc, updateDoc, setDoc, addDoc, deleteDoc, Timestamp, query, where } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, updateDoc, setDoc, addDoc, deleteDoc, Timestamp, query, where, collectionGroup } from 'firebase/firestore';
 import { showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
@@ -31,6 +31,7 @@ export async function renderAdminAds() {
       <!-- Segment Tabs -->
       <div style="display:flex; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); padding:10px 16px; gap:10px; flex-shrink:0; z-index:10; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;">
         <button id="tab-shop-ads" class="ad-tab active" style="flex:0 0 auto; height:44px; border-radius:12px; border:none; background:transparent; font-weight:800; font-size:13px; color:var(--color-text-tertiary); padding:0 16px; cursor:pointer; transition:all 0.2s;">Destaques</button>
+        <button id="tab-only-in-app" class="ad-tab" style="flex:0 0 auto; height:44px; border-radius:12px; border:none; background:transparent; font-weight:800; font-size:13px; color:var(--color-text-tertiary); padding:0 16px; cursor:pointer; transition:all 0.2s;">📱 Solo en App</button>
         <button id="tab-custom-ads" class="ad-tab" style="flex:0 0 auto; height:44px; border-radius:12px; border:none; background:transparent; font-weight:800; font-size:13px; color:var(--color-text-tertiary); padding:0 16px; cursor:pointer; transition:all 0.2s;">Personalizados</button>
         <button id="tab-mandado-banners" class="ad-tab" style="flex:0 0 auto; height:44px; border-radius:12px; border:none; background:transparent; font-weight:800; font-size:13px; color:var(--color-text-tertiary); padding:0 16px; cursor:pointer; transition:all 0.2s;">Banners Mandados</button>
         <button id="tab-ad-requests" class="ad-tab" style="flex:0 0 auto; height:44px; border-radius:12px; border:none; background:transparent; font-weight:800; font-size:13px; color:var(--color-text-tertiary); padding:0 16px; cursor:pointer; transition:all 0.2s;">Solicitudes</button>
@@ -65,6 +66,7 @@ export async function renderAdminAds() {
   let currentTab = 'shop';
 
   const tabShop = document.getElementById('tab-shop-ads');
+  const tabOnlyInApp = document.getElementById('tab-only-in-app');
   const tabCustom = document.getElementById('tab-custom-ads');
   const tabMandadoBanners = document.getElementById('tab-mandado-banners');
   const tabAdRequests = document.getElementById('tab-ad-requests');
@@ -75,6 +77,7 @@ export async function renderAdminAds() {
   const switchTab = (tab) => {
     currentTab = tab;
     tabShop.classList.remove('active');
+    if (tabOnlyInApp) tabOnlyInApp.classList.remove('active');
     tabCustom.classList.remove('active');
     tabMandadoBanners.classList.remove('active');
     tabAdRequests.classList.remove('active');
@@ -84,6 +87,10 @@ export async function renderAdminAds() {
       tabShop.classList.add('active');
       actionBar.style.display = 'none';
       loadShopAds();
+    } else if (tab === 'onlyInApp') {
+      if (tabOnlyInApp) tabOnlyInApp.classList.add('active');
+      actionBar.style.display = 'none';
+      loadOnlyInAppProducts();
     } else if (tab === 'custom') {
       tabCustom.classList.add('active');
       actionBar.style.display = 'flex';
@@ -110,6 +117,7 @@ export async function renderAdminAds() {
   };
 
   tabShop.onclick = () => switchTab('shop');
+  if (tabOnlyInApp) tabOnlyInApp.onclick = () => switchTab('onlyInApp');
   tabCustom.onclick = () => switchTab('custom');
   tabMandadoBanners.onclick = () => switchTab('mandado');
   tabAdRequests.onclick = () => switchTab('requests');
@@ -269,9 +277,12 @@ function openAdEditor(ad) {
     </div>
   </div>
 
-  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box;">
-    <button id="save-ad-settings" style="width:100%; height:56px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.3);">
+  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box; display:flex; flex-direction:column; gap:10px;">
+    <button id="save-ad-settings" style="width:100%; height:52px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; box-shadow:0 8px 24px rgba(var(--color-primary-rgb),0.3);">
       Guardar Configuración
+    </button>
+    <button id="delete-shop-ad-btn" style="width:100%; height:46px; border-radius:14px; background:rgba(239,68,68,0.08); color:#ef4444; border:1px solid rgba(239,68,68,0.2); font-weight:800; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+      ${icon('trash', 16)} Desactivar y Quitar del Slider
     </button>
   </div>
   `;
@@ -355,6 +366,31 @@ function openAdEditor(ad) {
       saveBtn.innerText = 'Guardar Configuración';
     }
   };
+
+  const deleteShopAdBtn = modalContent.querySelector('#delete-shop-ad-btn');
+  if (deleteShopAdBtn) {
+    deleteShopAdBtn.onclick = () => {
+      showConfirm({
+        title: 'Desactivar Destaque',
+        message: `¿Estás seguro de quitar el destaque del comercio "${ad.name}" del slider principal?`,
+        confirmText: 'Sí, Desactivar',
+        confirmClass: 'btn-danger',
+        onConfirm: async () => {
+          try {
+            await updateDoc(doc(db, 'comercios', ad.id), {
+              promotion: { active: false, isPaid: false, isPriority: false, label: 'Anuncio' }
+            });
+            showToast('Destaque desactivado correctamente', 'success');
+            closeModal();
+            loadShopAds();
+          } catch (err) {
+            console.error('Error deactivating shop ad:', err);
+            showToast('Error al desactivar destaque', 'danger');
+          }
+        }
+      });
+    };
+  }
 }
 
 async function loadCustomAds() {
@@ -1365,8 +1401,11 @@ async function openTariffsConfigEditor() {
   let settings = {
     bannerBasePrice: 1000,
     premiumGlowPrice: 500,
-    sponsoredBasePrice: 1500
+    sponsoredBasePrice: 1500,
+    pushAdPrice: 3000,
+    featuredAdPrice: 5000
   };
+
   try {
     const snap = await getDoc(doc(db, 'settings', 'ads_pricing'));
     if (snap.exists()) settings = { ...settings, ...snap.data() };
@@ -1377,10 +1416,12 @@ async function openTariffsConfigEditor() {
   modalContent.innerHTML = `
     <div style="padding:20px; display:flex; flex-direction:column; gap:20px;">
       <div style="background:rgba(99,102,241,0.06); border:1.5px solid rgba(99,102,241,0.2); border-radius:16px; padding:14px; font-size:12px; color:var(--color-text-secondary); line-height:1.5;">
-        Estos valores se usan automáticamente en el cotizador que ven los comercios al solicitar publicidad.
+        Estos valores se usan automáticamente en las opciones de contratación de publicidad para comercios.
       </div>
       <div style="display:flex; flex-direction:column; gap:14px;">
         ${[
+          { key: 'pushAdPrice', label: 'Precio Notificación Push Anuncio (por envío)', icon: 'bell' },
+          { key: 'featuredAdPrice', label: 'Precio Destaque en Slider Home (por 7 días)', icon: 'sparkles' },
           { key: 'bannerBasePrice', label: 'Precio Banner Mandados (por día)', icon: 'image' },
           { key: 'premiumGlowPrice', label: 'Adicional Destacado Estético (por día)', icon: 'star' },
           { key: 'sponsoredBasePrice', label: 'Precio Comercio Patrocinado (por día)', icon: 'megaphone' }
@@ -1389,7 +1430,7 @@ async function openTariffsConfigEditor() {
             <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; display:flex; align-items:center; gap:6px;">${icon(field.icon, 14)} ${field.label}</label>
             <div style="position:relative; display:flex; align-items:center;">
               <span style="position:absolute; left:14px; font-weight:900; color:var(--color-text-tertiary); font-size:14px;">$</span>
-              <input type="number" id="tariff-${field.key}" value="${settings[field.key]}" style="width:100%; height:48px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 14px 0 28px; font-weight:900; font-size:16px; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" />
+              <input type="number" id="tariff-${field.key}" value="${settings[field.key] !== undefined ? settings[field.key] : ''}" style="width:100%; height:48px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 14px 0 28px; font-weight:900; font-size:16px; color:var(--color-text-primary); background:var(--color-surface); box-sizing:border-box;" />
             </div>
           </div>
         `).join('')}
@@ -1405,6 +1446,8 @@ async function openTariffsConfigEditor() {
     saveBtn.innerText = 'Guardando...';
     try {
       const newSettings = {
+        pushAdPrice: parseFloat(modalContent.querySelector('#tariff-pushAdPrice').value) || 0,
+        featuredAdPrice: parseFloat(modalContent.querySelector('#tariff-featuredAdPrice').value) || 0,
         bannerBasePrice: parseFloat(modalContent.querySelector('#tariff-bannerBasePrice').value) || 0,
         premiumGlowPrice: parseFloat(modalContent.querySelector('#tariff-premiumGlowPrice').value) || 0,
         sponsoredBasePrice: parseFloat(modalContent.querySelector('#tariff-sponsoredBasePrice').value) || 0,
@@ -1465,5 +1508,130 @@ async function loadSponsoredMerchants() {
   } catch (err) {
     console.error('Error loading sponsored merchants:', err);
     container.innerHTML = '<p style="color:#ef4444;text-align:center;padding:20px;">Error al cargar patrocinios.</p>';
+  }
+}
+
+// ─── GESTOR DE PRODUCTOS SOLO EN LA APP ───────────────────────────────────────
+async function loadOnlyInAppProducts() {
+  const container = document.getElementById('ads-list-container');
+  if (!container) return;
+  container.innerHTML = '<div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>';
+
+  try {
+    // 1. Fetch all comercios map for names
+    const comerciosSnap = await getDocs(collection(db, 'comercios'));
+    const comerciosMap = {};
+    comerciosSnap.docs.forEach(d => {
+      comerciosMap[d.id] = d.data().name || 'Comercio';
+    });
+
+    // 2. Fetch all products where onlyInApp == true across all stores
+    let onlyInAppProducts = [];
+    try {
+      const q = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
+      const snap = await getDocs(q);
+      onlyInAppProducts = snap.docs.map(docSnap => {
+        const data = docSnap.data();
+        const pathSegments = docSnap.ref.path.split('/');
+        const comercioId = pathSegments[1];
+        return {
+          id: docSnap.id,
+          comercioId,
+          comercioName: comerciosMap[comercioId] || 'Comercio',
+          ...data
+        };
+      });
+    } catch (err) {
+      console.warn('Fallback collectionGroup query failed, scanning comercios subcollections:', err);
+      for (const comDoc of comerciosSnap.docs) {
+        const pSnap = await getDocs(collection(db, 'comercios', comDoc.id, 'products'));
+        pSnap.docs.forEach(pd => {
+          const pData = pd.data();
+          if (pData.onlyInApp === true) {
+            onlyInAppProducts.push({
+              id: pd.id,
+              comercioId: comDoc.id,
+              comercioName: comDoc.data().name || 'Comercio',
+              ...pData
+            });
+          }
+        });
+      }
+    }
+
+    if (onlyInAppProducts.length === 0) {
+      container.innerHTML = `
+        <div style="text-align:center; padding:50px 20px; background:var(--color-surface); border-radius:24px; border:1.5px dashed var(--color-border);">
+          <div style="font-size:36px; margin-bottom:12px;">📱</div>
+          <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0 0 6px; color:var(--color-text-primary);">No hay productos "Solo en la App" activos</h3>
+          <p style="font-size:12px; color:var(--color-text-secondary); max-width:320px; margin:0 auto; line-height:1.4;">
+            Ningún comercio tiene productos marcados como exclusivos de la app en este momento.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="background:rgba(99,102,241,0.06); border:1.5px solid rgba(99,102,241,0.2); border-radius:16px; padding:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <div>
+            <h4 style="font-size:13px; font-weight:900; color:var(--color-text-primary); margin:0;">Productos Exclusivos "Solo en App"</h4>
+            <p style="font-size:11px; color:var(--color-text-secondary); margin:2px 0 0;">Controlá o quitá anuncios exclusivos de la app de cualquier comercio.</p>
+          </div>
+          <span style="font-size:13px; font-weight:950; color:var(--color-primary); background:rgba(99,102,241,0.12); padding:4px 12px; border-radius:20px;">${onlyInAppProducts.length} Activos</span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          ${onlyInAppProducts.map(prod => `
+            <div style="background:var(--color-surface); border-radius:20px; border:1.5px solid var(--color-border); padding:16px; display:flex; align-items:center; justify-content:space-between; gap:14px; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
+              <div style="display:flex; align-items:center; gap:14px; min-width:0; flex:1;">
+                <div style="width:54px; height:54px; border-radius:14px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); overflow:hidden; flex-shrink:0; display:flex; align-items:center; justify-content:center;">
+                  ${prod.image ? `<img src="${prod.image}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:20px;">📦</span>`}
+                </div>
+                <div style="min-width:0; flex:1;">
+                  <span style="font-size:10px; font-weight:800; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.04em;">${prod.comercioName}</span>
+                  <h4 style="font-family:var(--font-display); font-size:14px; font-weight:900; color:var(--color-text-primary); margin:2px 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${prod.name || 'Producto'}</h4>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:13px; font-weight:950; color:var(--color-text-primary);">${formatPrice(prod.price || 0)}</span>
+                    <span style="font-size:10px; font-weight:800; color:#8b5cf6; background:rgba(139,92,246,0.12); padding:2px 8px; border-radius:6px; text-transform:uppercase;">Solo en App</span>
+                  </div>
+                </div>
+              </div>
+              <button class="btn-disable-only-in-app" data-comercio-id="${prod.comercioId}" data-prod-id="${prod.id}" style="height:38px; padding:0 12px; border-radius:12px; border:none; background:rgba(239,68,68,0.1); color:#ef4444; font-weight:900; font-size:11.5px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; gap:4px; transition:all 0.2s;">
+                ${icon('close', 14)} Quitar de "Solo en App"
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    // Attach click listeners to disable button
+    container.querySelectorAll('.btn-disable-only-in-app').forEach(btn => {
+      btn.onclick = async () => {
+        const cId = btn.dataset.comercioId;
+        const pId = btn.dataset.prodId;
+        btn.disabled = true;
+        btn.innerText = 'Desactivando...';
+
+        try {
+          await updateDoc(doc(db, 'comercios', cId, 'products', pId), {
+            onlyInApp: false,
+            updatedAt: Timestamp.now()
+          });
+          showToast('Producto quitado de "Solo en la App"', 'success');
+          loadOnlyInAppProducts();
+        } catch (err) {
+          console.error('Error disabling onlyInApp:', err);
+          showToast('Error al desactivar la etiqueta', 'danger');
+          btn.disabled = false;
+          btn.innerHTML = `${icon('close', 14)} Quitar de "Solo en App"`;
+        }
+      };
+    });
+  } catch (err) {
+    console.error('Error loading onlyInApp products:', err);
+    container.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Error al cargar productos solo en la app.</p>';
   }
 }

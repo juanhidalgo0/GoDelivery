@@ -6,7 +6,7 @@ import { formatPrice, calculateScheduleSurcharge } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { icon } from '../utils/icons.js';
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
-import { isLoggedIn } from '../auth.js';
+import { isLoggedIn, isAdmin } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { getDistance, calculateDynamicFee } from '../utils/geo.js';
 
@@ -1029,8 +1029,8 @@ async function checkOnlineDrivers() {
     
     return snap.docs.some(d => {
       const data = d.data();
-      const role = data.role || '';
-      const isDel = data.isDelivery === true || data.isDelivery === 'true' || role === 'delivery' || role === 'driver' || role === 'repartidor' || role === 'chofer' || role === 'admin';
+      const role = (data.role || '').toLowerCase();
+      const isDel = data.isDelivery === true || data.isDelivery === 'true' || ['delivery', 'driver', 'repartidor', 'chofer'].includes(role);
       return isDel;
     });
   } catch (err) {
@@ -1041,9 +1041,8 @@ async function checkOnlineDrivers() {
 
 async function verifyDriversAndConfirm(confirmOptions) {
   const hasDelivery = await checkOnlineDrivers();
-  const isAdmin = getState().user?.isAdmin || getState().user?.role === 'admin';
 
-  if (!hasDelivery && !isAdmin) {
+  if (!hasDelivery) {
     const { showModal } = await import('../components/modal.js');
     const { close: closeAlert } = showModal({
       title: '',
@@ -1070,7 +1069,7 @@ async function verifyDriversAndConfirm(confirmOptions) {
     return;
   }
 
-  if (isAdmin) {
+  if (isAdmin()) {
     const { getDocs, collection, query } = await import('firebase/firestore');
     const { db } = await import('../firebase.js');
     const { showModal, closeModal } = await import('../components/modal.js');

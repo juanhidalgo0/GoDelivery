@@ -239,6 +239,25 @@ select {
   top: 0;
   z-index: var(--z-header);
   background-color: var(--color-surface);
+  will-change: opacity;
+}
+
+@media (max-width: 1023px) {
+  body:not(.header-hidden) #app-header {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 2000 !important;
+    background: var(--color-primary) !important;
+    border-bottom-left-radius: 28px !important;
+    border-bottom-right-radius: 28px !important;
+    box-shadow: 0 10px 30px rgba(var(--color-primary-rgb), 0.3) !important;
+    border: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
 }
 
 #app-content {

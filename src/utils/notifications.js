@@ -112,11 +112,12 @@ export async function initPushNotifications() {
           localStorage.removeItem('gd_fcm_error');
           // Forcing re-upload of admin/driver tokens on every boot/registration to repair missing profiles
           try {
+            const currentPlatform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'web';
             await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
               token: token.value,
               lastSession: serverTimestamp(),
               updatedAt: serverTimestamp(),
-              platform: 'android-native'
+              platform: `${currentPlatform}-native`
             }, { merge: true });
             
             // Mirror token to user doc root to ensure fallback paths can query it
@@ -174,7 +175,7 @@ export async function initPushNotifications() {
 
           if (actionId === 'ACCEPT_ORDER' && orderId) {
             console.log('[Push] User pressed ⚡ ACEPTAR PEDIDO on notification action button!');
-            window.location.hash = `#/delivery-panel?takeOrderId=${orderId}&autoTake=true`;
+            window.location.hash = `#/delivery?takeOrderId=${orderId}&autoTake=true`;
             setTimeout(() => {
               window.dispatchEvent(new HashChangeEvent('hashchange'));
             }, 150);

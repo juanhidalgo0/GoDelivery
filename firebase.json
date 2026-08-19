@@ -15,7 +15,31 @@
         "**/.*",
         "**/node_modules/**"
       ],
+      "redirects": [
+        {
+          "source": "/ios",
+          "destination": "https://apps.apple.com/app/go-delivery/id6790820954",
+          "type": 301
+        },
+        {
+          "source": "/android",
+          "destination": "https://play.google.com/store/apps/details?id=com.godelivery.magdalena",
+          "type": 301
+        }
+      ],
       "rewrites": [
+        {
+          "source": "/descargar",
+          "destination": "/descargar.html"
+        },
+        {
+          "source": "/app",
+          "destination": "/descargar.html"
+        },
+        {
+          "source": "/descargar.html",
+          "destination": "/descargar.html"
+        },
         {
           "source": "/seguimiento.html",
           "destination": "/seguimiento.html"
@@ -50,6 +74,10 @@
             {
               "key": "Cache-Control",
               "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
             }
           ]
         },

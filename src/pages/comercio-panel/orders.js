@@ -1823,7 +1823,7 @@ function updateAllUnreadBadges(orders) {
 }
 
 function getStatusLabel(status) {
-  const labels = { pending: 'Pendiente', confirmed: 'Preparando', ready: 'Listo', delivering: 'En camino', completed: 'Entregado', cancelled: 'Cancelado' };
+  const labels = { pending: 'Pendiente', confirmed: 'Preparando', ready: 'Listo', accepted: 'Aceptado por repartidor', delivering: 'En camino', completed: 'Entregado', cancelled: 'Cancelado' };
   return labels[status] || 'Pendiente';
 }
 

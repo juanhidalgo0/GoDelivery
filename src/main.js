@@ -46,6 +46,8 @@ async function init() {
     });
   } catch (e) {}
 
+  const isNativeApp = !!(window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web')));
+
   if (window.Capacitor) {
     document.body.classList.add('platform-capacitor');
     
@@ -88,6 +90,12 @@ async function init() {
           window.history.back();
         } else {
           App.exitApp();
+        }
+      });
+
+      App.addListener('appStateChange', (state) => {
+        if (state.isActive && typeof window.checkAppVersion === 'function') {
+          window.checkAppVersion();
         }
       });
     }).catch(err => console.warn('Failed to load Capacitor App plugin:', err));
@@ -139,37 +147,51 @@ async function init() {
       } catch (e) {
         console.warn('Update cleanup failed:', e);
       }
-      window.location.reload();
+      window.location.href = window.location.origin + window.location.pathname + '?v=' + Date.now() + (window.location.hash || '');
     }, 1200);
   }
 
-  const isNativeApp = !!(window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web')));
+  const BUNDLE_BUILD_VERSION = "__APP_BUILD_TIME_PLACEHOLDER__";
 
-  // Force-update check against version.json (PWA only - Native App Store updates are handled via Apple/Google Stores)
+  // Force-update check against version.json (Runs on Web and PWA only; bypassed on Native iOS/Android apps to prevent WebView freeze loops)
   const checkAppVersion = async () => {
     if (isNativeApp) return;
     try {
-      const vRes = await fetch('/version.json?cb=' + Date.now());
-      if (vRes.ok) {
+      const versionUrl = 'https://godelivery-magdalena.web.app/version.json?cb=' + Date.now();
+      const vRes = await fetch(versionUrl).catch(() => fetch('/version.json?cb=' + Date.now()));
+
+      if (vRes && vRes.ok) {
         const vData = await vRes.json();
+        const serverVersion = String(vData.version);
+        const runningBuildTime = String(BUNDLE_BUILD_VERSION);
         const currentVer = localStorage.getItem('gd_app_version');
-        if (currentVer && currentVer !== String(vData.version)) {
-          console.log('[Version] New version detected:', vData.version, '. Clearing app caches and reloading...');
-          localStorage.setItem('gd_app_version', String(vData.version));
+
+        const isOutdated = (currentVer && currentVer !== serverVersion) || 
+                           (runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && runningBuildTime !== '' && runningBuildTime !== serverVersion);
+
+        if (isOutdated) {
+          console.log('[Version] New version detected on web. Server:', serverVersion, 'Local:', currentVer || runningBuildTime);
+          localStorage.setItem('gd_app_version', serverVersion);
           showUpdateSplashAndReload();
           return;
         } else if (!currentVer) {
-          localStorage.setItem('gd_app_version', String(vData.version));
+          localStorage.setItem('gd_app_version', serverVersion);
         }
       }
     } catch (err) {
       console.warn('[Version] Check failed:', err);
     }
   };
-  if (!isNativeApp) {
-    setTimeout(checkAppVersion, 3000);
-    setInterval(checkAppVersion, 25000);
-  }
+  window.checkAppVersion = checkAppVersion;
+
+  // Run version check immediately, periodically, and on visibility/focus
+  checkAppVersion();
+  setTimeout(checkAppVersion, 1500);
+  setInterval(checkAppVersion, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkAppVersion();
+  });
+  window.addEventListener('focus', checkAppVersion);
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
   const urlParams = new URLSearchParams(window.location.search);
@@ -724,6 +746,7 @@ async function init() {
       return import('./pages/category.js').then(m => m.renderCategoryPage(id, c));
     },
     '/delivery': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel(c)),
+    '/delivery-panel': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel(c)),
     '/delivery/history': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryHistory(c)),
     '/delivery/finances': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryFinances(c)),
     '/delivery/config': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryConfig(c)),
@@ -1156,94 +1179,93 @@ async function init() {
       import('./utils/background-tracking.js').then(m => m.initGlobalTracking()).catch(e => console.warn('Tracking failed', e));
       import('./pages/home.js').then(m => m.renderHome()).catch(e => console.warn('Home pre-render failed', e));
 
-      // Fetch GoMarket Logo for Banner and Auto-Sync new Assets in Firestore
-      try {
-        const { collection, query, getDocs, doc, updateDoc } = await import('firebase/firestore');
-        const comSnap = await getDocs(collection(db, 'comercios'));
-        const gm = comSnap.docs.find(d => {
-          const n = (d.data().name || '').toLowerCase();
-          return n.includes('go!') && n.includes('market');
-        });
-        if (gm) {
-          const data = gm.data();
-          localStorage.setItem('gd_gomarket_id', gm.id);
-          import('./state.js').then(m => m.setState('goMarketId', gm.id));
-          if (data.logo) {
-            import('./state.js').then(m => m.setState('goMarketLogo', data.logo));
-          }
-          if (data.banner) {
-            import('./state.js').then(m => m.setState('goMarketBanner', data.banner));
-          }
-        }
-      } catch (e) {
-        console.error('Error auto-syncing GoMarket assets:', e);
-      }
-
-      if (isDelivery() && !isPreview) import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel());
-      if (isComercio() && user && !isPreview) {
-        const { collection, query, where, getDocs, doc, getDoc, updateDoc } = await import('firebase/firestore');
-        
-        // Upgrade database role to admin first to satisfy rules
-        const { isAdmin } = await import('./auth.js');
-        if (isAdmin()) {
-          try {
-            const userRef = doc(db, 'users', user.uid);
-            const uSnap = await getDoc(userRef);
-            const currentRole = uSnap.data().role;
-            if (uSnap.exists() && (currentRole === 'user' || !currentRole)) {
-              await updateDoc(userRef, { role: 'admin' });
-              user.role = 'admin';
-              console.log('[Auth] Database role updated to admin');
-            }
-          } catch (e) {
-            console.warn('Failed to auto-promote database role:', e);
-          }
-        }
-
-        let comId = null;
-
-        if (isAdmin()) {
+      // Fetch GoMarket Logo for Banner and Auto-Sync new Assets in Firestore (Non-blocking background)
+      (async () => {
+        try {
+          const { collection, getDocs } = await import('firebase/firestore');
           const comSnap = await getDocs(collection(db, 'comercios'));
           const gm = comSnap.docs.find(d => {
             const n = (d.data().name || '').toLowerCase();
             return n.includes('go!') && n.includes('market');
           });
           if (gm) {
-            comId = gm.id;
-            import('./state.js').then(m => m.setState('currentComercio', { id: gm.id, ...gm.data() }));
-            
-            // Sync GoMarket ownerId with current admin user to satisfy Firestore rules
-            const gmData = gm.data();
-            if (gmData.ownerId !== user.uid) {
-              import('firebase/firestore').then(async ({ doc, updateDoc }) => {
-                try {
-                  await updateDoc(doc(db, 'comercios', gm.id), { ownerId: user.uid });
-                  console.log('[Auth] Synced GoMarket ownerId with Admin UID:', user.uid);
-                } catch (err) {
-                  console.warn('Failed to sync GoMarket ownerId locally, trying Cloud Function...', err);
-                  try {
-                    const res = await fetch(`https://us-central1-godelivery-magdalena.cloudfunctions.net/setCommerceOwner?comercioId=${gm.id}&ownerId=${user.uid}`);
-                    const text = await res.text();
-                    console.log('[Auth] Cloud Function owner sync result:', text);
-                  } catch (fetchErr) {
-                    console.warn('[Auth] Cloud Function owner sync failed:', fetchErr);
-                  }
-                }
-              });
+            const data = gm.data();
+            localStorage.setItem('gd_gomarket_id', gm.id);
+            import('./state.js').then(m => m.setState('goMarketId', gm.id));
+            if (data.logo) {
+              import('./state.js').then(m => m.setState('goMarketLogo', data.logo));
+            }
+            if (data.banner) {
+              import('./state.js').then(m => m.setState('goMarketBanner', data.banner));
             }
           }
-        } else {
-          const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            comId = snap.docs[0].id;
-            import('./state.js').then(m => m.setState('currentComercio', { id: snap.docs[0].id, ...snap.docs[0].data() }));
-          }
+        } catch (e) {
+          console.warn('Error auto-syncing GoMarket assets:', e);
         }
+      })();
 
-        if (comId) {
-          import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders(comId));
-        }
+      if (isDelivery() && !isPreview) import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel());
+      if (isComercio() && user && !isPreview) {
+        (async () => {
+          try {
+            const { collection, query, where, getDocs, doc, getDoc, updateDoc } = await import('firebase/firestore');
+            
+            // Upgrade database role to admin first to satisfy rules
+            const { isAdmin } = await import('./auth.js');
+            if (isAdmin()) {
+              try {
+                const userRef = doc(db, 'users', user.uid);
+                const uSnap = await getDoc(userRef);
+                const currentRole = uSnap.data()?.role;
+                if (uSnap.exists() && (currentRole === 'user' || !currentRole)) {
+                  await updateDoc(userRef, { role: 'admin' });
+                  user.role = 'admin';
+                  console.log('[Auth] Database role updated to admin');
+                }
+              } catch (e) {
+                console.warn('Failed to auto-promote database role:', e);
+              }
+            }
+
+            let comId = null;
+
+            if (isAdmin()) {
+              const comSnap = await getDocs(collection(db, 'comercios'));
+              const gm = comSnap.docs.find(d => {
+                const n = (d.data().name || '').toLowerCase();
+                return n.includes('go!') && n.includes('market');
+              });
+              if (gm) {
+                comId = gm.id;
+                import('./state.js').then(m => m.setState('currentComercio', { id: gm.id, ...gm.data() }));
+                
+                // Sync GoMarket ownerId with current admin user to satisfy Firestore rules
+                const gmData = gm.data();
+                if (gmData.ownerId !== user.uid) {
+                  try {
+                    await updateDoc(doc(db, 'comercios', gm.id), { ownerId: user.uid });
+                    console.log('[Auth] Synced GoMarket ownerId with Admin UID:', user.uid);
+                  } catch (err) {
+                    console.warn('Failed to sync GoMarket ownerId locally:', err);
+                  }
+                }
+              }
+            } else {
+              const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
+              const snap = await getDocs(q);
+              if (!snap.empty) {
+                comId = snap.docs[0].id;
+                import('./state.js').then(m => m.setState('currentComercio', { id: snap.docs[0].id, ...snap.docs[0].data() }));
+              }
+            }
+
+            if (comId) {
+              import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders(comId));
+            }
+          } catch (err) {
+            console.warn('Error in background comercio role sync:', err);
+          }
+        })();
       }
 
       import('./pages/cart.js').then(m => m.renderCart());
@@ -1507,7 +1529,7 @@ async function checkAppUpdate() {
       
       if (minVersion > 0 && localVersion < minVersion) {
         const storeUrl = platform === 'ios'
-          ? (settings.appStoreUrl || 'https://apps.apple.com/app/godelivery/id6741753760')
+          ? (settings.appStoreUrl || 'https://apps.apple.com/app/go-delivery/id6790820954')
           : (settings.playStoreUrl || 'https://play.google.com/store/apps/details?id=com.godelivery.magdalena');
         console.log(`[VersionCheck] Version outdated. Displaying floating update banner pointing to: ${storeUrl}`);
         showUpdateFloatingBanner(storeUrl);

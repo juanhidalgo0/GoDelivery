@@ -616,11 +616,19 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
 
           </div>
 
-          <button class="btn btn-ghost btn-block" id="logout-btn" style="margin-top:14px; height:46px; border-radius:12px; color:var(--color-danger); font-weight:800; background:rgba(var(--color-danger-rgb), 0.05); font-size:14px;">
-            ${icon('logOut', 16)} Cerrar sesión
-          </button>
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="btn btn-ghost" id="logout-btn" style="flex:1; height:46px; border-radius:12px; color:var(--color-danger); font-weight:800; background:rgba(var(--color-danger-rgb), 0.05); font-size:14px;">
+              ${icon('logOut', 16)} Cerrar sesión
+            </button>
+            <button class="btn btn-ghost" id="force-reload-btn" style="flex:1; height:46px; border-radius:12px; color:var(--color-primary); font-weight:800; background:rgba(225, 29, 72, 0.08); font-size:13px;" title="Limpiar caché y forzar actualización">
+              ${icon('refresh', 16)} Actualizar App
+            </button>
+          </div>
 
-          <p style="text-align:center; margin-top:8px; font-size:10px; color:var(--color-text-tertiary); font-weight:600;">GoDelivery v2.4.0 — Made with ❤️</p>
+          <p id="profile-app-version-footer" style="text-align:center; margin-top:14px; font-size:11px; color:var(--color-text-tertiary); font-weight:700; cursor:pointer;" title="Tocar para forzar actualización">
+            GoDelivery v1.6.1 (Build: ${localStorage.getItem('gd_app_version') || '1.6.1'})
+            <br/><span style="font-size:10px; color:var(--color-primary); font-weight:800;">⚡ Tocar aquí si no ves los últimos cambios</span>
+          </p>
       </div>
     `;
 
@@ -639,6 +647,33 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     });
     document.getElementById('install-app-row')?.addEventListener('click', () => showInstallUI());
     document.getElementById('help-terms-btn')?.addEventListener('click', () => showHelpAndTermsModal());
+    const triggerForceReload = async () => {
+      AudioManager.hapticLight();
+      const { showToast } = await import('../components/toast.js');
+      showToast('Limpiando memoria local y descargando última versión...', 'info');
+      try {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('gd_cache') || key.startsWith('gd_cached') || key.startsWith('gd_platform') || key === 'gd_app_version') {
+            localStorage.removeItem(key);
+          }
+        });
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) await r.unregister();
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const k of keys) await caches.delete(k);
+        }
+      } catch (e) {}
+      setTimeout(() => {
+        window.location.href = window.location.origin + window.location.pathname + '?v=' + Date.now() + (window.location.hash || '#/');
+      }, 500);
+    };
+
+    document.getElementById('force-reload-btn')?.addEventListener('click', triggerForceReload);
+    document.getElementById('profile-app-version-footer')?.addEventListener('click', triggerForceReload);
+
     document.getElementById('delete-account-row')?.addEventListener('click', () => {
       AudioManager.hapticLight();
       showDeleteAccountConfirmModal();

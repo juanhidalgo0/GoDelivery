@@ -1287,9 +1287,16 @@ function updateUI(order, isDriverViewOverride = false) {
 
 
 
-    ${!isDriverView && isDelivering && !order.isTrip ? `
-      <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
-    ` : ''}
+    ${(() => {
+      const isCommerceOrder = !order.isFavor && !order.isTrip;
+      const isEncomiendaOrder = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
+      const showCode = !isDriverView && !order.isTrip && !isEncomiendaOrder && !!order.verificationCode && (
+        isCommerceOrder ? order.status === 'delivering' : !['delivered', 'cancelled', 'completed'].includes(order.status)
+      );
+      return showCode ? `
+        <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
+      ` : '';
+    })()}
 
     ${(!isDriverView && order.driverId && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
       <!-- Card de Transferencia Minimalista con Alias del Repartidor -->

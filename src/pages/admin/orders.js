@@ -137,34 +137,28 @@ export async function renderAdminOrders() {
   
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
-      <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <!-- Red Premium Header (Single Row) -->
+      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
-        <a href="#/admin" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; text-decoration:none; transition:all 0.2s; position:relative; z-index:2;">
-          ${icon('chevronLeft', 24)}
-        </a>
-        <div style="flex:1; position:relative; z-index:2;">
-          <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; letter-spacing:-0.03em;">Registro de Ventas</h1>
-          <div style="display:flex; align-items:center; gap:8px; margin-top:2px;">
-            <div id="conn-dot" style="width:8px; height:8px; border-radius:50%; background:#00D67F; box-shadow:0 0 8px #00D67F;"></div>
-            <span id="conn-diag" style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.8); letter-spacing:0.05em; text-transform:uppercase;">• ACTIVOS EN VIVO</span>
-          </div>
+        <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+          <a href="#/admin" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; text-decoration:none; transition:all 0.2s; position:relative; z-index:2; flex-shrink:0;">
+            ${icon('chevronLeft', 24)}
+          </a>
+          <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; letter-spacing:-0.03em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; z-index:2;">Registro de Ventas</h1>
         </div>
-        <a href="#/admin/support-chats" id="orders-support-chats-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s; position:relative; z-index:2; margin-right:4px;" title="Mesa de Ayuda">
+
+        <a href="#/admin/support-chats" id="orders-support-chats-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all 0.2s; position:relative; z-index:2; flex-shrink:0;" title="Mesa de Ayuda">
           ${icon('chatBubble', 22)}
         </a>
-        <button id="toggle-history-btn" style="background:rgba(255,255,255,0.18); border:none; padding:0 12px; height:40px; border-radius:12px; cursor:pointer; display:flex; align-items:center; gap:6px; color:white; font-size:12px; font-weight:900; transition:all 0.2s; position:relative; z-index:2; box-shadow:0 2px 8px rgba(0,0,0,0.1);" title="Abrir Historial Completo de Pedidos">
-          ${icon('clock', 16)} <span id="history-btn-label">Historial</span>
-        </button>
       </div>
 
       <!-- Advanced Search & Main 3 Segments (APP / WHATSAPP / CHATS) -->
       <div style="padding:16px 20px; flex-shrink:0; background:linear-gradient(to bottom, var(--color-surface), var(--color-bg));">
         
-        <!-- Ultra-Premium Segmented Control Bar (APP / WHATSAPP / CHATS) -->
-        <div class="premium-segmented-bar" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:5px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:14px; box-shadow:0 4px 20px rgba(0,0,0,0.03);">
+        <!-- Ultra-Premium Segmented Control Bar (APP / WHATSAPP) -->
+        <div class="premium-segmented-bar" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:5px; display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:14px; box-shadow:0 4px 20px rgba(0,0,0,0.03);">
           <button class="main-segment-btn active" data-segment="app" style="height:44px; border-radius:16px; border:none; background:linear-gradient(135deg, #e11d48, #be123c); color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 4px 14px rgba(225,29,72,0.3); transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
             <div style="width:24px; height:24px; border-radius:8px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('smartphone', 14, '', '#FFF')}</div>
             <span>App</span>
@@ -174,13 +168,7 @@ export async function renderAdminOrders() {
           <button class="main-segment-btn" data-segment="whatsapp" style="height:44px; border-radius:16px; border:none; background:transparent; color:var(--color-text-secondary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
             <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" style="width:20px; height:20px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(37,211,102,0.2));" alt="WhatsApp" />
             <span>WhatsApp</span>
-            <span id="seg-count-wa" style="background:#25D366; color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
-          </button>
-
-          <button class="main-segment-btn" data-segment="chats" style="height:44px; border-radius:16px; border:none; background:transparent; color:var(--color-text-secondary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
-            <div style="width:24px; height:24px; border-radius:8px; background:rgba(245,158,11,0.15); color:#d97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('headset', 14)}</div>
-            <span>Chats</span>
-            <span id="seg-count-chats" style="background:#f59e0b; color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
+            <span id="seg-count-wa" style="background:rgba(37,211,102,0.15); color:#16a34a; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
           </button>
         </div>
 
@@ -190,12 +178,24 @@ export async function renderAdminOrders() {
             style="flex:1; padding:10px 0; background:transparent; border:none; color:var(--color-text); font-weight:700; font-size:14.5px; outline:none;" />
         </div>
         
-        <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:16px; box-shadow:var(--shadow-sm);">
-          <div id="toggle-filters-btn" style="font-size:10px; font-weight:900; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;">
-            <div style="display:flex; align-items:center; gap:6px;">
-              ${icon('filter', 12)} Filtros de Auditoría
+        <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:20px; padding:12px 14px; box-shadow:var(--shadow-sm);">
+          <div style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px;">
+            <div id="toggle-filters-btn" style="font-size:10px; font-weight:900; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none; flex-shrink:1; min-width:0;">
+              <span style="display:flex;">${icon('filter', 12)}</span>
+              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Filtros</span>
+              <span id="filters-chevron-icon" style="transition:transform 0.2s; display:flex; align-items:center; color:var(--color-text-secondary);">${icon('chevronDown', 14)}</span>
             </div>
-            <span id="filters-chevron-icon" style="transition:transform 0.2s; display:flex; align-items:center; color:var(--color-text-secondary);">${icon('chevronDown', 14)}</span>
+
+            <!-- ACTIVOS / TODOS Segmented Pill Switch -->
+            <div id="history-switch-container" style="display:inline-flex; background:var(--color-bg-secondary); border-radius:100px; padding:3px; border:1px solid var(--color-border-light); flex-shrink:0; align-items:center;">
+              <button id="switch-activos-btn" type="button" style="padding:4px 11px; border-radius:100px; border:none; background:var(--color-primary); color:white; font-size:11px; font-weight:900; transition:all 0.2s; cursor:pointer; display:flex; align-items:center; gap:4px; box-shadow:0 2px 6px rgba(225,29,72,0.3);">
+                <span style="width:6px; height:6px; border-radius:50%; background:#00D67F; box-shadow:0 0 6px #00D67F;"></span>
+                Activos
+              </button>
+              <button id="switch-todos-btn" type="button" style="padding:4px 11px; border-radius:100px; border:none; background:transparent; color:var(--color-text-tertiary); font-size:11px; font-weight:800; transition:all 0.2s; cursor:pointer;">
+                Todos
+              </button>
+            </div>
           </div>
           
           <div id="filters-collapsible-content" style="display:none; margin-top:14px;">
@@ -418,6 +418,17 @@ function setupEventListeners() {
         b.style.color = 'var(--color-text-secondary)';
         b.style.boxShadow = 'none';
         b.classList.remove('active');
+
+        const appBadge = b.querySelector('#seg-count-app');
+        if (appBadge) {
+          appBadge.style.background = 'var(--color-bg-secondary)';
+          appBadge.style.color = 'var(--color-text-secondary)';
+        }
+        const waBadge = b.querySelector('#seg-count-wa');
+        if (waBadge) {
+          waBadge.style.background = 'rgba(37,211,102,0.15)';
+          waBadge.style.color = '#16a34a';
+        }
       });
 
       btn.classList.add('active');
@@ -426,38 +437,56 @@ function setupEventListeners() {
         btn.style.background = 'linear-gradient(135deg, #e11d48, #be123c)';
         btn.style.color = 'white';
         btn.style.boxShadow = '0 4px 14px rgba(225,29,72,0.3)';
+        const appBadge = btn.querySelector('#seg-count-app');
+        if (appBadge) {
+          appBadge.style.background = 'rgba(255,255,255,0.25)';
+          appBadge.style.color = 'white';
+        }
       } else if (seg === 'whatsapp') {
         btn.style.background = 'linear-gradient(135deg, #25D366, #128C7E)';
         btn.style.color = 'white';
         btn.style.boxShadow = '0 4px 14px rgba(37,211,102,0.3)';
-      } else if (seg === 'chats') {
-        btn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
-        btn.style.color = 'white';
-        btn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+        const waBadge = btn.querySelector('#seg-count-wa');
+        if (waBadge) {
+          waBadge.style.background = 'rgba(255,255,255,0.25)';
+          waBadge.style.color = 'white';
+        }
       }
 
       renderOrdersList();
     };
   });
 
-  const toggleHistoryBtn = document.getElementById('toggle-history-btn');
+  const switchActivosBtn = document.getElementById('switch-activos-btn');
+  const switchTodosBtn = document.getElementById('switch-todos-btn');
   let isLoadingMoreHistory = false;
 
-  if (toggleHistoryBtn) {
-    toggleHistoryBtn.onclick = () => {
-      isHistoryMode = !isHistoryMode;
+  if (switchActivosBtn && switchTodosBtn) {
+    switchActivosBtn.onclick = () => {
+      if (!isHistoryMode) return;
+      isHistoryMode = false;
       currentLimit = 30;
-      
-      const label = document.getElementById('history-btn-label');
-      if (isHistoryMode) {
-        if (label) label.textContent = 'Ver Activos';
-        toggleHistoryBtn.style.background = '#25D366';
-        showToast('📜 Mostrando Historial Completo (Paginado de a 30 pedidos)', 'info');
-      } else {
-        if (label) label.textContent = 'Historial';
-        toggleHistoryBtn.style.background = 'rgba(255,255,255,0.18)';
-        showToast('🟢 Mostrando únicamente Pedidos Activos', 'info');
-      }
+      switchActivosBtn.style.background = 'var(--color-primary)';
+      switchActivosBtn.style.color = 'white';
+      switchActivosBtn.style.boxShadow = '0 2px 6px rgba(225,29,72,0.3)';
+      switchTodosBtn.style.background = 'transparent';
+      switchTodosBtn.style.color = 'var(--color-text-tertiary)';
+      switchTodosBtn.style.boxShadow = 'none';
+      showToast('🟢 Mostrando únicamente Pedidos Activos', 'info');
+      loadAllOrders();
+    };
+
+    switchTodosBtn.onclick = () => {
+      if (isHistoryMode) return;
+      isHistoryMode = true;
+      currentLimit = 30;
+      switchTodosBtn.style.background = 'var(--color-primary)';
+      switchTodosBtn.style.color = 'white';
+      switchTodosBtn.style.boxShadow = '0 2px 6px rgba(225,29,72,0.3)';
+      switchActivosBtn.style.background = 'transparent';
+      switchActivosBtn.style.color = 'var(--color-text-tertiary)';
+      switchActivosBtn.style.boxShadow = 'none';
+      showToast('📜 Mostrando Historial Completo (Paginado de a 30 pedidos)', 'info');
       loadAllOrders();
     };
   }
@@ -994,7 +1023,7 @@ function renderFilteredOrders(container, filtered) {
                     return `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong> <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 6px; border-radius:6px; font-weight:900; margin-left:4px;">${remainingSec}s</span>`;
                   }
                   if (o.status === 'confirmed' || o.status === 'preparing') return `🍳 En preparación`;
-                  if (o.status === 'pending') return `⏳ Esperando confirmación`;
+                  if (o.status === 'pending') return `🏪 Esperando confirmación del local`;
                   return `🔍 Buscando repartidor en tiempo real...`;
                 })()}
               </span>
@@ -1013,6 +1042,27 @@ function renderFilteredOrders(container, filtered) {
             <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary);">
               ${o.paymentMethod === 'mercadopago' ? 'Transferencia' : 'Efectivo'}
             </div>
+          </div>
+
+          <!-- Colorful High-End Quick Action Buttons Row -->
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:14px; padding-top:12px; border-top:1.5px dashed var(--color-border-light);" onclick="event.stopPropagation();">
+            <!-- 1. Liberar Button (Vibrant Coral/Red) -->
+            <button class="order-quick-action-btn reassign-btn" data-order-id="${o.id}" style="height:36px; padding:0 8px; border-radius:12px; border:1px solid rgba(239,68,68,0.25); background:linear-gradient(135deg, rgba(239,68,68,0.12), rgba(220,38,38,0.06)); color:#dc2626; font-size:11.5px; font-weight:900; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; transition:all 0.2s cubic-bezier(0.16, 1, 0.3, 1); box-shadow:0 2px 6px rgba(239,68,68,0.08);" title="Liberar pedido para asignar a otro repartidor">
+              <span style="display:flex;">${icon('refreshCw', 13)}</span>
+              <span>Liberar</span>
+            </button>
+            
+            <!-- 2. Chat Button (Vibrant Cyan/Blue) -->
+            <button class="order-quick-action-btn chat-btn" data-order-id="${o.id}" style="height:36px; padding:0 8px; border-radius:12px; border:1px solid rgba(14,165,233,0.25); background:linear-gradient(135deg, rgba(14,165,233,0.12), rgba(2,132,199,0.06)); color:#0284c7; font-size:11.5px; font-weight:900; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; transition:all 0.2s cubic-bezier(0.16, 1, 0.3, 1); box-shadow:0 2px 6px rgba(14,165,233,0.08);" title="Abrir Chat del Pedido">
+              <span style="display:flex;">${icon('chatBubble', 13)}</span>
+              <span>Chat</span>
+            </button>
+            
+            <!-- 3. En Vivo Button (Vibrant Emerald/Green) -->
+            <button class="order-quick-action-btn track-btn" data-order-id="${o.id}" style="height:36px; padding:0 8px; border-radius:12px; border:1px solid rgba(34,197,94,0.25); background:linear-gradient(135deg, rgba(34,197,94,0.12), rgba(22,163,74,0.06)); color:#15803d; font-size:11.5px; font-weight:900; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; transition:all 0.2s cubic-bezier(0.16, 1, 0.3, 1); box-shadow:0 2px 6px rgba(34,197,94,0.08);" title="Ver Seguimiento en Vivo">
+              <span style="display:flex;">${icon('mapPin', 13)}</span>
+              <span>En Vivo</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1039,6 +1089,54 @@ function renderFilteredOrders(container, filtered) {
       });
     }, 1000);
   }
+
+  // Bind Quick Action Buttons Event Listeners
+  document.querySelectorAll('.order-quick-action-btn.reassign-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const orderId = btn.dataset.orderId;
+      if (!orderId) return;
+      await openReleaseDriverModal(orderId);
+    };
+  });
+
+  document.querySelectorAll('.order-quick-action-btn.chat-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const orderId = btn.dataset.orderId;
+      if (!orderId) return;
+      const { openChat } = await import('../../components/chat.js');
+      openChat({
+        orderId,
+        type: 'client-delivery',
+        otherName: 'Chat del Pedido',
+        orderNum: orderId.slice(0, 6),
+        senderDisplayName: 'Admin',
+        isAudit: true
+      });
+    };
+  });
+
+  document.querySelectorAll('.order-quick-action-btn.track-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const orderId = btn.dataset.orderId;
+      if (!orderId) return;
+      const { showModal } = await import('../../components/modal.js');
+      const { renderOrderTracking } = await import('../order-tracking.js');
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'padding: 0; width: 100%; height: 100%; overflow-y: auto;';
+      
+      showModal({
+        title: `Seguimiento en Vivo - #${orderId.slice(0, 6)}`,
+        content: modalContent,
+        fullscreen: true,
+        height: '100%'
+      });
+      
+      renderOrderTracking(orderId, modalContent, true);
+    };
+  });
 
   if (infiniteObserver) {
     infiniteObserver.disconnect();
@@ -1103,7 +1201,7 @@ window.showOrderDetail = async (idOrObject) => {
 
   steps.push({
     label: 'Asignado a Repartidor',
-    time: formatTime(o.acceptedAt),
+    time: (o.driverId || o.driverName) ? formatTime(o.acceptedAt || o.driverAssignedAt) : null,
     icon: 'user',
     color: '#a855f7',
     bg: 'rgba(168, 85, 247, 0.1)'
@@ -1349,22 +1447,26 @@ window.showOrderDetail = async (idOrObject) => {
     </div>
 
     <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:20px; margin-bottom:20px;">
-       <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-         <span style="font-size:12px; font-weight:700; opacity:0.6;">Comercio:</span>
-         <span style="font-size:12px; font-weight:800;">${getComercioDisplayName(o)}</span>
+       <div style="display:flex; justify-content:space-between; margin-bottom:12px; align-items:flex-start;">
+         <span style="font-size:12px; font-weight:700; opacity:0.6; flex-shrink:0;">Punto de Retiro:</span>
+         <span style="font-size:12px; font-weight:850; text-align:right; max-width:210px; color:#16a34a; word-break:break-word;">
+           📍 ${o.pickupAddress || o.comercioAddress || o.originAddress || getComercioDisplayName(o) || 'Punto de Retiro'}
+         </span>
+       </div>
+       <div style="display:flex; justify-content:space-between; margin-bottom:12px; align-items:flex-start;">
+         <span style="font-size:12px; font-weight:700; opacity:0.6; flex-shrink:0;">Punto de Entrega:</span>
+         <span style="font-size:12px; font-weight:850; text-align:right; max-width:210px; color:#e11d48; word-break:break-word;">
+           🎯 ${o.deliveryAddress || o.destinationAddress || 'Dirección de Entrega'}
+         </span>
        </div>
        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-         <span style="font-size:12px; font-weight:700; opacity:0.6;">Ubicación:</span>
-         <span style="font-size:12px; font-weight:800; text-align:right; max-width:180px;">${o.deliveryAddress}</span>
-       </div>
-       <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-         <span style="font-size:12px; font-weight:700; opacity:0.6;">Método:</span>
+         <span style="font-size:12px; font-weight:700; opacity:0.6;">Método de Pago:</span>
          <span style="font-size:12px; font-weight:800; text-transform:uppercase;">${o.paymentMethod || 'Efectivo'}</span>
        </div>
        <div style="display:flex; justify-content:space-between; border-top:1px dashed var(--color-border-light); padding-top:12px;">
          <span style="font-size:12px; font-weight:700; opacity:0.6;">Código de Entrega:</span>
-         <span style="font-size:12px; font-weight:800; color:${o.verificationCode ? 'var(--color-primary)' : 'var(--color-text-tertiary)'}; letter-spacing: ${o.verificationCode ? '2px' : 'normal'};">
-           ${o.verificationCode || 'Pendiente / No disponible'}
+         <span style="font-size:12px; font-weight:800; color:${(o.favorType === 'encomienda' || o.serviceType === 'encomienda') ? 'var(--color-text-tertiary)' : (o.verificationCode ? 'var(--color-primary)' : 'var(--color-text-tertiary)')}; letter-spacing: ${(o.favorType === 'encomienda' || o.serviceType === 'encomienda') ? 'normal' : (o.verificationCode ? '2px' : 'normal')};">
+           ${(o.favorType === 'encomienda' || o.serviceType === 'encomienda') ? 'No requiere código (Encomienda)' : (o.verificationCode || 'Pendiente / No disponible')}
          </span>
        </div>
     </div>
@@ -1450,206 +1552,7 @@ window.showOrderDetail = async (idOrObject) => {
       const releaseBtn = document.getElementById('admin-release-driver-btn');
       if (releaseBtn) {
         releaseBtn.addEventListener('click', async () => {
-          const { getDocs, collection, query, where, doc, getDoc, updateDoc, setDoc, serverTimestamp, arrayUnion } = await import('firebase/firestore');
-          const { db } = await import('../../firebase.js');
-          const { showModal, closeModal } = await import('../../components/modal.js');
-          const { showToast } = await import('../../components/toast.js');
-
-          const modalContent = document.createElement('div');
-          modalContent.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px;';
-          modalContent.innerHTML = `<div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div>`;
-
-          showModal({
-            title: 'Liberar y Asignar Pedido',
-            content: modalContent
-          });
-
-          try {
-            // Fetch delivery drivers directly with query filter
-            const { where } = await import('firebase/firestore');
-            const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery')));
-            const drivers = driversSnap.docs
-              .map(d => ({ uid: d.id, ...d.data() }))
-              .filter(u => u.isOnline === true);
-
-            modalContent.innerHTML = `
-              <div style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.4;">
-                ¿Cómo deseas liberar este pedido? El repartidor actual se desvinculará del pedido.
-              </div>
-
-              <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
-                <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino / Reasignación</label>
-                <select id="v5-assign-driver-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-bg-card); font-size:13.5px; font-weight:600; outline:none; border:1.5px solid var(--color-border-light);">
-                  <option value="rotation">🔄 Devolver a rotación general (ofrecer a otros)</option>
-                  ${drivers.map(d => `
-                    <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || '---'})</option>
-                  `).join('')}
-                </select>
-              </div>
-
-              <div style="display:flex; gap:10px; margin-top:16px; border-top:1px solid var(--color-border-light); padding-top:16px;">
-                <button class="btn btn-ghost" id="v5-cancel-release-btn" style="flex:1; height:48px; border-radius:14px; font-weight:800;">CANCELAR</button>
-                <button class="btn btn-primary" id="v5-confirm-release-btn" style="flex:2; height:48px; border-radius:14px; font-weight:900;">CONFIRMAR LIBERACIÓN</button>
-              </div>
-            `;
-
-            modalContent.querySelector('#v5-cancel-release-btn').onclick = () => closeModal();
-            modalContent.querySelector('#v5-confirm-release-btn').onclick = async () => {
-              const select = modalContent.querySelector('#v5-assign-driver-select');
-              const destination = select.value;
-              const confirmBtn = modalContent.querySelector('#v5-confirm-release-btn');
-
-              confirmBtn.disabled = true;
-              confirmBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' PROCESANDO...';
-
-              try {
-                const oldDriverId = o.driverId;
-
-                if (destination === 'rotation') {
-                  // Standard release (rotation)
-                  const updateFields = {
-                    driverId: null,
-                    driverName: null,
-                    driverPhoto: null,
-                    driverPhone: null,
-                    queueTargetDriverId: null,
-                    queueTargetDriverName: null,
-                    queueOfferedAt: null,
-                    status: 'ready'
-                  };
-                  if (oldDriverId) {
-                    updateFields.queueRejectedDrivers = arrayUnion(oldDriverId);
-                  }
-                  await updateDoc(doc(db, 'orders', o.id), updateFields);
-
-                  // Reset chats
-                  try {
-                    const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
-                    const cdSnap = await getDoc(clientChatRef);
-                    if (cdSnap.exists()) {
-                      const cdData = cdSnap.data();
-                      const prevDriver = cdData.driverId || oldDriverId;
-                      const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
-                      await updateDoc(clientChatRef, {
-                        driverId: null,
-                        driverName: null,
-                        participants: newParts
-                      });
-                    }
-                    const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
-                    const comSnap = await getDoc(comChatRef);
-                    if (comSnap.exists()) {
-                      const comData = comSnap.data();
-                      const prevDriver = comData.driverId || oldDriverId;
-                      const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
-                      await updateDoc(comChatRef, {
-                        driverId: null,
-                        driverName: null,
-                        participants: newParts
-                      });
-                    }
-                  } catch (e) {
-                    console.warn('[Admin Release] Chat reset error:', e);
-                  }
-
-                  showToast('🔓 Pedido liberado con éxito. Se volvió a ofertar en rotación.', 'success');
-                  const { updateDispatchQueue } = await import('../delivery-panel.js');
-                  updateDispatchQueue(o.id);
-
-                } else {
-                  // Direct assignment to selected driver
-                  const selectedDriver = drivers.find(d => d.uid === destination);
-                  if (!selectedDriver) throw new Error('Repartidor no encontrado');
-
-                  // Assign fields
-                  const assignFields = {
-                    driverId: selectedDriver.uid,
-                    driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
-                    driverPhoto: selectedDriver.photo || selectedDriver.photoURL || '',
-                    driverPhone: selectedDriver.phone || '',
-                    driverDlId: selectedDriver.displayId || '',
-                    driverAlias: selectedDriver.transferAlias || '',
-                    driverVehicleModel: selectedDriver.vehicleModel || '',
-                    driverVehicleColor: selectedDriver.vehicleColor || '',
-                    driverVehiclePatent: selectedDriver.vehicleDetails || selectedDriver.patente || '',
-                    queueTargetDriverId: null,
-                    queueTargetDriverName: null,
-                    queueOfferedAt: null,
-                    status: (o.isFavor || o.isTrip) ? 'confirmed' : 'accepted',
-                    acceptedAt: serverTimestamp()
-                  };
-
-                  await updateDoc(doc(db, 'orders', o.id), assignFields);
-
-                  // Send notification to the newly assigned driver
-                  try {
-                    const orderNum = o.orderId || o.id.slice(-6).toUpperCase();
-                    await addDoc(collection(db, 'users', selectedDriver.uid, 'notifications'), {
-                      title: '⚡ Pedido Asignado por Soporte',
-                      body: `Se te ha asignado manualmente el pedido #${orderNum}. Ingresa a tu Hoja de Ruta para ver los detalles.`,
-                      type: 'order_assigned',
-                      orderId: o.id,
-                      status: 'unread',
-                      createdAt: serverTimestamp()
-                    });
-
-                    // Trigger immediate background push notification via global notifications collection
-                    await addDoc(collection(db, 'notifications'), {
-                      userId: selectedDriver.uid,
-                      title: '⚡ Pedido Asignado por Soporte',
-                      body: `Se te ha asignado manualmente el pedido #${orderNum}.`,
-                      url: `#/delivery`,
-                      type: 'system',
-                      createdAt: serverTimestamp()
-                    });
-                  } catch (notifErr) {
-                    console.warn('Failed to send assignment notification:', notifErr);
-                  }
-
-                  // Setup client-delivery chat
-                  const cdRef = doc(db, 'chats', `${o.id}_client-delivery`);
-                  await setDoc(cdRef, {
-                    orderId: o.id,
-                    type: 'client-delivery',
-                    driverId: selectedDriver.uid,
-                    driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
-                    userId: o.userId || null,
-                    participants: [selectedDriver.uid, o.userId].filter(Boolean)
-                  }, { merge: true });
-
-                  // Setup commerce-delivery chat
-                  if (o.comercioId) {
-                    const comdRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
-                    await setDoc(comdRef, {
-                      orderId: o.id,
-                      type: 'commerce-delivery',
-                      driverId: selectedDriver.uid,
-                      driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
-                      comercioId: o.comercioId,
-                      participants: [selectedDriver.uid, o.comercioId].filter(Boolean)
-                    }, { merge: true });
-                  }
-
-                  showToast(`⚡ Pedido asignado directamente a ${selectedDriver.displayName || selectedDriver.name || 'Repartidor'}.`, 'success');
-                }
-
-                closeModal();
-                // Close the audit modal too
-                document.getElementById('close-audit-modal')?.click();
-                renderOrdersList(); // Refresh list
-
-              } catch (err) {
-                console.error('[Admin Assign/Release] Error:', err);
-                showToast('Error al reasignar pedido: ' + err, 'danger');
-                confirmBtn.disabled = false;
-                confirmBtn.innerHTML = 'CONFIRMAR LIBERACIÓN';
-              }
-            };
-
-          } catch (e) {
-            console.error('Error loading drivers:', e);
-            modalContent.innerHTML = `<p style="color:var(--color-danger); text-align:center;">Error al cargar la lista de repartidores.</p>`;
-          }
+          await openReleaseDriverModal(o);
         });
       }
 
@@ -2000,4 +1903,223 @@ async function openAdminToDriverSupportChatModal(driverId, driverName, orderId, 
   inputEl.onkeydown = (e) => {
     if (e.key === 'Enter') handleSend();
   };
+}
+
+export async function openReleaseDriverModal(idOrOrder) {
+  const { getDocs, collection, query, where, doc, getDoc, updateDoc, setDoc, serverTimestamp, arrayUnion } = await import('firebase/firestore');
+  const { db } = await import('../../firebase.js');
+  const { showModal, closeModal } = await import('../../components/modal.js');
+  const { showToast } = await import('../../components/toast.js');
+
+  let o = typeof idOrOrder === 'object' && idOrOrder !== null ? idOrOrder : null;
+  if (!o && typeof idOrOrder === 'string') {
+    o = allOrders.find(item => item.id === idOrOrder);
+    if (!o) {
+      const snap = await getDoc(doc(db, 'orders', idOrOrder));
+      if (snap.exists()) {
+        o = { id: snap.id, ...snap.data() };
+      }
+    }
+  }
+
+  if (!o) {
+    showToast('❌ Pedido no encontrado', 'error');
+    return;
+  }
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px;';
+  modalContent.innerHTML = `<div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div>`;
+
+  showModal({
+    title: 'Liberar y Asignar Pedido',
+    content: modalContent
+  });
+
+  try {
+    const driversSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery')));
+    const drivers = driversSnap.docs
+      .map(d => ({ uid: d.id, ...d.data() }))
+      .filter(u => u.isOnline === true);
+
+    modalContent.innerHTML = `
+      <div style="font-size:13.5px; color:var(--color-text-secondary); line-height:1.4;">
+        ¿Cómo deseas liberar este pedido (#${o.orderNumber || o.id.slice(0,6)})? El repartidor actual se desvinculará del pedido.
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino / Reasignación</label>
+        <select id="v5-assign-driver-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-bg-card); font-size:13.5px; font-weight:600; outline:none; border:1.5px solid var(--color-border-light);">
+          <option value="rotation">🔄 Devolver a rotación general (ofrecer a otros)</option>
+          ${drivers.map(d => `
+            <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || '---'})</option>
+          `).join('')}
+        </select>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:16px; border-top:1px solid var(--color-border-light); padding-top:16px;">
+        <button class="btn btn-ghost" id="v5-cancel-release-btn" style="flex:1; height:48px; border-radius:14px; font-weight:800;">CANCELAR</button>
+        <button class="btn btn-primary" id="v5-confirm-release-btn" style="flex:2; height:48px; border-radius:14px; font-weight:900;">CONFIRMAR LIBERACIÓN</button>
+      </div>
+    `;
+
+    modalContent.querySelector('#v5-cancel-release-btn').onclick = () => closeModal();
+    modalContent.querySelector('#v5-confirm-release-btn').onclick = async () => {
+      const select = modalContent.querySelector('#v5-assign-driver-select');
+      const destination = select.value;
+      const confirmBtn = modalContent.querySelector('#v5-confirm-release-btn');
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' PROCESANDO...';
+
+      try {
+        const oldDriverId = o.driverId;
+
+        if (destination === 'rotation') {
+          // Standard release (rotation)
+          const updateFields = {
+            driverId: null,
+            driverName: null,
+            driverPhoto: null,
+            driverPhone: null,
+            queueTargetDriverId: null,
+            queueTargetDriverName: null,
+            queueOfferedAt: null,
+            status: 'ready'
+          };
+          if (oldDriverId) {
+            updateFields.queueRejectedDrivers = arrayUnion(oldDriverId);
+          }
+          await updateDoc(doc(db, 'orders', o.id), updateFields);
+
+          // Reset chats
+          try {
+            const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
+            const cdSnap = await getDoc(clientChatRef);
+            if (cdSnap.exists()) {
+              const cdData = cdSnap.data();
+              const prevDriver = cdData.driverId || oldDriverId;
+              const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+              await updateDoc(clientChatRef, {
+                driverId: null,
+                driverName: null,
+                participants: newParts
+              });
+            }
+            const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
+            const comSnap = await getDoc(comChatRef);
+            if (comSnap.exists()) {
+              const comData = comSnap.data();
+              const prevDriver = comData.driverId || oldDriverId;
+              const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+              await updateDoc(comChatRef, {
+                driverId: null,
+                driverName: null,
+                participants: newParts
+              });
+            }
+          } catch (e) {
+            console.warn('[Admin Release] Chat reset error:', e);
+          }
+
+          showToast('🔓 Pedido liberado con éxito. Se volvió a ofertar en rotación.', 'success');
+          const { updateDispatchQueue } = await import('../delivery-panel.js');
+          updateDispatchQueue(o.id);
+
+        } else {
+          // Re-offer exclusively to selected driver in rotation (rotar / ofertar sin auto-asignar)
+          const selectedDriver = drivers.find(d => d.uid === destination);
+          if (!selectedDriver) throw new Error('Repartidor no encontrado');
+
+          const updateFields = {
+            driverId: null,
+            driverName: null,
+            driverPhoto: null,
+            driverPhone: null,
+            driverDlId: null,
+            driverAlias: null,
+            driverVehicleModel: null,
+            driverVehicleColor: null,
+            driverVehiclePatent: null,
+            queueTargetDriverId: selectedDriver.uid,
+            queueTargetDriverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+            queueOfferedAt: serverTimestamp(),
+            directDriverUid: selectedDriver.uid,
+            status: (o.isFavor || o.isTrip) ? 'pending' : 'ready'
+          };
+
+          if (oldDriverId) {
+            updateFields.queueRejectedDrivers = arrayUnion(oldDriverId);
+          }
+          if (Array.isArray(o.manuallyRejectedDrivers) && o.manuallyRejectedDrivers.includes(selectedDriver.uid)) {
+            updateFields.manuallyRejectedDrivers = arrayRemove(selectedDriver.uid);
+          }
+
+          await updateDoc(doc(db, 'orders', o.id), updateFields);
+
+          // Reset chats so previous driver is unlinked
+          try {
+            const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
+            const cdSnap = await getDoc(clientChatRef);
+            if (cdSnap.exists()) {
+              const cdData = cdSnap.data();
+              const prevDriver = cdData.driverId || oldDriverId;
+              const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+              await updateDoc(clientChatRef, { driverId: null, driverName: null, participants: newParts });
+            }
+            const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
+            const comSnap = await getDoc(comChatRef);
+            if (comSnap.exists()) {
+              const comData = comSnap.data();
+              const prevDriver = comData.driverId || oldDriverId;
+              const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
+              await updateDoc(comChatRef, { driverId: null, driverName: null, participants: newParts });
+            }
+          } catch (e) {
+            console.warn('[Admin Release] Chat reset error:', e);
+          }
+
+          // Trigger exclusive push notification for target driver
+          try {
+            const orderNum = o.orderId || o.id.slice(-6).toUpperCase();
+            await addDoc(collection(db, 'users', selectedDriver.uid, 'notifications'), {
+              title: '🛵 ¡Nueva Oferta Exclusiva!',
+              body: `Se te ha ofertado en rotación el pedido #${orderNum}. ¡Ingresá para aceptar!`,
+              type: 'new_exclusive_offer',
+              orderId: o.id,
+              status: 'unread',
+              createdAt: serverTimestamp()
+            });
+
+            await addDoc(collection(db, 'notifications'), {
+              userId: selectedDriver.uid,
+              title: '🛵 ¡Nueva Oferta Exclusiva!',
+              body: `Se te ha ofertado en rotación el pedido #${orderNum}.`,
+              url: `#/delivery`,
+              type: 'new_exclusive_offer',
+              createdAt: serverTimestamp()
+            });
+          } catch (notifErr) {
+            console.warn('[Admin Release] Push notification trigger warning:', notifErr);
+          }
+
+          showToast(`🛵 Pedido ofertado en rotación exclusivamente a ${selectedDriver.displayName || selectedDriver.name}.`, 'success');
+        }
+
+        closeModal();
+        document.getElementById('close-audit-modal')?.click();
+        renderOrdersList();
+
+      } catch (err) {
+        console.error('[Admin Assign/Release] Error:', err);
+        showToast('Error al reasignar pedido: ' + err, 'danger');
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = 'CONFIRMAR LIBERACIÓN';
+      }
+    };
+
+  } catch (e) {
+    console.error('Error loading drivers:', e);
+    modalContent.innerHTML = `<p style="color:var(--color-danger); text-align:center;">Error al cargar la lista de repartidores.</p>`;
+  }
 }

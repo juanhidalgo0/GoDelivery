@@ -3021,11 +3021,13 @@ body.header-hidden .slide-overlay {
 .cart-fixed-footer {
   background: var(--color-bg-card);
   border-top: 1px solid var(--color-border-light);
-  padding: var(--space-4) var(--space-4) calc(var(--space-2) + env(safe-area-inset-bottom, 0)) var(--space-4);
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.05);
-  z-index: 100;
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 24px)) var(--space-4);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.08);
+  z-index: 1000;
   border-radius: 24px 24px 0 0;
   flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
 }
 /* -- Delivery Finances V3 -- */
 .delivery-finances-v3 {
@@ -3630,6 +3632,40 @@ body.header-hidden .slide-overlay {
 .panel-page > div[style*="overflow-y: auto"],
 .panel-page > div.scrollable-content {
   padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+/* ==========================================================================
+   Enhancement B: Premium Glassmorphism & Spring Touch for Service Cards
+   ========================================================================== */
+.spring-hover {
+  will-change: transform, box-shadow;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.3s ease !important;
+}
+.spring-hover:hover {
+  transform: translateY(-3px) scale(1.01);
+}
+.spring-hover:active {
+  transform: translateY(1px) scale(0.97) !important;
+}
+
+/* ==========================================================================
+   Enhancement C: Elevated Merchant Cards & Smooth Banner Zoom
+   ========================================================================== */
+.comercio-card {
+  will-change: transform, box-shadow;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease !important;
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.07), 0 2px 8px -2px rgba(0, 0, 0, 0.04) !important;
+}
+.comercio-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.12), 0 4px 12px -2px rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(var(--color-primary-rgb), 0.25) !important;
+}
+.comercio-card-banner img {
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.comercio-card:hover .comercio-card-banner img {
+  transform: scale(1.06);
 }
 
 

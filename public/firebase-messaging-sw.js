@@ -205,21 +205,28 @@ self.addEventListener('fetch', (event) => {
     url.protocol === 'chrome-extension:' ||
     url.pathname.startsWith('/@') ||
     url.pathname.startsWith('/src/') ||
-    url.pathname.startsWith('/node_modules/')
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.includes('version.json')
   ) {
     return;
   }
 
-  // STRATEGY: Network-First for index.html (ensure latest version)
-  if (url.pathname === '/' || url.pathname.endsWith('index.html')) {
+  // STRATEGY: Network-First for index.html, JS, CSS, assets, and version.json (ensure latest version)
+  if (
+    url.pathname === '/' || 
+    url.pathname.endsWith('index.html') ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.includes('version.json')
+  ) {
     event.respondWith(
       fetch(request).then((networkResponse) => {
-        return caches.open(CACHE_NAME).then((cache) => {
-          if (networkResponse && networkResponse.status === 200) {
-            cache.put(request, networkResponse.clone());
-          }
-          return networkResponse;
-        });
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        }
+        return networkResponse;
       }).catch(() => {
         return caches.match(request);
       })
@@ -227,7 +234,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // STRATEGY: Stale-While-Revalidate for other assets
+  // STRATEGY: Stale-While-Revalidate for images and static media
   event.respondWith(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.match(request).then((cachedResponse) => {
@@ -237,11 +244,9 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         }).catch(() => {
-          // If network fails, we return the cached response (even if undefined)
           return cachedResponse;
         });
 
-        // Return cached version immediately if available, otherwise wait for network
         return cachedResponse || fetchedResponse;
       });
     })

@@ -1007,7 +1007,8 @@ export async function renderAdminDeliveriesSettings(container) {
           const newDebt = Math.max(0, currentDebt - proof.amount);
           const adminEmail = getState().user?.email || "Admin";
           batch.update(doc2(db, "users", proof.driverId), {
-            deliveryDebt: newDebt
+            deliveryDebt: newDebt,
+            points: 0
           });
           const settlementRef = doc2(collection2(db, "delivery_debt_settlements"));
           batch.set(settlementRef, {
@@ -1016,7 +1017,7 @@ export async function renderAdminDeliveriesSettings(container) {
             driverEmail: driver?.email || "",
             amount: proof.amount,
             method: "transferencia",
-            notes: "Aprobaci\xF3n comprobante nativo app",
+            notes: "Aprobación comprobante nativo app",
             settledBy: adminEmail,
             createdAt: serverTimestamp2()
           });
@@ -1025,7 +1026,7 @@ export async function renderAdminDeliveriesSettings(container) {
             driverId: proof.driverId,
             type: "liquidation",
             amount: -proof.amount,
-            description: `Aprobaci\xF3n Comprobante Nativa App`,
+            description: `Aprobación Comprobante Nativa App`,
             settledBy: adminEmail,
             createdAt: serverTimestamp2()
           });
@@ -1034,6 +1035,35 @@ export async function renderAdminDeliveriesSettings(container) {
             settledAt: serverTimestamp2(),
             settledBy: adminEmail
           });
+
+          // Mark driver orders as settled
+          const proofOrders = globalPendingOrders.filter((o) => o.driverId === proof.driverId && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
+          proofOrders.forEach((o) => {
+            batch.update(doc2(db, "orders", o.id), {
+              isSettledDriver: true,
+              driverCommissionStatus: "paid",
+              driverSettledAt: serverTimestamp2()
+            });
+          });
+
+          // Mark driver canons as settled
+          try {
+            const { collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
+            const canonQ = q2(col2(db, "delivery_canon_payments"), w2("driverId", "==", proof.driverId));
+            const canonSnap = await gD2(canonQ);
+            canonSnap.docs.forEach((cDoc) => {
+              if (cDoc.data().settled !== true) {
+                batch.update(doc2(db, "delivery_canon_payments", cDoc.id), {
+                  settled: true,
+                  status: "settled",
+                  settledAt: serverTimestamp2()
+                });
+              }
+            });
+          } catch (cErr) {
+            console.warn("Could not mark canons as settled in proof approval:", cErr);
+          }
+
           await batch.commit();
           showToast("\u2705 Comprobante aprobado con \xE9xito.", "success");
           await loadData();
@@ -1132,14 +1162,14 @@ export async function renderAdminDeliveriesSettings(container) {
             <p style="margin-top:12px; font-weight:700;">No se encontraron repartidores con los criterios de b\xFAsqueda.</p>
           </div>
         ` : filteredDrivers.map((d) => {
-      const debt = d.deliveryDebt || 0;
+      const debt = Math.max(0, d.deliveryDebt || 0);
       const isCanonPaidToday = d.lastCanonDate === todayStr;
       const isExempt = d.isCanonExempt === true;
       const isOnlineNow = d.isOnline === true;
       const photo = d.photoURL || d.avatarUrl || d.photo || d.profileImage || "";
       const displayId = d.deliveryId || d.goId || d.customId || "go-" + d.id.slice(0, 4);
-      const driverOrders = globalPendingOrders.filter((o) => o.driverId === d.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
-      const totalCouponsCredit = driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
+      const driverOrders = debt > 0 ? globalPendingOrders.filter((o) => o.driverId === d.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")) : [];
+      const totalCouponsCredit = debt > 0 ? driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0) : 0;
       const finalSettleAmount = Math.max(0, debt - totalCouponsCredit);
       return `
             <div style="background:var(--color-surface); border:1.5px solid ${finalSettleAmount > 0 ? "rgba(239,68,68,0.25)" : "var(--color-border-light)"}; border-radius:24px; padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:16px; transition:all 0.2s;">
@@ -1809,7 +1839,8 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         const newDebt = Math.max(0, currentDebt - amountToSettle);
         const adminEmail = getState().user?.email || "Admin";
         batch.update(doc2(db, "users", driver.id), {
-          deliveryDebt: newDebt
+          deliveryDebt: newDebt,
+          points: 0
         });
         const settlementRef = doc2(collection2(db, "delivery_debt_settlements"));
         batch.set(settlementRef, {
@@ -1838,6 +1869,24 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
             driverSettledAt: serverTimestamp()
           });
         });
+
+        // Also mark all pending delivery_canon_payments as settled for this driver
+        try {
+          const canonQ = q2(col2(db, "delivery_canon_payments"), w2("driverId", "==", driver.id));
+          const canonSnap = await gD2(canonQ);
+          canonSnap.docs.forEach((cDoc) => {
+            if (cDoc.data().settled !== true) {
+              batch.update(doc2(db, "delivery_canon_payments", cDoc.id), {
+                settled: true,
+                status: "settled",
+                settledAt: serverTimestamp()
+              });
+            }
+          });
+        } catch (canonErr) {
+          console.warn("Could not mark canon payments as settled:", canonErr);
+        }
+
         await batch.commit();
         try {
           const notifRef = doc2(collection2(db, "users", driver.id, "notifications"));
@@ -3076,32 +3125,122 @@ async function showDriverPaymentHistoryModal(driver, db2) {
 async function showDriverDebtDetailModal(driver, db2) {
   const { showModal: showModal2 } = await import("../../components/modal.js");
   const { formatPrice: formatPrice2 } = await import("../../utils/format.js");
-  const currentDebt = driver.deliveryDebt || 0;
-  const canonAmt = getState().canonAmount || 1800;
-  const driverOrders = globalPendingOrders.filter(
-    (o) => o.driverId === driver.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")
-  );
-  const appFeesTotal = driverOrders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
-  const rawCanonFees = Math.max(0, currentDebt - appFeesTotal);
-  const canonFeesTotal = rawCanonFees;
-  const totalCouponsCredit = driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
-  const finalSettleAmount = Math.max(0, appFeesTotal + canonFeesTotal - totalCouponsCredit);
-  const getOrderTypeName = (o) => {
-    if (o.isTrip) return "\u{1F697} Go Viaje";
-    if (o.isFavor) {
-      if (o.favorType === "gocash") return "\u{1F4B5} Go Cash";
-      if (o.favorType === "encomienda") return "\u{1F4E6} Encomienda";
-      if (o.favorType === "mandado" || o.favorType === "compra") return "\u{1F6F5} Mandado";
-      if (o.favorType === "pagodeservicios") return "\u{1F9FE} Pago de Servicios";
-      return "\u{1F6F5} Mandado";
+  const { doc: doc2, getDoc: getDoc2, collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
+  const targetDb = db2 || db;
+
+  // Re-fetch fresh user document from Firestore to ensure real-time accuracy of deliveryDebt
+  let freshDebt = driver.deliveryDebt || 0;
+  try {
+    const userSnap = await getDoc2(doc2(targetDb, "users", driver.id));
+    if (userSnap.exists()) {
+      freshDebt = userSnap.data().deliveryDebt || 0;
     }
-    return `\u{1F3EA} ${o.comercioName || o.commerce || "Comercio"}`;
+  } catch (err) {
+    console.warn("Could not re-fetch fresh user doc for debt modal:", err);
+  }
+
+  const currentDebt = Math.max(0, freshDebt);
+  const canonAmt = getState().canonAmount || 1800;
+
+  // Query driver's unsettled orders directly from Firestore or globalPendingOrders
+  let driverOrders = [];
+  try {
+    const { collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
+    const ordersQ = q2(col2(targetDb, "orders"), w2("driverId", "==", driver.id));
+    const ordersSnap = await gD2(ordersQ);
+    driverOrders = ordersSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(o => o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
+  } catch (err) {
+    driverOrders = globalPendingOrders.filter(
+      (o) => o.driverId === driver.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")
+    );
+  }
+
+  const appFeesTotal = currentDebt > 0 ? driverOrders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0) : 0;
+  const totalCouponsCredit = currentDebt > 0 ? driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0) : 0;
+
+  // Fetch driver's itemized canon charges directly from Firestore
+  let driverCanons = [];
+  try {
+    const { collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
+    const canonQ = q2(col2(targetDb, "delivery_canon_payments"), w2("driverId", "==", driver.id));
+    const canonSnap = await gD2(canonQ);
+    driverCanons = canonSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(c => c.status !== "revoked")
+      .sort((a, b) => {
+        const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return tB - tA;
+      });
+  } catch (err) {
+    console.warn("Error fetching driver canons for debt details:", err);
+  }
+
+  // If driver has active debt, ensure canonFeesTotal matches (currentDebt - appFeesTotal)
+  let canonFeesTotal = 0;
+  if (currentDebt > 0) {
+    const rawCanon = Math.max(0, currentDebt - appFeesTotal);
+    canonFeesTotal = rawCanon;
+
+    // Filter itemized list to show canons matching current debt
+    let accum = 0;
+    const itemized = [];
+    for (const c of driverCanons) {
+      if (accum >= canonFeesTotal) break;
+      itemized.push(c);
+      accum += (c.amount || canonAmt);
+    }
+    driverCanons = itemized;
+  } else {
+    driverCanons = [];
+    canonFeesTotal = 0;
+  }
+
+  const systemDebtSubtotal = currentDebt > 0 ? (appFeesTotal + canonFeesTotal) : 0;
+  const finalSettleAmount = Math.max(0, systemDebtSubtotal - totalCouponsCredit);
+
+  const getOrderTypeName = (o) => {
+    if (o.isTrip) return "🚗 Go Viaje";
+    if (o.isFavor) {
+      if (o.favorType === "gocash") return "💵 Go Cash";
+      if (o.favorType === "encomienda") return "📦 Encomienda";
+      if (o.favorType === "mandado" || o.favorType === "compra") return "🛵 Mandado";
+      if (o.favorType === "pagodeservicios") return "🧾 Pago de Servicios";
+      return "🛵 Mandado";
+    }
+    return `🏪 ${o.comercioName || o.commerce || "Comercio"}`;
   };
+
   const formatDate = (ts) => {
     if (!ts) return "---";
     const d = ts.toDate ? ts.toDate() : new Date(ts);
-    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   };
+
+  const formatDateWithTime = (ts, fallbackStr) => {
+    if (!ts) return fallbackStr || "---";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    if (isNaN(d.getTime())) return fallbackStr || "---";
+    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " hs";
+  };
+
+  const canonsBreakdownHTML = driverCanons.length > 0 ? `
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; border-top:1px dashed rgba(239,68,68,0.2); padding-top:8px;">
+      <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;">Cánones Registrados:</div>
+      ${driverCanons.map(c => `
+        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); padding:8px 10px; border-radius:10px; font-size:11px;">
+          <div style="display:flex; flex-direction:column; gap:1px;">
+            <span style="font-weight:800; color:var(--color-text-primary);">🛵 Canon Diario Jornada (${c.dateStr || ''})</span>
+            <span style="font-size:9.5px; color:var(--color-text-tertiary); font-weight:700;">📅 ${formatDateWithTime(c.createdAt, c.dateStr)}</span>
+          </div>
+          <strong style="color:#ef4444; font-family:monospace; font-size:12px;">+${formatPrice2(c.amount || canonAmt)}</strong>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
   const ordersListHTML = driverOrders.length === 0 ? `<div style="text-align:center; padding:16px; color:var(--color-text-tertiary); font-size:11px; font-weight:700;">Sin tarifas de pedidos pendientes de liquidar.</div>` : driverOrders.map((o) => `
         <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:12px; font-size:11.5px; transition:all 0.15s;">
           <div style="display:flex; flex-direction:column; gap:2px;">
@@ -3111,7 +3250,7 @@ async function showDriverDebtDetailModal(driver, db2) {
           <div style="text-align:right;">
             <strong style="color:#ef4444; font-family:monospace; font-size:12.5px;">+${formatPrice2(o.appUsageFee || 0)}</strong>
             ${o.couponDiscount > 0 ? `
-              <div style="font-size:9.5px; color:#a855f7; font-weight:850; margin-top:2px;">Cup\xF3n: -${formatPrice2(o.couponDiscount)}</div>
+              <div style="font-size:9.5px; color:#a855f7; font-weight:850; margin-top:2px;">Cupón: -${formatPrice2(o.couponDiscount)}</div>
             ` : ""}
           </div>
         </div>
@@ -3140,18 +3279,21 @@ async function showDriverDebtDetailModal(driver, db2) {
           </div>
 
           <!-- Canon Diario -->
-          <div style="background:rgba(239,68,68,0.02); border:1px solid rgba(239,68,68,0.08); border-radius:16px; padding:14px; display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-size:13px; font-weight:900; color:var(--color-text-primary);">Canon Diario / Ajustes</div>
-              <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Acumulado de cuotas o diferencias de saldo</div>
+          <div style="background:rgba(239,68,68,0.02); border:1px solid rgba(239,68,68,0.12); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-size:13px; font-weight:900; color:var(--color-text-primary);">Canon Diario / Ajustes</div>
+                <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Acumulado de cuotas o diferencias de saldo</div>
+              </div>
+              <div style="font-size:16px; font-weight:900; color:#ef4444; font-family:monospace;">+${formatPrice2(canonFeesTotal)}</div>
             </div>
-            <div style="font-size:16px; font-weight:900; color:#ef4444; font-family:monospace;">+${formatPrice2(canonFeesTotal)}</div>
+            ${canonsBreakdownHTML}
           </div>
 
           <!-- Total Base Debt -->
           <div style="display:flex; justify-content:space-between; align-items:center; padding:0 8px; font-weight:800; font-size:12.5px; border-bottom:1px dashed var(--color-border-light); padding-bottom:10px;">
             <span>Subtotal Deuda (Sistema)</span>
-            <span style="color:#ef4444; font-weight:900; font-family:monospace;">${formatPrice2(currentDebt)}</span>
+            <span style="color:#ef4444; font-weight:900; font-family:monospace;">${formatPrice2(systemDebtSubtotal)}</span>
           </div>
 
           <!-- Coupons Credit (if exists) -->

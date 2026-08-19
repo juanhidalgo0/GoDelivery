@@ -1122,9 +1122,14 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       await serverSideDispatch(orderId, after);
     }
 
-    // Server-side Auto-Accept Logic:
-    // If a target driver is assigned, the driver changed, there is no driver assigned yet, and the driver has auto-accept enabled:
-    if (after.queueTargetDriverId && before.queueTargetDriverId !== after.queueTargetDriverId && !after.driverId) {
+    const bOfferedMs = before.queueOfferedAt ? (before.queueOfferedAt.toMillis ? before.queueOfferedAt.toMillis() : new Date(before.queueOfferedAt).getTime()) : 0;
+    const aOfferedMs = after.queueOfferedAt ? (after.queueOfferedAt.toMillis ? after.queueOfferedAt.toMillis() : new Date(after.queueOfferedAt).getTime()) : 0;
+    const isTargetAssignedOrRefreshed = after.queueTargetDriverId && (
+      before.queueTargetDriverId !== after.queueTargetDriverId ||
+      (aOfferedMs > 0 && aOfferedMs !== bOfferedMs)
+    );
+
+    if (isTargetAssignedOrRefreshed && !after.driverId) {
       const driverId = after.queueTargetDriverId;
       const driverDoc = await db.collection("users").doc(driverId).get();
       if (driverDoc.exists) {
@@ -1879,6 +1884,21 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
   }
 
   try {
+    // Verify online delivery drivers availability
+    const onlineDriversSnap = await db.collection("users")
+      .where("isOnline", "==", true)
+      .get();
+
+    const hasOnlineDriver = onlineDriversSnap.docs.some(doc => {
+      const d = doc.data();
+      const role = (d.role || "").toLowerCase();
+      return d.isDelivery === true || d.isDelivery === "true" || ["delivery", "driver", "repartidor", "chofer"].includes(role);
+    });
+
+    if (!hasOnlineDriver) {
+      return res.status(400).json({ error: "No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona." });
+    }
+
     // Fetch active offers for the cart's commerce IDs (done before transaction to prevent Firestore errors)
     const commerceIds = [...new Set(cart.map(item => item.comercioId))];
     let activeOffers = [];
@@ -2385,6 +2405,21 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
   }
 
   try {
+    // Verify online delivery drivers availability
+    const onlineDriversSnap = await db.collection("users")
+      .where("isOnline", "==", true)
+      .get();
+
+    const hasOnlineDriver = onlineDriversSnap.docs.some(doc => {
+      const d = doc.data();
+      const role = (d.role || "").toLowerCase();
+      return d.isDelivery === true || d.isDelivery === "true" || ["delivery", "driver", "repartidor", "chofer"].includes(role);
+    });
+
+    if (!hasOnlineDriver) {
+      return res.status(400).json({ error: "No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona." });
+    }
+
     const result = await db.runTransaction(async (transaction) => {
       // 1. Fetch user data
       const userRef = db.collection("users").doc(uid);
@@ -3178,30 +3213,8 @@ exports.checkNightSurchargeSchedule = onSchedule("*/5 * * * *", async (event) =>
 });
 
 exports.onOfferCreated = onDocumentCreated("offers/{offerId}", async (event) => {
-  const offer = event.data.data();
-  if (!offer) return;
-  const title = offer.title || "¡Nueva Oferta!";
-  const body = offer.description || "Aprovechá esta oferta especial.";
-  
-  let targetUrl = "#/";
-  if (offer.comercioId) {
-    if (offer.productIds && offer.productIds.length > 0) {
-      targetUrl = `#/comercio/${offer.comercioId}?product=${offer.productIds[0]}`;
-    } else {
-      targetUrl = `#/comercio/${offer.comercioId}`;
-    }
-  }
-
-  try {
-    const tokensSnap = await db.collectionGroup("fcmTokens").get();
-    const tokens = [...new Set(tokensSnap.docs.map(d => d.data().token).filter(Boolean))];
-    
-    if (tokens.length > 0) {
-      await sendPush(tokens, { title, body }, { tag: `offer-${event.params.offerId}`, url: targetUrl });
-    }
-  } catch (e) {
-    logger.error("Error sending offer push:", e);
-  }
+  // Push notification on offer creation disabled per user request
+  return;
 });
 
 exports.onAdCreated = onDocumentCreated("ads/{adId}", async (event) => {
@@ -3600,7 +3613,7 @@ exports.getServerTime = onRequest({ cors: true }, (req, res) => {
  * if all apps are in background or closed.
  */
 exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
-  const OFFER_TIMEOUT_MS = 60 * 1000; // Strict 60-second limit
+  const OFFER_TIMEOUT_MS = 30 * 1000; // Strict 30-second limit
   const now = Date.now();
   const cutoff = new Date(now - OFFER_TIMEOUT_MS);
 

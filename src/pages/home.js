@@ -42,13 +42,15 @@ export async function renderHome(content) {
     if (rawAppOnly) onlyInAppProducts = JSON.parse(rawAppOnly);
 
     const rawCats = localStorage.getItem('gd_platform_categories');
-    if (rawCats) categories = JSON.parse(rawCats);
+    if (rawCats) {
+      const parsed = JSON.parse(rawCats);
+      if (Array.isArray(parsed)) categories = parsed;
+    }
 
     const rawComercios = localStorage.getItem('gd_cached_comercios');
     if (rawComercios) {
       const parsed = JSON.parse(rawComercios);
-      // Only treat cache as valid and complete if it has >= 3 shops (avoids 1-shop glitches)
-      if (parsed && parsed.length >= 3) {
+      if (parsed && parsed.length > 0) {
         comercios = parsed;
         isLoadingComercios = false;
       }
@@ -163,19 +165,35 @@ export async function renderHome(content) {
         <!-- Promoted Section -->
         <div id="promoted-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
   
+        <!-- Offers Slider Section -->
+        <div id="offers-slider-section" style="margin-top: 2px; margin-bottom: 14px;">
+          <div style="padding: 0 16px; margin-bottom: 8px;">
+            <div style="height: 18px; width: 140px; background: rgba(0,0,0,0.06); border-radius: 6px;" class="skeleton"></div>
+          </div>
+          <div style="display: flex; gap: 12px; padding: 4px 16px 12px 16px; overflow: hidden;">
+            ${renderSkeletonCards(3)}
+          </div>
+        </div>
+
         <!-- App Only Section -->
         <div id="app-only-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
   
         <!-- Main Content (Comercios Grid) -->
         <div style="position: absolute; top: -50px; left: -20%; width: 140%; height: 300px; background: radial-gradient(circle at 50% 0%, rgba(225,29,72,0.15), rgba(16,185,129,0.05), transparent 70%); filter: blur(40px); z-index: -1; pointer-events: none;"></div>
-        <div class="home-section" style="margin-top: 18px; padding-top: 8px; position: relative;">
-          <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 18px; padding: 0 16px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-              <h2 class="home-section-title" style="font-size:19px; font-weight:900; letter-spacing:-0.03em; color:var(--color-text-primary); margin:0;">
-                Todos los comercios
-              </h2>
-              <a href="#/category/Todos" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
+        <div class="home-section" style="margin-top: 24px; position: relative;">
+          <div style="padding: 0 16px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+                <h2 class="home-section-title" style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  Comercios
+                </h2>
+                <span style="background: rgba(16, 185, 129, 0.1); color: #059669; font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;">
+                  🛒 Locales
+                </span>
+              </div>
+              <a href="#/category/Todos" style="font-size: 12px; font-weight: 800; color: var(--color-primary); text-decoration: none; display: flex; align-items: center; gap: 2px; padding: 5px 11px; border-radius: 20px; background: rgba(225, 29, 72, 0.08); transition: all 0.2s; flex-shrink: 0; white-space: nowrap;">Ver todos <span style="display: flex;">${icon('chevronRight', 14)}</span></a>
             </div>
+            <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Explorá gastronómicos, almacenes y tiendas locales</span>
           </div>
           
           <div class="comercios-slider-wrapper">
@@ -322,6 +340,7 @@ export async function renderHome(content) {
     renderBrandsSlider(comercios);
     renderPopularProductsSlider(comercios, offers);
     renderPromotedSection(comercios);
+    renderOffersSection(offers, comercios);
     renderAppOnlySection(onlyInAppProducts, comercios, offers);
     
     const searchVal = document.getElementById('header-search')?.value || '';
@@ -355,86 +374,67 @@ export async function renderHome(content) {
     renderBrandsSlider(comercios);
     renderPopularProductsSlider(comercios, offers);
     renderPromotedSection(comercios);
+    renderOffersSection(offers, comercios);
     renderAppOnlySection(onlyInAppProducts, comercios, offers);
     const searchVal = document.getElementById('header-search')?.value || '';
     renderComercios(comercios, activeCategory, searchVal, currentFilters);
   }
 
-  // Load Firestore data in background without blocking layout skeleton
-  try {
-    const qAppOnly = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
-    const [catSnap, offersSnap, appOnlySnap] = await Promise.all([
-      getDocsOptimized(query(collection(db, 'platformCategories'), orderBy('order')), 'platformCategories', 3600000),
-      getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 300000),
-      getDocsOptimized(qAppOnly, 'onlyInAppProducts', 300000)
-    ]);
-
-    categories = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
-    if (categories.length <= 2) {
-      categories = defaultNames.map((name, i) => ({ id: name.toLowerCase().replace(/\s+/g, '-'), name, icon: '', order: i, isActive: true }));
+  // Safety Fallback Timer for iPhone / slow WebKit connections (never leave skeleton frozen > 300ms)
+  const homeSafetyTimer = setTimeout(() => {
+    if (isLoadingComercios) {
+      console.log('[Home Safety Timer] Forcing isLoadingComercios = false to prevent skeleton freeze on iOS');
+      isLoadingComercios = false;
+      doActualHomeRender();
     }
+  }, 300);
 
-    try {
-      localStorage.setItem('gd_platform_categories', JSON.stringify(categories));
-    } catch (e) {}
-
-    offers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    onlyInAppProducts = appOnlySnap.docs
-      .map(docSnap => {
-        const pathParts = docSnap.ref.path.split('/');
-        const comercioId = pathParts[1];
-        return { id: docSnap.id, comercioId, ...docSnap.data() };
-      })
-      .filter(p => p.isAvailable !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0));
-
-    try {
-      localStorage.setItem('gd_cached_offers', JSON.stringify(offers));
-      localStorage.setItem('gd_cached_only_in_app', JSON.stringify(onlyInAppProducts));
-    } catch (e) {}
-
-    if (!categories.some(c => c.name === 'GoMarket')) {
-      categories.push({ id: 'gomarket', name: 'GoMarket', icon: 'shoppingBag', order: 0 });
+  // Parallel getDocs fetch as immediate fallback for iOS Safari/Capacitor WebKit
+  getDocs(collection(db, 'comercios')).then((comSnap) => {
+    if (comSnap.docs && comSnap.docs.length > 0) {
+      const fetchedComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (comercios.length === 0 || isLoadingComercios) {
+        comercios = fetchedComercios;
+        isLoadingComercios = false;
+        clearTimeout(homeSafetyTimer);
+        try { localStorage.setItem('gd_cached_comercios', JSON.stringify(comercios)); } catch (e) {}
+        doActualHomeRender();
+      }
     }
-  } catch (err) {
-    console.error('Error fetching dynamic collections:', err);
-  }
+  }).catch((err) => {
+    console.warn('[Parallel getDocs comercios warning]', err);
+  });
 
-  // Set up live snapshot listener for comercios
+  // Set up live snapshot listener for comercios IMMEDIATELY
   try {
-    unsubComercios = onSnapshot(collection(db, 'comercios'), { includeMetadataChanges: true }, async (comSnap) => {
+    unsubComercios = onSnapshot(collection(db, 'comercios'), { includeMetadataChanges: true }, (comSnap) => {
+      clearTimeout(homeSafetyTimer);
       const isFromCache = comSnap.metadata.fromCache;
       const newComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      // Skip incomplete offline cache snapshots (less than 3 stores) or snaps smaller than our current list
-      if (isFromCache && (newComercios.length < 3 || comercios.length > newComercios.length)) {
-        console.log(`[Firestore Cache Bypassed] Ignoring incomplete offline cache snap of size ${newComercios.length}`);
-        return;
+      if (newComercios.length > 0 || !isFromCache) {
+        comercios = newComercios;
       }
-
-      comercios = newComercios;
 
       const wasLoading = isLoadingComercios;
-      // Only mark loading as complete if data came from server or if we got >=3 cached items
-      if (!isFromCache || newComercios.length >= 3) {
-        isLoadingComercios = false;
-      }
+      isLoadingComercios = false;
 
-      if (!isFromCache) {
+      if (!isFromCache && comercios.length > 0) {
         try {
           localStorage.setItem('gd_cached_comercios', JSON.stringify(comercios));
         } catch (e) {}
       }
 
-      // If we are rendering for the first time (no valid cache was present on start)
-      if (wasLoading && !isLoadingComercios) {
+      // Render or update UI in place
+      if (wasLoading) {
         doActualHomeRender();
-      } else if (!isLoadingComercios) {
-        // Update elements in place if already rendered
+      } else {
         const hasContainer = content.querySelector('#brands-slider-container');
         if (hasContainer) {
           renderBrandsSlider(comercios);
           renderPopularProductsSlider(comercios, offers);
           renderPromotedSection(comercios);
+          renderOffersSection(offers, comercios);
           renderAppOnlySection(onlyInAppProducts, comercios, offers);
           renderCategories(categories, activeCategory);
           const searchVal = document.getElementById('header-search')?.value || '';
@@ -443,10 +443,59 @@ export async function renderHome(content) {
           doActualHomeRender();
         }
       }
+    }, (snapErr) => {
+      console.error('[onSnapshot comercios error]', snapErr);
+      clearTimeout(homeSafetyTimer);
+      isLoadingComercios = false;
+      doActualHomeRender();
     });
   } catch (err) {
     console.error('Error setting onSnapshot:', err);
+    clearTimeout(homeSafetyTimer);
+    isLoadingComercios = false;
+    doActualHomeRender();
   }
+
+  // Load secondary Firestore collections asynchronously in background (Non-blocking)
+  (async () => {
+    try {
+      const qAppOnly = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
+      const [catSnap, offersSnap, appOnlySnap] = await Promise.all([
+        getDocsOptimized(query(collection(db, 'platformCategories'), orderBy('order')), 'platformCategories', 3600000).catch(() => ({ docs: [] })),
+        getDocsOptimized(collection(db, 'offers'), 'activeOffers', 300000).catch(() => ({ docs: [] })),
+        getDocsOptimized(qAppOnly, 'onlyInAppProducts', 300000).catch(() => ({ docs: [] }))
+      ]);
+
+      if (catSnap.docs && catSnap.docs.length > 0) {
+        const loadedCats = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
+        if (loadedCats.length >= 3) {
+          categories = loadedCats;
+          try { localStorage.setItem('gd_platform_categories', JSON.stringify(categories)); } catch (e) {}
+          renderCategories(categories, activeCategory);
+        }
+      }
+
+      if (offersSnap.docs) {
+        offers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        try { localStorage.setItem('gd_cached_offers', JSON.stringify(offers)); } catch (e) {}
+        renderOffersSection(offers, comercios);
+      }
+
+      if (appOnlySnap.docs) {
+        onlyInAppProducts = appOnlySnap.docs
+          .map(docSnap => {
+            const pathParts = docSnap.ref.path.split('/');
+            const comercioId = pathParts[1];
+            return { id: docSnap.id, comercioId, ...docSnap.data() };
+          })
+          .filter(p => p.isAvailable !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0));
+        try { localStorage.setItem('gd_cached_only_in_app', JSON.stringify(onlyInAppProducts)); } catch (e) {}
+        renderAppOnlySection(onlyInAppProducts, comercios, offers);
+      }
+    } catch (err) {
+      console.warn('Error fetching dynamic background collections:', err);
+    }
+  })();
 
   return {
     cleanup: () => {
@@ -643,10 +692,15 @@ async function checkAndShowWelcomeCouponModal() {
       `;
 
       modalEl.innerHTML = `
-        <div style="background: var(--color-surface, #ffffff); max-width: 400px; width: 100%; border-radius: 28px; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.2); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; position: relative;">
+        <div style="background: var(--color-surface, #ffffff); max-width: 400px; width: 92%; max-height: calc(100vh - 40px); border-radius: 28px; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.25); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow-y: auto; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; position: relative;">
           
+          <!-- Close X button -->
+          <button id="welcome-coupon-close-x" style="position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%; background: rgba(0,0,0,0.2); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; transition: transform 0.2s;" title="Cerrar">
+            ${icon('x', 18, '', '#FFF')}
+          </button>
+
           <!-- Gift Header visual box -->
-          <div style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); padding: 36px 24px 24px; text-align: center; color: white; position: relative;">
+          <div style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); padding: 36px 24px 24px; text-align: center; color: white; position: relative; flex-shrink: 0;">
             <div style="font-size: 56px; line-height: 1; margin-bottom: 12px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15)); display: inline-block;">🎁</div>
             <h2 style="font-family: var(--font-display, inherit); font-size: 24px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.03em;">¡Tu Regalo de Bienvenida!</h2>
             <div style="font-size: 13px; font-weight: 800; color: rgba(255,255,255,0.9); margin-top: 6px;">Te regalamos $${couponValue} para tu primer pedido</div>
@@ -681,16 +735,23 @@ async function checkAndShowWelcomeCouponModal() {
 
       document.body.appendChild(modalEl);
 
+      const closeWelcomeModal = () => {
+        localStorage.setItem('welcome_coupon_modal_shown_v1', 'true');
+        modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
+        setTimeout(() => {
+          modalEl.remove();
+        }, 200);
+      };
+
       const acceptBtn = modalEl.querySelector('#welcome-coupon-accept-btn');
-      if (acceptBtn) {
-        acceptBtn.onclick = () => {
-          localStorage.setItem('welcome_coupon_modal_shown_v1', 'true');
-          modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
-          setTimeout(() => {
-            modalEl.remove();
-          }, 200);
-        };
-      }
+      if (acceptBtn) acceptBtn.onclick = closeWelcomeModal;
+
+      const closeX = modalEl.querySelector('#welcome-coupon-close-x');
+      if (closeX) closeX.onclick = closeWelcomeModal;
+
+      modalEl.onclick = (e) => {
+        if (e.target === modalEl) closeWelcomeModal();
+      };
     }
   }, 150);
 }
@@ -896,14 +957,19 @@ async function renderPromotedSection(comercios) {
 
   container.style.display = ''; // Reset display:none from previous empty-data call
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
-      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
-          Recomendados para vos
-        </h2>
-        <a href="#/category/Recomendados" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s; flex-shrink:0;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
+    <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+          <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            Recomendados
+          </h2>
+          <span style="background: rgba(245, 158, 11, 0.12); color: #d97706; font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;">
+            ⭐ Destacados
+          </span>
+        </div>
+        <a href="#/category/Recomendados" style="font-size: 12px; font-weight: 800; color: var(--color-primary); text-decoration: none; display: flex; align-items: center; gap: 2px; padding: 5px 11px; border-radius: 20px; background: rgba(225, 29, 72, 0.08); transition: all 0.2s; flex-shrink: 0; white-space: nowrap;">Ver todos <span style="display: flex;">${icon('chevronRight', 14)}</span></a>
       </div>
-      <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Selección exclusiva de locales destacados</span>
+      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Locales con las mejores opiniones cerca tuyo</span>
     </div>
     <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${finalPromoted.map(p => {
@@ -982,6 +1048,197 @@ async function renderPromotedSection(comercios) {
   container.classList.add('revealed');
 }
 
+async function renderOffersSection(offers = [], comercios = []) {
+  const container = document.getElementById('offers-slider-section');
+  if (!container) return;
+
+  const activeOffers = offers.filter(o => o.active !== false);
+
+  if (activeOffers.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const comerciosMap = {};
+  comercios.forEach(c => comerciosMap[c.id] = c);
+
+  let offerItems = [];
+
+  for (const offer of activeOffers) {
+    const comercio = comerciosMap[offer.comercioId];
+    const comercioName = comercio ? comercio.name : (offer.merchantName || 'Comercio');
+    const isClosed = comercio ? !isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen) : false;
+
+    const prodIds = offer.productIds || (offer.targetProductId ? [offer.targetProductId] : []);
+
+    let badgeText = offer.badgeText || offer.title || 'OFERTA';
+    if (offer.type === 'percentage' && offer.value) badgeText = `${offer.value}% OFF`;
+    else if (offer.type === 'fixed' && offer.value) badgeText = `-$${offer.value}`;
+    else if (offer.type === '2x1') badgeText = '2x1';
+    else if (offer.discountPercentage) badgeText = `${offer.discountPercentage}% OFF`;
+    else if (offer.discountFixed) badgeText = `-$${offer.discountFixed}`;
+
+    if (prodIds.length === 0) {
+      offerItems.push({
+        id: offer.id,
+        comercioId: offer.comercioId,
+        comercioName,
+        title: offer.title || 'Oferta Especial',
+        image: offer.banner || offer.bannerUrl || offer.imageUrl || (comercio ? comercio.logo : ''),
+        badgeText,
+        originalPrice: offer.originalPrice || 0,
+        finalPrice: offer.offerPrice || offer.price || 0,
+        isClosed,
+        offer
+      });
+      continue;
+    }
+
+    let addedCount = 0;
+    for (const pId of prodIds.slice(0, 3)) {
+      try {
+        const prodSnap = await getDoc(doc(db, 'comercios', offer.comercioId, 'products', pId));
+        if (prodSnap.exists()) {
+          const prodData = prodSnap.data();
+          if (prodData.isAvailable !== false) {
+            const originalPrice = prodData.price || 0;
+            let finalPrice = originalPrice;
+
+            if (offer.type === 'percentage' && offer.value) {
+              finalPrice = Math.round(originalPrice * (1 - offer.value / 100));
+            } else if (offer.type === 'fixed' && offer.value) {
+              finalPrice = Math.max(0, originalPrice - offer.value);
+            } else if (offer.discountPercentage) {
+              finalPrice = Math.round(originalPrice * (1 - offer.discountPercentage / 100));
+            } else if (offer.discountFixed) {
+              finalPrice = Math.max(0, originalPrice - offer.discountFixed);
+            } else if (offer.offerPrice || offer.price) {
+              finalPrice = offer.offerPrice || offer.price;
+            }
+
+            offerItems.push({
+              id: `${offer.id}_${prodSnap.id}`,
+              comercioId: offer.comercioId,
+              comercioName,
+              title: prodData.name || offer.title || 'Oferta',
+              image: prodData.image || offer.banner || offer.bannerUrl || (comercio ? comercio.logo : ''),
+              badgeText,
+              originalPrice,
+              finalPrice,
+              isClosed,
+              product: { id: prodSnap.id, ...prodData },
+              offer
+            });
+            addedCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Error resolving offer product:', e);
+      }
+    }
+
+    if (addedCount === 0) {
+      offerItems.push({
+        id: offer.id,
+        comercioId: offer.comercioId,
+        comercioName,
+        title: offer.title || 'Oferta Especial',
+        image: offer.banner || offer.bannerUrl || offer.imageUrl || (comercio ? comercio.logo : ''),
+        badgeText,
+        originalPrice: offer.originalPrice || 0,
+        finalPrice: offer.offerPrice || offer.price || 0,
+        isClosed,
+        offer
+      });
+    }
+  }
+
+  if (offerItems.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="home-section" style="margin-top: 14px; position: relative;">
+      <div style="padding: 0 16px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #ef4444, #f59e0b); display: flex; align-items: center; justify-content: center; color: white; box-shadow: 0 4px 10px rgba(239,68,68,0.25);">
+            ${icon('flame', 18)}
+          </div>
+          <div>
+            <h2 style="font-family: var(--font-display); font-size: 17px; font-weight: 950; letter-spacing: -0.02em; color: var(--color-text-primary); margin: 0; line-height: 1.1;">
+              Ofertas del Día
+            </h2>
+            <span style="font-size: 10.5px; color: var(--color-text-secondary); font-weight: 600;">Promociones exclusivas en comercios</span>
+          </div>
+        </div>
+        <a href="#/offers" style="font-size: 12px; font-weight: 850; color: var(--color-primary); text-decoration: none; display: flex; align-items: center; gap: 2px;">
+          Ver todas ${icon('chevronRight', 16)}
+        </a>
+      </div>
+
+      <div class="offers-slider" style="display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding: 4px 16px 14px; scroll-behavior: smooth;">
+        ${offerItems.map((item, index) => `
+          <div class="offer-card-home-item spring-hover" data-item-index="${index}" style="flex: 0 0 165px; background: var(--color-surface); border-radius: 18px; border: 1.5px solid var(--color-border); overflow: hidden; display: flex; flex-direction: column; cursor: pointer; position: relative; box-shadow: 0 4px 14px rgba(0,0,0,0.04); transition: all 0.2s;">
+            
+            <!-- Badge -->
+            <div style="position: absolute; top: 8px; left: 8px; z-index: 5; background: linear-gradient(135deg, #ef4444, #dc2626); color: white; font-size: 9.5px; font-weight: 950; padding: 3px 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(239,68,68,0.3); text-transform: uppercase; letter-spacing: 0.3px;">
+              ${item.badgeText}
+            </div>
+
+            <!-- Product Image Container -->
+            <div style="width: 100%; height: 110px; background: var(--color-bg-secondary); position: relative; overflow: hidden;">
+              ${item.image 
+                ? `<img src="${item.image}" alt="${item.title}" style="width: 100%; height: 100%; object-fit: cover; ${item.isClosed ? 'filter: grayscale(80%);' : ''}" />`
+                : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:32px;">🏷️</div>`
+              }
+              ${item.isClosed ? `
+                <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center;">
+                  <span style="background: rgba(0,0,0,0.75); color: white; font-size: 9px; font-weight: 900; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">Cerrado</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Content -->
+            <div style="padding: 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between; gap: 6px;">
+              <div>
+                <span style="font-size: 9.5px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.3px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  ${item.comercioName}
+                </span>
+                <h4 style="font-family: var(--font-display); font-size: 13px; font-weight: 900; color: var(--color-text-primary); margin: 2px 0 0; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                  ${item.title}
+                </h4>
+              </div>
+
+              <!-- Price Box -->
+              <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                ${item.finalPrice > 0 ? `<span style="font-size: 14px; font-weight: 950; color: #ef4444; font-family: var(--font-display);">${formatPrice(item.finalPrice)}</span>` : `<span style="font-size: 11px; font-weight: 900; color: var(--color-primary);">Ver Promo</span>`}
+                ${item.originalPrice > item.finalPrice && item.finalPrice > 0 ? `<span style="font-size: 10.5px; text-decoration: line-through; color: var(--color-text-tertiary); font-weight: 700;">${formatPrice(item.originalPrice)}</span>` : ''}
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  // Attach click events
+  container.querySelectorAll('.offer-card-home-item').forEach(card => {
+    card.onclick = () => {
+      const idx = parseInt(card.dataset.itemIndex);
+      const item = offerItems[idx];
+      if (item) {
+        if (item.product) {
+          openProductModal(item.product, offers, item.comercioId);
+        } else {
+          location.hash = `#/comercio/${item.comercioId}`;
+        }
+      }
+    };
+  });
+  container.classList.add('revealed');
+}
+
 function renderAppOnlySection(products, comercios, offers = []) {
   const container = document.getElementById('app-only-section');
   if (!container) return;
@@ -1006,14 +1263,19 @@ function renderAppOnlySection(products, comercios, offers = []) {
   const shuffledProducts = seededShuffle(activeProducts, getHourSeed());
 
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px;">
-      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
-          Disponible sólo en la app
-        </h2>
-        <a href="#/category/Solo En App" style="font-size:13px; font-weight:700; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:20px; background:var(--color-surface); border:1px solid var(--color-border-light); box-shadow:0 2px 8px rgba(0,0,0,0.03); transition:all 0.2s; flex-shrink:0;">Ver todos <span style="opacity:0.6; display:flex;">${icon('chevronRight', 14)}</span></a>
+    <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+          <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            Exclusivos App
+          </h2>
+          <span style="background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(126,34,206,0.15)); color: #7e22ce; font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;">
+            📱 Solo en App
+          </span>
+        </div>
+        <a href="#/category/Solo En App" style="font-size: 12px; font-weight: 800; color: #7e22ce; text-decoration: none; display: flex; align-items: center; gap: 2px; padding: 5px 11px; border-radius: 20px; background: rgba(126, 34, 206, 0.08); transition: all 0.2s; flex-shrink: 0; white-space: nowrap;">Ver todos <span style="display: flex;">${icon('chevronRight', 14)}</span></a>
       </div>
-      <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Aprovechá productos exclusivos de nuestra plataforma móvil</span>
+      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Promociones especiales disponibles únicamente desde tu teléfono</span>
     </div>
     <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${shuffledProducts.map(p => {
@@ -1975,11 +2237,18 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   // If cache exists, render immediately to completely bypass skeleton transition
   if (cachedProducts && cachedProducts.length > 0) {
     container.innerHTML = `
-      <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px; margin-top: 14px;">
-        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
-          Productos Destacados
-        </h2>
-        <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los más vendidos en tiempo real ${icon('flame', 12)}</span>
+      <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+            <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              Destacados
+            </h2>
+            <span style="background: rgba(225, 29, 72, 0.1); color: var(--color-primary); font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
+              🔥 Top Ventas
+            </span>
+          </div>
+        </div>
+        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los productos y platos más pedidos en tiempo real</span>
       </div>
       <div class="random-products-slider-wrapper">
         <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
@@ -1997,11 +2266,18 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   } else {
     // Show skeletons initially ONLY if cache is empty
     container.innerHTML = `
-      <div style="padding: 0 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--color-primary); margin-left: 16px; padding-left: 10px; margin-top: 14px;">
-        <h2 style="font-size: 19px; font-weight: 900; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0;">
-          Productos Destacados
-        </h2>
-        <span style="font-size: 12.5px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los más vendidos en tiempo real ${icon('flame', 12)}</span>
+      <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+            <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              Destacados
+            </h2>
+            <span style="background: rgba(225, 29, 72, 0.1); color: var(--color-primary); font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
+              🔥 Top Ventas
+            </span>
+          </div>
+        </div>
+        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los productos y platos más pedidos en tiempo real</span>
       </div>
       <div class="random-products-slider-wrapper">
         <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">

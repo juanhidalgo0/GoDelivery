@@ -19,6 +19,7 @@ const getMainRoutes = () => {
     '/mi-comercio': 'page-commerce',
     '/mi-comercio/:id/orders': 'page-commerce',
     '/delivery': 'page-delivery',
+    '/delivery-panel': 'page-delivery',
     '/cart': 'page-cart',
     '/profile': 'page-profile',
     '/profile/orders': 'page-profile',
@@ -26,7 +27,10 @@ const getMainRoutes = () => {
     '/mis-chats': 'page-mis-chats'
   };
   const user = getState().user;
-  if (user && !isDelivery() && !isAdmin()) delete list['/delivery'];
+  if (user && !isDelivery() && !isAdmin()) {
+    delete list['/delivery'];
+    delete list['/delivery-panel'];
+  }
   if (user && !isComercio() && !isAdmin()) {
     delete list['/mi-comercio'];
     delete list['/mi-comercio/:id/orders'];

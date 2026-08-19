@@ -75,6 +75,28 @@ export function renderHeader() {
   if (header.dataset.lastHeaderFingerprint === currentFingerprint && header.innerHTML.trim().length > 0) {
     return;
   }
+
+  // In-place DOM update if header DOM is already mounted (prevents tearing down DOM and layout flickering)
+  const existingAddressSpan = header.querySelector('#header-address-text');
+  if (existingAddressSpan && header.innerHTML.trim().length > 0) {
+    existingAddressSpan.textContent = displayAddress;
+    const desktopAddressVal = header.querySelector('.desktop-address-value');
+    if (desktopAddressVal) {
+      desktopAddressVal.textContent = address || 'Seleccionar dirección';
+    }
+    const badgeEl = header.querySelector('#mobile-unread-badge');
+    if (badgeEl) {
+      if (unreadCount > 0) {
+        badgeEl.textContent = unreadCount;
+        badgeEl.style.display = 'flex';
+      } else {
+        badgeEl.style.display = 'none';
+      }
+    }
+    header.dataset.lastHeaderFingerprint = currentFingerprint;
+    return;
+  }
+
   header.dataset.lastHeaderFingerprint = currentFingerprint;
 
   const isOwner = isComercio();
@@ -202,37 +224,9 @@ export function renderHeader() {
     </div>
   `;
 
-  if (isHome) {
-    if (window.innerWidth < 1024) {
-      header.style.setProperty('background', 'var(--color-primary)', 'important');
-      header.style.setProperty('border-bottom-left-radius', '28px', 'important');
-      header.style.setProperty('border-bottom-right-radius', '28px', 'important');
-      header.style.setProperty('box-shadow', '0 10px 30px rgba(var(--color-primary-rgb), 0.3)', 'important');
-      header.style.setProperty('border', 'none', 'important');
-      header.style.setProperty('backdrop-filter', 'none', 'important');
-      header.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-      header.style.setProperty('margin', '0', 'important');
-      header.style.setProperty('padding', '0', 'important');
-      header.style.setProperty('position', 'sticky', 'important');
-      header.style.setProperty('top', '0', 'important');
-      header.style.setProperty('z-index', '2000', 'important');
-      header.style.setProperty('overflow', 'visible', 'important');
-    } else {
-      header.style.removeProperty('background');
-      header.style.removeProperty('border-bottom-left-radius');
-      header.style.removeProperty('border-bottom-right-radius');
-      header.style.removeProperty('box-shadow');
-      header.style.removeProperty('border');
-      header.style.removeProperty('backdrop-filter');
-      header.style.removeProperty('-webkit-backdrop-filter');
-      header.style.removeProperty('margin');
-      header.style.removeProperty('padding');
-      header.style.removeProperty('position');
-      header.style.removeProperty('top');
-      header.style.removeProperty('z-index');
-      header.style.removeProperty('overflow');
-    }
+  const isProfilePage = hash === '#/profile';
 
+  if (isHome || isProfilePage) {
     header.innerHTML = `
       ${desktopHeaderHTML}
       <div class="mobile-header-only" style="width:100%; padding-top: ${topPadding};">
@@ -245,7 +239,7 @@ export function renderHeader() {
         <div class="header-top" style="height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 2;">
           <!-- Address Selector -->
           <div id="header-location-selector" style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-            <span style="font-weight: 700; font-size: 14px; color: white; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            <span id="header-address-text" style="font-weight: 700; font-size: 14px; color: white; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               ${displayAddress}
             </span>
             <span style="color: white; display: flex; opacity: 0.8;">${icon('chevronDown', 14)}</span>
@@ -260,9 +254,7 @@ export function renderHeader() {
             <!-- Modern Social-Style Notification Bell -->
             <a href="#/notifications" title="Notificaciones" style="color: white; display: flex; position: relative; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.2s;">
               ${icon('bell', 20)}
-              ${(getState().unreadNotifications || 0) > 0 ? `
-                <span style="position: absolute; top: 2px; right: 2px; background: #E11D48; color: white; font-size: 10px; font-weight: 900; min-width: 16px; height: 16px; border-radius: 8px; border: 2px solid var(--color-primary); display: flex; align-items: center; justify-content: center; padding: 0 3px; box-sizing: border-box; animation: badgePulse 2s infinite;">${getState().unreadNotifications}</span>
-              ` : ''}
+              <span id="mobile-unread-badge" style="position: absolute; top: 2px; right: 2px; background: #E11D48; color: white; font-size: 10px; font-weight: 900; min-width: 16px; height: 16px; border-radius: 8px; border: 2px solid var(--color-primary); display: ${unreadCount > 0 ? 'flex' : 'none'}; align-items: center; justify-content: center; padding: 0 3px; box-sizing: border-box; animation: badgePulse 2s infinite;">${unreadCount}</span>
             </a>
             <a href="#/profile" style="color: white; display: flex; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
               ${icon('user', 20)}
@@ -275,15 +267,17 @@ export function renderHeader() {
           </div>
         </div>
 
-        <!-- Search Bar -->
-        <div id="header-search-container" style="padding: 0 16px 16px 16px; margin-top: 2px; position: relative; z-index: 2; overflow: hidden; height: 62px; opacity: 1; transform: translateY(0); will-change: height, opacity, transform;">
-          <div style="background: white; border-radius: 14px; height: 46px; display: flex; align-items: center; padding: 0 4px 0 16px; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-            <input type="text" id="header-search" placeholder="Locales, platos y productos" autocomplete="off" style="color: #333; font-weight: 600; font-size: 14px; border: none; background: transparent; width: 100%; outline: none;" />
-            <div style="background: var(--color-primary); width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; cursor: pointer;">
-              ${icon('search', 18)}
+        <!-- Search Bar (Hidden on Profile Page) -->
+        ${isProfilePage ? '' : `
+          <div id="header-search-container" style="padding: 0 16px 16px 16px; margin-top: 2px; position: relative; z-index: 2; overflow: hidden; height: 62px; opacity: 1; transform: translateY(0); will-change: height, opacity, transform;">
+            <div style="background: white; border-radius: 14px; height: 46px; display: flex; align-items: center; padding: 0 4px 0 16px; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+              <input type="text" id="header-search" placeholder="Locales, platos y productos" autocomplete="off" style="color: #333; font-weight: 600; font-size: 14px; border: none; background: transparent; width: 100%; outline: none;" />
+              <div style="background: var(--color-primary); width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; cursor: pointer;">
+                ${icon('search', 18)}
+              </div>
             </div>
           </div>
-        </div>
+        `}
       </div>
       
       <style>
@@ -359,41 +353,43 @@ export function renderHeader() {
     }
     initSearchSuggestions();
 
-  } else {
-    if (window.innerWidth < 1024) {
-      header.style.setProperty('background', 'var(--color-primary)', 'important');
-      header.style.setProperty('border-bottom-left-radius', '28px', 'important');
-      header.style.setProperty('border-bottom-right-radius', '28px', 'important');
-      header.style.setProperty('box-shadow', '0 10px 30px rgba(var(--color-primary-rgb), 0.3)', 'important');
-      header.style.setProperty('border', 'none', 'important');
-      header.style.setProperty('backdrop-filter', 'none', 'important');
-      header.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-      header.style.setProperty('margin', '0', 'important');
-      header.style.setProperty('padding', '0', 'important');
-      header.style.setProperty('position', 'sticky', 'important');
-      header.style.setProperty('top', '0', 'important');
-      header.style.setProperty('z-index', '2000', 'important');
-      header.style.setProperty('overflow', 'visible', 'important');
-    } else {
-      header.style.removeProperty('background');
-      header.style.removeProperty('border-bottom-left-radius');
-      header.style.removeProperty('border-bottom-right-radius');
-      header.style.removeProperty('box-shadow');
-      header.style.removeProperty('border');
-      header.style.removeProperty('backdrop-filter');
-      header.style.removeProperty('-webkit-backdrop-filter');
-      header.style.removeProperty('margin');
-      header.style.removeProperty('padding');
-      header.style.removeProperty('position');
-      header.style.removeProperty('top');
-      header.style.removeProperty('z-index');
-      header.style.removeProperty('overflow');
-    }
+  }
 
+  if (window.innerWidth < 1024) {
+    header.style.setProperty('background', 'var(--color-primary)', 'important');
+    header.style.setProperty('border-bottom-left-radius', '28px', 'important');
+    header.style.setProperty('border-bottom-right-radius', '28px', 'important');
+    header.style.setProperty('box-shadow', '0 10px 30px rgba(var(--color-primary-rgb), 0.3)', 'important');
+    header.style.setProperty('border', 'none', 'important');
+    header.style.setProperty('backdrop-filter', 'none', 'important');
+    header.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    header.style.setProperty('margin', '0', 'important');
+    header.style.setProperty('padding', '0', 'important');
+    header.style.setProperty('position', 'sticky', 'important');
+    header.style.setProperty('top', '0', 'important');
+    header.style.setProperty('z-index', '2000', 'important');
+    header.style.setProperty('overflow', 'visible', 'important');
+  } else {
+    header.style.removeProperty('background');
+    header.style.removeProperty('border-bottom-left-radius');
+    header.style.removeProperty('border-bottom-right-radius');
+    header.style.removeProperty('box-shadow');
+    header.style.removeProperty('border');
+    header.style.removeProperty('backdrop-filter');
+    header.style.removeProperty('-webkit-backdrop-filter');
+    header.style.removeProperty('margin');
+    header.style.removeProperty('padding');
+    header.style.removeProperty('position');
+    header.style.removeProperty('top');
+    header.style.removeProperty('z-index');
+    header.style.removeProperty('overflow');
+  }
+
+  if (!isHome && !isProfilePage) {
     // SUB-PAGE HEADER: Dynamic Title + Gradient + Circles
     let title = 'Notificaciones';
     if (hash.startsWith('#/profile/orders')) title = 'Mis Pedidos';
-    else if (hash.startsWith('#/profile')) title = 'Mi Perfil';
+    else if (hash.startsWith('#/profile/publications')) title = 'Mis Publicaciones';
     else if (hash.startsWith('#/gofavores')) title = 'Mandados';
     else if (hash.startsWith('#/category')) {
        title = decodeURIComponent(hash.split('/').pop());

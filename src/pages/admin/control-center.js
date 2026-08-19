@@ -157,6 +157,10 @@ export async function renderAdminControlCenter(content) {
                 🛵 <span id="cc-stat-drivers" style="color:#10b981; font-weight:950;">0</span> Motos
               </span>
               <span style="opacity: 0.3;">|</span>
+              <span style="font-size: 13px; font-weight: 850; display: flex; align-items: center; gap: 6px;" title="Usuarios únicos con App Nativa de Android o iOS instalada">
+                📱 <span id="cc-stat-devices" style="color:#a855f7; font-weight:950;">...</span> Apps Nativas
+              </span>
+              <span style="opacity: 0.3;">|</span>
               <span style="font-size: 13px; font-weight: 850; display: flex; align-items: center; gap: 6px;">
                 📦 <span id="cc-stat-orders" style="color:#38bdf8; font-weight:950;">0</span> Activos
               </span>
@@ -248,6 +252,8 @@ export async function renderAdminControlCenter(content) {
   // Attach Back button
   const backBtn = content.querySelector('#cc-back-btn');
   if (backBtn) backBtn.onclick = () => { window.location.hash = '#/admin'; };
+
+  loadNativeDevicesCount();
 
   // Attach Bot Mode buttons
   content.querySelectorAll('.wsp-mode-btn').forEach(btn => {
@@ -469,6 +475,7 @@ function renderOrdersColumn() {
                     return `⏳ Ofrecido: <strong>${o.queueTargetDriverName}</strong> <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 5px; border-radius:4px; font-weight:900;">${remainingSec}s</span>`;
                   }
                   if (o.status === 'confirmed' || o.status === 'preparing') return `🍳 En preparación`;
+                  if (o.status === 'pending') return `🏪 Esperando confirmación del local`;
                   return `🔍 Buscando moto...`;
                 })()}
               </span>
@@ -617,4 +624,25 @@ function renderDriversColumn() {
       }
     };
   });
+}
+
+async function loadNativeDevicesCount() {
+  try {
+    const { collectionGroup, getDocs } = await import('firebase/firestore');
+    const tokensSnap = await getDocs(collectionGroup(db, 'fcmTokens'));
+    const nativeUsers = new Set();
+    tokensSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      const pathParts = docSnap.ref.path.split('/');
+      const userId = pathParts[1];
+      const platform = data.platform || '';
+      if (platform.includes('android') || platform.includes('ios')) {
+        nativeUsers.add(userId);
+      }
+    });
+    const deviceEl = document.getElementById('cc-stat-devices');
+    if (deviceEl) deviceEl.textContent = nativeUsers.size;
+  } catch (e) {
+    console.warn('[Control Center] Error loading native device metrics:', e);
+  }
 }

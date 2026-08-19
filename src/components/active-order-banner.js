@@ -179,7 +179,11 @@ function updateBannerState(order, allOrders = []) {
   }
 
   // Show persistent floating indicator
-  const showCode = !order.isTrip && (order.status === 'delivering' || (order.bundleId && allOrders.some(o => o.bundleId === order.bundleId && o.status === 'delivering')));
+  const isCommerceOrder = !order.isFavor && !order.isTrip;
+  const isEncomienda = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
+  const showCode = !order.isTrip && !isEncomienda && !!order.verificationCode && (
+    isCommerceOrder ? (order.status === 'delivering' || (order.bundleId && allOrders.some(o => o.bundleId === order.bundleId && o.status === 'delivering'))) : !['delivered', 'cancelled', 'completed'].includes(order.status)
+  );
   updateOrderFAB(order, { color1, color2, title, iconName, showCode });
 
   // If status JUST changed, also show a brief banner for attention
@@ -203,7 +207,9 @@ function updateBannerState(order, allOrders = []) {
           statusDesc = 'El repartidor aceptó tu GoFavor y está yendo a buscar tu pedido.';
           break;
         case 'delivering':
-          statusDesc = `El repartidor retiró tu pedido y está en camino a entregarlo. Código de entrega: ${order.verificationCode || '----'}`;
+          statusDesc = isEncomienda
+            ? 'El repartidor retiró tu encomienda y está en camino a entregarla.'
+            : `El repartidor retiró tu mandado y está en camino. Código de entrega: ${order.verificationCode || '----'}`;
           break;
         default:
           statusDesc = `Tu GoFavor cambió al estado: ${order.status}`;

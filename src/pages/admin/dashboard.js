@@ -40,16 +40,13 @@ export async function renderAdminDashboard() {
           <h3 style="font-size:11px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px; padding-left:4px;">Gestión del Ecosistema</h3>
           
           <div id="admin-menu" style="display:flex; flex-direction:column; gap:10px;">
-            <a href="#/admin/orders" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(225,29,72,0.06), rgba(190,18,60,0.06)); border:1.5px solid rgba(225,29,72,0.25); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 16px rgba(225,29,72,0.06);">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#e11d48,#be123c); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px; box-shadow: 0 4px 12px rgba(225,29,72,0.3);">${icon('shoppingBag', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:950; font-size:16.5px; color:var(--color-text-primary); display:flex; align-items:center; gap:8px;">
-                  <span>Registro de Ventas y Operaciones</span>
-                  <span style="font-size:9.5px; font-weight:900; background:var(--color-primary); color:white; padding:2px 8px; border-radius:100px;">PANEL GENERAL</span>
-                </div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Control unificado de Pedidos App, WhatsApp y Chats de Soporte</div>
+            <a href="#/admin/orders" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(225,29,72,0.05), rgba(190,18,60,0.03)); border:1.5px solid rgba(225,29,72,0.2); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:14px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 14px rgba(225,29,72,0.05);">
+              <div style="width:44px; height:44px; border-radius:14px; background:linear-gradient(135deg,#e11d48,#be123c); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: 0 4px 12px rgba(225,29,72,0.25);">${icon('shoppingBag', 22)}</div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight:900; font-size:16px; color:var(--color-text-primary); letter-spacing:-0.01em;">Registro de Ventas</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Monitoreo en vivo de pedidos App y WhatsApp</div>
               </div>
-              <div style="color:var(--color-primary);">${icon('chevronRight', 20)}</div>
+              <div style="color:var(--color-primary); flex-shrink:0;">${icon('chevronRight', 20)}</div>
             </a>
 
             <a href="#/admin/metrics" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(126, 34, 206, 0.08)); border:1px solid rgba(168, 85, 247, 0.3); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.05); position: relative; overflow: hidden;">
@@ -131,8 +128,8 @@ export async function renderAdminDashboard() {
             <a href="#/admin/ads" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
               <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fff1f2,#fecdd3); color:#e11d48; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('megaphone', 24)}</div>
               <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Anuncios</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Publicidad y destaques</div>
+                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Anuncios y Slider Home</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Gestión de banners, destaques y slider principal</div>
               </div>
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>

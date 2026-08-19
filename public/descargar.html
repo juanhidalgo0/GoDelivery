@@ -276,10 +276,26 @@
     }
 
     .btn-ios {
-      background: transparent;
-      color: #a8a29e;
-      border: 1.5px dashed #d6d3d1;
-      cursor: not-allowed;
+      background: var(--color-dark);
+      color: #fafaf9;
+      border: none;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    .btn-ios:hover {
+      background: #1c1917;
+      transform: translateY(-1px);
+    }
+
+    .btn-disabled {
+      opacity: 0.35 !important;
+      pointer-events: none !important;
+      cursor: not-allowed !important;
+      background: #e7e5e4 !important;
+      color: #a8a29e !important;
+      border: 1px dashed #d6d3d1 !important;
+      box-shadow: none !important;
+      filter: grayscale(100%) !important;
     }
 
     /* Soft pulse indicating device detected */
@@ -371,7 +387,7 @@
 
         <div class="store-buttons">
           <!-- Android Button -->
-          <a id="android-link" href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android">
+          <a id="android-link" href="https://play.google.com/store/apps/details?id=com.godelivery.magdalena" class="btn btn-android" target="_blank" rel="noopener noreferrer">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3,5.27V18.73L16.5,12L3,5.27M17.87,11.33L21,12.9L17.87,14.47L16.5,12L17.87,11.33M3,3C2.8,3 2.6,3.05 2.43,3.15L15.35,11L18.84,7.5L3,3M3,21L18.84,16.5L15.35,13L2.43,20.85C2.6,20.95 2.8,21 3,21Z"/>
             </svg>
@@ -379,11 +395,11 @@
           </a>
 
           <!-- iOS Button -->
-          <a id="ios-link" href="#" class="btn btn-ios" onclick="return false;">
+          <a id="ios-link" href="https://apps.apple.com/app/go-delivery/id6790820954" class="btn btn-ios" target="_blank" rel="noopener noreferrer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.48C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.1 16.67C20.08 16.74 19.67 18.11 18.71 19.5M15.97 4.17C16.63 3.37 17.07 2.28 16.95 1C16 1.04 14.9 1.6 14.24 2.38C13.68 3.04 13.19 4.14 13.34 5.4C14.39 5.48 15.4 4.88 15.97 4.17Z"/>
             </svg>
-            iPhone (iOS) — Próximamente
+            Descargar para iPhone (iOS)
           </a>
         </div>
 
@@ -396,23 +412,32 @@
   </div>
 
   <script>
-    // OS Detection and highlight (no auto-redirect)
     document.addEventListener("DOMContentLoaded", () => {
       const userAgent = navigator.userAgent || navigator.vendor || window.opera;
       const statusLabel = document.getElementById('status-label');
       const androidLink = document.getElementById('android-link');
+      const iosLink = document.getElementById('ios-link');
 
-      setTimeout(() => {
-        if (/android/i.test(userAgent)) {
-          statusLabel.textContent = "Dispositivo Android detectado";
-          androidLink.classList.add('highlighted-pulse');
-        } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-          statusLabel.textContent = "iOS Próximamente";
-        } else {
-          statusLabel.textContent = "Dispositivos listos";
-          androidLink.classList.add('highlighted-pulse');
-        }
-      }, 800);
+      const isIOS = /iPad|iPhone|iPod/.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isAndroid = /android/i.test(userAgent);
+
+      if (isIOS) {
+        statusLabel.textContent = "Dispositivo iPhone / iOS detectado";
+        iosLink.classList.add('highlighted-pulse');
+        androidLink.classList.add('btn-disabled');
+        androidLink.setAttribute('aria-disabled', 'true');
+        androidLink.onclick = (e) => { e.preventDefault(); return false; };
+      } else if (isAndroid) {
+        statusLabel.textContent = "Dispositivo Android detectado";
+        androidLink.classList.add('highlighted-pulse');
+        iosLink.classList.add('btn-disabled');
+        iosLink.setAttribute('aria-disabled', 'true');
+        iosLink.onclick = (e) => { e.preventDefault(); return false; };
+      } else {
+        statusLabel.textContent = "Seleccioná tu plataforma";
+        androidLink.classList.add('highlighted-pulse');
+        iosLink.classList.add('highlighted-pulse');
+      }
     });
   </script>
 </body>

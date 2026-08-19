@@ -985,8 +985,6 @@ function showFeeDetails() {
   const dynamicFees = state.dynamicDeliveryFees;
   const dynamicDistances = state.dynamicDistances || {};
 
-  const { showModal } = import('../components/modal.js');
-
   let html = `
     <div style="padding:4px;">
       <p style="font-size:13px; color:var(--color-text-secondary); margin-bottom:20px; line-height:1.5;">
@@ -1791,8 +1789,8 @@ async function checkOnlineDrivers() {
     const snap = await getDocsFromServer(q);
     const hasDriver = snap.docs.some(d => {
       const data = d.data();
-      const role = data.role || '';
-      const isDel = data.isDelivery === true || data.isDelivery === 'true' || role === 'delivery' || role === 'driver' || role === 'repartidor' || role === 'chofer' || role === 'admin';
+      const role = (data.role || '').toLowerCase();
+      const isDel = data.isDelivery === true || data.isDelivery === 'true' || ['delivery', 'driver', 'repartidor', 'chofer'].includes(role);
       return isDel;
     });
     console.log('Driver Verification: Found online delivery driver:', hasDriver);
@@ -2444,8 +2442,10 @@ async function openCheckoutConfirmationModal() {
   // Handle Submit Order
   const submitBtn = modalContent.querySelector('#confirm-submit-btn');
   submitBtn.onclick = async () => {
-    if (!hasDelivery) {
-      showToast('No es posible confirmar el pedido sin repartidores online', 'error');
+    const isStillAvailable = await checkOnlineDrivers();
+    if (!isStillAvailable) {
+      showToast('Sin repartidores disponibles. No es posible confirmar el pedido en este momento.', 'error');
+      close();
       return;
     }
     if (!getState().deliveryAddress) {

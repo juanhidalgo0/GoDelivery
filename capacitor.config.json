@@ -2,6 +2,10 @@
   "appId": "com.godelivery.magdalena",
   "appName": "GO!",
   "webDir": "dist",
+  "server": {
+    "url": "https://godelivery-magdalena.web.app",
+    "cleartext": true
+  },
   "plugins": {
     "GoogleAuth": {
       "scopes": ["profile", "email"],

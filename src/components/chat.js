@@ -112,9 +112,34 @@ window.playCustomAudio = function(btnEl) {
 /**
  * Opens a chat modal for a given order.
  */
-export async function openChat({ orderId, type, otherName, orderNum, senderDisplayName, isAudit = false }) {
+export async function openChat(options) {
   if (isChatOpening) return;
   isChatOpening = true;
+
+  let orderId, type, otherName, orderNum, senderDisplayName, isAudit;
+  if (typeof options === 'string') {
+    orderId = options;
+    type = 'client-delivery';
+    otherName = 'Chat del Pedido';
+    orderNum = options.slice(0, 6);
+    senderDisplayName = 'Admin';
+    isAudit = true;
+  } else if (options && typeof options === 'object') {
+    orderId = options.orderId;
+    type = options.type || 'client-delivery';
+    otherName = options.otherName || 'Chat del Pedido';
+    orderNum = options.orderNum || (orderId ? orderId.slice(0, 6) : '');
+    senderDisplayName = options.senderDisplayName || 'Usuario';
+    isAudit = options.isAudit === true;
+  } else {
+    isChatOpening = false;
+    return;
+  }
+
+  if (!orderId) {
+    isChatOpening = false;
+    return;
+  }
 
   const user = getState().user;
   if (!user) {

@@ -227,6 +227,25 @@ export async function renderComercioProducts() {
     const prodsSnap = await getDocs(collection(db, 'comercios', comercioId, 'products'));
     products = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+    // Sanitize: Limit onlyInApp products to maximum 3 per commerce
+    const appOnlyProds = products.filter(p => p.onlyInApp === true);
+    if (appOnlyProds.length > 3) {
+      appOnlyProds.sort((a, b) => {
+        const aTime = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const bTime = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return bTime - aTime;
+      });
+      const excessProds = appOnlyProds.slice(3);
+      for (const p of excessProds) {
+        p.onlyInApp = false;
+        try {
+          await updateDoc(doc(db, 'comercios', comercioId, 'products', p.id), { onlyInApp: false });
+        } catch (errSanitize) {
+          console.warn('Error sanitizing excess onlyInApp product:', p.id, errSanitize);
+        }
+      }
+    }
+
     const catsSnap = await getDocs(query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order')));
     categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     panelCategories = categories;
@@ -1111,8 +1130,13 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
           <div class="switch-container" style="margin-top:8px;">
             <div style="text-align:left;">
-              <div style="font-size:13px; font-weight:750; color:var(--color-text-primary);">Disponible sólo en la app</div>
-              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">Producto o sabor exclusivo para usuarios de la App.</div>
+              <div style="font-size:13px; font-weight:750; color:var(--color-text-primary);">
+                Disponible sólo en la app 
+                <span id="prod-only-in-app-count-badge" style="font-size:11.5px; font-weight:800; color:${(panelFilteredProducts || []).filter(p => p.onlyInApp === true && (!product || p.id !== product.id)).length >= 3 ? 'var(--color-danger)' : 'var(--color-primary)'}; margin-left:4px;">
+                  (${(panelFilteredProducts || []).filter(p => p.onlyInApp === true && (!product || p.id !== product.id)).length}/3 en uso)
+                </span>
+              </div>
+              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">Producto o sabor exclusivo para usuarios de la App (máx. 3 por comercio).</div>
             </div>
             <label class="prod-switch" style="width:50px; height:28px; cursor:pointer; position:relative; display:inline-block; margin:0; flex-shrink:0;">
               <input type="checkbox" id="prod-only-in-app" ${product?.onlyInApp ? 'checked' : ''} style="opacity:0; width:0; height:0;" />
@@ -1616,6 +1640,25 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     }
   });
 
+  const appOnlyCb = document.getElementById('prod-only-in-app');
+  const appOnlyBanner = document.getElementById('prod-only-in-app-banner');
+  if (appOnlyCb) {
+    appOnlyCb.addEventListener('change', (e) => {
+      const currentCount = (panelFilteredProducts || []).filter(p => p.onlyInApp === true && (!product || p.id !== product.id)).length;
+      if (e.target.checked) {
+        if (currentCount >= 3) {
+          e.target.checked = false;
+          if (appOnlyBanner) appOnlyBanner.style.display = 'none';
+          showToast('Límite alcanzado: Cada comercio solo puede tener hasta 3 productos disponibles "Solo en la app".', 'warning');
+          return;
+        }
+        if (appOnlyBanner) appOnlyBanner.style.display = 'flex';
+      } else {
+        if (appOnlyBanner) appOnlyBanner.style.display = 'none';
+      }
+    });
+  }
+
   document.getElementById('prod-cancel')?.addEventListener('click', closeModal);
   document.getElementById('prod-save')?.addEventListener('click', async () => {
     const name = document.getElementById('prod-name')?.value.trim();
@@ -1628,6 +1671,15 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     if (!price || price <= 0) { showToast('Ingresá un precio válido', 'warning'); return; }
     if (!product && !croppedImage) { showToast('Es obligatorio subir una imagen para crear el producto', 'warning'); return; }
 
+    const onlyInApp = document.getElementById('prod-only-in-app')?.checked || false;
+    if (onlyInApp) {
+      const currentCount = (panelFilteredProducts || []).filter(p => p.onlyInApp === true && (!product || p.id !== product.id)).length;
+      if (currentCount >= 3) {
+        showToast('Límite alcanzado: Cada comercio solo puede tener hasta 3 productos disponibles "Solo en la app".', 'warning');
+        return;
+      }
+    }
+
     const stockMode = document.getElementById('prod-stock-mode')?.value || 'unlimited';
     let stockQuantity = 0;
     let stockThreshold = 3;
@@ -1639,8 +1691,6 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       maxSelections = parseInt(document.getElementById('prod-flavors-max')?.value) || 4;
       allowedFlavors = Array.from(document.querySelectorAll('.prod-flavor-checkbox:checked')).map(cb => cb.value);
     }
-
-    const onlyInApp = document.getElementById('prod-only-in-app')?.checked || false;
 
     if (stockMode === 'limited' && !useGlobalFlavors) {
       const qtyInput = document.getElementById('prod-stock-quantity')?.value;

@@ -35,7 +35,24 @@ if (fs.existsSync(mainSwPath)) {
   }
 }
 
-// 3. Write version.json metadata file to dist and public
+// 3. Inject timestamp into built JS bundles in dist/assets/
+const assetsDir = path.join(process.cwd(), 'dist', 'assets');
+if (fs.existsSync(assetsDir)) {
+  const files = fs.readdirSync(assetsDir);
+  for (const file of files) {
+    if (file.endsWith('.js')) {
+      const filePath = path.join(assetsDir, file);
+      let content = fs.readFileSync(filePath, 'utf8');
+      if (content.includes('__APP_BUILD_TIME_PLACEHOLDER__')) {
+        content = content.replaceAll('__APP_BUILD_TIME_PLACEHOLDER__', String(timestamp));
+        fs.writeFileSync(filePath, content, 'utf8');
+        console.log(`[Post-Build] Injected build timestamp ${timestamp} into ${file}`);
+      }
+    }
+  }
+}
+
+// 4. Write version.json metadata file to dist and public
 try {
   const versionData = JSON.stringify({ version: timestamp });
   fs.writeFileSync(path.join(process.cwd(), 'dist', 'version.json'), versionData, 'utf8');

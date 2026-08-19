@@ -737,6 +737,7 @@ export async function renderDeliveryPanel() {
       allOrders.forEach(o => {
         if (o.driverId) return;
         if (o.queueTargetDriverId !== user?.uid) return;
+        if ((o.manuallyRejectedDrivers || []).includes(user?.uid)) return;
         
         const mode = user?.deliveryMode || 'both';
         if (mode === 'trip' && !o.isTrip) return;
@@ -818,13 +819,55 @@ function loadTabContent(tab, container, user) {
 
   container.innerHTML = `<div class="loader-dots" style="margin: 2rem auto;"><span></span><span></span><span></span></div>`;
 
+  // Auto-open take order modal if takeOrderId or orderId is in URL query parameters
+  const hashQuery = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+  const hashParams = new URLSearchParams(hashQuery);
+  const targetTakeOrderId = hashParams.get('takeOrderId') || hashParams.get('orderId');
+
+  if (targetTakeOrderId && window._processedTakeOrderId !== targetTakeOrderId) {
+    window._processedTakeOrderId = targetTakeOrderId;
+    const cleanHash = window.location.hash.split('?')[0];
+    window.history.replaceState(null, '', window.location.pathname + cleanHash);
+
+    setTimeout(async () => {
+      try {
+        let orderToTake = null;
+        const orderDocSnap = await getDoc(doc(db, 'orders', targetTakeOrderId));
+        if (orderDocSnap.exists()) {
+          orderToTake = { id: orderDocSnap.id, ...orderDocSnap.data() };
+        } else {
+          const numericVal = parseInt(targetTakeOrderId);
+          if (!isNaN(numericVal)) {
+            const qNumeric = query(collection(db, 'orders'), where('orderId', '==', numericVal));
+            const numSnap = await getDocs(qNumeric);
+            if (!numSnap.empty) {
+              orderToTake = { id: numSnap.docs[0].id, ...numSnap.docs[0].data() };
+            }
+          }
+        }
+
+        if (orderToTake && !orderToTake.driverId) {
+          showConfirm({
+            title: `¿Tomar Pedido #${orderToTake.orderId || orderToTake.displayId || ''}?`,
+            message: `<strong>${orderToTake.comercioName || 'Pedido'}</strong><br>Cliente: ${orderToTake.userName || 'Cliente'}<br>Dirección: ${orderToTake.deliveryAddress || ''}`,
+            confirmText: 'SÍ, TOMAR PEDIDO',
+            onConfirm: () => {
+              takeBatch(orderToTake.bundleId || orderToTake.id, user);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('[Delivery Panel] Error auto-opening target take order modal:', e);
+      }
+    }, 400);
+  }
+
   try {
     if (tab === 'available') {
       const q = query(
         collection(db, 'orders'),
         where('status', 'in', ['ready', 'preparing', 'confirmed', 'pending'])
       );
-
 
       let isInitial = true;
       const listUnsub = onSnapshot(q, (snap) => {
@@ -862,42 +905,37 @@ function loadTabContent(tab, container, user) {
           if (o.driverId) return;
 
           const now = Date.now() + (getState().serverTimeOffset || 0);
-          const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.queueTargetDriverId ? now : 0);
+          const offeredAt = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : (o.readyAt ? (o.readyAt.toMillis ? o.readyAt.toMillis() : new Date(o.readyAt).getTime()) : (o.createdAt ? (o.createdAt.toMillis ? o.createdAt.toMillis() : new Date(o.createdAt).getTime()) : now));
           const isTargetMe = o.queueTargetDriverId === user.uid;
           const isCoPickup = o.isCoPickupOffer || o.isSuggestedCoPickup || false;
           const isOwn = o.isOwnDeliveryOrder || o.isPermanentOffer || isCoPickup || false;
-          const needsQueueAssign = !isOwn && offeredAt > 0 && (
-                                   (!o.queueTargetDriverId && (now - offeredAt >= 15000)) || 
-                                   (o.queueTargetDriverId && isTargetMe && (now - offeredAt >= 30000)) ||
-                                   (o.queueTargetDriverId && !isTargetMe && (now - offeredAt >= 33000))
+
+          const isCommerceReady = o.isFavor || o.isTrip || o.status === 'ready';
+          const offerAgeMs = now - offeredAt;
+          const needsQueueAssign = isCommerceReady && !isOwn && (
+                                   !o.queueTargetDriverId || 
+                                   (o.queueTargetDriverId && offerAgeMs >= 30000)
                                    );
           if (needsQueueAssign) {
             updateDispatchQueue(o.id);
           }
 
-          if (o.queueTargetDriverId === user.uid) {
-            window.expiredLocalOrders = window.expiredLocalOrders || new Set();
-            window.expiredLocalOrders.delete(o.id);
-          }
+          const isManuallyRejected = (o.manuallyRejectedDrivers || []).includes(user.uid);
+          if (isManuallyRejected) return;
 
-          // Filter: show if offered to me exclusively, or if it is public (no target driver) and I haven't rejected it
+          const isTargetedToMe = o.queueTargetDriverId === user.uid;
+          const isQueueRejected = (o.queueRejectedDrivers || []).includes(user.uid);
+          if (isQueueRejected && !isTargetedToMe) return;
+
           window.expiredLocalOrders = window.expiredLocalOrders || new Set();
-          if (window.expiredLocalOrders.has(o.id)) return;
+          if (window.expiredLocalOrders.has(o.id) && !isTargetedToMe) return;
 
           // For regular commerce orders, require status === 'ready' before offering to drivers
           if (!o.isFavor && !o.isTrip && o.status !== 'ready') return;
 
-          const isRejectedByMe = (o.queueRejectedDrivers || []).includes(user.uid);
           if (o.queueTargetDriverId) {
             // Exclusive offer: only show to targeted driver
             if (o.queueTargetDriverId !== user.uid) return;
-          } else {
-            // Regular commerce order in public pool: hide if rejected by me
-            if (isRejectedByMe) return;
-            // Guard against a very brief flash during initial server dispatch (order newer than 8s with no queue fields)
-            const createdMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : (o.createdAt ? new Date(o.createdAt).getTime() : 0);
-            const ageMs = Date.now() - createdMs;
-            if (!o.queueRejectedDrivers && ageMs < 8000) return;
           }
 
           // Handle Auto-Accept
@@ -905,14 +943,19 @@ function loadTabContent(tab, container, user) {
             if (!window.activeAutoAccepts) window.activeAutoAccepts = new Set();
             if (!window.activeAutoAccepts.has(o.id)) {
               window.activeAutoAccepts.add(o.id);
-              showToast('Auto-Aceptando pedido en 2s...', 'info');
+              showToast('⚡ Auto-Aceptando pedido...', 'info');
               setTimeout(async () => {
-                const freshSnap = await getDoc(doc(db, 'orders', o.id));
-                if (freshSnap.exists() && !freshSnap.data().driverId && freshSnap.data().queueTargetDriverId === user.uid) {
-                  takeBatch(o.bundleId || o.id, user);
+                try {
+                  const freshSnap = await getDoc(doc(db, 'orders', o.id));
+                  if (freshSnap.exists() && !freshSnap.data().driverId && freshSnap.data().queueTargetDriverId === user.uid) {
+                    await takeBatch(o.bundleId || o.id, user);
+                  }
+                } catch (e) {
+                  console.error('[AutoAccept] Error auto-taking batch:', e);
+                } finally {
+                  window.activeAutoAccepts.delete(o.id);
                 }
-                window.activeAutoAccepts.delete(o.id);
-              }, 2000);
+              }, 400);
             }
           }
 
@@ -1243,9 +1286,14 @@ function loadTabContent(tab, container, user) {
               const favorRgb = favorMeta ? getRgbString(favorMeta.color) : '239, 68, 68';
 
               const orderObj = b.isBundle ? b.orders[0] : b.order;
-              const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (orderObj?.queueTargetDriverId ? (Date.now() + (getState().serverTimeOffset || 0)) : 0);
-              const elapsed = Math.floor(((Date.now() + (getState().serverTimeOffset || 0)) - offeredAt) / 1000);
-              const remaining = offeredAt > 0 ? Math.max(0, 30 - elapsed) : 0;
+              const nowMs = Date.now() + (getState().serverTimeOffset || 0);
+              const offeredAt = orderObj?.queueOfferedAt 
+                ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) 
+                : (orderObj?.createdAt ? (orderObj.createdAt.toMillis ? orderObj.createdAt.toMillis() : new Date(orderObj.createdAt).getTime()) : nowMs);
+              
+              const elapsed = Math.max(0, Math.floor((nowMs - offeredAt) / 1000));
+              const remaining = Math.max(1, 30 - (elapsed % 30));
+              const expiryMs = nowMs + (remaining * 1000);
 
               return `
                 <div class="admin-card expandable-card collapsed" data-id="${b.id}" style="margin-bottom: 20px; border: 1px solid var(--color-border); background: var(--color-bg-card); padding: 22px; border-radius: 28px; position:relative; overflow:hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.03); ${anyPending ? 'opacity: 0.8;' : ''}">
@@ -1258,14 +1306,14 @@ function loadTabContent(tab, container, user) {
                       </span>
                       <span style="font-size:14px; font-weight:950; color:#E3001B;" class="queue-countdown" data-is-own-delivery="true" data-expiry="0" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">Permanente</span>
                     </div>
-                  ` : (remaining > 0 ? `
+                  ` : `
                     <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.15); border-radius:16px; padding:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; width:100%;">
                       <span style="font-size:12px; font-weight:800; color:#ef4444; display:flex; align-items:center; gap:6px;">
                         ⚠️ OFERTA EXCLUSIVA:
                       </span>
-                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${offeredAt + 30000}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
+                      <span style="font-size:14px; font-weight:950; color:#ef4444;" class="queue-countdown" data-expiry="${expiryMs}" data-order-ids="${b.isBundle ? b.orders.map(o => o.id).join(',') : b.order.id}">${remaining}s</span>
                     </div>
-                  ` : '')}
+                  `}
                   
                   <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
                     <div style="flex:1;">
@@ -1470,8 +1518,6 @@ function loadTabContent(tab, container, user) {
           }
 
           countdownElements.forEach(el => {
-            if (el.dataset.expired === 'true') return;
-
             const isOwn = el.dataset.isOwnDelivery === 'true';
             if (isOwn) {
               el.textContent = "Permanente";
@@ -1486,24 +1532,25 @@ function loadTabContent(tab, container, user) {
             el.textContent = `${remaining}s`;
 
             if (remaining <= 0) {
-              el.dataset.expired = 'true';
               const orderIdsStr = el.dataset.orderIds;
-              console.log(`[Queue Countdown] Timer expired for orderIds: ${orderIdsStr}`);
-
-              if (orderIdsStr) {
+              if (orderIdsStr && el.dataset.rotating !== 'true') {
+                el.dataset.rotating = 'true';
+                console.log(`[Queue Countdown] Timer expired for orderIds: ${orderIdsStr}. Rotating offer...`);
                 const orderIds = orderIdsStr.split(',');
-                window.expiredLocalOrders = window.expiredLocalOrders || new Set();
 
-                orderIds.forEach(oid => {
-                  window.expiredLocalOrders.add(oid);
-                });
+                window.expiredLocalOrders = window.expiredLocalOrders || new Set();
+                orderIds.forEach(oid => window.expiredLocalOrders.add(oid));
 
                 stopExclusiveOfferAlert();
 
-                // 2. Trigger instant server rotation for each expired order
+                // Trigger instant server rotation for each expired order
                 orderIds.forEach(id => {
                   updateDispatchQueue(id).catch(err => {
                     console.error(`[Queue Countdown] Error updating dispatch queue for ${id}:`, err);
+                  }).finally(() => {
+                    setTimeout(() => {
+                      el.dataset.rotating = 'false';
+                    }, 3000);
                   });
                 });
               }
@@ -1533,7 +1580,7 @@ function loadTabContent(tab, container, user) {
             showToast('Rechazando pedido...', 'info');
             
             try {
-              // Add driver to queueRejectedDrivers of these orders
+              // Add driver to manuallyRejectedDrivers & queueRejectedDrivers of these orders
               await runTransaction(db, async (transaction) => {
                 const oIdsStr = btn.dataset.ids;
                 if (!oIdsStr) return;
@@ -1542,10 +1589,14 @@ function loadTabContent(tab, container, user) {
                   const orderRef = doc(db, 'orders', oId);
                   const oSnap = await transaction.get(orderRef);
                   if (oSnap.exists()) {
-                    const rejected = oSnap.data().queueRejectedDrivers || [];
-                    if (!rejected.includes(user.uid)) rejected.push(user.uid);
+                    const data = oSnap.data();
+                    const manualRejected = data.manuallyRejectedDrivers || [];
+                    const passiveRejected = data.queueRejectedDrivers || [];
+                    if (!manualRejected.includes(user.uid)) manualRejected.push(user.uid);
+                    if (!passiveRejected.includes(user.uid)) passiveRejected.push(user.uid);
                     transaction.update(orderRef, {
-                      queueRejectedDrivers: rejected,
+                      manuallyRejectedDrivers: manualRejected,
+                      queueRejectedDrivers: passiveRejected,
                       queueTargetDriverId: null,
                       queueTargetDriverName: null,
                       queueOfferedAt: null,
@@ -1947,12 +1998,14 @@ function loadTabContent(tab, container, user) {
                 if (o.isTrip) {
                   stopName = 'Punto de Encuentro';
                 } else if (o.isFavor) {
-                  if (o.favorType === 'pagodeservicios') {
+                  if (o.favorType === 'encomienda' || o.serviceType === 'encomienda') {
+                    stopName = '📦 Retiro de Encomienda';
+                  } else if (o.favorType === 'pagodeservicios') {
                     const match = o.details?.match(/🏢\s*\*\*Servicio:\*\*\s*(.*?)(?=\n|$)/i);
                     stopName = match ? match[1].trim() : 'Pago de Servicio';
                   } else {
                     const stores = parseFavorDetails(o.details || o.description);
-                    stopName = stores.length > 0 ? stores[0].name : (o.comercioName || 'Comercio a Comprar');
+                    stopName = stores.length > 0 ? stores[0].name : (o.comercioName || 'Punto de Retiro');
                   }
                 } else {
                   stopName = o.comercioName || 'Comercio a Comprar';
@@ -1961,7 +2014,7 @@ function loadTabContent(tab, container, user) {
 
               pickupsByCommerce.set(key, {
                 comercioName: stopName,
-                address: o.pickupAddress || o.comercioAddress || '',
+                address: o.pickupAddress || o.originAddress || o.comercioAddress || 'Punto de Retiro',
                 isFavor: !!o.isFavor,
                 orders: []
               });
@@ -1970,7 +2023,7 @@ function loadTabContent(tab, container, user) {
           }
 
           // Drop-off stops (unique per address)
-          const dropAddress = o.deliveryAddress || o.pickupAddress || o.comercioAddress || 'Dirección de Entrega';
+          const dropAddress = o.deliveryAddress || o.destinationAddress || 'Dirección de Entrega';
           if (!deliveries.has(dropAddress)) {
             deliveries.set(dropAddress, { userName: o.userName || 'Cliente', orders: [] });
           }
@@ -5509,8 +5562,8 @@ async function showBalanceHistoryModal(driverId) {
         contentArea.innerHTML = pendingCharges.map(t => {
           const isCanon = t.type === 'canon_charge';
           const isAppFee = t.type === 'app_usage_fee';
-          const amount = t.amount || 0;
-          const formattedDate = t.createdAt ? new Date(t.createdAt.toMillis ? t.createdAt.toMillis() : new Date(t.createdAt).getTime()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Saldo Pendiente';
+          const rawDate = t.createdAt ? (t.createdAt.toMillis ? t.createdAt.toMillis() : new Date(t.createdAt).getTime()) : null;
+          const formattedDate = rawDate ? `📅 ${new Date(rawDate).toLocaleDateString('es-AR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'})} hs` : 'Saldo Pendiente';
           
           let iconColor = isCanon ? '#e11d48' : '#f59e0b';
           let iconBg = isCanon ? 'rgba(225,29,72,0.08)' : 'rgba(245,158,11,0.08)';
@@ -6190,7 +6243,10 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
           deliverySessionId: user.currentSessionId || null,
           status: (o.isFavor || o.isTrip) ? 'confirmed' : 'accepted',
           acceptedAt: serverTimestamp(),
-          estimatedDeliveryTime: estTime
+          estimatedDeliveryTime: estTime,
+          queueTargetDriverId: null,
+          queueTargetDriverName: null,
+          queueOfferedAt: null
         };
 
         if (orderData.isGoCash || orderData.favorType === 'gocash') {
@@ -6317,9 +6373,17 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
       }
     }
 
-    showToast('¡Pedido tomado! Empezá tu ruta.', 'success');
+    showToast('¡Pedido tomado! Abriendo mapa en vivo...', 'success');
     // Automatically switch to active tab
     window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: 'active' }));
+
+    // Automatically open the Live GPS Tracking Map for the accepted order
+    if (ordersToTake && ordersToTake.length > 0) {
+      const targetOrder = ordersToTake[0];
+      setTimeout(() => {
+        showDeliveryMapModal(targetOrder, ordersToTake);
+      }, 350);
+    }
   } catch (err) {
     console.error('takeBatch error:', err);
     showToast(err.toString(), 'error');
@@ -7137,18 +7201,36 @@ export async function updateDispatchQueue(orderId) {
     const o = orderSnap.data();
     if (o.driverId) return;
 
-    const prevTargetDriverId = o.queueTargetDriverId;
-    let rejected = [...(o.queueRejectedDrivers || [])];
-    if (prevTargetDriverId && !rejected.includes(prevTargetDriverId)) {
-      rejected.push(prevTargetDriverId);
+    // Los pedidos gastronómicos/comercio solo se ofrecen cuando pasan a estar en estado "listo"
+    if (!o.isFavor && !o.isTrip && o.status !== 'ready') {
+      return;
     }
 
-    // Check if admin selected a direct driver assignment that hasn't been rejected yet
+    const now = Date.now() + (getState().serverTimeOffset || 0);
+    const offeredAt = o.queueOfferedAt 
+      ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime())
+      : null;
+
+    // GUARD 1: Si la oferta actual está dirigida y tiene menos de 28s de emitida, NO ROTAR.
+    // Esto evita que relojes desfasados salten ofertas activas a los pocos segundos.
+    if (o.queueTargetDriverId && offeredAt && (now - offeredAt < 28000)) {
+      return;
+    }
+
+    const prevTargetDriverId = o.queueTargetDriverId || null;
+    let manualRejected = [...(o.manuallyRejectedDrivers || [])];
+    let offeredDrivers = [...(o.queueOfferedDrivers || o.queueRejectedDrivers || [])];
+
+    if (prevTargetDriverId && !offeredDrivers.includes(prevTargetDriverId)) {
+      offeredDrivers.push(prevTargetDriverId);
+    }
+
+    // Direct assignment override from Admin
     let nextDriverId = null;
     let nextDriverName = null;
 
     const targetDirectUid = o.directDriverUid || o.preferredDriverUid;
-    if (targetDirectUid && targetDirectUid !== 'rotation' && !rejected.includes(targetDirectUid)) {
+    if (targetDirectUid && targetDirectUid !== 'rotation' && !manualRejected.includes(targetDirectUid) && !offeredDrivers.includes(targetDirectUid)) {
       const directDriverSnap = await getDoc(doc(db, 'users', targetDirectUid));
       if (directDriverSnap.exists()) {
         const dData = directDriverSnap.data();
@@ -7159,48 +7241,73 @@ export async function updateDispatchQueue(orderId) {
     }
 
     if (!nextDriverId) {
-      // Fetch all online drivers to calculate next candidate or restart cycle
-      const driversQuery = query(
-        collection(db, 'users'),
-        where('role', '==', 'delivery'),
-        where('isOnline', '==', true)
-      );
-      const driversSnap = await getDocs(driversQuery);
-      const onlineDriverDocs = driversSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Fetch all online drivers
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const onlineDrivers = usersSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(u => (u.isDelivery === true || u.role === 'delivery' || u.role === 'driver' || u.role === 'chofer') && u.isOnline === true);
 
-      let availableUnrejected = onlineDriverDocs.filter(d => !rejected.includes(d.id));
-      if (availableUnrejected.length === 0 && onlineDriverDocs.length > 0) {
-        console.log(`[Queue] Todos los repartidores (${onlineDriverDocs.length}) fueron consultados. Reiniciando ciclo de rotación infinita.`);
-        rejected = [];
-        availableUnrejected = onlineDriverDocs;
+      if (onlineDrivers.length === 0) return;
+
+      // 1. Filtrar repartidores en línea que aún NO han recibido la oferta en esta ronda
+      let candidates = onlineDrivers.filter(d => !offeredDrivers.includes(d.id) && !manualRejected.includes(d.id));
+
+      if (candidates.length === 0) {
+        // Ronda completada para todos los repartidores. Iniciar nueva ronda excluyendo los que rechazaron manualmente.
+        const nonManualRejectingDrivers = onlineDrivers.filter(d => !manualRejected.includes(d.id));
+        if (nonManualRejectingDrivers.length > 0) {
+          console.log(`[Queue] Ronda de ofertas completada. Reiniciando ciclo secuencial para ${nonManualRejectingDrivers.length} repartidores.`);
+          offeredDrivers = [];
+          candidates = nonManualRejectingDrivers;
+        } else {
+          console.log(`[Queue] Todos los repartidores en línea rechazaron manualmente el pedido.`);
+          offeredDrivers = [];
+          candidates = onlineDrivers;
+        }
       }
 
-      const nextDriver = availableUnrejected.length > 0 ? availableUnrejected[0] : null;
-      nextDriverId = nextDriver ? nextDriver.id : null;
-      nextDriverName = nextDriver ? (nextDriver.name || nextDriver.displayName || 'Repartidor') : null;
+      const nextDriver = candidates.length > 0 ? candidates[0] : null;
+      if (nextDriver) {
+        nextDriverId = nextDriver.id;
+        nextDriverName = nextDriver.name || nextDriver.displayName || 'Repartidor';
+        if (!offeredDrivers.includes(nextDriverId)) {
+          offeredDrivers.push(nextDriverId);
+        }
+      }
     }
 
     await runTransaction(db, async (transaction) => {
       const freshSnap = await transaction.get(orderRef);
       if (!freshSnap.exists()) return;
       const fresh = freshSnap.data();
-      if (fresh.driverId || fresh.queueTargetDriverId !== prevTargetDriverId) {
-        throw new Error('already_rotated_or_assigned');
+      if (fresh.driverId) throw new Error('already_assigned');
+
+      const freshOfferedAt = fresh.queueOfferedAt 
+        ? (fresh.queueOfferedAt.toMillis ? fresh.queueOfferedAt.toMillis() : new Date(fresh.queueOfferedAt).getTime())
+        : null;
+      const freshNow = Date.now() + (getState().serverTimeOffset || 0);
+
+      // GUARD 2: Candado dentro de la transacción de 28 segundos mínimos de duración por oferta
+      if (fresh.queueTargetDriverId && freshOfferedAt && (freshNow - freshOfferedAt < 28000) && fresh.queueTargetDriverId === prevTargetDriverId) {
+        throw new Error('offer_still_active');
       }
 
+      const rejectedList = nextDriverId ? offeredDrivers.filter(id => id !== nextDriverId) : offeredDrivers;
       transaction.update(orderRef, {
         queueTargetDriverId: nextDriverId,
         queueTargetDriverName: nextDriverName,
         queueOfferedAt: nextDriverId ? serverTimestamp() : null,
-        queueRejectedDrivers: rejected,
+        queueOfferedDrivers: offeredDrivers,
+        queueRejectedDrivers: rejectedList,
+        manuallyRejectedDrivers: manualRejected,
         isPermanentOffer: null
       });
     });
 
-    console.log(`[Queue] Pedido #${o.orderId || orderId} rotado exitosamente a: ${nextDriverName || 'Buscando'}`);
+    console.log(`[Queue] Pedido #${o.orderId || orderId} rotado secuencialmente a: ${nextDriverName || 'Buscando'}`);
   } catch (txErr) {
-    if (txErr.message === 'already_rotated_or_assigned') {
-      console.log('[Queue transaction] Rotación completada por otro proceso.');
+    if (txErr.message === 'already_assigned' || txErr.message === 'offer_still_active') {
+      // Aborto normal por candado de tiempo o pedido ya asignado
     } else {
       console.error('[Queue transaction error]', txErr);
     }
@@ -7569,8 +7676,9 @@ export function showExclusiveOfferOverlay(batch, user) {
     const cdEl = document.getElementById('exclusive-modal-countdown');
     if (cdEl) cdEl.textContent = rem;
     if (rem <= 0) {
-      hideExclusiveOfferOverlay();
-      stopExclusiveOfferAlert();
+      const orderIdToRotate = orderObj.id || batch.id;
+      updateDispatchQueue(orderIdToRotate).catch(console.warn);
+      playExclusiveOfferAlert();
     }
   }, 1000);
 

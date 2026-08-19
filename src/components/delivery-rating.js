@@ -71,15 +71,12 @@ export function showDeliveryRating(order) {
     </div>
 
     <!-- Puntos Sumados Card -->
-    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 20px; padding: 14px 20px; display: flex; flex-direction: column; align-items: center; gap: 2px; box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+    <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 20px; padding: 16px 20px; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: var(--shadow-sm); margin-bottom: 24px;">
       <span style="font-size: 10px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.8px;">Sumaste en Club GO</span>
       <div style="font-size: 28px; font-weight: 950; color: #f59e0b; letter-spacing: -0.5px; display: flex; align-items: center; gap: 4px;">
         +${points} <span style="font-size: 13px; font-weight: 850; letter-spacing: 0;">GO PTS</span>
       </div>
-      <div style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 700;">
-        Equivalentes a <strong style="color: var(--color-success); font-weight: 900;">${formatPrice(valueDiscount)}</strong> de descuento directo.
-      </div>
-      <div style="font-size: 10.5px; color: var(--color-text-tertiary); font-weight: 600; margin-top: 4px;">
+      <div style="font-size: 10.5px; color: var(--color-text-tertiary); font-weight: 600; margin-top: 2px;">
         Multiplicador <strong style="color: ${levelColor}; font-weight: 900;">${levelName}</strong> activo (${order.appliedMultiplier || multiplier}x)
       </div>
     </div>

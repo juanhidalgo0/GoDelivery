@@ -77,6 +77,8 @@ function startCommerceListListener(user) {
   });
 }
 
+let recurring5MinInterval = null;
+
 function startOrdersListener() {
   stopOrdersListener();
   if (myComercioIds.length === 0) return;
@@ -123,6 +125,48 @@ function startOrdersListener() {
       );
     }
 
+    // Handle 5-Minute Recurring Reminder Timer for Commerce
+    if (orders.length > 0) {
+      if (!recurring5MinInterval) {
+        recurring5MinInterval = setInterval(async () => {
+          if (currentPendingOrders.length > 0) {
+            console.log(`⏰ [Commerce Monitor] 5-minute reminder: ${currentPendingOrders.length} pending order(s)`);
+            isMutedGlobally = false;
+            AudioManager.startLoop(SOUND_URL, 0.95);
+            AudioManager.hapticError();
+
+            const count = currentPendingOrders.length;
+            sendLocalNotification(
+              `⚠️ ¡RECORDATORIO DE PEDIDO!`, 
+              `Tenés ${count} pedido${count > 1 ? 's' : ''} pendiente${count > 1 ? 's' : ''} sin aceptar o rechazar.`,
+              { type: 'order', url: `#/mi-comercio/${myComercioIds[0]}/orders` }
+            );
+
+            // Insert notification in Firestore for record
+            try {
+              const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+              const user = getState().user;
+              if (user?.uid) {
+                await addDoc(collection(db, 'notifications'), {
+                  userId: user.uid,
+                  title: '⚠️ ¡RECORDATORIO DE PEDIDO PENDIENTE!',
+                  body: `Tenés ${count} pedido(s) sin aceptar o rechazar. Por favor confirmá o cancelá para continuar.`,
+                  type: 'pending_reminder',
+                  read: false,
+                  createdAt: serverTimestamp()
+                });
+              }
+            } catch (err) {}
+          }
+        }, 5 * 60 * 1000); // Every 5 minutes
+      }
+    } else {
+      if (recurring5MinInterval) {
+        clearInterval(recurring5MinInterval);
+        recurring5MinInterval = null;
+      }
+    }
+
     const currentIds = new Set(orders.map(o => o.id));
     lastKnownPendingIds = new Set([...lastKnownPendingIds].filter(id => currentIds.has(id)));
 
@@ -134,6 +178,10 @@ function startOrdersListener() {
 function stopOrdersListener() {
   if (commerceUnsub) commerceUnsub();
   commerceUnsub = null;
+  if (recurring5MinInterval) {
+    clearInterval(recurring5MinInterval);
+    recurring5MinInterval = null;
+  }
   AudioManager.stopLoop(SOUND_URL);
   updateMutePill(false);
 }

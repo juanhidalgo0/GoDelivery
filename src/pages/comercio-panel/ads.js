@@ -57,6 +57,44 @@ export async function renderComercioAds(container) {
       <!-- Scrollable List -->
       <div style="flex:1; overflow-y:auto; padding:20px; -webkit-overflow-scrolling:touch;">
         <div style="display:flex; flex-direction:column; gap:16px; max-width:600px; margin:0 auto;">
+
+          <!-- Action Cards for Paid Ads & Featured Placement -->
+          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:4px;">
+            <!-- Push Ad Card -->
+            <div id="btn-push-ad-card" style="background: linear-gradient(135deg, rgba(225,29,72,0.06) 0%, rgba(168,85,247,0.06) 100%); border: 1.5px solid rgba(225,29,72,0.25); border-radius: 20px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(225,29,72,0.04);">
+              <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;">
+                <div style="width: 44px; height: 44px; border-radius: 14px; background: linear-gradient(135deg, var(--color-primary), #a855f7); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 12px rgba(225,29,72,0.25);">
+                  ${icon('bell', 22)}
+                </div>
+                <div style="min-width: 0; flex: 1;">
+                  <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Enviar Notificación Anuncio</h4>
+                  <p style="font-size: 11px; color: var(--color-text-secondary); margin: 2px 0 0; font-weight: 600;">Notificación push masiva a todos los usuarios</p>
+                </div>
+              </div>
+              <div style="text-align: right; flex-shrink: 0;">
+                <span id="push-ad-price-tag" style="display: block; font-size: 15px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">$0</span>
+                <span style="font-size: 10px; font-weight: 800; color: #059669; background: rgba(5,150,105,0.1); padding: 2px 6px; border-radius: 6px; text-transform: uppercase;">Enviar Ya</span>
+              </div>
+            </div>
+
+            <!-- Featured Slider Card -->
+            <div id="btn-featured-slider-card" style="background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(217,119,6,0.06) 100%); border: 1.5px solid rgba(245,158,11,0.3); border-radius: 20px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(245,158,11,0.04);">
+              <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;">
+                <div style="width: 44px; height: 44px; border-radius: 14px; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 12px rgba(245,158,11,0.25);">
+                  ${icon('sparkles', 22)}
+                </div>
+                <div style="min-width: 0; flex: 1;">
+                  <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Contratar Destaque Slider Home</h4>
+                  <p style="font-size: 11px; color: var(--color-text-secondary); margin: 2px 0 0; font-weight: 600;">Aparecer primero en Destacados del Home</p>
+                </div>
+              </div>
+              <div style="text-align: right; flex-shrink: 0;">
+                <span id="featured-ad-price-tag" style="display: block; font-size: 15px; font-weight: 950; color: #d97706; font-family: var(--font-display);">$0</span>
+                <span style="font-size: 10px; font-weight: 800; color: #d97706; background: rgba(245,158,11,0.15); padding: 2px 6px; border-radius: 6px; text-transform: uppercase;">Aparecer Top</span>
+              </div>
+            </div>
+          </div>
+
           <h2 style="font-size:14px; font-weight:900; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.05em; margin:0 0 -4px 0;">Tus Campañas Publicitarias</h2>
           
           <div id="commerce-ads-list" style="display:flex; flex-direction:column; gap:14px; padding-bottom:30px;">
@@ -83,6 +121,20 @@ export async function renderComercioAds(container) {
     if (settingsSnap.exists()) {
       pricingSettings = { ...pricingSettings, ...settingsSnap.data() };
     }
+
+    // Update UI price tags
+    const pushPriceTag = document.getElementById('push-ad-price-tag');
+    if (pushPriceTag) pushPriceTag.textContent = formatPrice(pricingSettings.pushAdPrice || 3000);
+
+    const featuredPriceTag = document.getElementById('featured-ad-price-tag');
+    if (featuredPriceTag) featuredPriceTag.textContent = formatPrice(pricingSettings.featuredAdPrice || 5000);
+
+    // Bind action card click listeners
+    const pushCard = document.getElementById('btn-push-ad-card');
+    if (pushCard) pushCard.onclick = () => openPushAdModal(comercioId, currentComercioName);
+
+    const featuredCard = document.getElementById('btn-featured-slider-card');
+    if (featuredCard) featuredCard.onclick = () => openFeaturedSliderModal(comercioId, currentComercioName);
   } catch (err) {
     console.error('Error fetching details:', err);
   }
@@ -425,5 +477,261 @@ export async function renderComercioAds(container) {
     };
 
     updateModalUI();
+  };
+}
+
+// ─── MODAL ENVIAR NOTIFICACIÓN ANUNCIO PUSH ──────────────────────────────────
+function openPushAdModal(comercioId, comercioName) {
+  const pushPrice = pricingSettings.pushAdPrice || 3000;
+  let croppedBase64 = '';
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative; box-sizing:border-box;';
+
+  modalContent.innerHTML = `
+    <div style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; justify-content:space-between; color:white; flex-shrink:0;">
+      <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:6px;">
+        ${icon('bell', 18)} Enviar Notificación Anuncio
+      </h3>
+      <button id="close-push-modal" style="background:transparent; border:none; color:white; cursor:pointer;">${icon('close', 20)}</button>
+    </div>
+
+    <div style="flex:1; padding:20px; display:flex; flex-direction:column; gap:16px; overflow-y:auto; box-sizing:border-box; -webkit-overflow-scrolling:touch;">
+      <!-- Clarification Box -->
+      <div style="background:linear-gradient(135deg, rgba(225,29,72,0.08) 0%, rgba(168,85,247,0.08) 100%); border:1.5px solid rgba(225,29,72,0.25); border-radius:16px; padding:14px; display:flex; gap:10px; align-items:flex-start;">
+        <div style="color:var(--color-primary); font-size:20px; line-height:1;">ℹ️</div>
+        <div style="flex:1; font-size:12px; color:var(--color-text-secondary); line-height:1.45; font-weight:600;">
+          <strong style="color:var(--color-text-primary); font-weight:900; display:block; margin-bottom:2px;">Aclaración sobre el costo:</strong>
+          El costo de esta notificación push es de <strong style="color:var(--color-primary); font-size:14px;">${formatPrice(pushPrice)}</strong>. 
+          Al enviar la notificación, <strong>este importe se sumará automáticamente a tus comisiones pendientes de pago</strong>.
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Título de la Notificación *</label>
+        <input type="text" id="push-title-input" placeholder="Ej: ¡20% OFF hoy en ${comercioName}!" style="width:100%; height:46px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface);" required />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Texto / Mensaje *</label>
+        <textarea id="push-body-input" rows="3" placeholder="Ej: Aprovechá nuestro descuento exclusivo pidiendo desde la app de GoDelivery." style="width:100%; border-radius:12px; border:1.5px solid var(--color-border); padding:10px 12px; font-weight:600; font-size:13px; color:var(--color-text-primary); background:var(--color-surface); resize:none;" required></textarea>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Imagen del Banner (Opcional - 16:9)</label>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <div id="push-preview-container" style="width:90px; height:50px; border-radius:10px; border:1.5px dashed var(--color-border); background:var(--color-bg-secondary); overflow:hidden; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <span style="font-size:9px; color:var(--color-text-tertiary); font-weight:800;">Sin foto</span>
+          </div>
+          <button type="button" id="btn-push-upload-image" style="height:36px; padding:0 12px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); font-weight:800; font-size:12px; cursor:pointer;">Seleccionar Imagen</button>
+        </div>
+      </div>
+
+      <div style="margin-top:auto; padding:14px; background:var(--color-bg-secondary); border-radius:16px; border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between;">
+        <span style="font-size:12px; font-weight:850; color:var(--color-text-secondary);">Costo a adicionar a comisiones:</span>
+        <span style="font-size:18px; font-weight:950; color:var(--color-primary);">${formatPrice(pushPrice)}</span>
+      </div>
+
+      <button type="button" id="btn-submit-push-ad" style="height:52px; border-radius:16px; border:none; background:var(--color-primary); color:white; font-weight:900; font-size:15px; cursor:pointer; width:100%; box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);">
+        Confirmar y Enviar Notificación (${formatPrice(pushPrice)})
+      </button>
+    </div>
+  `;
+
+  showModal({ title: '', hideHeader: true, height: '82dvh', content: modalContent });
+
+  modalContent.querySelector('#close-push-modal').onclick = () => closeModal();
+
+  const uploadBtn = modalContent.querySelector('#btn-push-upload-image');
+  uploadBtn.onclick = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        try {
+          const base64 = await openCropper(file, { aspectRatio: 16 / 9, maxWidth: 800, maxHeight: 450 });
+          croppedBase64 = base64;
+          const container = modalContent.querySelector('#push-preview-container');
+          if (container) container.innerHTML = `<img src="${base64}" style="width:100%; height:100%; object-fit:cover;" />`;
+        } catch (err) { console.error(err); }
+      }
+    };
+    fileInput.click();
+  };
+
+  const submitBtn = modalContent.querySelector('#btn-submit-push-ad');
+  submitBtn.onclick = async () => {
+    const title = modalContent.querySelector('#push-title-input').value.trim();
+    const body = modalContent.querySelector('#push-body-input').value.trim();
+    if (!title || !body) {
+      return showToast('Completá el título y el mensaje de la notificación', 'warning');
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Enviando notificación...';
+
+    try {
+      // 1. Add ad charge order record (increases pending commission debt)
+      await addDoc(collection(db, 'orders'), {
+        comercioId,
+        comercioName,
+        status: 'completed',
+        isAdCharge: true,
+        type: 'ad_push',
+        title: `Notificación Push: ${title}`,
+        total: pushPrice,
+        commissionAmount: pushPrice,
+        commissionStatus: 'pending',
+        createdAt: Timestamp.now(),
+        notes: `Notificación anuncio enviada. Título: "${title}"`
+      });
+
+      // 2. Add to customAds collection (triggers FCM push broadcast & shows on home)
+      await addDoc(collection(db, 'customAds'), {
+        title,
+        body,
+        banner: croppedBase64 || '',
+        link: `#/comercio/${comercioId}`,
+        active: true,
+        isPriority: true,
+        comercioId,
+        createdAt: Timestamp.now()
+      });
+
+      showToast(`¡Notificación enviada! Se sumaron ${formatPrice(pushPrice)} a tus comisiones pendientes.`, 'success');
+      closeModal();
+    } catch (err) {
+      console.error('Error sending push ad:', err);
+      showToast('Error al enviar notificación anuncio', 'danger');
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Confirmar y Enviar Notificación';
+    }
+  };
+}
+
+// ─── MODAL CONTRATAR DESTAQUE SLIDER HOME ──────────────────────────────────────
+function openFeaturedSliderModal(comercioId, comercioName) {
+  const featuredPrice = pricingSettings.featuredAdPrice || 5000;
+  let croppedBase64 = '';
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden; position:relative; box-sizing:border-box;';
+
+  modalContent.innerHTML = `
+    <div style="background:linear-gradient(135deg, #f59e0b, #d97706); padding:16px 20px; display:flex; align-items:center; justify-content:space-between; color:white; flex-shrink:0;">
+      <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; display:flex; align-items:center; gap:6px;">
+        ${icon('sparkles', 18)} Destaque Slider Home
+      </h3>
+      <button id="close-featured-modal" style="background:transparent; border:none; color:white; cursor:pointer;">${icon('close', 20)}</button>
+    </div>
+
+    <div style="flex:1; padding:20px; display:flex; flex-direction:column; gap:16px; overflow-y:auto; box-sizing:border-box; -webkit-overflow-scrolling:touch;">
+      <!-- Clarification Box -->
+      <div style="background:linear-gradient(135deg, rgba(245,158,11,0.1) 0%, rgba(217,119,6,0.08) 100%); border:1.5px solid rgba(245,158,11,0.3); border-radius:16px; padding:14px; display:flex; gap:10px; align-items:flex-start;">
+        <div style="color:#d97706; font-size:20px; line-height:1;">⭐</div>
+        <div style="flex:1; font-size:12px; color:var(--color-text-secondary); line-height:1.45; font-weight:600;">
+          <strong style="color:var(--color-text-primary); font-weight:900; display:block; margin-bottom:2px;">Aclaración sobre el costo:</strong>
+          Tu comercio aparecerá destacado en el slider principal del Home por 7 días. 
+          El costo de esta promoción es de <strong style="color:#d97706; font-size:14px;">${formatPrice(featuredPrice)}</strong> y <strong>se sumará automáticamente a tus comisiones pendientes de pago</strong>.
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Texto del Badge / Etiqueta *</label>
+        <input type="text" id="featured-label-input" placeholder="Ej: Hasta 30% OFF o ¡Imperdible!" value="Promoción Especial" style="width:100%; height:46px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; font-weight:700; color:var(--color-text-primary); background:var(--color-surface);" required />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase;">Banner para el Slider (Opcional - 16:9)</label>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <div id="featured-preview-container" style="width:90px; height:50px; border-radius:10px; border:1.5px dashed var(--color-border); background:var(--color-bg-secondary); overflow:hidden; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <span style="font-size:9px; color:var(--color-text-tertiary); font-weight:800;">Logo comercio</span>
+          </div>
+          <button type="button" id="btn-featured-upload-image" style="height:36px; padding:0 12px; border-radius:10px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); font-weight:800; font-size:12px; cursor:pointer;">Seleccionar Banner</button>
+        </div>
+      </div>
+
+      <div style="margin-top:auto; padding:14px; background:var(--color-bg-secondary); border-radius:16px; border:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between;">
+        <span style="font-size:12px; font-weight:850; color:var(--color-text-secondary);">Costo a adicionar a comisiones:</span>
+        <span style="font-size:18px; font-weight:950; color:#d97706;">${formatPrice(featuredPrice)}</span>
+      </div>
+
+      <button type="button" id="btn-submit-featured-ad" style="height:52px; border-radius:16px; border:none; background:linear-gradient(135deg, #f59e0b, #d97706); color:white; font-weight:900; font-size:15px; cursor:pointer; width:100%; box-shadow:0 8px 20px rgba(245,158,11,0.25);">
+        Activar Destaque (${formatPrice(featuredPrice)})
+      </button>
+    </div>
+  `;
+
+  showModal({ title: '', hideHeader: true, height: '78dvh', content: modalContent });
+
+  modalContent.querySelector('#close-featured-modal').onclick = () => closeModal();
+
+  const uploadBtn = modalContent.querySelector('#btn-featured-upload-image');
+  uploadBtn.onclick = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        try {
+          const base64 = await openCropper(file, { aspectRatio: 16 / 9, maxWidth: 800, maxHeight: 450 });
+          croppedBase64 = base64;
+          const container = modalContent.querySelector('#featured-preview-container');
+          if (container) container.innerHTML = `<img src="${base64}" style="width:100%; height:100%; object-fit:cover;" />`;
+        } catch (err) { console.error(err); }
+      }
+    };
+    fileInput.click();
+  };
+
+  const submitBtn = modalContent.querySelector('#btn-submit-featured-ad');
+  submitBtn.onclick = async () => {
+    const label = modalContent.querySelector('#featured-label-input').value.trim() || 'Destacado';
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Activando destaque...';
+
+    try {
+      // 1. Add ad charge order record
+      await addDoc(collection(db, 'orders'), {
+        comercioId,
+        comercioName,
+        status: 'completed',
+        isAdCharge: true,
+        type: 'featured_listing',
+        title: 'Destaque en Slider Principal Home',
+        total: featuredPrice,
+        commissionAmount: featuredPrice,
+        commissionStatus: 'pending',
+        createdAt: Timestamp.now(),
+        notes: `Destaque slider home contratado por 7 días.`
+      });
+
+      // 2. Activate featured promotion on commerce document
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 7);
+      await updateDoc(doc(db, 'comercios', comercioId), {
+        promotion: {
+          active: true,
+          isPaid: true,
+          isPriority: true,
+          label,
+          banner: croppedBase64 || '',
+          startDate: Timestamp.now(),
+          endDate: Timestamp.fromDate(endDate)
+        }
+      });
+
+      showToast(`¡Destaque activado! Tu comercio ya aparece en el slider del home. Se sumaron ${formatPrice(featuredPrice)} a tus comisiones pendientes.`, 'success');
+      closeModal();
+    } catch (err) {
+      console.error('Error activating featured slider ad:', err);
+      showToast('Error al activar destaque', 'danger');
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Activar Destaque';
+    }
   };
 }

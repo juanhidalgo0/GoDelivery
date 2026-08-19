@@ -219,13 +219,16 @@ export async function renderAdminComercios() {
                 </button>
               </div>
 
-              <!-- Secondary Controls (Editar / Pedidos) -->
+              <!-- Secondary Controls (Editar / Pedidos / Productos) -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; border-top:1px dashed var(--color-border-light); padding-top:12px;">
                 <button class="admin-edit-com-btn" data-id="${c.id}" style="height:38px; border-radius:12px; border:1px solid var(--color-border-light); background:var(--color-bg-secondary); color:var(--color-text); font-weight:800; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
                   ${icon('settings', 16)} Editar Perfil
                 </button>
                 <a href="#/mi-comercio/${c.id}/orders" style="height:38px; border-radius:12px; border:none; background:var(--color-primary-lighter); color:var(--color-primary); font-weight:800; font-size:12px; display:flex; align-items:center; justify-content:center; gap:6px; text-decoration:none;">
                   ${icon('package', 16)} Ver Pedidos
+                </a>
+                <a href="#/mi-comercio/${c.id}/products" style="grid-column: span 2; height:38px; border-radius:12px; border:1px solid rgba(139,92,246,0.25); background:rgba(139,92,246,0.06); color:#8b5cf6; font-weight:800; font-size:12px; display:flex; align-items:center; justify-content:center; gap:6px; text-decoration:none;">
+                  ${icon('tag', 16)} Administrar Productos / "Solo en App"
                 </a>
               </div>
 

@@ -26,7 +26,8 @@ self.addEventListener('fetch', (event) => {
       url.origin !== self.location.origin ||
       event.request.url.includes('firestore.googleapis.com') || 
       event.request.url.includes('firebase') ||
-      event.request.url.includes('google')) {
+      event.request.url.includes('google') ||
+      event.request.url.includes('version.json')) {
     return;
   }
 
