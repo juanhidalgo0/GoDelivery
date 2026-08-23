@@ -16,6 +16,7 @@ export function navigate(path) {
 const getMainRoutes = () => {
   const list = {
     '/': 'page-home',
+    '/offers': 'page-offers',
     '/mi-comercio': 'page-commerce',
     '/mi-comercio/:id/orders': 'page-commerce',
     '/delivery': 'page-delivery',

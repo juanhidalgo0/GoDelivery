@@ -2916,7 +2916,7 @@ function loadTabContent(tab, container, user) {
                     });
                     
                     if (order.userId) {
-                      const isEncomienda = order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda');
+                      const isEncomienda = order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda') || order.serviceType === 'encomienda';
                       const codeStr = (order.verificationCode && !isEncomienda) ? ` Tené listo tu código de entrega: ${order.verificationCode}` : '';
                       await addDoc(collection(db, 'users', order.userId, 'notifications'), {
                         title: '¡Tu repartidor está en la puerta!',
@@ -2956,7 +2956,7 @@ function loadTabContent(tab, container, user) {
               return;
             }
 
-            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.source === 'whatsapp_bot' || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda'));
+            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.source === 'whatsapp_bot' || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda') || o.serviceType === 'encomienda');
             openSlideToConfirmModal({
               isTrip,
               noCodeRequired,
@@ -3612,23 +3612,22 @@ function loadTabContent(tab, container, user) {
       if (reapplyBtn) reapplyBtn.onclick = handleApplyClick;
 
       document.getElementById('config-save-btn').onclick = async () => {
-        const aliasVal = document.getElementById('config-alias-input').value.trim();
+        const aliasInput = document.getElementById('config-alias-input');
+        const aliasVal = aliasInput ? aliasInput.value.trim() : '';
 
         if (!aliasVal) {
-          showToast('El alias es obligatorio', 'warning');
+          showToast('El alias de transferencia es obligatorio', 'warning');
           return;
         }
 
         const vehicleTypeSelect = document.getElementById('config-vehicle-type-select');
-        const vehicleType = vehicleTypeSelect ? vehicleTypeSelect.value : '';
-        const vehicleModel = document.getElementById('config-vehicle-model-input').value.trim();
-        const vehicleColor = document.getElementById('config-vehicle-color-input').value.trim();
-        const vehiclePatent = document.getElementById('config-vehicle-patent-input').value.trim();
-
-        if (!vehicleType || !vehicleModel || !vehicleColor || !vehiclePatent) {
-          showToast('Debés completar todos los datos del vehículo (tipo, modelo, color y patente) para poder recibir viajes y pedidos.', 'warning');
-          return;
-        }
+        const vehicleType = vehicleTypeSelect ? vehicleTypeSelect.value : (user.vehicleType || user.tripVehicleType || 'Moto');
+        const vehicleModelInput = document.getElementById('config-vehicle-model-input');
+        const vehicleModel = (vehicleModelInput && vehicleModelInput.value.trim()) ? vehicleModelInput.value.trim() : (user.vehicleModel || user.tripVehicleModel || 'Moto');
+        const vehicleColorInput = document.getElementById('config-vehicle-color-input');
+        const vehicleColor = (vehicleColorInput && vehicleColorInput.value.trim()) ? vehicleColorInput.value.trim() : (user.vehicleColor || user.tripVehicleColor || 'Negro');
+        const vehiclePatentInput = document.getElementById('config-vehicle-patent-input');
+        const vehiclePatent = (vehiclePatentInput && vehiclePatentInput.value.trim()) ? vehiclePatentInput.value.trim() : (user.vehiclePatent || user.patente || user.tripVehiclePatent || 'S/N');
 
         const saveBtn = document.getElementById('config-save-btn');
         saveBtn.disabled = true;
@@ -3638,33 +3637,36 @@ function loadTabContent(tab, container, user) {
           const { doc: fDoc, updateDoc: fUpdateDoc } = await import('firebase/firestore');
           const userRef = fDoc(db, 'users', user.uid);
           
+          const vTypeLower = (vehicleType || 'moto').toLowerCase();
+
           const updateFields = {
-            transferAlias: aliasVal
+            transferAlias: aliasVal,
+            alias: aliasVal,
+            mpAlias: aliasVal,
+            
+            tripVehicleType: vTypeLower,
+            tripVehicleModel: vehicleModel,
+            tripVehicleColor: vehicleColor,
+            tripVehiclePatent: vehiclePatent,
+            
+            deliveryVehicleType: vehicleType || 'Moto',
+            deliveryVehicleModel: vehicleModel,
+            deliveryVehicleColor: vehicleColor,
+            deliveryVehiclePatent: vehiclePatent,
+
+            vehicleType: vTypeLower,
+            vehicleModel: vehicleModel,
+            vehicleColor: vehicleColor,
+            vehicleDetails: vehiclePatent,
+            patente: vehiclePatent
           };
 
           if (isTripApproved) {
-            const modeVal = document.getElementById('config-deliverymode-select').value;
-            updateFields.deliveryMode = modeVal;
+            const modeSelect = document.getElementById('config-deliverymode-select');
+            if (modeSelect) {
+              updateFields.deliveryMode = modeSelect.value;
+            }
           }
-
-          // Unify vehicle information across all fields for absolute compatibility
-          const vTypeLower = vehicleType.toLowerCase();
-          
-          updateFields.tripVehicleType = vTypeLower;
-          updateFields.tripVehicleModel = vehicleModel;
-          updateFields.tripVehicleColor = vehicleColor;
-          updateFields.tripVehiclePatent = vehiclePatent;
-          
-          updateFields.deliveryVehicleType = vehicleType;
-          updateFields.deliveryVehicleModel = vehicleModel;
-          updateFields.deliveryVehicleColor = vehicleColor;
-          updateFields.deliveryVehiclePatent = vehiclePatent;
-
-          updateFields.vehicleType = vTypeLower;
-          updateFields.vehicleModel = vehicleModel;
-          updateFields.vehicleColor = vehicleColor;
-          updateFields.vehicleDetails = vehiclePatent;
-          updateFields.patente = vehiclePatent;
 
           await fUpdateDoc(userRef, updateFields);
 
@@ -3673,10 +3675,10 @@ function loadTabContent(tab, container, user) {
             ...updateFields
           });
 
-          showToast('¡Configuración guardada con éxito!', 'success');
+          showToast('✅ ¡Configuración y alias guardados con éxito!', 'success');
         } catch (err) {
           console.error('Error saving config:', err);
-          showToast('Error al guardar la configuración', 'error');
+          showToast('Error al guardar la configuración: ' + err.message, 'error');
         } finally {
           saveBtn.disabled = false;
           saveBtn.innerHTML = 'Guardar Configuración';
@@ -5901,6 +5903,48 @@ export async function ensureDriverPermissions() {
   return true;
 }
 
+function showBlockingLoading(message = 'Cargando...') {
+  hideBlockingLoading();
+  const overlay = document.createElement('div');
+  overlay.id = 'v5-blocking-loading-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    color: white;
+    font-family: var(--font-display, 'Outfit', sans-serif);
+    animation: fadeIn 0.25s ease-out;
+  `;
+  overlay.innerHTML = `
+    <div style="width: 54px; height: 54px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.2); border-top-color: var(--color-primary, #e11d48); animation: spin 0.8s linear infinite;"></div>
+    <div style="font-size: 16px; font-weight: 900; letter-spacing: -0.01em; color: white; text-align: center; max-width: 280px; line-height: 1.4;">
+      ${message}
+    </div>
+  `;
+  if (!document.getElementById('blocking-loading-styles')) {
+    const s = document.createElement('style');
+    s.id = 'blocking-loading-styles';
+    s.textContent = `
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    `;
+    document.head.appendChild(s);
+  }
+  document.body.appendChild(overlay);
+}
+
+function hideBlockingLoading() {
+  document.getElementById('v5-blocking-loading-overlay')?.remove();
+}
+
 function attachStatusBarListeners(user) {
   const btn = document.getElementById('session-toggle-btn');
   if (!btn || !user) return;
@@ -5925,17 +5969,23 @@ function attachStatusBarListeners(user) {
         title: '¿Desconectarse?',
         message: 'Dejarás de recibir notificaciones de nuevos pedidos.',
         confirmText: 'Sí, desconectar',
-        onConfirm: () => {
+        onConfirm: async () => {
           closeModal();
-          // Instant optimistic local state update (0ms, no spinner!)
-          setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
-          const bar = document.getElementById('session-status-bar-container');
-          const latest = getState().user;
-          if (bar) {
-            bar.innerHTML = renderStatusBar(latest);
-            attachStatusBarListeners(latest);
+          showBlockingLoading('Desconectando sesión...');
+          try {
+            await endSession(user);
+            const bar = document.getElementById('session-status-bar-container');
+            const latest = getState().user;
+            if (bar) {
+              bar.innerHTML = renderStatusBar(latest);
+              attachStatusBarListeners(latest);
+            }
+          } catch (err) {
+            console.error('Disconnection error:', err);
+            showToast('Error al desconectar', 'error');
+          } finally {
+            hideBlockingLoading();
           }
-          endSession(user).catch(err => console.error('Background disconnection error:', err));
         }
       });
     } else {
@@ -5975,8 +6025,6 @@ function attachStatusBarListeners(user) {
         };
         return;
       }
-      
-      const originalText = btn.innerHTML;
 
       try {
         // Mandatorio: alias de transferencia configurado para poder recibir pagos y conectarse
@@ -5999,109 +6047,102 @@ function attachStatusBarListeners(user) {
           ? `Comenzarás a recibir pedidos en tu zona. Se sumarán <b>$${configuredCanonAmount.toLocaleString('es-AR')}</b> de canon diario a tu saldo de comisiones.`
           : 'Comenzarás a recibir pedidos disponibles en tu zona.';
 
-        // Show confirm modal INSTANTLY (0ms latency)
         showConfirm({
           title: '¿Conectarse?',
           message: modalMessage,
           confirmText: 'Sí, conectar',
-          onConfirm: () => {
+          onConfirm: async () => {
             closeModal();
+            showBlockingLoading('Verificando permisos y conectando...');
 
-            // Instant optimistic local state update (0ms, no spinner/loader!)
             const previousUser = getState().user;
-            setState('user', { ...previousUser, isOnline: true });
-            
-            const bar = document.getElementById('session-status-bar-container');
-            const latest = getState().user;
-            if (bar) {
-              bar.innerHTML = renderStatusBar(latest);
-              attachStatusBarListeners(latest);
-            }
 
-            // Process background checks & session start
-            (async () => {
-              try {
-                // Mandatorio: permisos de notificaciones y ubicación GPS autorizados
-                const okPermissions = await ensureDriverPermissions();
-                if (!okPermissions) {
-                  setState('user', { ...previousUser, isOnline: false });
-                  if (bar) {
-                    bar.innerHTML = renderStatusBar(getState().user);
-                    attachStatusBarListeners(getState().user);
-                  }
-                  return;
-                }
+            try {
+              // Mandatorio: permisos de notificaciones y ubicación GPS autorizados
+              const okPermissions = await ensureDriverPermissions();
+              if (!okPermissions) {
+                hideBlockingLoading();
+                return;
+              }
 
-                if (isFirstConnectionToday) {
-                  const { doc, setDoc, updateDoc, increment, serverTimestamp, collection, getDoc } = await import('firebase/firestore');
-                  const { db } = await import('../firebase.js');
+              if (isFirstConnectionToday) {
+                const { doc, setDoc, updateDoc, increment, serverTimestamp, collection, getDoc } = await import('firebase/firestore');
+                const { db } = await import('../firebase.js');
 
-                  const canonDocRef = doc(db, 'delivery_canon_payments', `${user.uid}_${todayStr}`);
-                  
-                  // Double check in Firestore to absolutely prevent duplicates
-                  const canonSnap = await getDoc(canonDocRef);
-                  if (canonSnap.exists() && canonSnap.data().amount > 0) {
-                    console.log(`[Canon] Already charged for today (${todayStr}) in Firestore. Skipping duplicate charge.`);
-                  } else {
-                    // 1. Record individual Canon transaction
-                    await setDoc(canonDocRef, {
-                      driverId: user.uid,
-                      driverName: user.displayName || user.name || 'Repartidor',
-                      dateStr: todayStr,
-                      amount: configuredCanonAmount,
-                      settled: false,
-                      createdAt: serverTimestamp()
-                    }, { merge: true });
-
-                    // 2. Record in delivery_transactions so it appears in the Driver's Balance History
-                    const transRef = doc(collection(db, 'delivery_transactions'));
-                    await setDoc(transRef, {
-                      driverId: user.uid,
-                      type: 'canon_charge',
-                      amount: configuredCanonAmount,
-                      description: `Canon Diario Jornada (${todayStr})`,
-                      createdAt: serverTimestamp()
-                    });
-
-                    // 3. Add canon amount to deliveryDebt and update lastCanonChargeDate
-                    await updateDoc(doc(db, 'users', user.uid), {
-                      deliveryDebt: increment(configuredCanonAmount),
-                      lastCanonChargeDate: todayStr
-                    });
-
-                    showToast(`🛵 Se registraron +$${configuredCanonAmount.toLocaleString('es-AR')} de canon diario en tu saldo de comisiones.`, 'info');
-                  }
-                }
-
-                await startSession(user);
+                const canonDocRef = doc(db, 'delivery_canon_payments', `${user.uid}_${todayStr}`);
                 
-                // Auto open functioning info sheet for the first 3 connections
-                const connKey = `gd_delivery_connect_count_${user.uid}`;
-                let connCount = parseInt(localStorage.getItem(connKey) || '0', 10);
-                if (connCount < 3) {
-                  connCount += 1;
-                  localStorage.setItem(connKey, connCount.toString());
-                  setTimeout(() => {
-                    document.getElementById('delivery-contact-support-btn')?.click();
-                  }, 600);
-                }
-              } catch (err) {
-                console.error('Login error:', err);
-                showToast('Error al conectar', 'error');
-                setState('user', { ...previousUser, isOnline: false });
-                if (bar) {
-                  bar.innerHTML = renderStatusBar(getState().user);
-                  attachStatusBarListeners(getState().user);
+                // Double check in Firestore to absolutely prevent duplicates
+                const canonSnap = await getDoc(canonDocRef);
+                if (canonSnap.exists() && canonSnap.data().amount > 0) {
+                  console.log(`[Canon] Already charged for today (${todayStr}) in Firestore. Skipping duplicate charge.`);
+                } else {
+                  // 1. Record individual Canon transaction
+                  await setDoc(canonDocRef, {
+                    driverId: user.uid,
+                    driverName: user.displayName || user.name || 'Repartidor',
+                    dateStr: todayStr,
+                    amount: configuredCanonAmount,
+                    settled: false,
+                    createdAt: serverTimestamp()
+                  }, { merge: true });
+
+                  // 2. Record in delivery_transactions so it appears in the Driver's Balance History
+                  const transRef = doc(collection(db, 'delivery_transactions'));
+                  await setDoc(transRef, {
+                    driverId: user.uid,
+                    type: 'canon_charge',
+                    amount: configuredCanonAmount,
+                    description: `Canon Diario Jornada (${todayStr})`,
+                    createdAt: serverTimestamp()
+                  });
+
+                  // 3. Add canon amount to deliveryDebt and update lastCanonChargeDate
+                  await updateDoc(doc(db, 'users', user.uid), {
+                    deliveryDebt: increment(configuredCanonAmount),
+                    lastCanonChargeDate: todayStr
+                  });
+
+                  showToast(`🛵 Se registraron +$${configuredCanonAmount.toLocaleString('es-AR')} de canon diario en tu saldo de comisiones.`, 'info');
                 }
               }
-            })();
+
+              await startSession(user);
+
+              const bar = document.getElementById('session-status-bar-container');
+              const latest = getState().user;
+              if (bar) {
+                bar.innerHTML = renderStatusBar(latest);
+                attachStatusBarListeners(latest);
+              }
+              
+              // Auto open functioning info sheet for the first 3 connections
+              const connKey = `gd_delivery_connect_count_${user.uid}`;
+              let connCount = parseInt(localStorage.getItem(connKey) || '0', 10);
+              if (connCount < 3) {
+                connCount += 1;
+                localStorage.setItem(connKey, connCount.toString());
+                setTimeout(() => {
+                  document.getElementById('delivery-contact-support-btn')?.click();
+                }, 600);
+              }
+            } catch (err) {
+              console.error('Login error:', err);
+              showToast('Error al conectar', 'error');
+              setState('user', { ...previousUser, isOnline: false });
+              const bar = document.getElementById('session-status-bar-container');
+              if (bar) {
+                bar.innerHTML = renderStatusBar(getState().user);
+                attachStatusBarListeners(getState().user);
+              }
+            } finally {
+              hideBlockingLoading();
+            }
           }
         });
       } catch (err) {
         console.error('Error al conectar:', err);
         showToast('Error al conectar repartidor', 'error');
         btn.disabled = false;
-        btn.innerHTML = originalText;
       }
     }
   };
@@ -6449,7 +6490,7 @@ export async function markAsPickedUp(orderIdOrIds) {
           if (orderSnap.exists()) {
             const orderData = orderSnap.data();
             if (orderData.userId) {
-              const isEncomienda = orderData.favorType === 'encomienda' || (orderData.isFavor && orderData.favorType === 'encomienda');
+              const isEncomienda = orderData.favorType === 'encomienda' || (orderData.isFavor && orderData.favorType === 'encomienda') || orderData.serviceType === 'encomienda';
               const codeStr = (orderData.verificationCode && !isEncomienda) ? ` Tené listo tu código de entrega: ${orderData.verificationCode}` : '';
               await addDoc(collection(db, 'users', orderData.userId, 'notifications'), {
                 title: orderData.isFavor ? '¡Tu favor va en camino! 🚴' : '¡Tu pedido va en camino! 🚴',

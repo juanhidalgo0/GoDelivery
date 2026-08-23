@@ -7,6 +7,12 @@ let pwaCheckDone = false;
  * PWA Enforcement Lock Screen
  */
 export function ensureAppInstalled() {
+  const isCapacitorNative = !!(window.Capacitor && (
+    (typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()) ||
+    window.Capacitor.isNative ||
+    (window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web')
+  ));
+  if (isCapacitorNative) return;
   if (checkIfInstalled()) return;
   
   if (window.location.search.includes('test=true') || window.location.search.includes('preview=true') || window.location.hash.includes('preview=true')) return;

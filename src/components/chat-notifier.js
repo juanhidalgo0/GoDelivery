@@ -53,11 +53,39 @@ function listenToChat(chatId, userId, chatData) {
     // Resolve otherName and order details dynamically
     let otherName = 'Mensaje';
     let order = null;
+    // Ignore chats of completed, delivered or cancelled orders
+    if (chatData.status === 'completed' || chatData.status === 'closed' || chatData.isClosed === true || chatData.closed === true) {
+      unreadCounts[chatId] = 0;
+      notifyUnreadChange();
+      return;
+    }
+
     if (chatData.orderId) {
       try {
         const orderSnap = await getDoc(doc(db, 'orders', chatData.orderId));
         if (orderSnap.exists()) {
           order = { id: orderSnap.id, ...orderSnap.data() };
+          
+          // If order is completed, delivered or cancelled, do NOT count as unread
+          if (order.status === 'completed' || order.status === 'delivered' || order.status === 'cancelled') {
+            unreadCounts[chatId] = 0;
+            notifyUnreadChange();
+            return;
+          }
+
+          // Verify if userId is an actual party to this order
+          const isActualParty = order.userId === userId || 
+                                order.driverId === userId || 
+                                order.comercioId === userId || 
+                                order.comercioOwnerId === userId;
+
+          if (!isActualParty) {
+            // User is only an auditor/admin inspecting this chat. Do NOT count unread!
+            unreadCounts[chatId] = 0;
+            notifyUnreadChange();
+            return;
+          }
+
           if (chatData.type === 'client-commerce') {
             otherName = userId === order.userId ? (order.comercioName || 'Comercio') : (order.userName || 'Cliente');
           } else if (chatData.type === 'client-delivery') {
@@ -75,40 +103,46 @@ function listenToChat(chatId, userId, chatData) {
       otherName = 'Soporte';
     }
 
-    snap.docs.forEach(d => {
-      const msg = d.data();
-      if (msg.senderId !== userId && !msg.read) {
-        unread++;
-        const msgKey = `${chatId}_${d.id}`;
-        if (!notifiedMessages.has(msgKey)) {
-          if (!isInitialLoad) {
-            notifiedMessages.add(msgKey);
-            
-            // Play sound alert
-            try {
-              AudioManager.playSynthMessageReceive();
-            } catch (soundErr) {
-              console.warn('AudioManager sound play failed:', soundErr);
+    // Check if unread count for this user is explicitly 0 in chat document metadata
+    if (chatData.unread && typeof chatData.unread[userId] === 'number' && chatData.unread[userId] === 0) {
+      unread = 0;
+    } else {
+      snap.docs.forEach(d => {
+        const msg = d.data();
+        if (msg.senderId !== userId && !msg.read) {
+          unread++;
+          const msgKey = `${chatId}_${d.id}`;
+          if (!notifiedMessages.has(msgKey)) {
+            if (!isInitialLoad) {
+              notifiedMessages.add(msgKey);
+              
+              // Play sound alert
+              try {
+                AudioManager.playSynthMessageReceive();
+              } catch (soundErr) {
+                console.warn('AudioManager sound play failed:', soundErr);
+              }
+
+              const clickUrl = order 
+                ? (order.userId !== userId 
+                    ? (order.driverId === userId ? `#/delivery-panel?chatOrder=${order.id}` : `#/comercio-panel/orders?id=${order.comercioId}&chatOrder=${order.id}`)
+                    : `#/pedido/${order.id}`)
+                : `#/mis-chats`;
+
+              sendLocalNotification(`💬 ${msg.senderName || otherName}`, msg.text, {
+                tag: `chat-${chatId}`,
+                url: clickUrl,
+                type: 'chat'
+              });
+              showGlobalMessageBanner(msg.senderName || otherName, msg.text, chatData.orderId || '', chatId, order ? (order.userId !== userId) : false, order);
+            } else {
+              notifiedMessages.add(msgKey);
             }
-
-            const clickUrl = order 
-              ? (order.userId !== userId 
-                  ? (order.driverId === userId ? `#/delivery-panel?chatOrder=${order.id}` : `#/comercio-panel/orders?id=${order.comercioId}&chatOrder=${order.id}`)
-                  : `#/pedido/${order.id}`)
-              : `#/mis-chats`;
-
-            sendLocalNotification(`💬 ${msg.senderName || otherName}`, msg.text, {
-              tag: `chat-${chatId}`,
-              url: clickUrl,
-              type: 'chat'
-            });
-            showGlobalMessageBanner(msg.senderName || otherName, msg.text, chatData.orderId || '', chatId, order ? (order.userId !== userId) : false, order);
-          } else {
-            notifiedMessages.add(msgKey);
           }
         }
-      }
-    });
+      });
+    }
+
     isInitialLoad = false;
     unreadCounts[chatId] = unread;
     notifyUnreadChange();

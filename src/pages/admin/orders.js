@@ -1493,6 +1493,9 @@ window.showOrderDetail = async (idOrObject) => {
           ${icon('navigationArrow', 20)} SEGUIMIENTO EN TIEMPO REAL (GPS)
         </button>
         ${o.status !== 'cancelled' && o.status !== 'completed' && o.status !== 'entregado' ? `
+          <button id="admin-force-complete-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 15px rgba(16,185,129,0.3);">
+            ${icon('checkCircle', 20)} FORZAR ENTREGA (MARCAR COMO COMPLETADO)
+          </button>
           <button id="admin-cancel-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#E74C3C; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
             ${icon('xCircle', 20)} CANCELAR PEDIDO
           </button>
@@ -1548,6 +1551,42 @@ window.showOrderDetail = async (idOrObject) => {
         });
       }
 
+      // Force complete button handler
+      const forceCompleteBtn = document.getElementById('admin-force-complete-order-btn');
+      if (forceCompleteBtn) {
+        forceCompleteBtn.addEventListener('click', async () => {
+          const { showConfirm } = await import('../../components/modal.js');
+          showConfirm({
+            title: '⚠️ ¿FORZAR ENTREGA DE ESTE PEDIDO?',
+            message: `¿Confirmás que deseas marcar como ENTREGADO y COMPLETADO el pedido #${o.orderNumber || o.orderId || o.id.slice(0,6)}?`,
+            confirmText: 'SÍ, FORZAR ENTREGA',
+            onConfirm: async () => {
+              const { showToast } = await import('../../components/toast.js');
+              const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+              const { db } = await import('../../firebase.js');
+              try {
+                forceCompleteBtn.disabled = true;
+                forceCompleteBtn.innerHTML = icon('loader', 14, 'animate-spin') + ' PROCESANDO...';
+                
+                await updateDoc(doc(db, 'orders', o.id), {
+                  status: 'completed',
+                  deliveredAt: serverTimestamp(),
+                  completedAt: serverTimestamp(),
+                  deliveredByAdmin: true
+                });
+                closeModal();
+                showToast('✅ Pedido entregado y completado exitosamente por el administrador', 'success');
+                setTimeout(() => location.reload(), 600);
+              } catch (err) {
+                console.error('[Admin Force Complete] Error:', err);
+                showToast('Error al forzar entrega: ' + (err.message || err), 'danger');
+                forceCompleteBtn.disabled = false;
+              }
+            }
+          });
+        });
+      }
+
       // Release driver button handler
       const releaseBtn = document.getElementById('admin-release-driver-btn');
       if (releaseBtn) {
@@ -1598,45 +1637,34 @@ window.showOrderDetail = async (idOrObject) => {
           modalDiv.style.cssText = 'padding:24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg); border-radius:24px;';
           modalDiv.innerHTML = `
             <div style="text-align:center;">
-              <div style="font-size:32px; margin-bottom:8px;">🚨</div>
-              <h3 style="font-size:18px; font-weight:900; color:var(--color-text-primary); margin:0;">Cancelar Pedido #${o.orderId || '---'}</h3>
-              <p style="font-size:13px; color:var(--color-text-tertiary); margin:6px 0 0;">Ingresá el motivo de la cancelación. Se le enviará esta explicación al cliente junto a su notificación.</p>
+              <h3 style="margin:0 0 6px 0; font-size:17px; font-weight:900; color:var(--color-text-primary);">Motivo de Cancelación</h3>
+              <p style="margin:0; font-size:12.5px; color:var(--color-text-secondary); font-weight:600;">Seleccioná el motivo por el cual estás cancelando este pedido</p>
             </div>
-
-            <div style="display:flex; flex-direction:column; gap:6px;">
-              <label style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Motivo de cancelación (Obligatorio)</label>
-              <textarea id="admin-cancel-reason-input" placeholder="Ej: El local se encuentra sin stock del producto seleccionado..." style="width:100%; height:90px; border-radius:14px; border:1.5px solid var(--color-border); background:var(--color-bg-secondary); color:var(--color-text-primary); padding:12px; font-size:13px; font-weight:600; outline:none; resize:none; font-family:inherit;"></textarea>
-            </div>
-
-            <div style="display:flex; gap:10px; width:100%; margin-top:8px;">
-              <button id="cancel-reason-abort-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:14px; font-weight:800; font-size:13px;">Volver</button>
-              <button id="cancel-reason-confirm-btn" class="btn btn-danger" style="flex:1.5; height:48px; border-radius:14px; font-weight:900; font-size:13px; background:#EF4444; color:white; border:none; box-shadow:0 6px 18px rgba(239,68,68,0.35);">Confirmar Cancelación</button>
+            <select id="v5-cancel-reason-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-surface); font-size:13px; font-weight:700; outline:none; border:1.5px solid var(--color-border-light);">
+              <option value="Cliente no responde">Cliente no responde</option>
+              <option value="Comercio sin stock / cerrado">Comercio sin stock / cerrado</option>
+              <option value="Sin repartidores disponibles">Sin repartidores disponibles</option>
+              <option value="Pedido duplicado o de prueba">Pedido duplicado o de prueba</option>
+              <option value="Cancelación solicitada por el usuario">Cancelación solicitada por el usuario</option>
+              <option value="Otro motivo">Otro motivo</option>
+            </select>
+            <div style="display:flex; gap:10px; margin-top:8px;">
+              <button class="btn btn-ghost" id="v5-cancel-dismiss-btn" style="flex:1; height:46px; border-radius:12px; font-weight:800;">VOLVER</button>
+              <button class="btn btn-primary" id="v5-cancel-confirm-btn" style="flex:1.5; height:46px; border-radius:12px; font-weight:900; background:#EF4444; color:white; border:none;">CONFIRMAR CANCELACIÓN</button>
             </div>
           `;
 
           showModal({
-            title: 'Motivo de Cancelación',
+            title: 'Cancelar Pedido (Admin)',
             content: modalDiv,
-            hideHeader: true,
             height: 'auto'
           });
 
-          document.getElementById('cancel-reason-abort-btn').onclick = () => closeCancelModal();
-
-          document.getElementById('cancel-reason-confirm-btn').onclick = async () => {
-            const reasonInput = document.getElementById('admin-cancel-reason-input');
-            const reason = reasonInput ? reasonInput.value.trim() : '';
-
-            if (!reason) {
-              if (reasonInput) {
-                reasonInput.style.borderColor = '#EF4444';
-                reasonInput.focus();
-              }
-              showToast('Por favor explicá el motivo de la cancelación.', 'warning');
-              return;
-            }
-
-            const confirmBtnEl = document.getElementById('cancel-reason-confirm-btn');
+          modalDiv.querySelector('#v5-cancel-dismiss-btn').onclick = () => closeCancelModal();
+          modalDiv.querySelector('#v5-cancel-confirm-btn').onclick = async () => {
+            const select = modalDiv.querySelector('#v5-cancel-reason-select');
+            const reason = select.value || 'Cancelado por el administrador';
+            const confirmBtnEl = modalDiv.querySelector('#v5-cancel-confirm-btn');
             confirmBtnEl.disabled = true;
             confirmBtnEl.innerHTML = 'Cancelando...';
 
@@ -1685,7 +1713,7 @@ window.showOrderDetail = async (idOrObject) => {
               showToast('Error al cancelar el pedido: ' + err, 'danger');
               if (confirmBtnEl) {
                 confirmBtnEl.disabled = false;
-                confirmBtnEl.innerHTML = 'Confirmar Cancelación';
+                confirmBtnEl.innerHTML = 'CONFIRMAR CANCELACIÓN';
               }
             }
           };
@@ -1952,7 +1980,7 @@ export async function openReleaseDriverModal(idOrOrder) {
         <select id="v5-assign-driver-select" class="select" style="width:100%; height:48px; border-radius:14px; padding:0 12px; background:var(--color-bg-card); font-size:13.5px; font-weight:600; outline:none; border:1.5px solid var(--color-border-light);">
           <option value="rotation">🔄 Devolver a rotación general (ofrecer a otros)</option>
           ${drivers.map(d => `
-            <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.displayId || '---'})</option>
+            <option value="${d.uid}">${d.displayName || d.name || 'Repartidor'} (ID: ${d.deliveryId || d.displayId || '---'})</option>
           `).join('')}
         </select>
       </div>
@@ -2027,25 +2055,29 @@ export async function openReleaseDriverModal(idOrOrder) {
           updateDispatchQueue(o.id);
 
         } else {
-          // Re-offer exclusively to selected driver in rotation (rotar / ofertar sin auto-asignar)
+          // DIRECT AUTOMATIC ASSIGNMENT TO SELECTED DRIVER (WITHOUT REQUIRING ACCEPTANCE)
           const selectedDriver = drivers.find(d => d.uid === destination);
           if (!selectedDriver) throw new Error('Repartidor no encontrado');
 
           const updateFields = {
-            driverId: null,
-            driverName: null,
-            driverPhoto: null,
-            driverPhone: null,
-            driverDlId: null,
-            driverAlias: null,
-            driverVehicleModel: null,
-            driverVehicleColor: null,
-            driverVehiclePatent: null,
-            queueTargetDriverId: selectedDriver.uid,
-            queueTargetDriverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
-            queueOfferedAt: serverTimestamp(),
-            directDriverUid: selectedDriver.uid,
-            status: (o.isFavor || o.isTrip) ? 'pending' : 'ready'
+            driverId: selectedDriver.uid,
+            driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+            driverPhoto: selectedDriver.photoURL || selectedDriver.photo || null,
+            driverPhone: selectedDriver.phone || selectedDriver.phoneNumber || null,
+            driverDeliveryId: selectedDriver.deliveryId || selectedDriver.displayId || selectedDriver.dlId || null,
+            driverDlId: selectedDriver.deliveryId || selectedDriver.displayId || selectedDriver.dlId || null,
+            driverAlias: selectedDriver.transferAlias || selectedDriver.alias || null,
+            driverVehicleModel: selectedDriver.vehicleModel || selectedDriver.deliveryVehicleModel || null,
+            driverVehicleColor: selectedDriver.vehicleColor || null,
+            driverVehiclePatent: selectedDriver.vehicleDetails || selectedDriver.patente || selectedDriver.vehiclePatent || null,
+            assignedAt: serverTimestamp(),
+            acceptedAt: serverTimestamp(),
+            driverAssignedAt: serverTimestamp(),
+            status: (o.isFavor || o.isTrip) ? 'confirmed' : 'accepted',
+            queueTargetDriverId: null,
+            queueTargetDriverName: null,
+            queueOfferedAt: null,
+            directDriverUid: selectedDriver.uid
           };
 
           if (oldDriverId) {
@@ -2057,53 +2089,68 @@ export async function openReleaseDriverModal(idOrOrder) {
 
           await updateDoc(doc(db, 'orders', o.id), updateFields);
 
-          // Reset chats so previous driver is unlinked
+          // Update chats so the newly assigned driver is connected to client and commerce
           try {
             const clientChatRef = doc(db, 'chats', `${o.id}_client-delivery`);
             const cdSnap = await getDoc(clientChatRef);
             if (cdSnap.exists()) {
               const cdData = cdSnap.data();
-              const prevDriver = cdData.driverId || oldDriverId;
-              const newParts = (cdData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
-              await updateDoc(clientChatRef, { driverId: null, driverName: null, participants: newParts });
+              const oldParts = (cdData.participants || []).filter(p => p !== oldDriverId);
+              const newParts = [...new Set([...oldParts, selectedDriver.uid])];
+              await updateDoc(clientChatRef, { 
+                driverId: selectedDriver.uid, 
+                driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+                participants: newParts 
+              });
             }
             const comChatRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
             const comSnap = await getDoc(comChatRef);
             if (comSnap.exists()) {
               const comData = comSnap.data();
-              const prevDriver = comData.driverId || oldDriverId;
-              const newParts = (comData.participants || []).filter(p => p !== prevDriver && p !== oldDriverId);
-              await updateDoc(comChatRef, { driverId: null, driverName: null, participants: newParts });
+              const oldParts = (comData.participants || []).filter(p => p !== oldDriverId);
+              const newParts = [...new Set([...oldParts, selectedDriver.uid])];
+              await updateDoc(comChatRef, { 
+                driverId: selectedDriver.uid, 
+                driverName: selectedDriver.displayName || selectedDriver.name || 'Repartidor',
+                participants: newParts 
+              });
             }
           } catch (e) {
-            console.warn('[Admin Release] Chat reset error:', e);
+            console.warn('[Admin Assign Direct] Chat update error:', e);
           }
 
-          // Trigger exclusive push notification for target driver
+          // Trigger MAXIMUM PRIORITY push notification for target driver
           try {
-            const orderNum = o.orderId || o.id.slice(-6).toUpperCase();
+            const orderNum = o.orderId || o.orderNumber || o.id.slice(-6).toUpperCase();
+            
+            // In-app user notification for driver
             await addDoc(collection(db, 'users', selectedDriver.uid, 'notifications'), {
-              title: '🛵 ¡Nueva Oferta Exclusiva!',
-              body: `Se te ha ofertado en rotación el pedido #${orderNum}. ¡Ingresá para aceptar!`,
-              type: 'new_exclusive_offer',
+              title: '🚨 ¡PEDIDO ASIGNADO DIRECTAMENTE!',
+              body: `Se te asignó directamente el Pedido #${orderNum}. Ingresá a tu panel para realizar la entrega.`,
+              type: 'direct_assignment',
+              priority: 'high',
               orderId: o.id,
               status: 'unread',
+              sound: 'alert.mp3',
               createdAt: serverTimestamp()
             });
 
+            // Global Push dispatch trigger
             await addDoc(collection(db, 'notifications'), {
               userId: selectedDriver.uid,
-              title: '🛵 ¡Nueva Oferta Exclusiva!',
-              body: `Se te ha ofertado en rotación el pedido #${orderNum}.`,
+              title: '🚨 ¡PEDIDO ASIGNADO DIRECTAMENTE!',
+              body: `Se te asignó directamente el Pedido #${orderNum}. ¡Ingresá a tu panel de delivery!`,
               url: `#/delivery`,
-              type: 'new_exclusive_offer',
+              type: 'direct_assignment',
+              priority: 'high',
+              sound: 'alert.mp3',
               createdAt: serverTimestamp()
             });
           } catch (notifErr) {
-            console.warn('[Admin Release] Push notification trigger warning:', notifErr);
+            console.warn('[Admin Assign Direct] Push notification trigger warning:', notifErr);
           }
 
-          showToast(`🛵 Pedido ofertado en rotación exclusivamente a ${selectedDriver.displayName || selectedDriver.name}.`, 'success');
+          showToast(`⚡ Pedido asignado automáticamente a ${selectedDriver.displayName || selectedDriver.name} (Notificado con máxima prioridad).`, 'success');
         }
 
         closeModal();

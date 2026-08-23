@@ -8,11 +8,12 @@ import { formatPrice, isShopOpen } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { getFooterHTML } from '../components/footer.js';
 
-import { renderNavbar } from '../components/navbar.js';
+import { renderNavbar, updateGlobalCartFAB } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { openProductModal } from '../components/product-modal.js';
 
 let currentComercio = null;
+const memoryCommerceCache = new Map();
 
 export async function renderComercio(content) {
   if (!content) content = document.getElementById('app-content');
@@ -73,6 +74,9 @@ export async function renderComercio(content) {
 
   currentComercio = comercio;
   const resolvedComercioId = comercio.id;
+  try {
+    localStorage.setItem('gd_last_visited_comercio', JSON.stringify({ id: comercio.id, name: comercio.name || 'Comercio' }));
+  } catch (e) {}
   let unsubComercios = null;
 
   try {
@@ -138,19 +142,22 @@ export async function renderComercio(content) {
   // Proactive fee calculation
   import('./cart.js').then(m => m.calculateAllFees && m.calculateAllFees(resolvedComercioId));
 
-  let cachedData = null;
-  try {
-    const rawCache = localStorage.getItem(`gd_comercio_cache_${resolvedComercioId}`);
-    if (rawCache) {
-      const parsed = JSON.parse(rawCache);
-      if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < 14400000)) {
-        cachedData = parsed.data;
-      } else {
-        console.log('[Cache] Menu cache expired (4 hours limit) or invalid');
+  let cachedData = memoryCommerceCache.get(resolvedComercioId) || null;
+  if (!cachedData) {
+    try {
+      const rawCache = localStorage.getItem(`gd_comercio_cache_${resolvedComercioId}`);
+      if (rawCache) {
+        const parsed = JSON.parse(rawCache);
+        if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < 14400000)) {
+          cachedData = parsed.data;
+          memoryCommerceCache.set(resolvedComercioId, cachedData);
+        } else {
+          console.log('[Cache] Menu cache expired (4 hours limit) or invalid');
+        }
       }
+    } catch (err) {
+      console.warn('Error reading local cache:', err);
     }
-  } catch (err) {
-    console.warn('Error reading local cache:', err);
   }
 
   let activeCategory = 'all';
@@ -240,26 +247,26 @@ export async function renderComercio(content) {
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
       if (catId === 'all') {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(150));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(20));
       } else if (catId === 'discounts') {
         const productIds = [];
         activeOffers.forEach(o => {
           if (o.productIds) productIds.push(...o.productIds);
         });
         if (productIds.length > 0) {
-          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', productIds.slice(0, 30)));
+          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', productIds.slice(0, 20)));
         } else {
           return [];
         }
       } else if (catId === 'favorites') {
         const favoriteIds = getState().favorites || [];
         if (favoriteIds.length > 0) {
-          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', favoriteIds.slice(0, 30)));
+          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', favoriteIds.slice(0, 20)));
         } else {
           return [];
         }
       } else {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('categoryId', '==', catId));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('categoryId', '==', catId), limit(20));
       }
 
       const prodsSnap = await getDocsOptimized(q, cacheKey, 15 * 60 * 1000);
@@ -270,11 +277,13 @@ export async function renderComercio(content) {
     const initialProducts = await loadCategoryProducts(activeCategory);
     products = initialProducts;
 
-    // Store in localStorage for next instant load
+    // Store in memory & localStorage for next instant load
+    const cachePayload = { comercio, categories, products, activeOffers };
+    memoryCommerceCache.set(resolvedComercioId, cachePayload);
     try {
       localStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify({
         timestamp: Date.now(),
-        data: { comercio, categories, products, activeOffers }
+        data: cachePayload
       }));
     } catch (err) {
       console.warn('Error saving to local cache:', err);
@@ -412,10 +421,10 @@ export async function renderComercio(content) {
               products.push(cp);
             }
           });
-          // Also load products for any subcategories
-          for (const sub of subCats) {
-            const subProducts = await loadCategoryProducts(sub.id);
-            subProducts.forEach(cp => {
+          // Also load products for any subcategories concurrently in parallel
+          if (subCats.length > 0) {
+            const subResults = await Promise.all(subCats.map(sub => loadCategoryProducts(sub.id)));
+            subResults.flat().forEach(cp => {
               if (!products.some(p => p.id === cp.id)) {
                 products.push(cp);
               }
@@ -576,7 +585,7 @@ export async function renderComercio(content) {
           }, 1500);
 
           renderNavbar();
-          updateFAB();
+          updateGlobalCartFAB();
           return;
         }
 
@@ -591,7 +600,7 @@ export async function renderComercio(content) {
   }
 
   // Cart FAB subscription
-  const unsub = subscribe('cart', () => updateFAB());
+  const unsub = subscribe('cart', () => updateGlobalCartFAB());
   return {
     cleanup: () => {
       unsub();
@@ -811,9 +820,6 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
         </div>
       </div>
 
-      <!-- Cart FAB -->
-      <div id="cart-fab-container"></div>
-      
       ${getFooterHTML()}
     </div>
   `;
@@ -821,7 +827,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
   const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
   const isPausedNow = comercio.isPaused === true;
   renderProducts(products, activeCategory, activeOffers, activeSort, '', comercio.id, isOpen, activeBrand, activeSubCategory, categories, isPausedNow);
-  updateFAB();
+  updateGlobalCartFAB();
 
   // Bind rating button click
   document.getElementById('rate-comercio-btn')?.addEventListener('click', () => {
@@ -1262,27 +1268,10 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
 
         setupSentinel();
       }
-    }, { threshold: 0.1 });
+    }, { threshold: 0.05, rootMargin: '400px' });
 
     infiniteScrollObserver.observe(sentinel);
   };
 
   setupSentinel();
-}
-
-function updateFAB() {
-  const container = document.getElementById('cart-fab-container');
-  if (!container) return;
-  const count = getCartCount();
-
-  if (count > 0) {
-    container.innerHTML = `
-      <a href="#/cart" class="fab" title="Ver carrito" style="bottom: calc(var(--navbar-height) + 20px + env(safe-area-inset-bottom, 0px)) !important; right: 16px !important;">
-        ${icon('cart', 26)}
-        <span class="fab-badge">${count}</span>
-      </a>
-    `;
-  } else {
-    container.innerHTML = '';
-  }
 }

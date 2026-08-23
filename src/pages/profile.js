@@ -217,8 +217,25 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       `;
     }
 
+    const isNative = !!window.Capacitor;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+
     content.innerHTML = `
-      <div class="profile-page page-enter" style="background:var(--color-bg);">
+      <div class="profile-page page-enter" style="background:var(--color-bg); padding-bottom: 90px;">
+        <!-- Header estilo Mis Chats -->
+        <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: relative; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0;">
+          <!-- Decorative Circles -->
+          <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
+            <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
+            <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
+          </div>
+
+          <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 16px; position: relative; z-index: 2;">
+            <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Perfil</span>
+          </div>
+        </div>
         
         <style>
           #page-profile::-webkit-scrollbar {

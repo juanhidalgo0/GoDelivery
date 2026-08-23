@@ -156,9 +156,13 @@ async function init() {
   // Force-update check against version.json (Runs on Web and PWA only; bypassed on Native iOS/Android apps to prevent WebView freeze loops)
   const checkAppVersion = async () => {
     if (isNativeApp) return;
+    // Guard against infinite reload loops within the same browser session (especially on iOS Safari / PWA)
+    if (sessionStorage.getItem('gd_update_attempted') === 'true') {
+      return;
+    }
     try {
-      const versionUrl = 'https://godelivery-magdalena.web.app/version.json?cb=' + Date.now();
-      const vRes = await fetch(versionUrl).catch(() => fetch('/version.json?cb=' + Date.now()));
+      const versionUrl = window.location.origin + '/version.json?cb=' + Date.now();
+      const vRes = await fetch(versionUrl, { cache: 'no-store' }).catch(() => null);
 
       if (vRes && vRes.ok) {
         const vData = await vRes.json();
@@ -166,15 +170,15 @@ async function init() {
         const runningBuildTime = String(BUNDLE_BUILD_VERSION);
         const currentVer = localStorage.getItem('gd_app_version');
 
-        const isOutdated = (currentVer && currentVer !== serverVersion) || 
-                           (runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && runningBuildTime !== '' && runningBuildTime !== serverVersion);
+        const isOutdated = currentVer && currentVer !== serverVersion && runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && runningBuildTime !== serverVersion;
 
         if (isOutdated) {
           console.log('[Version] New version detected on web. Server:', serverVersion, 'Local:', currentVer || runningBuildTime);
+          sessionStorage.setItem('gd_update_attempted', 'true');
           localStorage.setItem('gd_app_version', serverVersion);
           showUpdateSplashAndReload();
           return;
-        } else if (!currentVer) {
+        } else {
           localStorage.setItem('gd_app_version', serverVersion);
         }
       }
@@ -184,14 +188,13 @@ async function init() {
   };
   window.checkAppVersion = checkAppVersion;
 
-  // Run version check immediately, periodically, and on visibility/focus
+  // Run version check ONCE on startup and on tab visibility change (No aggressive setInterval loops)
   checkAppVersion();
-  setTimeout(checkAppVersion, 1500);
-  setInterval(checkAppVersion, 15000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') checkAppVersion();
+    if (document.visibilityState === 'visible' && !sessionStorage.getItem('gd_update_attempted')) {
+      checkAppVersion();
+    }
   });
-  window.addEventListener('focus', checkAppVersion);
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
   const urlParams = new URLSearchParams(window.location.search);

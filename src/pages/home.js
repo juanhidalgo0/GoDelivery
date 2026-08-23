@@ -386,6 +386,7 @@ export async function renderHome(content) {
       console.log('[Home Safety Timer] Forcing isLoadingComercios = false to prevent skeleton freeze on iOS');
       isLoadingComercios = false;
       doActualHomeRender();
+      renderComercios(comercios, activeCategory, '', currentFilters);
     }
   }, 300);
 
@@ -462,7 +463,7 @@ export async function renderHome(content) {
       const qAppOnly = query(collectionGroup(db, 'products'), where('onlyInApp', '==', true));
       const [catSnap, offersSnap, appOnlySnap] = await Promise.all([
         getDocsOptimized(query(collection(db, 'platformCategories'), orderBy('order')), 'platformCategories', 3600000).catch(() => ({ docs: [] })),
-        getDocsOptimized(collection(db, 'offers'), 'activeOffers', 300000).catch(() => ({ docs: [] })),
+        getDocsOptimized(collection(db, 'offers'), 'activeOffers', 60000).catch(() => ({ docs: [] })),
         getDocsOptimized(qAppOnly, 'onlyInAppProducts', 300000).catch(() => ({ docs: [] }))
       ]);
 
@@ -756,6 +757,36 @@ async function checkAndShowWelcomeCouponModal() {
   }, 150);
 }
 
+function enableInfiniteHorizontalScroll(sliderContainer) {
+  if (!sliderContainer || sliderContainer._infiniteScrollBound) return;
+  sliderContainer._infiniteScrollBound = true;
+
+  let isAppending = false;
+
+  sliderContainer.addEventListener('scroll', () => {
+    if (isAppending) return;
+    const scrollThreshold = sliderContainer.scrollWidth - sliderContainer.clientWidth - 160;
+    
+    if (sliderContainer.scrollLeft >= scrollThreshold) {
+      isAppending = true;
+      const initialChildren = Array.from(sliderContainer.children);
+      if (initialChildren.length > 0 && initialChildren.length < 100) {
+        initialChildren.forEach(child => {
+          const clone = child.cloneNode(true);
+          const img = clone.querySelector('img');
+          if (img) {
+            img.setAttribute('loading', 'lazy');
+            img.setAttribute('decoding', 'async');
+          }
+          if (child.onclick) clone.onclick = child.onclick;
+          sliderContainer.appendChild(clone);
+        });
+      }
+      setTimeout(() => { isAppending = false; }, 250);
+    }
+  }, { passive: true });
+}
+
 function renderBrandsSlider(comercios) {
   const container = document.getElementById('brands-slider-container');
   if (!container) return;
@@ -812,7 +843,7 @@ function renderBrandsSlider(comercios) {
           <a href="${href}" style="flex: 0 0 64px; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 6px; ${isInactive ? 'opacity: 0.5; filter: grayscale(1); pointer-events: none;' : ''}">
             <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: white; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; position: relative;
               ${brand.isSponsored ? 'border: 2px solid #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.45); animation: goldPulse 2s infinite alternate;' : 'border: 1px solid var(--color-border-light); box-shadow: 0 4px 12px rgba(0,0,0,0.06);'}">
-              <img src="${brand.logo}" alt="${brand.name}" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+              <img src="${brand.logo}" alt="${brand.name}" loading="lazy" decoding="async" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
               ${brand.isSponsored ? `
                 <div style="position: absolute; top: -1px; right: -1px; background: #fbbf24; color: #78350f; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 1.5px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.15); font-size: 8px; font-weight: 900; z-index: 2;">
                   ${icon('star', 8)}
@@ -1016,14 +1047,14 @@ async function renderPromotedSection(comercios) {
         return `
           <a href="${targetHref}" ${p.link && p.link.startsWith('http') ? 'target="_blank" rel="noopener noreferrer"' : ''} style="flex: 0 0 280px; text-decoration: none; display: flex; flex-direction: column; gap: 12px;">
             <div style="position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 20px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.08); background: var(--color-surface); ${priorityBorder}">
-              <img src="${p.banner}" alt="${p.name}" style="width: 100%; height: 100%; object-fit: cover;" />
+              <img src="${p.banner}" alt="${p.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
               <div style="position: absolute; top: 12px; left: 12px; background: ${badgeBg}; color: ${badgeColor}; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 ${p.label}
               </div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px; padding: 0 4px;">
               <div style="width: 46px; height: 46px; border-radius: 50%; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.03); background: white; border: 1px solid var(--color-border-light); display: flex; align-items: center; justify-content: center;">
-                <img src="${p.logo || '/logo.png'}" alt="" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+                <img src="${p.logo || '/logo.png'}" alt="" loading="lazy" decoding="async" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
               </div>
               <div style="flex: 1; min-width: 0;">
                 ${footerHtml}
@@ -1041,6 +1072,7 @@ async function renderPromotedSection(comercios) {
 
   const slider = container.querySelector('div:nth-child(2)');
   if (slider) {
+    enableInfiniteHorizontalScroll(slider);
     if (slider._autoplayCleanup) slider._autoplayCleanup();
     slider._autoplayCleanup = initAutoplay(slider, 5000, 300);
   }
@@ -1059,12 +1091,16 @@ async function renderOffersSection(offers = [], comercios = []) {
     return;
   }
 
+  // Shuffle active offers for commerce fairness
+  const shuffledOffers = [...activeOffers].sort(() => Math.random() - 0.5);
+
   const comerciosMap = {};
   comercios.forEach(c => comerciosMap[c.id] = c);
 
   let offerItems = [];
+  const fetchPromises = [];
 
-  for (const offer of activeOffers) {
+  for (const offer of shuffledOffers) {
     const comercio = comerciosMap[offer.comercioId];
     const comercioName = comercio ? comercio.name : (offer.merchantName || 'Comercio');
     const isClosed = comercio ? !isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen) : false;
@@ -1094,68 +1130,65 @@ async function renderOffersSection(offers = [], comercios = []) {
       continue;
     }
 
-    let addedCount = 0;
-    for (const pId of prodIds.slice(0, 3)) {
-      try {
-        const prodSnap = await getDoc(doc(db, 'comercios', offer.comercioId, 'products', pId));
-        if (prodSnap.exists()) {
-          const prodData = prodSnap.data();
-          if (prodData.isAvailable !== false) {
-            const originalPrice = prodData.price || 0;
-            let finalPrice = originalPrice;
+    // Process linked products in parallel
+    const shuffledProdIds = [...prodIds].sort(() => Math.random() - 0.5).slice(0, 4);
+    for (const pId of shuffledProdIds) {
+      fetchPromises.push(
+        getDoc(doc(db, 'comercios', offer.comercioId, 'products', pId))
+          .then(prodSnap => ({ prodSnap, offer, comercioName, isClosed, badgeText }))
+          .catch(() => null)
+      );
+    }
+  }
 
-            if (offer.type === 'percentage' && offer.value) {
-              finalPrice = Math.round(originalPrice * (1 - offer.value / 100));
-            } else if (offer.type === 'fixed' && offer.value) {
-              finalPrice = Math.max(0, originalPrice - offer.value);
-            } else if (offer.discountPercentage) {
-              finalPrice = Math.round(originalPrice * (1 - offer.discountPercentage / 100));
-            } else if (offer.discountFixed) {
-              finalPrice = Math.max(0, originalPrice - offer.discountFixed);
-            } else if (offer.offerPrice || offer.price) {
-              finalPrice = offer.offerPrice || offer.price;
-            }
+  // Execute all product fetches concurrently in parallel (instant speed)
+  const results = await Promise.all(fetchPromises);
 
-            offerItems.push({
-              id: `${offer.id}_${prodSnap.id}`,
-              comercioId: offer.comercioId,
-              comercioName,
-              title: prodData.name || offer.title || 'Oferta',
-              image: prodData.image || offer.banner || offer.bannerUrl || (comercio ? comercio.logo : ''),
-              badgeText,
-              originalPrice,
-              finalPrice,
-              isClosed,
-              product: { id: prodSnap.id, ...prodData },
-              offer
-            });
-            addedCount++;
-          }
-        }
-      } catch (e) {
-        console.warn('Error resolving offer product:', e);
-      }
+  for (const res of results) {
+    if (!res || !res.prodSnap || !res.prodSnap.exists()) continue;
+    const { prodSnap, offer, comercioName, isClosed, badgeText } = res;
+    const prodData = prodSnap.data();
+    if (prodData.isAvailable === false) continue;
+
+    const originalPrice = prodData.price || 0;
+    let finalPrice = originalPrice;
+
+    if (offer.type === 'percentage' && offer.value) {
+      finalPrice = Math.round(originalPrice * (1 - offer.value / 100));
+    } else if (offer.type === 'fixed' && offer.value) {
+      finalPrice = Math.max(0, originalPrice - offer.value);
+    } else if (offer.discountPercentage) {
+      finalPrice = Math.round(originalPrice * (1 - offer.discountPercentage / 100));
+    } else if (offer.discountFixed) {
+      finalPrice = Math.max(0, originalPrice - offer.discountFixed);
+    } else if (offer.offerPrice || offer.price) {
+      finalPrice = offer.offerPrice || offer.price;
     }
 
-    if (addedCount === 0) {
-      offerItems.push({
-        id: offer.id,
-        comercioId: offer.comercioId,
-        comercioName,
-        title: offer.title || 'Oferta Especial',
-        image: offer.banner || offer.bannerUrl || offer.imageUrl || (comercio ? comercio.logo : ''),
-        badgeText,
-        originalPrice: offer.originalPrice || 0,
-        finalPrice: offer.offerPrice || offer.price || 0,
-        isClosed,
-        offer
-      });
-    }
+    offerItems.push({
+      id: `${offer.id}_${prodSnap.id}`,
+      comercioId: offer.comercioId,
+      comercioName,
+      title: prodData.name || offer.title || 'Oferta',
+      image: prodData.image || offer.banner || offer.bannerUrl || (comerciosMap[offer.comercioId] ? comerciosMap[offer.comercioId].logo : ''),
+      badgeText,
+      originalPrice,
+      finalPrice,
+      isClosed,
+      product: { id: prodSnap.id, ...prodData },
+      offer
+    });
   }
 
   if (offerItems.length === 0) {
     container.innerHTML = '';
     return;
+  }
+
+  // Randomly shuffle offer items on each page load for dynamic variety
+  for (let i = offerItems.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [offerItems[i], offerItems[j]] = [offerItems[j], offerItems[i]];
   }
 
   container.innerHTML = `
@@ -1189,7 +1222,7 @@ async function renderOffersSection(offers = [], comercios = []) {
             <!-- Product Image Container -->
             <div style="width: 100%; height: 110px; background: var(--color-bg-secondary); position: relative; overflow: hidden;">
               ${item.image 
-                ? `<img src="${item.image}" alt="${item.title}" style="width: 100%; height: 100%; object-fit: cover; ${item.isClosed ? 'filter: grayscale(80%);' : ''}" />`
+                ? `<img src="${item.image}" alt="${item.title}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover; ${item.isClosed ? 'filter: grayscale(80%);' : ''}" />`
                 : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:32px;">🏷️</div>`
               }
               ${item.isClosed ? `
@@ -1222,7 +1255,12 @@ async function renderOffersSection(offers = [], comercios = []) {
     </div>
   `;
 
-  // Attach click events
+  const slider = container.querySelector('.offers-slider');
+  if (slider) {
+    enableInfiniteHorizontalScroll(slider);
+  }
+
+  // Attach click events with delegation
   container.querySelectorAll('.offer-card-home-item').forEach(card => {
     card.onclick = () => {
       const idx = parseInt(card.dataset.itemIndex);
@@ -1277,11 +1315,10 @@ function renderAppOnlySection(products, comercios, offers = []) {
       </div>
       <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Promociones especiales disponibles únicamente desde tu teléfono</span>
     </div>
-    <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
+    <div class="app-only-slider" style="overflow-x: auto; display: flex; gap: 12px; padding: 4px 16px 14px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; scroll-behavior: smooth;">
       ${shuffledProducts.map(p => {
         const c = comercios.find(com => com.id === p.comercioId);
         const cName = c ? c.name : 'Comercio';
-        const cLogo = c ? c.logo : '/logo.png';
         const pImage = p.image || '/logo.png';
         const targetHref = `#/comercio/${p.comercioId}?product=${p.id}`;
 
@@ -1290,36 +1327,41 @@ function renderAppOnlySection(products, comercios, offers = []) {
         const discountedPrice = discountPercent > 0 ? p.price * (1 - discountPercent / 100) : p.price;
 
         return `
-          <a href="${targetHref}" class="app-only-nav-card" style="flex: 0 0 240px; text-decoration: none; display: flex; flex-direction: column; gap: 10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:12px; transition: all 0.2s; box-shadow: var(--shadow-xs);">
-            <div style="position: relative; width: 100%; aspect-ratio: 16/10; border-radius: 16px; overflow: hidden; background: var(--color-bg-secondary);">
-              <img src="${pImage}" alt="Banner" style="width: 100%; height: 100%; object-fit: cover;" />
-              
-              <!-- App only Badge Overlay -->
-              <div style="position: absolute; top: 10px; left: 10px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; padding: 5px 11px; border-radius: 10px; font-size: 10px; font-weight: 900; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 4px; letter-spacing: -0.01em; text-transform: uppercase; line-height: 1;">
-                Disponible sólo en la app
+          <a href="${targetHref}" class="app-only-nav-card spring-hover" style="flex: 0 0 165px; text-decoration: none; display: flex; flex-direction: column; background: var(--color-surface); border-radius: 18px; border: 1.5px solid var(--color-border); overflow: hidden; position: relative; box-shadow: 0 4px 14px rgba(0,0,0,0.04); transition: all 0.2s;">
+            <!-- Badge -->
+            <div style="position: absolute; top: 8px; left: 8px; z-index: 5; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; font-size: 9px; font-weight: 950; padding: 3px 7px; border-radius: 8px; box-shadow: 0 2px 8px rgba(126,34,206,0.3); text-transform: uppercase; letter-spacing: 0.3px;">
+              Solo App
+            </div>
+            ${discountPercent > 0 ? `
+              <div style="position: absolute; top: 8px; right: 8px; z-index: 5; background: var(--color-primary); color: white; font-size: 8.5px; font-weight: 950; padding: 2px 6px; border-radius: 6px; text-transform: uppercase;">
+                ${discountPercent}% OFF
               </div>
-              ${discountPercent > 0 ? `
-                <div style="position: absolute; top: 10px; right: 10px; background: var(--color-primary); color: white; padding: 3px 8px; border-radius: 8px; font-size: 9px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2; text-transform: uppercase;">
-                  ${discountPercent}% OFF
-                </div>
-              ` : ''}
+            ` : ''}
+
+            <!-- Product Image -->
+            <div style="width: 100%; height: 110px; background: var(--color-bg-secondary); position: relative; overflow: hidden;">
+              <img src="${pImage}" alt="${p.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
             </div>
 
-            <div style="display:flex; align-items:center; gap:10px; padding: 0 4px;">
-              <div style="width: 38px; height: 38px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: white; border: 1px solid var(--color-border-light); display:flex; align-items:center; justify-content:center;">
-                <img src="${cLogo}" alt="" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+            <!-- Content -->
+            <div style="padding: 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between; gap: 6px;">
+              <div>
+                <span style="font-size: 9.5px; font-weight: 800; color: #7e22ce; text-transform: uppercase; letter-spacing: 0.3px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  ${cName}
+                </span>
+                <h4 style="font-family: var(--font-display); font-size: 13px; font-weight: 900; color: var(--color-text-primary); margin: 2px 0 0; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                  ${p.name}
+                </h4>
               </div>
-              <div style="flex:1; min-width:0;">
-                <div style="font-weight: 850; font-size: 14px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em;">${p.name}</div>
-                <div style="font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;">${cName}</div>
-                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
-                  ${discountPercent > 0 ? `
-                    <span style="font-weight: 900; font-size: 15px; color: var(--color-primary);">${formatPrice(discountedPrice)}</span>
-                    <span style="font-size: 11px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(p.price)}</span>
-                  ` : `
-                    <span style="font-weight: 900; font-size: 15px; color: var(--color-primary);">${formatPrice(p.price)}</span>
-                  `}
-                </div>
+
+              <!-- Price Box -->
+              <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                ${discountPercent > 0 ? `
+                  <span style="font-size: 14px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">${formatPrice(discountedPrice)}</span>
+                  <span style="font-size: 10.5px; text-decoration: line-through; color: var(--color-text-tertiary); font-weight: 700;">${formatPrice(p.price)}</span>
+                ` : `
+                  <span style="font-size: 14px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">${formatPrice(p.price)}</span>
+                `}
               </div>
             </div>
           </a>
@@ -1332,8 +1374,9 @@ function renderAppOnlySection(products, comercios, offers = []) {
     </style>
   `;
 
-  const slider = container.querySelector('div:nth-child(2)');
+  const slider = container.querySelector('.app-only-slider');
   if (slider) {
+    enableInfiniteHorizontalScroll(slider);
     if (slider._autoplayCleanup) slider._autoplayCleanup();
     slider._autoplayCleanup = initAutoplay(slider, 5000, 260);
   }
@@ -2220,17 +2263,20 @@ async function renderPopularProductsSlider(comercios, offers = []) {
     const slider = container.querySelector('#random-products-slider');
     const prevBtn = container.querySelector('#prod-prev-btn');
     const nextBtn = container.querySelector('#prod-prev-btn-next');
-    if (slider && prevBtn && nextBtn) {
-      const updateArrows = () => {
-        prevBtn.style.display = slider.scrollLeft > 5 ? 'flex' : 'none';
-        nextBtn.style.display = slider.scrollLeft + slider.clientWidth < slider.scrollWidth - 5 ? 'flex' : 'none';
-      };
-      slider.addEventListener('scroll', updateArrows);
-      setTimeout(updateArrows, 200);
-      prevBtn.onclick = () => slider.scrollBy({ left: -260, behavior: 'smooth' });
-      nextBtn.onclick = () => slider.scrollBy({ left: 260, behavior: 'smooth' });
+    if (slider) {
+      enableInfiniteHorizontalScroll(slider);
+      if (prevBtn && nextBtn) {
+        const updateArrows = () => {
+          prevBtn.style.display = slider.scrollLeft > 5 ? 'flex' : 'none';
+          nextBtn.style.display = slider.scrollLeft + slider.clientWidth < slider.scrollWidth - 5 ? 'flex' : 'none';
+        };
+        slider.addEventListener('scroll', updateArrows);
+        setTimeout(updateArrows, 200);
+        prevBtn.onclick = () => slider.scrollBy({ left: -260, behavior: 'smooth' });
+        nextBtn.onclick = () => slider.scrollBy({ left: 260, behavior: 'smooth' });
+      }
       if (slider._autoplayCleanup) slider._autoplayCleanup();
-      slider._autoplayCleanup = initAutoplay(slider, 3500, 260);
+      slider._autoplayCleanup = initAutoplay(slider, 4500, 260);
     }
   };
 
@@ -2425,11 +2471,12 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   }, 100);
 }
 
-function initAutoplay(sliderEl, intervalMs = 3500, stepPx = 280) {
+function initAutoplay(sliderEl, intervalMs = 4500, stepPx = 280) {
   if (!sliderEl) return;
   
   let timerId = null;
   let isInterrupted = false;
+  let graceTimeout = null;
 
   const start = () => {
     if (timerId) clearInterval(timerId);
@@ -2450,13 +2497,45 @@ function initAutoplay(sliderEl, intervalMs = 3500, stepPx = 280) {
       clearInterval(timerId);
       timerId = null;
     }
+    if (graceTimeout) {
+      clearTimeout(graceTimeout);
+      graceTimeout = null;
+    }
   };
 
-  sliderEl.addEventListener('mouseenter', () => { isInterrupted = true; });
-  sliderEl.addEventListener('mouseleave', () => { isInterrupted = false; });
-  sliderEl.addEventListener('touchstart', () => { isInterrupted = true; }, { passive: true });
+  const setGracePeriod = (graceMs = 7000) => {
+    isInterrupted = true;
+    if (graceTimeout) clearTimeout(graceTimeout);
+    graceTimeout = setTimeout(() => {
+      isInterrupted = false;
+    }, graceMs);
+  };
+
+  sliderEl.addEventListener('mouseenter', () => {
+    isInterrupted = true;
+    if (graceTimeout) clearTimeout(graceTimeout);
+  });
+  
+  sliderEl.addEventListener('mouseleave', () => {
+    setGracePeriod(5000);
+  });
+  
+  sliderEl.addEventListener('touchstart', () => {
+    isInterrupted = true;
+    if (graceTimeout) clearTimeout(graceTimeout);
+  }, { passive: true });
+
+  sliderEl.addEventListener('touchmove', () => {
+    isInterrupted = true;
+    if (graceTimeout) clearTimeout(graceTimeout);
+  }, { passive: true });
+
   sliderEl.addEventListener('touchend', () => {
-    setTimeout(() => { isInterrupted = false; }, 2000);
+    setGracePeriod(7000);
+  }, { passive: true });
+
+  sliderEl.addEventListener('scroll', () => {
+    setGracePeriod(7000);
   }, { passive: true });
 
   start();

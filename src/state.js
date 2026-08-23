@@ -290,9 +290,10 @@ function triggerStockToast(msg, type = 'warning') {
 }
 
 // ── Cart helpers ──
-export function addToCart(product, comercioId, comercioName, qty = 1, options = []) {
+export function addToCart(product, comercioId, comercioName, qty = 1, options = [], notes = '') {
   // Ensure options is an array
   const safeOptions = Array.isArray(options) ? options : [];
+  const cleanNotes = typeof notes === 'string' ? notes.trim() : '';
 
   // Sort options to ensure comparison works regardless of selection order
   const sortedOptions = [...safeOptions].sort((a, b) => {
@@ -301,7 +302,7 @@ export function addToCart(product, comercioId, comercioName, qty = 1, options = 
     return aStr.localeCompare(bStr);
   });
 
-  const cartItemId = `${product.id}-${JSON.stringify(sortedOptions)}`;
+  const cartItemId = `${product.id}-${JSON.stringify(sortedOptions)}-${cleanNotes}`;
 
   // Enforce limited stock checks
   if (product.stockMode === 'limited' && !product.useGlobalFlavors) {
@@ -329,6 +330,7 @@ export function addToCart(product, comercioId, comercioName, qty = 1, options = 
 
   if (existing) {
     existing.qty += qty;
+    if (cleanNotes) existing.notes = cleanNotes;
   } else {
     state.cart.push({
       cartItemId,
@@ -336,7 +338,8 @@ export function addToCart(product, comercioId, comercioName, qty = 1, options = 
       comercioId,
       comercioName,
       qty,
-      options: sortedOptions
+      options: sortedOptions,
+      notes: cleanNotes
     });
   }
   try {

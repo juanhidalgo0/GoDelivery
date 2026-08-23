@@ -17,6 +17,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   // Local state for the modal
   let qty = (!isCommerceOpen || (product.stockMode === 'limited' && typeof product.stockQuantity === 'number' && product.stockQuantity <= 0)) ? 0 : 1;
   const selectedOptions = []; // Array of { groupName, name, price, qty }
+  let productNotes = '';
   let flavorSearchQuery = '';
   let commerceLogo = '';
   let commerceBanner = '';
@@ -279,7 +280,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       `}
 
       <!-- FIXED INFO SECTION -->
-      <div class="pm-info-section" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; background: var(--color-surface); border-bottom: 1px solid var(--color-border-light);">
+      <div class="pm-info-section" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; background: var(--color-surface); border-bottom: 1px solid var(--color-border-light);">
         ${offer && !product.image ? `
           <div class="pm-discount-tag" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; background: var(--color-primary); color: white; font-weight: 900; font-size: 11px; margin-bottom: 4px; box-shadow: 0 4px 10px rgba(225,29,72,0.2); border: 1.5px solid rgba(255,255,255,0.2); font-family: var(--font-display);">
             ${icon('tag', 12)} ${offer.type === 'percentage' ? `${offer.value}% OFF` : '2x1'}
@@ -296,13 +297,28 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
             <div class="price" style="font-size: 20px; font-weight: 900; color: var(--color-primary); flex-shrink: 0; margin: 0;">${formatPrice(product.price)}</div>
           `}
         </div>
-        ${product.description ? `<p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.4; margin: 0;">${product.description}</p>` : ''}
+        ${product.description ? `<p style="font-size: 12.5px; color: var(--color-text-secondary); line-height: 1.4; margin: 2px 0 0 0;">${product.description}</p>` : ''}
         ${stockBadgeHTML ? `<div style="margin-top: 2px;">${stockBadgeHTML.replace('margin-top: 8px;', 'margin-top: 2px;').replace('padding: 4px 12px;', 'padding: 3px 10px;')}</div>` : ''}
+
+        <!-- Feature & Quality Badges -->
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+          <span style="font-size:10.5px; font-weight:700; background:rgba(16,185,129,0.08); color:#059669; padding:3px 9px; border-radius:10px; border:1px solid rgba(16,185,129,0.18); display:inline-flex; align-items:center; gap:4px;">
+            ⚡ Entrega rápida
+          </span>
+          <span style="font-size:10.5px; font-weight:700; background:rgba(59,130,246,0.08); color:#2563eb; padding:3px 9px; border-radius:10px; border:1px solid rgba(59,130,246,0.18); display:inline-flex; align-items:center; gap:4px;">
+            🛡️ Calidad garantizada
+          </span>
+          ${comercioName ? `
+            <span style="font-size:10.5px; font-weight:700; background:rgba(245,158,11,0.08); color:#d97706; padding:3px 9px; border-radius:10px; border:1px solid rgba(245,158,11,0.18); display:inline-flex; align-items:center; gap:4px;">
+              🏬 ${comercioName}
+            </span>
+          ` : ''}
+        </div>
       </div>
 
       <!-- DYNAMIC SCROLLABLE BODY (ONLY FLAVOR LIST SCROLLS) -->
       <div class="pm-scrollable-body" style="flex:1; height:100%; min-height:0; overflow-y:scroll; -webkit-overflow-scrolling:touch; touch-action:pan-y; overscroll-behavior-y:contain; background: var(--color-bg-secondary);">
-        <div class="pm-content" style="padding: 8px 0 120px 0; touch-action:pan-y;">
+        <div class="pm-content" style="display: flex; flex-direction: column; min-height: 100%; box-sizing: border-box; padding: 8px 0 10px 0; touch-action: pan-y;">
         ${flavorsLoading ? `
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 20px; gap:12px;">
             <div style="border: 3px solid var(--color-border-light); border-top: 3px solid var(--color-primary); border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite;"></div>
@@ -452,9 +468,17 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           `;
         }).join('') : ''}
 
-        <!-- Sugeridos / Similares Section -->
-        ${(suggested.length > 0 && !hasLongFlavorsOrGroups) ? `
-          <div class="pm-suggested-section" style="margin-top: 24px; padding: 0 4px;">
+        <!-- Tarjeta de Aclaraciones / Notas para el comercio -->
+        <div style="padding: 14px 16px; margin: 12px 16px 16px 16px; background: var(--color-surface); border-radius: 16px; border: 1px solid var(--color-border-light); box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
+          <label for="pm-product-notes" style="font-size: 12px; font-weight: 850; color: var(--color-text); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-family: var(--font-display);">
+            📝 Aclaraciones o notas para el comercio (opcional)
+          </label>
+          <input type="text" id="pm-product-notes" value="${productNotes}" placeholder="Ej: Sin tomate, sin mayonesa, bien cocido..." style="width: 100%; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; font-weight: 600; color: var(--color-text); outline: none; box-sizing: border-box; transition: border-color 0.2s;" />
+        </div>
+
+        <!-- Sugeridos / Similares Section (At bottom of body, above footer) -->
+        ${suggested.length > 0 ? `
+          <div class="pm-suggested-section" style="margin-top: auto !important; padding: 14px 16px; background: var(--color-surface); border-top: 1px solid var(--color-border-light); margin-bottom: 0px;">
             <h3 style="font-family: var(--font-display); font-size: 13px; font-weight: 850; color: var(--color-text); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
               Otras personas lo combinan con:
             </h3>
@@ -465,19 +489,19 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                 const itemFinalPrice = itemDiscountPercent > 0 ? item.price * (1 - itemDiscountPercent / 100) : item.price;
                 
                 return `
-                  <div class="pm-suggested-row" data-suggested-id="${item.id}" style="display: flex; align-items: center; justify-content: space-between; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all 0.2s; gap: 10px;">
+                  <div class="pm-suggested-row" data-suggested-id="${item.id}" style="display: flex; align-items: center; justify-content: space-between; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all 0.2s; gap: 10px;">
                     <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
-                      <div style="position: relative; width: 40px; height: 40px; border-radius: 8px; overflow: hidden; background: #f8fafc; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.03);">
+                      <div style="position: relative; width: 42px; height: 42px; border-radius: 8px; overflow: hidden; background: #ffffff; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.05);">
                         <img src="${item.image || '/logo.png'}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;" />
                         ${hasItemOffer ? `
                           <div style="position: absolute; top: 0; left: 0; background: var(--color-primary); color: white; font-size: 7px; font-weight: 900; padding: 1px 3px; border-radius: 0 0 4px 0; font-family: var(--font-display);">${hasItemOffer.type === 'percentage' ? `${hasItemOffer.value}%` : '2x1'}</div>
                         ` : ''}
                       </div>
-                      <div style="font-size: 12px; font-weight: 750; color: var(--color-text); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;">
+                      <div style="font-size: 12.5px; font-weight: 750; color: var(--color-text); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;">
                         ${item.name}
                       </div>
                     </div>
-                    <div style="font-size: 12px; font-weight: 900; color: var(--color-primary); text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">
+                    <div style="font-size: 12.5px; font-weight: 900; color: var(--color-primary); text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">
                       <span>${formatPrice(itemFinalPrice)}</span>
                       ${hasItemOffer ? `
                         <span style="font-size: 9.5px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(item.price)}</span>
@@ -492,7 +516,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       </div>
     </div>
 
-    <div class="pm-footer">
+    <div class="pm-footer" style="flex-shrink:0 !important; position:relative !important; bottom:0 !important; background:var(--color-surface) !important; padding:12px 16px calc(14px + env(safe-area-inset-bottom, 0px)) 16px !important; border-top:1px solid var(--color-border-light) !important; display:flex !important; gap:12px !important; align-items:center !important; z-index:100 !important; box-shadow:0 -4px 20px rgba(0,0,0,0.08) !important;">
         <div class="pm-qty-main" style="${(!isCommerceOpen || isOutOfStock) ? 'opacity: 0.5; pointer-events: none;' : ''}">
           <button class="pm-main-qty-btn" id="pm-qty-minus">${icon('minus', 18)}</button>
           <span class="pm-main-qty-val">${qty}</span>
@@ -623,11 +647,23 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       }
       if (isOutOfStock) return;
 
-      addToCart(product, comercioId, comercioName, qty, selectedOptions);
+      addToCart(product, comercioId, comercioName, qty, selectedOptions, productNotes);
       closeModal();
-      renderNavbar();
       showToast(`${qty} x ${product.name} al carrito`, 'success');
+
+      setTimeout(() => {
+        renderNavbar();
+        import('./navbar.js').then(m => m.updateGlobalCartFAB && m.updateGlobalCartFAB());
+      }, 260);
     };
+
+    // Product Notes Listener
+    const notesInputEl = modalContent.querySelector('#pm-product-notes');
+    if (notesInputEl) {
+      notesInputEl.oninput = (e) => {
+        productNotes = e.target.value;
+      };
+    }
 
     // Close button
     modalContent.querySelector('#pm-modal-close').onclick = closeModal;
@@ -659,25 +695,25 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         const viewer = document.createElement('div');
         viewer.className = 'pm-image-viewer';
         viewer.style.cssText = `
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100vw;
-          height: 100vh;
-          background: rgba(0, 0, 0, 0.95);
-          z-index: 2000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          position: fixed !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          background: rgba(0, 0, 0, 0.95) !important;
+          z-index: 999999999 !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
           opacity: 0;
-          transition: opacity 0.25s ease;
+          transition: opacity 0.25s ease !important;
         `;
 
         viewer.innerHTML = `
-          <button style="position: absolute; top: 20px; right: 20px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.15); color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; z-index: 2100;">
+          <button style="position: absolute; top: calc(20px + env(safe-area-inset-top, 0px)); right: 20px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.2); color: white; border: 1.5px solid rgba(255,255,255,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; z-index: 1000000000; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
             ${icon('close', 24)}
           </button>
-          <img src="${product.image}" alt="${product.name}" style="max-width: 95%; max-height: 85%; object-fit: contain; border-radius: 12px; transform: scale(0.9); transition: transform 0.25s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.5);" />
+          <img src="${displayBannerImage || productImage || product.image}" alt="${product.name}" style="max-width: 95%; max-height: 85%; object-fit: contain; border-radius: 16px; transform: scale(0.9); transition: transform 0.25s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.8);" />
         `;
 
         document.body.appendChild(viewer);

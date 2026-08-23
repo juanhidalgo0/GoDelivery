@@ -521,17 +521,20 @@ async function updateChatMetadata(chatRef, uid, lastMessageText) {
     const orderId = chatData.orderId || parts[0];
     const chatType = chatData.type || parts[1];
 
-    if (orderId && (!chatSnap.exists() || !chatData.participants || chatData.participants.length < 2)) {
+    let orderParties = new Set();
+    if (orderId) {
       try {
         const orderSnap = await getDoc(doc(db, 'orders', orderId));
         if (orderSnap.exists()) {
           const oData = orderSnap.data();
-          const pSet = new Set([uid]);
-          if (oData.userId) pSet.add(oData.userId);
-          if (oData.driverId) pSet.add(oData.driverId);
-          if (oData.comercioId) pSet.add(oData.comercioId);
-          if (oData.comercioOwnerId) pSet.add(oData.comercioOwnerId);
-          participants = Array.from(pSet);
+          if (oData.userId) orderParties.add(oData.userId);
+          if (oData.driverId) orderParties.add(oData.driverId);
+          if (oData.comercioId) orderParties.add(oData.comercioId);
+          if (oData.comercioOwnerId) orderParties.add(oData.comercioOwnerId);
+          
+          if (orderParties.size > 0) {
+            participants = Array.from(orderParties);
+          }
         }
       } catch (err) {
         console.warn('Failed to fetch order for chat metadata fallback:', err);
@@ -549,7 +552,7 @@ async function updateChatMetadata(chatRef, uid, lastMessageText) {
     };
 
     participants.forEach(pId => {
-      if (pId !== uid) {
+      if (pId !== uid && (orderParties.size === 0 || orderParties.has(pId))) {
         updates[`unread.${pId}`] = increment(1);
       }
     });

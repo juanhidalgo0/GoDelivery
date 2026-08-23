@@ -61,10 +61,22 @@ export function printComanda(order) {
           <div class="section">
             <div class="section-title">DETALLE</div>
             ${(order.items || []).map(i => `
-              <div class="item">
-                <div class="item-qty">${i.qty}x</div>
-                <div class="item-name">${i.name}</div>
-                <div class="item-price">${formatP(i.price * i.qty)}</div>
+              <div class="item" style="display:flex; flex-direction:column; margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; width:100%;">
+                  <div class="item-qty">${i.qty}x</div>
+                  <div class="item-name">${i.name}</div>
+                  <div class="item-price">${formatP(i.price * i.qty)}</div>
+                </div>
+                ${i.options && i.options.length > 0 ? `
+                  <div style="font-size:13px; font-weight:bold; margin-left:34px; color:#333;">
+                    * Sabores: ${i.options.map(o => `${o.qty > 1 ? `${o.qty}x ` : ''}${o.name}`).join(', ')}
+                  </div>
+                ` : ''}
+                ${i.notes ? `
+                  <div style="font-size:14px; font-weight:bold; margin-left:34px; margin-top:2px; color:#e11d48;">
+                    * NOTA: "${i.notes}"
+                  </div>
+                ` : ''}
               </div>
             `).join('')}
           </div>

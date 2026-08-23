@@ -36,7 +36,7 @@ export function renderHeader() {
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
-  const isSubPage = (hash.startsWith('#/profile') && !hash.startsWith('#/profile/publications') && !hash.startsWith('#/profile/orders')) || hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category') || hash.startsWith('#/cart');
+  const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category');
   const slider = document.getElementById('app-slider');
 
   if (!isHome && !isSubPage) {

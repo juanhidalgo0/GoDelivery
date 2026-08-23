@@ -33,19 +33,17 @@ export async function renderOffersPage(container) {
     : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
 
   container.innerHTML = `
-    <div class="offers-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
-      <!-- Premium Fixed Header -->
-      <div style="width:100%; padding-top: ${topPadding}; background: var(--color-primary); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
-        <div style="display:flex; align-items:center; gap:12px; padding: 12px 16px 20px 16px; color:white; position:relative; overflow:hidden;">
-          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-          
-          <a href="#/" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.15); color:white; text-decoration:none; position:relative; z-index:2;">
-            ${icon('chevronLeft', 24)}
-          </a>
-          <div>
-            <h1 style="font-family:var(--font-display); font-weight:800; font-size:18px; margin:0; line-height:1.2; letter-spacing:-0.01em;">Ofertas y Descuentos</h1>
-            <p style="font-size:10px; color:rgba(255,255,255,0.85); font-weight:700; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.5px;">Ahorrá con las mejores promos</p>
-          </div>
+    <div class="offers-page" style="display:flex; flex-direction:column; min-height:100vh; background:var(--color-bg); padding-bottom: 90px;">
+      <!-- Header estilo Mis Chats (Sticky) -->
+      <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 200; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); flex-shrink: 0;">
+        <!-- Decorative Circles -->
+        <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
+          <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
+          <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
+        </div>
+
+        <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 16px; position: relative; z-index: 2;">
+          <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Ofertas y Descuentos</span>
         </div>
       </div>
 
@@ -66,8 +64,8 @@ export async function renderOffersPage(container) {
       </div>
 
       <!-- Scrollable Offers Grid -->
-      <div style="flex:1; overflow-y:auto; padding:16px; -webkit-overflow-scrolling:touch;" id="offers-page-scrollable">
-        <div id="offers-grid-container" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:16px; max-width:1200px; margin:0 auto; padding-bottom:30px;">
+      <div style="flex:1; padding:16px; -webkit-overflow-scrolling:touch;" id="offers-page-scrollable">
+        <div id="offers-grid-container" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:16px; max-width:1200px; margin:0 auto; padding-bottom:40px;">
           <!-- Loaded dynamically -->
         </div>
       </div>

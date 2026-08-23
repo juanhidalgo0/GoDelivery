@@ -200,7 +200,7 @@ function notifyNewOrder(order) {
   AudioManager.vibrate([400, 150, 400, 150, 600]);
 
   // Use swRegistration.showNotification with requireInteraction: true for mobile persistence
-  if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+  if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
     navigator.serviceWorker.ready.then(reg => {
       let body = `¡Nuevo pedido! ${order.comercioName} tiene un pedido listo para retirar.`;
       if (order.isFavor) {

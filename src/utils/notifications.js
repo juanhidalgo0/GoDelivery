@@ -245,7 +245,12 @@ export async function initPushNotifications() {
       return;
     }
 
-    // Check current permission
+    // Check current permission safely for iOS Safari
+    if (!('Notification' in window)) {
+      console.warn('Push notifications not supported in this browser');
+      return;
+    }
+
     if (Notification.permission === 'denied') {
       console.log('Push notifications are blocked by the user settings.');
       return;

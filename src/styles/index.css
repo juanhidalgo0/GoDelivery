@@ -788,7 +788,7 @@ body.platform-capacitor .panel-page > div[style*="overflow-y: auto"] {
 }
 
 /* Adjust commerce cover page back button position */
-body.platform-capacitor .comercio-header-back {
+body.platform-capacitor .comercio-header-back:not(#comercio-nav-back) {
   top: calc(16px + var(--status-bar-height)) !important;
 }
 
@@ -859,6 +859,8 @@ body.platform-capacitor .pm-footer {
   transform: scale(0.8) translateY(20px) !important;
 }
 
+body.modal-open #global-cart-fab-btn,
+body.modal-open #chat-global-fab,
 body.modal-open #support-bot-fab-btn,
 body.modal-open #app-guide-fab,
 body.modal-open #global-order-fab,
@@ -866,6 +868,7 @@ body.modal-open #global-commerce-pending-fab,
 body.modal-open #global-active-delivery-fab,
 body.modal-open #global-delivery-available-fab {
   opacity: 0 !important;
+  display: none !important;
   pointer-events: none !important;
 }
 

@@ -692,6 +692,11 @@ function showOrderDetailModal(initialOrder) {
                         ${flavorIcon} Sabores: ${i.options.map(o => `${o.qty > 1 ? `${o.qty}x ` : ''}${o.name}`).join(', ')}
                       </div>
                     ` : ''}
+                    ${i.notes ? `
+                      <div style="font-size:11.5px; font-weight:800; color:#e11d48; background:rgba(225,29,72,0.08); padding:3px 8px; border-radius:6px; margin-top:4px; border:1px solid rgba(225,29,72,0.15); display:inline-block;">
+                        📝 Nota: "${i.notes}"
+                      </div>
+                    ` : ''}
                   </div>
                   <div class="item-price">${formatPrice(i.price * i.qty)}</div>
                 </div>

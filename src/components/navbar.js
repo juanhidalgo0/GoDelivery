@@ -98,14 +98,81 @@ export function renderNavbar() {
   `;
 }
 
+export function updateGlobalCartFAB() {
+  const rawHash = window.location.hash || '#/';
+  let btn = document.getElementById('global-cart-fab-btn');
+  const count = getCartCount();
+
+  const isModalOpen = document.body.classList.contains('modal-open');
+  const isHomePage = rawHash === '#/' || rawHash === '#' || rawHash === '' || rawHash.startsWith('#/?');
+  const isCartPage = rawHash.startsWith('#/cart');
+  const isChatsPage = rawHash.startsWith('#/mis-chats') || rawHash.startsWith('#/chat') || rawHash.startsWith('#/support');
+  const isDeliveryPage = rawHash.startsWith('#/delivery');
+  const isComercioOwnerPage = rawHash.startsWith('#/mi-comercio');
+  const isOffersPage = rawHash.startsWith('#/offers');
+  const isProfilePage = rawHash.startsWith('#/profile');
+  const isExcludedPage = isHomePage || isCartPage || isChatsPage || isDeliveryPage || isComercioOwnerPage || isOffersPage || isProfilePage;
+
+  if (count > 0 && !isModalOpen && !isExcludedPage) {
+    if (!btn) {
+      btn = document.createElement('a');
+      btn.id = 'global-cart-fab-btn';
+      btn.href = '#/cart';
+      btn.title = 'Ver carrito';
+      document.body.appendChild(btn);
+    } else if (btn.parentElement !== document.body) {
+      document.body.appendChild(btn);
+    }
+
+    const isFullscreenPage = rawHash.startsWith('#/comercio/') || rawHash.startsWith('#/profile/') || rawHash.startsWith('#/mi-comercio/') || rawHash.startsWith('#/pedido/') || rawHash.startsWith('#/admin') || rawHash === '#/notifications' || rawHash === '#/viajes' || rawHash.startsWith('#/gofavores') || rawHash.startsWith('#/delivery');
+    const bottomVal = isFullscreenPage ? '24px' : '80px';
+
+    btn.style.cssText = `
+      position: fixed !important;
+      bottom: calc(${bottomVal} + env(safe-area-inset-bottom, 0px)) !important;
+      right: 20px !important;
+      z-index: 99999999 !important;
+      width: 60px !important;
+      height: 60px !important;
+      border-radius: 50% !important;
+      background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
+      color: white !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      box-shadow: 0 8px 28px rgba(225, 29, 72, 0.5), 0 2px 8px rgba(0,0,0,0.25) !important;
+      border: 2.5px solid #ffffff !important;
+      text-decoration: none !important;
+      pointer-events: auto !important;
+      transform: translateZ(0) !important;
+    `;
+
+    btn.innerHTML = `
+      ${icon('cart', 28)}
+      <span style="position:absolute; top:-4px; right:-4px; background:#10b981; color:white; min-width:24px; height:24px; border-radius:12px; font-size:12px; font-weight:900; display:flex; align-items:center; justify-content:center; padding:0 6px; border:2px solid white; box-shadow:0 3px 8px rgba(0,0,0,0.25); font-family:var(--font-display); line-height:1;">${count}</span>
+    `;
+  } else {
+    if (btn) {
+      btn.remove();
+    }
+  }
+}
+
 export function initNavbar() {
   renderNavbar();
-  subscribe('cart', () => renderNavbar());
+  updateGlobalCartFAB();
+  subscribe('cart', () => {
+    renderNavbar();
+    updateGlobalCartFAB();
+  });
   subscribe('user', () => renderNavbar());
   subscribe('commercePendingCount', () => renderNavbar());
   subscribe('unreadSupportCount', () => renderNavbar());
   subscribe('totalUnreadChats', () => renderNavbar());
-  window.addEventListener('hashchange', () => renderNavbar());
+  window.addEventListener('hashchange', () => {
+    renderNavbar();
+    updateGlobalCartFAB();
+  });
 
   // Real-time unread support chats listener for admins
   let unreadUnsub = null;
@@ -175,14 +242,34 @@ export function initNavbar() {
 
       // 2. Order chats unread
       const q = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid));
-      unreadUserChatsUnsub = onSnapshot(q, (snap) => {
+      unreadUserChatsUnsub = onSnapshot(q, async (snap) => {
         let count = 0;
-        snap.docs.forEach(d => {
+        for (const d of snap.docs) {
           const data = d.data();
-          if (data.unread && data.unread[user.uid] === true) {
+          const unreadVal = data.unread ? data.unread[user.uid] : 0;
+          const isUnread = unreadVal === true || (typeof unreadVal === 'number' && unreadVal > 0);
+          if (isUnread && data.orderId) {
+            try {
+              const { doc: fDoc, getDoc: fGetDoc } = await import('firebase/firestore');
+              const oSnap = await fGetDoc(fDoc(db, 'orders', data.orderId));
+              if (oSnap.exists()) {
+                const oData = oSnap.data();
+                if (oData.status === 'completed' || oData.status === 'delivered' || oData.status === 'cancelled') {
+                  continue;
+                }
+                const isActualParty = oData.userId === user.uid ||
+                                      oData.driverId === user.uid ||
+                                      oData.comercioId === user.uid ||
+                                      oData.comercioOwnerId === user.uid;
+                if (isActualParty) count++;
+              }
+            } catch (e) {
+              if (isUnread) count++;
+            }
+          } else if (isUnread) {
             count++;
           }
-        });
+        }
         unreadChats = count;
         updateCount();
       }, (err) => console.warn('User chats unread listener failed:', err));

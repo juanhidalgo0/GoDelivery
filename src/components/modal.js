@@ -89,7 +89,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
             <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
         ` : ''}
-        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''}">
+        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:${hideHeader ? 'hidden' : 'auto'} !important; -webkit-overflow-scrolling:touch !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''}">
           ${typeof content === 'string' ? content : ''}
         </div>
         ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px calc(20px + env(safe-area-inset-bottom, 0px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
@@ -98,6 +98,9 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   `;
 
   container.appendChild(modalWrapper);
+  document.body.classList.add('modal-open');
+  import('./navbar.js').then(m => m.updateGlobalCartFAB && m.updateGlobalCartFAB());
+
   const body = document.getElementById(`${modalId}-body`);
   if (typeof content !== 'string' && content) body.appendChild(content);
 
@@ -134,11 +137,14 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
       if (modalStack.length <= 1) {
         document.body.classList.remove('multiple-modals');
       }
-      // Restore pull-to-refresh when all modals are closed
+      // Restore pull-to-refresh and cart FAB when all modals are closed
       if (modalStack.length === 0) {
         document.body.style.overscrollBehaviorY = 'auto';
         document.documentElement.style.overscrollBehaviorY = 'auto';
         document.body.classList.remove('modal-open');
+        import('./navbar.js').then(m => m.updateGlobalCartFAB && m.updateGlobalCartFAB());
+      } else {
+        import('./navbar.js').then(m => m.updateGlobalCartFAB && m.updateGlobalCartFAB());
       }
       
       if (onClose) onClose();

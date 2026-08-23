@@ -3612,31 +3612,31 @@ exports.getServerTime = onRequest({ cors: true }, (req, res) => {
  * being accepted, ensuring the next driver always gets the offer even
  * if all apps are in background or closed.
  */
-exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
-  const OFFER_TIMEOUT_MS = 30 * 1000; // Strict 30-second limit
+async function processExpiredAndUnassignedOffers() {
+  const OFFER_TIMEOUT_MS = 28 * 1000; // Strict 28-second limit for server rotation
   const now = Date.now();
   const cutoff = new Date(now - OFFER_TIMEOUT_MS);
 
   try {
-    // Fetch all active orders (filtering by driverId in memory prevents empty results from missing properties)
     const pendingSnap = await db.collection("orders")
       .where("status", "in", ["pending", "confirmed", "preparing", "ready"])
       .get();
 
-    // Filter and process expired offers / dispatch unassigned orders
     const expiredOrders = [];
     const unassignedOrders = [];
 
     pendingSnap.docs.forEach(docSnap => {
       const o = docSnap.data();
-      // Auto-cancellation completely disabled per user directive.
+      if (o.driverId) return; // Already accepted
 
       if (!o.queueTargetDriverId) {
-        unassignedOrders.push(docSnap);
+        // Regular commerce orders must be ready before offering
+        if (o.isFavor || o.isTrip || o.status === "ready") {
+          unassignedOrders.push(docSnap);
+        }
         return;
       }
       
-      // If queueOfferedAt is missing but there is a target, treat it as expired to prevent stuck states
       if (!o.queueOfferedAt) {
         expiredOrders.push(docSnap);
         return;
@@ -3647,10 +3647,6 @@ exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
         expiredOrders.push(docSnap);
       }
     });
-
-    if (cancelPromises.length > 0) {
-      await Promise.all(cancelPromises);
-    }
 
     // Dispatch unassigned orders
     for (const docSnap of unassignedOrders) {
@@ -3673,10 +3669,6 @@ exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
       logger.info(`[RotateOffers] Rotating order ${orderId} (was offered to ${prevDriverId})`);
 
       try {
-        // Driver didn't accept the offer: rotate to next driver without disconnecting or incrementing missed offers
-        logger.info(`[RotateOffers] Offer expired for driver ${prevDriverId}. Rotating order ${orderId} without disconnecting driver.`);
-
-        // 2. Build updated order object with prev driver rejected
         const rejected = [...(order.queueRejectedDrivers || []), prevDriverId];
         const updatedOrder = {
           ...order,
@@ -3685,12 +3677,10 @@ exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
           queueOfferedAt: null
         };
 
-        // 3. Clear the current target atomically so no client picks it up mid-rotation
         await db.runTransaction(async (tx) => {
           const freshSnap = await tx.get(db.collection("orders").doc(orderId));
           if (!freshSnap.exists) return;
           const fresh = freshSnap.data();
-          // Abort if order was already accepted during our processing
           if (fresh.driverId || fresh.queueTargetDriverId !== prevDriverId) return;
           tx.update(db.collection("orders").doc(orderId), {
             queueTargetDriverId: null,
@@ -3699,18 +3689,25 @@ exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
           });
         });
 
-        // 4. Find the next eligible driver and assign
         await serverSideDispatch(orderId, updatedOrder);
-
       } catch (orderErr) {
         logger.error(`[RotateOffers] Error rotating order ${orderId}:`, orderErr);
       }
     }
-
-    logger.info("[RotateOffers] Done.");
   } catch (err) {
-    logger.error("[RotateOffers] Fatal error:", err);
+    logger.error("[RotateOffers] Error processing offers:", err);
   }
+}
+
+exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
+  logger.info("[RotateOffers] Starting background rotation pass (T+0s)...");
+  await processExpiredAndUnassignedOffers();
+  
+  // Wait 30 seconds for mid-minute pass to guarantee 30s rotation cycle
+  await new Promise(resolve => setTimeout(resolve, 30000));
+  
+  logger.info("[RotateOffers] Starting background rotation pass (T+30s)...");
+  await processExpiredAndUnassignedOffers();
 });
 
 

@@ -225,6 +225,18 @@ function startChatsListener(container, user) {
     });
     await Promise.all(orderPromises);
 
+    orderChats = orderChats.filter(chat => {
+      if (chat.deletedFor && chat.deletedFor.includes(user.uid)) return false;
+      if (chat.order) {
+        const isActualParty = chat.order.userId === user.uid ||
+                              chat.order.driverId === user.uid ||
+                              chat.order.comercioId === user.uid ||
+                              chat.order.comercioOwnerId === user.uid;
+        return isActualParty;
+      }
+      return true;
+    });
+
     currentOrderChats = orderChats;
     renderChats(container, user);
   }, (err) => console.warn('[MisChats] Order chats listener error:', err));
