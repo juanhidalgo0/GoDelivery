@@ -147,10 +147,30 @@ export async function openChat(options) {
     return;
   }
 
-  // Privacy protection: Comercio users cannot open or view client-delivery private chat
+  // Privacy protection: Comercio users cannot open or view client-delivery private chat UNLESS they are the client or driver of this order
   const { isAdmin } = await import('../auth.js');
   if (type === 'client-delivery' && !isAdmin() && !isAudit) {
-    if (user.role === 'comercio' || user.role === 'commerce' || user.comercioId) {
+    let isParticipant = false;
+    if (options && typeof options === 'object') {
+      if (options.userId === user.uid || options.clientId === user.uid || options.driverId === user.uid) {
+        isParticipant = true;
+      }
+    }
+    if (!isParticipant && orderId) {
+      try {
+        const { getDoc, doc } = await import('firebase/firestore');
+        const { db } = await import('../firebase.js');
+        const oSnap = await getDoc(doc(db, 'orders', orderId));
+        if (oSnap.exists()) {
+          const oData = oSnap.data();
+          if (oData.userId === user.uid || oData.driverId === user.uid) {
+            isParticipant = true;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!isParticipant && (user.role === 'comercio' || user.role === 'commerce' || user.comercioId)) {
       isChatOpening = false;
       const { showToast } = await import('./toast.js');
       showToast('⚠️ El chat entre el cliente y el repartidor es privado.', 'warning');
