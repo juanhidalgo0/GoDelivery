@@ -850,66 +850,32 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
       return;
     }
 
-    // 2. Regular commerce owner notification (Fires on all orders regardless of payment method)
+    // 2. Regular commerce owner notification (Only sent to the actual commerce owner, NOT admins)
     const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
     if (comercioDoc.exists) {
       const comData = comercioDoc.data();
       let ownerId = comData.ownerId;
-      const commerceName = (comData.name || "").toLowerCase().replace(/[^a-z0-9]/g, '');
-      const isGoMarket = commerceName.includes("gomarket");
-
-      if (isGoMarket) {
-        // If it's GoMarket, notify the commerce owner (if specified) AND ALL admins
-        let targetTokens = await getAdminTokens();
-        if (ownerId) {
-          const ownerTokens = await getUserTokens(ownerId);
-          targetTokens = [...new Set([...targetTokens, ...ownerTokens])];
+      if (!ownerId) {
+        const ownerQuerySnap = await db.collection("users").where("comercioId", "==", order.comercioId).get();
+        if (!ownerQuerySnap.empty) {
+          ownerId = ownerQuerySnap.docs[0].id;
         }
+      }
 
-        if (targetTokens.length > 0) {
-          await sendPush(targetTokens, {
-            title: "🛒 ¡Nuevo Pedido en GoMarket!",
-            body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`,
-            sound: "default"
-          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
-        }
-      } else {
-        // If ownerId is missing or empty, find user in 'users' collection where comercioId matches
-        if (!ownerId) {
-          const ownerQuerySnap = await db.collection("users").where("comercioId", "==", order.comercioId).get();
-          if (!ownerQuerySnap.empty) {
-            ownerId = ownerQuerySnap.docs[0].id;
-          }
-        }
+      if (ownerId) {
+        const ownerTokens = await getUserTokens(ownerId);
+        const adminTokens = await getAdminTokens();
+        const adminTokenSet = new Set(adminTokens);
+        // Exclude admin tokens so admins only receive their single admin audit alert (#/admin/orders)
+        const pureOwnerTokens = ownerTokens.filter(t => !adminTokenSet.has(t));
 
-        let ownerTokens = ownerId ? await getUserTokens(ownerId) : [];
-        
-        // Also query fcmTokens directly under user if ownerId is present
-        if (ownerTokens.length === 0 && ownerId) {
-          const uDoc = await db.collection("users").doc(ownerId).get();
-          if (uDoc.exists && uDoc.data().fcmToken) {
-            ownerTokens = [uDoc.data().fcmToken];
-          }
-        }
-
-        if (ownerTokens.length > 0) {
-          logger.info(`[FCM] Sending new order push to commerce owner ${ownerId} (${ownerTokens.length} tokens).`);
-          await sendPush(ownerTokens, {
+        if (pureOwnerTokens.length > 0) {
+          logger.info(`[FCM] Sending new order push to commerce owner ${ownerId} (${pureOwnerTokens.length} tokens).`);
+          await sendPush(pureOwnerTokens, {
             title: "🔔 ¡Nuevo Pedido Recibido!",
             body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`,
             sound: "default"
           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
-        } else {
-          // Fallback to admin if owner has no tokens registered
-          logger.warn(`[FCM] Commerce owner ${ownerId || 'unknown'} has no FCM tokens registered. Falling back to admins.`);
-          const adminTokens = await getAdminTokens();
-          if (adminTokens.length > 0) {
-            await sendPush(adminTokens, {
-              title: "🔔 ¡Nuevo Pedido Recibido!",
-              body: `Nuevo pedido #${orderNum} en ${comData.name || 'comercio'}.`,
-              sound: "default"
-            }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
-          }
         }
       }
     }

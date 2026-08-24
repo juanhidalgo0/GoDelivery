@@ -57,11 +57,13 @@ export async function signInWithGoogle() {
       try {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
-        // Initialize first to ensure serverClientId is configured for Firebase Auth
+        // Initialize first to ensure serverClientId and iosClientId are configured for Firebase Auth
         const SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
+        const IOS_CLIENT_ID = '848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3.apps.googleusercontent.com';
         try {
           await GoogleAuth.initialize({
-            clientId: SERVER_CLIENT_ID,
+            clientId: IOS_CLIENT_ID,
+            iosClientId: IOS_CLIENT_ID,
             serverClientId: SERVER_CLIENT_ID,
             scopes: ['profile', 'email'],
             grantOfflineAccess: true
