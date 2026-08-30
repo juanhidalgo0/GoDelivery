@@ -2,7 +2,34 @@
 <html lang="es" data-theme="light">
 
 <head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <script>
+    (function() {
+      try {
+        var currentBuild = '__APP_BUILD_TIME_PLACEHOLDER__';
+        var storedBuild = localStorage.getItem('gd_live_build_ts');
+        if (storedBuild && currentBuild !== '__APP_BUILD_TIME_PLACEHOLDER__' && storedBuild !== currentBuild) {
+          localStorage.setItem('gd_live_build_ts', currentBuild);
+          if ('caches' in window) {
+            caches.keys().then(function(names) {
+              names.forEach(function(n) { caches.delete(n); });
+            });
+          }
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              regs.forEach(function(r) { r.unregister(); });
+            });
+          }
+          window.location.reload(true);
+          return;
+        } else if (currentBuild !== '__APP_BUILD_TIME_PLACEHOLDER__') {
+          localStorage.setItem('gd_live_build_ts', currentBuild);
+        }
+      } catch(e) {}
+    })();
+  </script>
     (function() {
       try {
         var userStr = localStorage.getItem('gd-user') || localStorage.getItem('gd_user');

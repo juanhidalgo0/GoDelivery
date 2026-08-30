@@ -61,3 +61,18 @@ try {
 } catch (err) {
   console.error('[Post-Build] Error writing version file:', err);
 }
+
+// 5. Inject timestamp into dist/index.html
+const distIndexPath = path.join(process.cwd(), 'dist', 'index.html');
+if (fs.existsSync(distIndexPath)) {
+  try {
+    let content = fs.readFileSync(distIndexPath, 'utf8');
+    if (content.includes('__APP_BUILD_TIME_PLACEHOLDER__')) {
+      content = content.replaceAll('__APP_BUILD_TIME_PLACEHOLDER__', String(timestamp));
+      fs.writeFileSync(distIndexPath, content, 'utf8');
+      console.log(`[Post-Build] Injected build timestamp ${timestamp} into dist/index.html`);
+    }
+  } catch (err) {
+    console.error('[Post-Build] Error updating dist/index.html:', err);
+  }
+}
