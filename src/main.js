@@ -148,25 +148,38 @@ async function init() {
       } catch (e) {
         console.warn('Update cleanup failed:', e);
       }
-      window.location.href = window.location.origin + window.location.pathname + '?v=' + Date.now() + (window.location.hash || '');
+      const targetUrl = (window.location.origin.includes('localhost') || window.location.origin.includes('capacitor://') || window.location.origin.includes('http://localhost'))
+        ? 'https://godelivery-magdalena.web.app/?v=' + Date.now() + (window.location.hash || '')
+        : window.location.origin + window.location.pathname + '?v=' + Date.now() + (window.location.hash || '');
+      window.location.href = targetUrl;
     }, 1200);
   }
 
   const BUNDLE_BUILD_VERSION = "__APP_BUILD_TIME_PLACEHOLDER__";
 
-  // Force-update check against version.json (Runs on Web and PWA only; bypassed on Native iOS/Android apps to prevent WebView freeze loops)
+  // Force-update check against version.json (Runs on Web, PWA and Native apps to always keep app in sync in real time)
   const checkAppVersion = async () => {
-    if (isNativeApp) return;
+    // Guard against infinite reload loops within the same browser session
+    if (sessionStorage.getItem('gd_update_attempted') === 'true') {
+      return;
+    }
     try {
-      const versionUrl = window.location.origin + '/version.json?cb=' + Date.now();
+      const versionUrl = (window.location.origin.includes('localhost') || window.location.origin.includes('capacitor://') || window.location.origin.includes('http://localhost'))
+        ? 'https://godelivery-magdalena.web.app/version.json?cb=' + Date.now()
+        : window.location.origin + '/version.json?cb=' + Date.now();
       const vRes = await fetch(versionUrl, { cache: 'no-store' }).catch(() => null);
 
       if (vRes && vRes.ok) {
         const vData = await vRes.json();
         const serverVersion = String(vData?.version || vData?.buildTime || '');
+        const runningBuildTime = String(BUNDLE_BUILD_VERSION);
         const currentVer = localStorage.getItem('gd_app_version');
-        if (serverVersion && currentVer && currentVer !== serverVersion) {
-          console.log('[Version] New version detected. Server:', serverVersion);
+
+        const isOutdated = currentVer && currentVer !== serverVersion && runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && runningBuildTime !== serverVersion;
+
+        if (isOutdated) {
+          console.log('[Version] New version detected on web/app. Server:', serverVersion, 'Local:', currentVer || runningBuildTime);
+          sessionStorage.setItem('gd_update_attempted', 'true');
           localStorage.setItem('gd_app_version', serverVersion);
           if ('caches' in window) {
             caches.keys().then(names => {
@@ -185,8 +198,9 @@ async function init() {
   };
   window.checkAppVersion = checkAppVersion;
 
-  // Run version check ONCE on startup and on tab visibility change (No aggressive setInterval loops)
+  // Run version check on startup, on visibility change, and periodically every 60s
   checkAppVersion();
+  setInterval(checkAppVersion, 60000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !sessionStorage.getItem('gd_update_attempted')) {
       checkAppVersion();
