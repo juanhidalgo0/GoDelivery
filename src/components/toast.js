@@ -4,6 +4,12 @@ import { icon } from '../utils/icons.js';
 const activeToasts = new Set();
 
 export function showToast(message, type = 'info', duration = 2500) {
+  // Suppress all toast banners when operating in delivery driver mode
+  if (window.location.hash.startsWith('#/delivery') || document.body.classList.contains('is-delivery-mode')) {
+    console.log('[Toast suppressed in delivery mode]:', message);
+    return;
+  }
+
   if (activeToasts.has(message)) return;
   activeToasts.add(message);
 

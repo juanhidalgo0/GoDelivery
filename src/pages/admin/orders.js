@@ -7,6 +7,7 @@ import { showModal, closeModal } from '../../components/modal.js';
 import { getState, subscribe } from '../../state.js';
 import { registerUnsubscribe } from '../../utils/cleanup.js';
 
+let globalOrdersCache = [];
 const userCache = {};
 let knownOrderIds = null;
 const newOrderAlerts = {};
@@ -14,15 +15,37 @@ let currentLimit = 30;
 let isHistoryMode = false;
 let infiniteObserver = null;
 let pageLoadTime = 0;
+let renderScheduled = false;
+
+function scheduleRenderOrdersList() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    renderScheduled = false;
+    renderOrdersList();
+  });
+}
 
 async function getOrFetchUserProfile(userId) {
   if (!userId) return null;
   if (userCache[userId] !== undefined) return userCache[userId];
   
+  // Check memory state first
+  const stateUsers = getState().users || [];
+  const existingUser = stateUsers.find(u => u.uid === userId || u.id === userId);
+  if (existingUser) {
+    const profile = {
+      photo: existingUser.photoURL || existingUser.profilePhoto || null,
+      role: existingUser.role,
+      displayId: existingUser.dlId || existingUser.goId || '---',
+      displayName: existingUser.displayName || existingUser.name || 'Usuario'
+    };
+    userCache[userId] = profile;
+    return profile;
+  }
+
   userCache[userId] = null;
   try {
-    const { doc, getDoc } = await import('firebase/firestore');
-    const { db } = await import('../../firebase.js');
     const userSnap = await getDoc(doc(db, 'users', userId));
     if (userSnap.exists()) {
       const data = userSnap.data();
@@ -45,6 +68,7 @@ async function getOrFetchUserProfile(userId) {
         displayName: data.displayName || 'Usuario'
       };
       userCache[userId] = profile;
+      scheduleRenderOrdersList();
       return profile;
     }
   } catch (e) {
@@ -59,15 +83,20 @@ async function getOrFetchCommerceLogo(comercioId) {
   if (!comercioId) return null;
   if (commerceLogoCache[comercioId] !== undefined) return commerceLogoCache[comercioId];
   
+  const stateLogo = getState().comerciosData?.[comercioId] || getState().comercios?.find(c => c.id === comercioId)?.logo;
+  if (stateLogo) {
+    commerceLogoCache[comercioId] = stateLogo;
+    return stateLogo;
+  }
+
   commerceLogoCache[comercioId] = null;
   try {
-    const { doc, getDoc } = await import('firebase/firestore');
-    const { db } = await import('../../firebase.js');
     const comSnap = await getDoc(doc(db, 'comercios', comercioId));
     if (comSnap.exists()) {
       const data = comSnap.data();
       const logo = data.logo || data.image || null;
       commerceLogoCache[comercioId] = logo;
+      scheduleRenderOrdersList();
       return logo;
     }
   } catch (e) {
@@ -130,7 +159,11 @@ function parseFavorDetails(details) {
 
 export async function renderAdminOrders() {
   const content = document.getElementById('app-content');
-  allOrders = [];
+  if (globalOrdersCache.length > 0) {
+    allOrders = [...globalOrdersCache];
+  } else {
+    allOrders = [];
+  }
   isHistoryMode = false;
   currentLimit = 30;
   pageLoadTime = Date.now();
@@ -760,6 +793,14 @@ function renderOrdersList() {
     });
   }
 
+  // Default "Activos" mode filtering: only show active (non-completed, non-cancelled) orders unless "Todos" is chosen
+  if (!isHistoryMode && filter === 'all') {
+    filtered = filtered.filter(o => {
+      const st = (o.status || '').toLowerCase();
+      return !['completed', 'delivered', 'entregado', 'cancelled', 'cancelado'].includes(st);
+    });
+  }
+
   renderFilteredOrders(container, filtered);
 }
 
@@ -769,30 +810,21 @@ function loadAllOrders() {
   
   if (ordersUnsubscribe) ordersUnsubscribe();
 
-  let q;
-  if (!isHistoryMode) {
-    // ACTIVE ORDERS ONLY (Default Mode: Avoids unnecessary reads)
-    q = query(
-      collection(db, 'orders'),
-      where('status', 'in', ['pending', 'confirmed', 'preparing', 'ready', 'accepted', 'delivering', 'on_way'])
-    );
-  } else {
-    // HISTORICAL ORDERS (Paginated 30 at a time on scroll)
-    q = query(
-      collection(db, 'orders'),
-      orderBy('createdAt', 'desc'),
-      limit(currentLimit)
-    );
-  }
+  // Instant high-throughput query on single indexed orderBy for real-time live stream
+  const q = query(
+    collection(db, 'orders'),
+    orderBy('createdAt', 'desc'),
+    limit(isHistoryMode ? currentLimit : 120)
+  );
   
-  ordersUnsubscribe = onSnapshot(q, (snap) => {
+  ordersUnsubscribe = onSnapshot(q, { includeMetadataChanges: false }, (snap) => {
     registerUnsubscribe(ordersUnsubscribe);
     if (dot) {
       dot.style.background = isHistoryMode ? '#3B82F6' : '#00D67F';
       dot.style.boxShadow = isHistoryMode ? '0 0 10px #3B82F6' : '0 0 10px #00D67F';
     }
     if (diag) {
-      diag.textContent = isHistoryMode ? `• HISTORIAL COMPLETO (${snap.size})` : `• ACTIVOS EN VIVO (${snap.size})`;
+      diag.textContent = isHistoryMode ? `• HISTORIAL (${snap.size})` : `• EN VIVO (${snap.size})`;
     }
 
     const isFirstLoad = (knownOrderIds === null);
@@ -801,26 +833,25 @@ function loadAllOrders() {
     }
 
     allOrders = [];
-    snap.forEach(doc => {
+    snap.forEach(docSnap => {
       try {
-        const data = doc.data();
-        allOrders.push({ id: doc.id, ...data });
+        const data = docSnap.data();
+        allOrders.push({ id: docSnap.id, ...data });
         
         if (isFirstLoad) {
-          knownOrderIds.add(doc.id);
+          knownOrderIds.add(docSnap.id);
         } else {
-          if (!knownOrderIds.has(doc.id)) {
-            knownOrderIds.add(doc.id);
+          if (!knownOrderIds.has(docSnap.id)) {
+            knownOrderIds.add(docSnap.id);
             
             const orderMs = data.createdAt?.toMillis ? data.createdAt.toMillis() : (data.createdAt ? new Date(data.createdAt).getTime() : 0);
-            const isCreatedAfterLoad = orderMs > (pageLoadTime - 2000);
+            const isCreatedAfterLoad = orderMs > (pageLoadTime - 3000);
             
             if (isCreatedAfterLoad) {
-              newOrderAlerts[doc.id] = Date.now();
-              // Try to play notification sound
+              newOrderAlerts[docSnap.id] = Date.now();
               try {
                 import('../../utils/audio-manager.js').then(({ AudioManager }) => {
-                  AudioManager.play('new_order');
+                  AudioManager.playSynthChime();
                 }).catch(() => {});
               } catch(e) {}
             }
@@ -828,6 +859,8 @@ function loadAllOrders() {
         }
       } catch(e) {}
     });
+
+    globalOrdersCache = [...allOrders];
 
     // Sort active/pending scheduled orders to the top, completed/cancelled scheduled orders fallback chronologically
     allOrders.sort((a, b) => {
@@ -842,8 +875,9 @@ function loadAllOrders() {
       return bTime - aTime;
     });
     
-    renderOrdersList();
+    scheduleRenderOrdersList();
   }, (err) => {
+    console.error('[Orders] Realtime listener error:', err);
     if (dot) dot.style.background = '#E74C3C';
     showToast('Error de sincronización: ' + err.message, 'danger');
   });
@@ -2066,7 +2100,7 @@ export async function openReleaseDriverModal(idOrOrder) {
             driverPhone: selectedDriver.phone || selectedDriver.phoneNumber || null,
             driverDeliveryId: selectedDriver.deliveryId || selectedDriver.displayId || selectedDriver.dlId || null,
             driverDlId: selectedDriver.deliveryId || selectedDriver.displayId || selectedDriver.dlId || null,
-            driverAlias: selectedDriver.transferAlias || selectedDriver.alias || null,
+            driverAlias: selectedDriver.driverAlias || selectedDriver.transferAlias || selectedDriver.alias || null,
             driverVehicleModel: selectedDriver.vehicleModel || selectedDriver.deliveryVehicleModel || null,
             driverVehicleColor: selectedDriver.vehicleColor || null,
             driverVehiclePatent: selectedDriver.vehicleDetails || selectedDriver.patente || selectedDriver.vehiclePatent || null,

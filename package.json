@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:testing": "vite --mode testing",
-    "build": "vite build && node post-build.js",
-    "build:testing": "vite build --mode testing && node post-build.js",
+    "build": "node ./node_modules/vite/bin/vite.js build && node post-build.js",
+    "build:testing": "node ./node_modules/vite/bin/vite.js build --mode testing && node post-build.js",
     "preview": "vite preview",
     "deploy": "firebase deploy",
     "deploy:testing": "firebase deploy --project testing"
@@ -33,6 +33,7 @@
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "firebase": "^12.12.1",
     "jimp": "^1.6.1",
+    "maplibre-gl": "^6.6.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0"
   }

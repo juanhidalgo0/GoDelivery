@@ -109,10 +109,12 @@ function startListener() {
               // Render toast
               showToast(`🔔 ${notif.title}\n${notif.body || ''}`, 'info');
               
-              // Play sound via AudioManager
-              import('../utils/audio-manager.js').then(({ AudioManager }) => {
-                AudioManager.playSound('/assets/sounds/notification.mp3');
-              }).catch(err => console.warn('AudioManager load failed:', err));
+              // Play sound via AudioManager only if not on delivery panel
+              if (!window.location.hash.startsWith('#/delivery') && !notif.tag?.includes('exclusive') && notif.type !== 'exclusive_offer') {
+                import('../utils/audio-manager.js').then(({ AudioManager }) => {
+                  AudioManager.playSynthChime();
+                }).catch(err => console.warn('AudioManager load failed:', err));
+              }
             }
           }
         }
@@ -140,9 +142,11 @@ function startListener() {
                 recentlyNotified.add(dedupKey);
                 setTimeout(() => recentlyNotified.delete(dedupKey), 5000);
                 showToast(`🔔 ${notif.title}\n${notif.body || ''}`, 'info');
-                import('../utils/audio-manager.js').then(({ AudioManager }) => {
-                  AudioManager.playSound('/assets/sounds/notification.mp3');
-                }).catch(err => console.warn('AudioManager load failed:', err));
+                if (!window.location.hash.startsWith('#/delivery') && !notif.tag?.includes('exclusive') && notif.type !== 'exclusive_offer') {
+                  import('../utils/audio-manager.js').then(({ AudioManager }) => {
+                    AudioManager.playSynthChime();
+                  }).catch(err => console.warn('AudioManager load failed:', err));
+                }
               }
             }
           }

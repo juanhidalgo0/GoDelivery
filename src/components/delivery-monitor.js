@@ -158,7 +158,10 @@ function startMonitoring(user) {
 }
 
 let currentActiveCount = 0;
-const DELIVERY_ALARM_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3';
+
+function isDriverOnDeliveryPanel() {
+  return window.location.hash.startsWith('#/delivery');
+}
 
 function stopMonitoring() {
   if (availableUnsub) availableUnsub();
@@ -169,7 +172,9 @@ function stopMonitoring() {
   currentActiveOrder = null;
   clearBanner('delivery');
   clearDeliveryIndicator();
-  AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
+  if (!isDriverOnDeliveryPanel()) {
+    AudioManager.stopDriverOfferLoop();
+  }
   clearDeliverySystemNotifications();
 }
 
@@ -193,11 +198,10 @@ function notifyNewOrder(order) {
     return;
   }
 
-  // Use professional local sound
-  AudioManager.playSound('/assets/sounds/notification.mp3');
-
-  // Vibration for mobile (professional app feel)
-  AudioManager.vibrate([400, 150, 400, 150, 600]);
+  // If driver is on the delivery panel, delivery-panel.js handles the single modern radar chime and vibration
+  if (!isDriverOnDeliveryPanel()) {
+    AudioManager.vibrate([400, 150, 400, 150, 600]);
+  }
 
   // Use swRegistration.showNotification with requireInteraction: true for mobile persistence
   if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
@@ -235,11 +239,17 @@ function updateBannerState() {
   });
   const availableCount = batches.size;
 
-  // Sound loop alarm logic for delivery drivers: ringing continuously until order rotates or is cancelled/taken
-  if (availableCount > 0 && currentActiveCount === 0) {
-    AudioManager.startLoop(DELIVERY_ALARM_SOUND_URL, 0.95);
+  // Sound loop alarm logic for delivery drivers:
+  // When driver is on #/delivery, delivery-panel.js handles the offer loop exclusively.
+  // When driver is on another screen, delivery-monitor manages it.
+  if (!isDriverOnDeliveryPanel()) {
+    if (availableCount > 0 && currentActiveCount === 0) {
+      AudioManager.startDriverOfferLoop();
+    } else {
+      AudioManager.stopDriverOfferLoop();
+      clearDeliverySystemNotifications();
+    }
   } else {
-    AudioManager.stopLoop(DELIVERY_ALARM_SOUND_URL);
     clearDeliverySystemNotifications();
   }
 
@@ -255,6 +265,11 @@ function updateBannerState() {
 }
 
 function updateActiveDeliveryFAB(order, count) {
+  if (document.body.classList.contains('is-delivery-mode') || window.location.hash.startsWith('/delivery')) {
+    clearDeliveryIndicator();
+    return;
+  }
+
   let fab = document.getElementById('global-active-delivery-fab');
   // Clear available fab if exists
   const avFab = document.getElementById('global-delivery-available-fab');
@@ -364,6 +379,11 @@ function updateActiveDeliveryFAB(order, count) {
 }
 
 function updateDeliveryFAB(count) {
+  if (document.body.classList.contains('is-delivery-mode') || window.location.hash.startsWith('/delivery')) {
+    clearDeliveryIndicator();
+    return;
+  }
+
   let fab = document.getElementById('global-delivery-available-fab');
 
   if (!fab) {

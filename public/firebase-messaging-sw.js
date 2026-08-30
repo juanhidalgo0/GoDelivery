@@ -69,29 +69,34 @@ self.addEventListener('push', (event) => {
         });
       }
       const isSupportAlert = (fcmData.type === 'admin_support_alert' || nestedData.type === 'admin_support_alert');
+      const isDriverAlert = (fcmData.type === 'driver_assigned' || fcmData.type === 'new_offer' || fcmData.type === 'order_offer' || nestedData.type === 'driver_assigned' || nestedData.type === 'new_offer');
 
-      // 2. Display native notification if app is in background OR if it's an admin support alert
-      if (!isForeground || isSupportAlert) {
+      // 2. Display native notification if app is in background OR if it's an admin/driver alert
+      if (!isForeground || isSupportAlert || isDriverAlert) {
         const isExclusiveOffer = (fcmData.type === 'exclusive_offer' || nestedData.type === 'exclusive_offer');
 
         const options = {
           body: body,
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
           badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
-          vibrate: isExclusiveOffer ? [500, 150, 500, 150, 500, 150, 800] : [400, 150, 400, 150, 600],
-          requireInteraction: true, // High importance
+          vibrate: (isExclusiveOffer || isDriverAlert) ? [500, 150, 500, 150, 800, 150, 800] : [400, 150, 400, 150, 600],
+          requireInteraction: true, // High importance (keeps notification until interacted with)
           renotify: true, // Forces wakeup/vibration even on same tag
           silent: false, // Explicitly loud for Android heads-up
-          tag: tag,
+          tag: isDriverAlert ? `driver-offer-${Date.now()}` : tag,
           data: {
-            url: targetUrl,
+            url: isDriverAlert ? 'https://godelivery-magdalena.web.app/#/repartidor' : targetUrl,
             broadcastId: fcmData.broadcastId || nestedData.broadcastId || '',
             imageUrl: imageUrl,
             payload: payload
           }
         };
         
-        if (isExclusiveOffer) {
+        if (isDriverAlert) {
+          options.actions = [
+            { action: 'open_app', title: '🛵 ACEPTAR PEDIDO AHORA' }
+          ];
+        } else if (isExclusiveOffer) {
           options.actions = [
             { action: 'open_app', title: '⚡ ACEPTAR / VER EN APP' }
           ];
@@ -101,7 +106,7 @@ self.addEventListener('push', (event) => {
           options.image = imageUrl;
         }
         
-        console.log('[SW] Displaying premium background/support heads-up notification:', options);
+        console.log('[SW] Displaying premium background/driver heads-up notification:', options);
         await self.registration.showNotification(title, options);
       } else {
         console.log('[SW] Suppressing native notification since PWA is in foreground.');
@@ -190,10 +195,34 @@ self.addEventListener('activate', (event) => {
     )).then(() => self.clients.claim())
   );
 });
-// Fetch: Stale-While-Revalidate Strategy
-self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  const url = new URL(request.url);
+  // STRATEGY: Offline Map Tiles, Vector Glyphs & Sprites Caching
+  const isMapTile = url.hostname.includes('tile.openstreetmap.org') ||
+                    url.hostname.includes('cartocdn.com') ||
+                    url.hostname.includes('maplibre.org') ||
+                    url.hostname.includes('demotiles.maplibre.org') ||
+                    url.pathname.endsWith('.pbf') ||
+                    url.pathname.includes('/tiles/') ||
+                    url.pathname.includes('/fonts/') ||
+                    url.pathname.includes('/sprites/');
+
+  if (isMapTile && request.method === 'GET') {
+    event.respondWith(
+      caches.open('godelivery-map-tiles-v1').then(async (tileCache) => {
+        const cached = await tileCache.match(request);
+        if (cached) return cached;
+        try {
+          const networkResp = await fetch(request);
+          if (networkResp && (networkResp.status === 200 || networkResp.type === 'opaque')) {
+            tileCache.put(request, networkResp.clone());
+          }
+          return networkResp;
+        } catch (e) {
+          return cached || new Response('', { status: 408, statusText: 'Offline Tile' });
+        }
+      })
+    );
+    return;
+  }
 
   // Ignore non-GET, external API calls, Firebase/Google APIs, firestore, Vite Dev Server paths, and Chrome extensions
   if (

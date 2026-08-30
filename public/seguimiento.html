@@ -502,8 +502,9 @@
     </div>
   </div>
 
-  <!-- Google Maps JS API with correct key -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places"></script>
+  <!-- MapLibre GL JS & CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
@@ -549,19 +550,39 @@
       document.getElementById('step-5')
     ];
 
-    // Google Maps Initialization
+    // MapLibre Initialization
     const mapContainer = document.getElementById('live-tracking-map');
-    const magdalenaCenter = { lat: -35.0812, lng: -57.5129 };
+    const magdalenaCenter = [-57.5129, -35.0812];
 
-    const liveMap = new google.maps.Map(mapContainer, {
+    const liveMap = new maplibregl.Map({
+      container: mapContainer,
+      style: {
+        version: 8,
+        sources: {
+          'carto-dark': {
+            type: 'raster',
+            tiles: [
+              'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+              'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+              'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+              'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+            ],
+            tileSize: 256
+          }
+        },
+        layers: [
+          {
+            id: 'carto-dark-layer',
+            type: 'raster',
+            source: 'carto-dark',
+            minzoom: 0,
+            maxzoom: 20
+          }
+        ]
+      },
       center: magdalenaCenter,
-      zoom: 15,
-      disableDefaultUI: true,
-      zoomControl: false,
-      styles: [
-        { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
-        { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] }
-      ]
+      zoom: 15.5,
+      attributionControl: false
     });
 
     let riderMarker = null;
@@ -583,75 +604,30 @@
     }
 
     function createOrUpdateHomeMarker(pos) {
-      if (!google.maps.Marker) return;
       if (!homeMarker) {
-        const svgHome = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-          <svg width="42" height="42" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="21" cy="21" r="19" fill="black" stroke="white" stroke-width="3"/>
-            <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="20">🏠</text>
-          </svg>
-        `);
-        homeMarker = new google.maps.Marker({
-          position: pos,
-          map: liveMap,
-          icon: {
-            url: svgHome,
-            scaledSize: new google.maps.Size(42, 42),
-            anchor: new google.maps.Point(21, 21)
-          },
-          zIndex: 10
-        });
+        const el = document.createElement('div');
+        el.innerHTML = `
+          <div style="width:40px; height:40px; border-radius:50%; background:black; border:2.5px solid white; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 15px rgba(0,0,0,0.5); font-size:18px;">
+            🏠
+          </div>
+        `;
+        homeMarker = new maplibregl.Marker({ element: el }).setLngLat([pos.lng, pos.lat]).addTo(liveMap);
       } else {
-        homeMarker.setPosition(pos);
+        homeMarker.setLngLat([pos.lng, pos.lat]);
       }
-    }
-
-    function animateMarkerPosition(marker, newPos) {
-      const startPos = marker.getPosition();
-      if (!startPos) {
-        marker.setPosition(newPos);
-        return;
-      }
-      const startLat = startPos.lat();
-      const startLng = startPos.lng();
-      const endLat = newPos.lat;
-      const endLng = newPos.lng;
-      
-      if (Math.abs(startLat - endLat) < 0.000001 && Math.abs(startLng - endLng) < 0.000001) return;
-
-      const startTime = performance.now();
-      const duration = 1200;
-
-      function step(now) {
-        const elapsed = now - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        const currentLat = startLat + (endLat - startLat) * progress;
-        const currentLng = startLng + (endLng - startLng) * progress;
-        marker.setPosition({ lat: currentLat, lng: currentLng });
-
-        if (progress < 1) {
-          requestAnimationFrame(step);
-        }
-      }
-      requestAnimationFrame(step);
     }
 
     function createOrUpdateRiderMarker(riderPos) {
-      if (!google.maps.Marker) return;
-
       if (!riderMarker) {
-        riderMarker = new google.maps.Marker({
-          position: riderPos,
-          map: liveMap,
-          icon: {
-            url: '/go-delivery-moto.png?v=2',
-            scaledSize: new google.maps.Size(46, 46),
-            anchor: new google.maps.Point(23, 23)
-          },
-          zIndex: 20
-        });
+        const el = document.createElement('div');
+        el.innerHTML = `
+          <div style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative;">
+            <img src="/go-delivery-moto.png?v=2" style="width:44px; height:44px; object-fit:contain;" />
+          </div>
+        `;
+        riderMarker = new maplibregl.Marker({ element: el }).setLngLat([riderPos.lng, riderPos.lat]).addTo(liveMap);
       } else {
-        animateMarkerPosition(riderMarker, riderPos);
+        riderMarker.setLngLat([riderPos.lng, riderPos.lat]);
       }
     }
 
@@ -780,11 +756,9 @@
 
     document.getElementById('btn-recenter-map').addEventListener('click', () => {
       if (currentRiderPos) {
-        liveMap.panTo(currentRiderPos);
-        liveMap.setZoom(16);
+        liveMap.easeTo({ center: [currentRiderPos.lng, currentRiderPos.lat], zoom: 16 });
       } else {
-        liveMap.panTo(magdalenaCenter);
-        liveMap.setZoom(15);
+        liveMap.easeTo({ center: magdalenaCenter, zoom: 15.5 });
       }
     });
 

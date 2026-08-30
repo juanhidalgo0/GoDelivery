@@ -14,6 +14,17 @@ export function navigate(path) {
 }
 
 const getMainRoutes = () => {
+  const user = getState().user;
+  const inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+  const isDriver = isDelivery() && !inTempClientMode;
+
+  if (isDriver) {
+    return {
+      '/delivery': 'page-delivery',
+      '/delivery-panel': 'page-delivery'
+    };
+  }
+
   const list = {
     '/': 'page-home',
     '/offers': 'page-offers',
@@ -27,7 +38,6 @@ const getMainRoutes = () => {
     '/profile/appearance': 'page-profile',
     '/mis-chats': 'page-mis-chats'
   };
-  const user = getState().user;
   if (user && !isDelivery() && !isAdmin()) {
     delete list['/delivery'];
     delete list['/delivery-panel'];
@@ -87,6 +97,27 @@ export async function handleRoute() {
     const slider = document.getElementById('app-slider');
     const overlay = document.getElementById('app-overlay');
     
+    // Automatic Driver Guard: Delivery users default to /#/delivery in Dark Mode unless in temporary Client Mode
+    const userIsDelivery = isDelivery();
+    const inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+
+    if (userIsDelivery && !inTempClientMode && !hash.startsWith('/delivery') && !hash.startsWith('/admin') && !hash.startsWith('/profile')) {
+      document.documentElement.classList.add('is-delivery-mode');
+      document.body.classList.add('is-delivery-mode');
+      window.location.hash = '#/delivery';
+      isRouting = false;
+      return;
+    }
+
+    if (hash.startsWith('/delivery')) {
+      document.documentElement.classList.add('is-delivery-mode');
+      document.body.classList.add('is-delivery-mode');
+      sessionStorage.removeItem('gd_temp_client_mode');
+    } else if (!userIsDelivery || inTempClientMode) {
+      document.documentElement.classList.remove('is-delivery-mode');
+      document.body.classList.remove('is-delivery-mode');
+    }
+
     if (hash.startsWith('/seguimiento/wa')) {
       // Hide global headers, footers, bottom navs and sliders so tracking page fills full screen
       const bNav = document.getElementById('bottom-nav');
@@ -198,7 +229,7 @@ export async function handleRoute() {
       // 2. Then, update the content
       if (panel) {
         const isHome = pattern === '/';
-        const alreadyRendered = panel.children.length > 0;
+        const alreadyRendered = panel.children.length > 0 && !!panel.querySelector('#brands-slider-container');
 
         if (isHome && alreadyRendered) {
           console.log('[Router] Bypassing re-render for home page (already rendered)');
@@ -315,7 +346,7 @@ const updateUI = (index, scrollX) => {
   const targetHash = '#' + firstRoute;
   
   // Hide/Show panels based on authorization
-  ['page-home', 'page-commerce', 'page-delivery', 'page-cart', 'page-profile'].forEach(id => {
+  ['page-home', 'page-offers', 'page-commerce', 'page-delivery', 'page-cart', 'page-profile', 'page-mis-chats'].forEach(id => {
     const p = document.getElementById(id);
     if (!p) return;
     if (Object.values(mainRoutes).includes(id)) {

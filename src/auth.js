@@ -57,12 +57,13 @@ export async function signInWithGoogle() {
       try {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
-        // Initialize first to ensure serverClientId and iosClientId are configured for Firebase Auth
         const SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
         const IOS_CLIENT_ID = '848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3.apps.googleusercontent.com';
+        const isIOS = (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'ios') || /iPad|iPhone|iPod/.test(navigator.userAgent);
+
         try {
           await GoogleAuth.initialize({
-            clientId: IOS_CLIENT_ID,
+            clientId: isIOS ? IOS_CLIENT_ID : SERVER_CLIENT_ID,
             iosClientId: IOS_CLIENT_ID,
             serverClientId: SERVER_CLIENT_ID,
             scopes: ['profile', 'email'],
@@ -86,8 +87,17 @@ export async function signInWithGoogle() {
         console.error('[Auth] Native Google Sign-In error:', nativeErr);
         if (nativeErr.code === '12501' || nativeErr.message?.toLowerCase().includes('cancel') || nativeErr.message?.toLowerCase().includes('dismissed')) {
           showToast('Inicio de sesión cancelado', 'info');
-        } else {
-          showToast('Error en inicio de sesión con Google: ' + (nativeErr.message || 'Error de autenticación'), 'error');
+          return null;
+        }
+
+        // Fallback to web redirect login if native plugin fails (e.g., missing SHA-1 or Play Services error)
+        console.log('[Auth] Falling back to Web Redirect Google Sign-In...');
+        showToast('Redirigiendo a Google...', 'info');
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirectErr) {
+          console.error('[Auth] Redirect fallback error:', redirectErr);
+          showToast('Error al iniciar sesión: ' + (redirectErr.message || 'Error de autenticación'), 'error');
         }
         return null;
       }
@@ -97,21 +107,7 @@ export async function signInWithGoogle() {
     // Web / PWA Google Sign-In
     googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-    // Detect standalone PWA mode on iOS where popups are blocked or non-functional.
-    // In standard iOS browsers (Safari/Chrome), popups work perfectly and are much more reliable than redirects.
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-    const isInsideIframe = window.top !== window.self;
-    const useRedirect = (isStandalone && isIOS) || isInsideIframe;
-
-    if (useRedirect) {
-      console.log('[Auth] Standalone PWA or Iframe: forcing signInWithRedirect for Google...');
-      showToast('Redirigiendo a Google...', 'info');
-      await signInWithRedirect(auth, googleProvider);
-      return null;
-    }
-
-    // 1. Direct Web / PWA: try Popup first, fallback to Redirect if blocked or unsupported
+    // Try Popup first (native popups on mobile & web prevent cross-site redirect cookie errors)
     console.log('[Auth] Initiating Web/PWA Google Sign-In with Popup...');
     showToast('Iniciando sesión con Google...', 'info');
     try {
@@ -130,13 +126,8 @@ export async function signInWithGoogle() {
         return null;
       }
 
-      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/internal-error') {
-        showToast('Redirigiendo a Google...', 'info');
-        await signInWithRedirect(auth, googleProvider);
-        return null;
-      }
-
-      showToast('Error al iniciar sesión: ' + (popupErr.message || 'Desconocido'), 'error');
+      showToast('Redirigiendo a Google...', 'info');
+      await signInWithRedirect(auth, googleProvider);
       return null;
     }
   } catch (error) {

@@ -1,4 +1,6 @@
-// GoDelivery — Location Picker Modal (Refined)
+// GoDelivery — Location Picker Modal (Refined with MapLibre GL)
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { icon } from '../utils/icons.js';
 import { showModal, closeModal } from './modal.js';
 
@@ -66,31 +68,33 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
       title: '',
       content: modalContent,
       onOpen: () => {
-        initMap();
+        setTimeout(initMap, 50);
       }
     });
 
     function initMap() {
-      if (typeof google === 'undefined') {
-        setTimeout(initMap, 200);
-        return;
-      }
-
-      const theme = document.documentElement.getAttribute('data-theme') || 'light';
-      const magdalenaCenter = { lat: -35.0811, lng: -57.6508 };
-      const mapCenter = initialCoords ? { lat: initialCoords.lat, lng: initialCoords.lng } : magdalenaCenter;
+      const magCenterLngLat = [-57.5147, -35.0815];
+      const mapCenter = initialCoords ? [initialCoords.lng, initialCoords.lat] : magCenterLngLat;
 
       const mapContainer = document.getElementById('map-picker');
-      const map = new google.maps.Map(mapContainer, {
+      if (!mapContainer) return;
+
+      const map = new maplibregl.Map({
+        container: mapContainer,
+        style: 'https://tiles.openfreemap.org/styles/liberty',
         center: mapCenter,
         zoom: initialCoords ? 17 : 15,
-        disableDefaultUI: true,
-        styles: theme === 'dark' ? getDarkStyles() : [],
-        gestureHandling: 'greedy'
+        attributionControl: false
       });
 
-      let selectedCoords = initialCoords || mapCenter;
+      let selectedCoords = initialCoords || { lat: -35.0815, lng: -57.5147 };
       let selectedAddress = initialAddress;
+
+      map.on('moveend', () => {
+        const c = map.getCenter();
+        selectedCoords = { lat: c.lat, lng: c.lng };
+        reverseGeocode(c.lat, c.lng);
+      });
 
       const reverseGeocode = async (lat, lng) => {
         const addrDisplay = document.getElementById('detected-address');
@@ -167,8 +171,7 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
                       selectedCoords = { lat: finalLat, lng: finalLng };
                       selectedAddress = addr;
 
-                      map.setCenter(selectedCoords);
-                      map.setZoom(17);
+                      map.easeTo({ center: [finalLng, finalLat], zoom: 17 });
 
                       const addrDisplay = document.getElementById('detected-address');
                       if (addrDisplay) addrDisplay.textContent = selectedAddress;
@@ -225,25 +228,19 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
         });
       }
 
-      map.addListener('idle', () => {
-        const center = map.getCenter();
-        selectedCoords = { lat: center.lat(), lng: center.lng() };
-        reverseGeocode(selectedCoords.lat, selectedCoords.lng);
-      });
-
       const centerMe = (zoom = 17) => {
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition((pos) => {
             const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            map.setCenter(p);
-            map.setZoom(zoom);
+            selectedCoords = p;
+            map.easeTo({ center: [p.lng, p.lat], zoom });
+            reverseGeocode(p.lat, p.lng);
           });
         }
       };
 
       if (!initialCoords) {
         centerMe(17);
-        reverseGeocode(magdalenaCenter.lat, magdalenaCenter.lng);
       }
 
       document.getElementById('use-loc-btn').onclick = () => centerMe(17);
@@ -254,18 +251,4 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
         closeModal();
       };
     }
-  }
-
-  function getDarkStyles() {
-    return [
-      { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-      { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-      { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-      { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-      { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-      { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
-      { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
-      { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] },
-      { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
-    ];
   }

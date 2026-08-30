@@ -813,7 +813,25 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
         orderTypeLabel = `Compra en ${order.comercioName || 'Tienda'} 🏪`;
       }
 
-      const adminTokens = await getAdminTokens();
+      const targetDriverUid = order.queueTargetDriverId || order.driverId;
+      let adminTokens = await getAdminTokens();
+      if (targetDriverUid) {
+        try {
+          const driverDoc = await db.collection("users").doc(targetDriverUid).get();
+          if (driverDoc.exists) {
+            const dData = driverDoc.data();
+            const driverTokens = [
+              ...(Array.isArray(dData.fcmTokens) ? dData.fcmTokens : []),
+              dData.lastFcmToken
+            ].filter(Boolean);
+            const driverTokenSet = new Set(driverTokens);
+            adminTokens = adminTokens.filter(t => !driverTokenSet.has(t));
+          }
+        } catch (e) {
+          logger.warn("Could not filter target driver tokens from admin alert:", e);
+        }
+      }
+
       if (adminTokens.length > 0) {
         await sendPush(adminTokens, {
           title: `🚨 [SOPORTE GO] ¡Nuevo Pedido #${orderNum}!`,

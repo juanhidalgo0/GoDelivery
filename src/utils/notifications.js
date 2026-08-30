@@ -139,6 +139,16 @@ export async function initPushNotifications() {
         PushNotifications.addListener('pushNotificationReceived', async (notification) => {
           console.log('[Push] Native push received in foreground:', notification);
           const { title, body } = notification;
+          const isOnDelivery = window.location.hash.startsWith('#/delivery');
+          const isAdminAlert = (title && title.includes('[SOPORTE')) || 
+                               (notification.data && (notification.data.type === 'admin_support_alert' || notification.data.channelId === 'admin_alerts'));
+
+          // If user is operating as delivery driver, suppress admin duplicate push in foreground so audio is not interrupted
+          if (isOnDelivery && isAdminAlert) {
+            console.log('[Push] Suppressed admin audit notification in foreground because driver mode is active.');
+            return;
+          }
+
           if (title) {
             showToast(`${title}: ${body}`, 'info');
             
@@ -152,9 +162,9 @@ export async function initPushNotifications() {
               }).catch(err => console.warn('Could not trigger playExclusiveOfferAlert:', err));
             } else if (isAutoAccept) {
               // Play a prominent cash register coin sound for auto-accepted orders
-              AudioManager.playSound('/assets/sounds/chime.mp3');
-            } else {
-              AudioManager.playSound('/assets/sounds/notification.mp3');
+              AudioManager.playSynthChime();
+            } else if (!isOnDelivery) {
+              AudioManager.playSynthChime();
             }
           }
           await addDoc(collection(db, 'users', user.uid, 'notifications'), {

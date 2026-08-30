@@ -15,13 +15,11 @@ if (import.meta.env.VITE_FIREBASE_ENV === 'testing') {
 AudioManager.init();
 
 async function init() {
-  // Restore last route hash on startup to handle Android activity destruction recovery
+  // Always start on Home page (/#/) when opening the app, unless opening a specific tracking/shared link
   try {
-    const isNewSession = !sessionStorage.getItem('gd_session_active');
+    localStorage.removeItem('gd_last_hash');
     sessionStorage.setItem('gd_session_active', 'true');
-    if (isNewSession) {
-      localStorage.removeItem('gd_last_hash');
-    }
+    
     if (window.location.hash.includes('/seguimiento/wa/')) {
       const match = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
       if (match && match[1]) {
@@ -29,21 +27,13 @@ async function init() {
         return;
       }
     }
+
     const initialHash = window.location.hash;
-    const lastHash = localStorage.getItem('gd_last_hash');
-    if (initialHash && (initialHash.includes('/seguimiento/') || (initialHash !== '#/' && initialHash !== '#'))) {
-      // Keep initial URL hash opened by user
-    } else if (lastHash && lastHash !== '#/' && lastHash !== '#') {
-      window.location.hash = lastHash;
-    } else {
+    const isDeepLink = initialHash && (initialHash.includes('/seguimiento/') || initialHash.includes('/comercio/') || initialHash.includes('/product/') || initialHash.includes('/delivery'));
+    
+    if (!isDeepLink) {
       window.location.hash = '#/';
     }
-    window.addEventListener('hashchange', () => {
-      const h = window.location.hash;
-      if (h && !h.includes('reset') && !h.includes('login')) {
-        localStorage.setItem('gd_last_hash', h);
-      }
-    });
   } catch (e) {}
 
   const isNativeApp = !!(window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web')));
@@ -156,29 +146,25 @@ async function init() {
   // Force-update check against version.json (Runs on Web and PWA only; bypassed on Native iOS/Android apps to prevent WebView freeze loops)
   const checkAppVersion = async () => {
     if (isNativeApp) return;
-    // Guard against infinite reload loops within the same browser session (especially on iOS Safari / PWA)
-    if (sessionStorage.getItem('gd_update_attempted') === 'true') {
-      return;
-    }
     try {
       const versionUrl = window.location.origin + '/version.json?cb=' + Date.now();
       const vRes = await fetch(versionUrl, { cache: 'no-store' }).catch(() => null);
 
       if (vRes && vRes.ok) {
         const vData = await vRes.json();
-        const serverVersion = String(vData.version);
-        const runningBuildTime = String(BUNDLE_BUILD_VERSION);
+        const serverVersion = String(vData?.version || vData?.buildTime || '');
         const currentVer = localStorage.getItem('gd_app_version');
-
-        const isOutdated = currentVer && currentVer !== serverVersion && runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && runningBuildTime !== serverVersion;
-
-        if (isOutdated) {
-          console.log('[Version] New version detected on web. Server:', serverVersion, 'Local:', currentVer || runningBuildTime);
-          sessionStorage.setItem('gd_update_attempted', 'true');
+        if (serverVersion && currentVer && currentVer !== serverVersion) {
+          console.log('[Version] New version detected. Server:', serverVersion);
           localStorage.setItem('gd_app_version', serverVersion);
+          if ('caches' in window) {
+            caches.keys().then(names => {
+              names.forEach(name => caches.delete(name));
+            });
+          }
           showUpdateSplashAndReload();
           return;
-        } else {
+        } else if (serverVersion) {
           localStorage.setItem('gd_app_version', serverVersion);
         }
       }
@@ -207,7 +193,7 @@ async function init() {
   const startTime = Date.now();
   // Register Service Worker (PWA only - Native mobile apps use native APNS/FCM Push Notifications)
   if ('serviceWorker' in navigator && !isNativeApp) {
-    window.addEventListener('load', () => {
+    const registerSW = () => {
       navigator.serviceWorker.register('/firebase-messaging-sw.js')
         .then(reg => {
           console.log('GoDelivery: Service Worker registered');
@@ -237,7 +223,13 @@ async function init() {
           };
         })
         .catch(err => console.error('GoDelivery: SW registration failed', err));
-    });
+    };
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      registerSW();
+    } else {
+      window.addEventListener('load', registerSW);
+    }
 
     // Handle the controller change (activation of the new SW)
     let refreshing = false;
@@ -1179,6 +1171,18 @@ async function init() {
         }
       }
 
+      const isDriverModeActive = isDelivery() && sessionStorage.getItem('gd_temp_client_mode') !== 'true';
+
+      if (isDriverModeActive) {
+        console.log('⚡ Driver Mode Active: Bypassing client home pre-renders, store catalogs, and customer listeners for maximum speed.');
+        import('./utils/background-tracking.js').then(m => m.initGlobalTracking()).catch(e => console.warn('Tracking failed', e));
+        if (!window.location.hash.startsWith('#/delivery')) {
+          window.location.hash = '#/delivery';
+        }
+        handleRoute();
+        return;
+      }
+
       import('./utils/background-tracking.js').then(m => m.initGlobalTracking()).catch(e => console.warn('Tracking failed', e));
       import('./pages/home.js').then(m => m.renderHome()).catch(e => console.warn('Home pre-render failed', e));
 
@@ -1206,8 +1210,6 @@ async function init() {
           console.warn('Error auto-syncing GoMarket assets:', e);
         }
       })();
-
-      if (isDelivery() && !isPreview) import('./pages/delivery-panel.js').then(m => m.renderDeliveryPanel());
       if (isComercio() && user && !isPreview) {
         (async () => {
           try {

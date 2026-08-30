@@ -47,28 +47,32 @@ export function initSupportBot() {
     
     .support-bot-window {
       position: fixed;
-      bottom: 185px;
-      right: 20px;
-      width: calc(100% - 40px);
-      max-width: 380px;
-      height: 520px;
-      max-height: calc(100vh - 200px);
+      top: 0;
+      bottom: 0;
+      right: 0;
+      width: 100%;
+      max-width: 440px;
+      height: 100vh;
+      height: 100dvh;
       background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      border-radius: 28px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+      border-left: 1.5px solid var(--color-border);
+      border-top: none;
+      border-bottom: none;
+      border-right: none;
+      border-radius: 0;
+      box-shadow: -12px 0 40px rgba(0, 0, 0, 0.28);
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      z-index: 999;
-      opacity: 0;
-      transform: translateY(20px) scale(0.95);
+      z-index: 100005;
+      opacity: 1;
+      transform: translateX(100%);
       pointer-events: none;
-      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .support-bot-window.show {
       opacity: 1;
-      transform: translateY(0) scale(1);
+      transform: translateX(0);
       pointer-events: auto;
     }
 
@@ -470,10 +474,12 @@ export function initSupportBot() {
     if (isDelivery()) {
       roleText = 'Repartidor';
       questions = [
-        { text: 'Duda sobre comisiones y deudas', val: 'Hola soporte, tengo una consulta sobre el cálculo de mis comisiones o la deuda acumulada en la app.' },
-        { text: '¿Cómo funcionan los cupones en mis ganancias?', val: 'Hola soporte, ¿cómo impactan los cupones de descuento que usan los clientes en mis ganancias netas de reparto?' },
-        { text: 'Problemas de GPS / Seguimiento en mapa', val: 'Hola soporte, tengo inconvenientes con la geolocalización o el mapa de entrega en mi dispositivo.' },
-        { text: 'Reportar cliente ausente / Dirección incorrecta', val: 'Hola soporte, estoy en el destino pero el cliente no responde o la dirección es incorrecta.' }
+        { text: '🚪 Reportar cliente ausente o no contesta', val: 'Hola soporte, estoy en el destino de entrega pero el cliente no atiende la puerta ni responde el chat.' },
+        { text: '🏬 Comercio cerrado o sin stock', val: 'Hola soporte, llegué al comercio de retiro pero el local está cerrado o no tienen los productos solicitados.' },
+        { text: '🏍️ Pinchadura o avería en la moto', val: 'Hola soporte, tuve un desperfecto mecánico / pinchadura con mi moto mientras realizo una entrega activa.' },
+        { text: '💳 Cliente pide pagar con transferencia al llegar', val: 'Hola soporte, el pedido figura en efectivo pero el cliente me pide transferir en el momento de la entrega. ¿Cómo procedo?' },
+        { text: '🌧️ ¿Cómo funciona el recargo por lluvia y nocturno?', val: 'Hola soporte, quisiera consultar cómo se acredita el recargo adicional por lluvia y el recargo nocturno en mis viajes.' },
+        { text: '📍 Problemas de GPS o seguimiento en el mapa', val: 'Hola soporte, la app no está actualizando mi ubicación en tiempo real o el mapa no sigue mi recorrido.' }
       ];
     } else if (isComercio()) {
       roleText = 'Comercio';
@@ -538,6 +544,34 @@ export function initSupportBot() {
     {
       match: (t) => {
         const s = t.toLowerCase();
+        return s.includes('ausente') || s.includes('no contesta') || s.includes('no atiende') || s.includes('puerta');
+      },
+      answer: 'Si estás en la dirección del cliente y no responde:\n1. Tocá el botón **"Avisar Afuera"** en el panel para enviarle una alerta sonora directa.\n2. Enviá un mensaje por el **Chat del pedido** notificándole que estás en la puerta.\n3. Esperá un margen de cortesía de **5 a 7 minutos**. Si no se presenta, un administrador de soporte se comunicará con él o cancelará el pedido garantizando el pago de tu viaje.'
+    },
+    {
+      match: (t) => {
+        const s = t.toLowerCase();
+        return s.includes('cerrado') || s.includes('sin stock') || s.includes('no tienen');
+      },
+      answer: 'Si el local de retiro está cerrado o no cuenta con los artículos:\n1. Escribí de inmediato por el chat del pedido al cliente para consultarle si desea un reemplazo de producto.\n2. Si el comercio está cerrado o el cliente cancela, avisá por este chat de soporte para registrar la incidencia y compensarte por el tramo recorrido.'
+    },
+    {
+      match: (t) => {
+        const s = t.toLowerCase();
+        return s.includes('pinchadura') || s.includes('avería') || s.includes('averia') || s.includes('desperfecto') || s.includes('moto');
+      },
+      answer: '¡Priorizá tu seguridad!\n1. Estacioná en un lugar seguro.\n2. Un administrador de soporte tomará el pedido de inmediato y reasignará a otro compañero repartidor cercano para que recoja el paquete y finalice la entrega sin perjudicarte.'
+    },
+    {
+      match: (t) => {
+        const s = t.toLowerCase();
+        return s.includes('transferencia') || s.includes('transferir en el momento') || s.includes('pagar con transferencia');
+      },
+      answer: 'Si el cliente pide pagar con transferencia al llegar:\n1. Podés brindarle tu propio Alias bancario/Mercado Pago.\n2. **Verificá SIEMPRE el dinero acreditado en tu cuenta** antes de entregar los productos.\n3. Una vez confirmado el ingreso del dinero, marcás el pedido como entregado normalmente.'
+    },
+    {
+      match: (t) => {
+        const s = t.toLowerCase();
         return s.includes('porcentaje') || s.includes('comisión') || s.includes('comision');
       },
       get answer() {
@@ -556,9 +590,9 @@ export function initSupportBot() {
     {
       match: (t) => {
         const s = t.toLowerCase();
-        return s.includes('lluvia') || s.includes('climática');
+        return s.includes('lluvia') || s.includes('nocturno') || s.includes('climática');
       },
-      answer: 'Cuando se detectan condiciones climáticas de lluvia en tu zona, la app activa de forma automática un **recargo por lluvia** (por defecto de **$300 ARS**). Este recargo se suma por completo al costo del envío y se le transfiere al 100% al repartidor asignado, con el objetivo de compensar y recompensar su esfuerzo adicional por realizar la entrega bajo condiciones climáticas adversas.'
+      answer: 'Los recargos adicionales se acreditan al 100% para vos:\n• **Recargo por Lluvia:** Se activa automáticamente en días lluviosos (+$300 o tarifa configurada) y se suma íntegramente al valor de tu viaje.\n• **Recargo Nocturno:** Se aplica en la franja horaria nocturna (00:00 a 06:00 hs) para compensar tu labor en horarios especiales.'
     },
     {
       match: (t) => {
@@ -577,30 +611,16 @@ export function initSupportBot() {
     {
       match: (t) => {
         const s = t.toLowerCase();
-        return s.includes('deuda acumulada') || s.includes('deudas');
-      },
-      answer: 'Como repartidor, la aplicación te cobra una pequeña comisión fija sobre el costo del envío de cada pedido realizado. Si cobrás pedidos en efectivo, ese dinero en efectivo queda en tu poder, acumulando una "deuda de comisiones" con la app. Podés saldar esta deuda mediante transferencia en la sección de **Finanzas** de tu panel de delivery para seguir recibiendo pedidos sin límites.'
-    },
-    {
-      match: (t) => {
-        const s = t.toLowerCase();
         return s.includes('cupones') || s.includes('descuento');
       },
-      answer: '¡Tus ganancias de reparto están 100% protegidas! Cualquier cupón de descuento o campaña de "Envío Gratis" es costeado en su totalidad por la plataforma de GoDelivery. Dado que el cliente te abonará un monto menor en efectivo, **el descuento del cupón se resta automáticamente de tu deuda de comisiones** con la aplicación al completar la entrega, manteniendo tu ingreso neto real intacto.'
+      answer: '¡Tus ganancias de reparto están 100% protegidas! Cualquier cupón de descuento o campaña de "Envío Gratis" es costeado en su totalidad por la plataforma de GoDelivery, manteniendo tu ingreso neto real intacto.'
     },
     {
       match: (t) => {
         const s = t.toLowerCase();
-        return s.includes('geolocalización') || s.includes('gps') || s.includes('mapa');
+        return s.includes('geolocalización') || s.includes('gps') || s.includes('mapa') || s.includes('seguimiento');
       },
-      answer: 'Si el GPS no rastrea correctamente tu ubicación, te sugerimos: (1) Verificar que tengas el GPS/Ubicación en modo de "Alta Precisión" en los ajustes de tu celular, (2) Permitir a GoDelivery permisos de ubicación "Siempre activos" o "Mientras la app está en uso", y (3) Recargar la app. Podés presionar el botón de centrado en el mapa para restablecer la vista de tu recorrido.'
-    },
-    {
-      match: (t) => {
-        const s = t.toLowerCase();
-        return s.includes('no responde') || s.includes('ausente') || s.includes('incorrecta');
-      },
-      answer: 'Si el cliente no atiende o la dirección destino presenta inconsistencias, te sugerimos abrir el chat directo del pedido con el cliente. Si transcurren más de 10 minutos sin respuesta, comunícate con el soporte general para que cancelemos el pedido de forma segura y se te reintegren los costos correspondientes.'
+      answer: 'Para una navegación GPS óptima en primera persona 3D:\n1. Verificá tener la **Ubicación en modo Alta Precisión** en los ajustes del teléfono.\n2. Concedé permisos de ubicación **"Siempre permitir"** a GoDelivery en el navegador/app.\n3. Tocá el botón de **"Mi Ubicación"** en el mapa para activar el auto-seguimiento 3D con rotación continua en moto.'
     },
     {
       match: (t) => {
@@ -1427,3 +1447,14 @@ export async function openSupportTicketModal(orderId, orderNum) {
     }
   });
 }
+
+export function openSupportBot() {
+  initSupportBot();
+  const panel = document.getElementById('support-bot-window-panel');
+  if (panel) {
+    panel.classList.add('show');
+    panel.style.zIndex = '100005';
+  }
+}
+window.openSupportBot = openSupportBot;
+

@@ -1,3 +1,5 @@
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { db } from '../firebase.js';
 import { doc, onSnapshot, runTransaction, serverTimestamp, increment, collection, query, where, getDocs } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
@@ -184,7 +186,8 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         flex-direction: column;
         overflow: hidden;
       }
-      .map-container-v5 { position: absolute; inset: 0; z-index: 1; background: var(--color-bg-secondary); }
+      .map-container-v5 { position: absolute; inset: 0; z-index: 1; background: #12161f !important; }
+      .map-container-v5 .maplibregl-canvas { filter: none !important; }
       
       .tracking-v5-nav { position: absolute; top: calc(16px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
       .v5-back-btn { pointer-events: auto; width: 44px; height: 44px; background: var(--color-surface); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--color-text); box-shadow: var(--shadow-md); border: 1px solid var(--color-border); }
@@ -592,6 +595,34 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       }
     }
     
+    // Dynamically retrieve driver alias if order has driverId but driverAlias is missing
+    if (order.driverId && !order.driverAlias) {
+      if (!window.driverAliasCache) window.driverAliasCache = {};
+      if (window.driverAliasCache[order.driverId]) {
+        order.driverAlias = window.driverAliasCache[order.driverId];
+      } else {
+        import('firebase/firestore').then(async ({ getDoc, doc, updateDoc }) => {
+          try {
+            const driverSnap = await getDoc(doc(db, 'users', order.driverId));
+            if (driverSnap.exists()) {
+              const dData = driverSnap.data();
+              const foundAlias = (dData.driverAlias || dData.alias || dData.transferAlias || '').trim();
+              if (foundAlias) {
+                window.driverAliasCache[order.driverId] = foundAlias;
+                order.driverAlias = foundAlias;
+                updateUI(order, isDriverViewOverride);
+                try {
+                  await updateDoc(doc(db, 'orders', order.id), { driverAlias: foundAlias });
+                } catch(e) {}
+              }
+            }
+          } catch (e) {
+            console.warn("Error fetching driver alias:", e);
+          }
+        });
+      }
+    }
+    
     // Auth Check: Prevent driver from viewing the customer tracking view and the verification code
     const user = getState().user;
     if (!inModal && user && order.driverId === user.uid && order.userId !== user.uid) {
@@ -746,7 +777,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
                 return;
               }
 
-              const noCodeRequired = order.isManual === true || order.noCodeRequired === true || order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda');
+              const noCodeRequired = !!order.isTrip || order.isManual === true || order.noCodeRequired === true || order.source === 'whatsapp_bot' || order.favorType === 'encomienda' || (order.isFavor && order.favorType === 'encomienda') || order.serviceType === 'encomienda';
               openSlideToConfirmModal({
                 isTrip: !!order.isTrip,
                 noCodeRequired,
@@ -796,22 +827,22 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       ? (rawStatus === 'delivering' || rawStatus === 'en camino' ? dropoffPos : pickupPos)
       : dropoffPos;
 
-    if (riderPos && destPos && routeLine) {
-      const bounds = new google.maps.LatLngBounds();
-      routeLine.getPath().forEach(p => bounds.extend(p));
-      liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
-    } else if (destPos) {
-      liveMap.panTo(destPos);
-      liveMap.setZoom(17);
-    } else if (riderPos) {
-      liveMap.panTo(riderPos);
-      liveMap.setZoom(17);
-    } else if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        const myCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        liveMap.panTo(myCoords);
-        liveMap.setZoom(17);
-      }, (err) => console.warn('Geolocation error:', err));
+    if (liveMap) {
+      if (riderPos && destPos) {
+        const minLng = Math.min(riderPos.lng, destPos.lng);
+        const maxLng = Math.max(riderPos.lng, destPos.lng);
+        const minLat = Math.min(riderPos.lat, destPos.lat);
+        const maxLat = Math.max(riderPos.lat, destPos.lat);
+        liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 260, left: 50, right: 50 } });
+      } else if (destPos) {
+        liveMap.easeTo({ center: [destPos.lng, destPos.lat], zoom: 17 });
+      } else if (riderPos) {
+        liveMap.easeTo({ center: [riderPos.lng, riderPos.lat], zoom: 17 });
+      } else if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          liveMap.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17 });
+        }, (err) => console.warn('Geolocation error:', err));
+      }
     }
   };
 
@@ -819,12 +850,13 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     cleanup: () => {
       unsub();
       if (liveMap) {
-        if (riderMarker) riderMarker.setMap(null);
-        if (homeMarker) homeMarker.setMap(null);
-        if (pickupMarker) pickupMarker.setMap(null);
-        if (dropoffMarker) dropoffMarker.setMap(null);
-        if (routeLine) routeLine.setMap(null);
-        if (routeLineGlow) routeLineGlow.setMap(null);
+        try {
+          if (riderMarker) riderMarker.remove();
+          if (homeMarker) homeMarker.remove();
+          if (pickupMarker) pickupMarker.remove();
+          if (dropoffMarker) dropoffMarker.remove();
+          liveMap.remove();
+        } catch(e) {}
         liveMap = null;
       }
       riderMarker = null;
@@ -1298,15 +1330,15 @@ function updateUI(order, isDriverViewOverride = false) {
       ` : '';
     })()}
 
-    ${(!isDriverView && order.driverId && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
+    ${(!isDriverView && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
       <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
       <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
         <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
-          <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias del Repartidor</span>
-          <span style="font-size:14px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || 'Esperando asignación...'}</span>
+          <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias de Transferencia (${order.driverName || 'Repartidor'})</span>
+          <span style="font-size:14px; font-weight:800; color:${order.driverAlias ? 'var(--color-primary)' : 'var(--color-text-primary)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || (order.driverId ? 'Alias no registrado (consultar por chat)' : 'Esperando asignación...')}</span>
         </div>
         ${order.driverAlias ? `
-          <button id="v5-copy-alias-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; cursor:pointer; flex-shrink:0; transition:all 0.2s;">
+          <button id="v5-copy-alias-btn" style="background:var(--color-primary); color:white; border:none; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:900; cursor:pointer; flex-shrink:0; transition:all 0.2s; box-shadow:0 2px 8px rgba(225,29,72,0.3);">
             Copiar
           </button>
         ` : ''}
@@ -1524,20 +1556,67 @@ function updateUI(order, isDriverViewOverride = false) {
   }, 50);
 }
 
+const TRACKING_DARK_STYLE = 'https://tiles.openfreemap.org/styles/dark';
+
+function ensureTrackingRouteLayers() {
+  if (!liveMap || !liveMap.isStyleLoaded()) return;
+
+  if (!liveMap.getSource('tracking-route-source')) {
+    liveMap.addSource('tracking-route-source', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: []
+        }
+      }
+    });
+  }
+  if (!liveMap.getLayer('tracking-route-glow')) {
+    liveMap.addLayer({
+      id: 'tracking-route-glow',
+      type: 'line',
+      source: 'tracking-route-source',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': '#e11d48',
+        'line-width': 10,
+        'line-opacity': 0.4,
+        'line-blur': 2
+      }
+    });
+  }
+  if (!liveMap.getLayer('tracking-route-line')) {
+    liveMap.addLayer({
+      id: 'tracking-route-line',
+      type: 'line',
+      source: 'tracking-route-source',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': '#ff2d55',
+        'line-width': 5,
+        'line-opacity': 0.95
+      }
+    });
+  }
+}
+
 function updateMap(order) {
-  if (typeof google === 'undefined') return;
   const container = document.getElementById('live-tracking-map');
   if (!container) return;
 
   const isFinalized = order.status === 'completed' || order.status === 'cancelled';
   if (isFinalized) {
     if (liveMap) {
-      if (riderMarker) riderMarker.setMap(null);
-      if (homeMarker) homeMarker.setMap(null);
-      if (pickupMarker) pickupMarker.setMap(null);
-      if (dropoffMarker) dropoffMarker.setMap(null);
-      if (routeLine) routeLine.setMap(null);
-      if (routeLineGlow) routeLineGlow.setMap(null);
+      try {
+        if (riderMarker) riderMarker.remove();
+        if (homeMarker) homeMarker.remove();
+        if (pickupMarker) pickupMarker.remove();
+        if (dropoffMarker) dropoffMarker.remove();
+        liveMap.remove();
+      } catch(e) {}
+      liveMap = null;
     }
     container.innerHTML = `
       <div style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; background:var(--color-bg-secondary); color:var(--color-text-tertiary); padding:40px; text-align:center;">
@@ -1549,297 +1628,124 @@ function updateMap(order) {
   }
 
   const rawStatus = (order.status || '').toString().toLowerCase();
+  const isTrip = order.isTrip === true;
+  const riderPos = parseCoords(order.driverLocation);
+  const pickupPos = parseCoords(order.pickupCoords);
+  const dropoffPos = parseCoords(order.deliveryCoords);
+  const destPos = isTrip ? (rawStatus === 'delivering' || rawStatus === 'en camino' ? dropoffPos : pickupPos) : dropoffPos;
 
-  if (order.isTrip === true) {
-    const riderPos = parseCoords(order.driverLocation);
-    const pickupPos = parseCoords(order.pickupCoords);
-    const dropoffPos = parseCoords(order.deliveryCoords);
+  if (!liveMap) {
+    const magCenterLngLat = [-57.5147, -35.0815];
+    const initialCenter = destPos ? [destPos.lng, destPos.lat] : (riderPos ? [riderPos.lng, riderPos.lat] : magCenterLngLat);
 
-    if (!liveMap) {
-      const theme = document.documentElement.getAttribute('data-theme') || 'light';
-      liveMap = new google.maps.Map(container, {
-        zoom: 16,
-        center: pickupPos || dropoffPos || { lat: -35.0315, lng: -57.5147 },
-        disableDefaultUI: true,
-        zoomControl: false,
-        styles: theme === 'dark' ? getDarkStyles() : [],
-        gestureHandling: 'greedy'
-      });
+    liveMap = new maplibregl.Map({
+      container,
+      style: TRACKING_DARK_STYLE,
+      center: initialCenter,
+      zoom: 16,
+      attributionControl: false
+    });
+  }
+
+  // Home / Destination Marker
+  if (destPos) {
+    if (!homeMarker) {
+      const el = document.createElement('div');
+      el.className = 'v5-marker-shadow';
+      el.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center;">
+          <div style="background:#111111; width:44px; height:44px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:2.5px solid white; box-shadow:0 8px 20px rgba(0,0,0,0.5);">
+            <div style="transform:rotate(45deg); color:white; display:flex;">${icon('home', 20)}</div>
+          </div>
+        </div>`;
+      homeMarker = new maplibregl.Marker({ element: el, offset: [0, -22] })
+        .setLngLat([destPos.lng, destPos.lat])
+        .addTo(liveMap);
+    } else {
+      homeMarker.setLngLat([destPos.lng, destPos.lat]);
     }
+  }
 
-    if (pickupPos) {
-      if (!pickupMarker) {
-        pickupMarker = new google.maps.OverlayView();
-        pickupMarker.pos = pickupPos;
-        pickupMarker.onAdd = function() {
-          const div = document.createElement('div');
-          div.className = 'v5-marker-shadow';
-          div.style.position = 'absolute';
-          div.style.zIndex = '50';
-          div.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center;">
-              <div style="background:#22c55e; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 6px 15px rgba(34,197,94, 0.45);">
-                <div style="color:white; display:flex;">${icon('user', 18)}</div>
-              </div>
-              <div style="width:10px; height:3px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:2px; filter:blur(1px);"></div>
-            </div>`;
-          this.getPanes().overlayMouseTarget.appendChild(div);
-          this.div = div;
-        };
-        pickupMarker.draw = function() {
-          const projection = this.getProjection();
-          if (!projection) return;
-          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-          if (point && this.div) {
-            this.div.style.left = (point.x - 19) + 'px';
-            this.div.style.top = (point.y - 41) + 'px';
-          }
-        };
-        pickupMarker.setMap(liveMap);
-      } else {
-        pickupMarker.pos = pickupPos;
-        if (pickupMarker.draw) pickupMarker.draw();
-      }
+  // Pickup Marker
+  if (pickupPos && !homeMarker) {
+    if (!pickupMarker) {
+      const el = document.createElement('div');
+      el.className = 'v5-marker-shadow';
+      el.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center;">
+          <div style="background:#0284c7; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2.5px solid white; box-shadow:0 6px 15px rgba(2,132,199,0.5); font-size:18px;">
+            🏬
+          </div>
+        </div>`;
+      pickupMarker = new maplibregl.Marker({ element: el, offset: [0, -20] })
+        .setLngLat([pickupPos.lng, pickupPos.lat])
+        .addTo(liveMap);
+    } else {
+      pickupMarker.setLngLat([pickupPos.lng, pickupPos.lat]);
     }
+  }
 
-    if (dropoffPos) {
-      if (!dropoffMarker) {
-        dropoffMarker = new google.maps.OverlayView();
-        dropoffMarker.pos = dropoffPos;
-        dropoffMarker.onAdd = function() {
-          const div = document.createElement('div');
-          div.className = 'v5-marker-shadow';
-          div.style.position = 'absolute';
-          div.style.zIndex = '50';
-          div.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center;">
-              <div style="background:#ef4444; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 6px 15px rgba(239,68,68, 0.45);">
-                <div style="color:white; display:flex;">${icon('mapPin', 18)}</div>
-              </div>
-              <div style="width:10px; height:3px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:2px; filter:blur(1px);"></div>
-            </div>`;
-          this.getPanes().overlayMouseTarget.appendChild(div);
-          this.div = div;
-        };
-        dropoffMarker.draw = function() {
-          const projection = this.getProjection();
-          if (!projection) return;
-          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-          if (point && this.div) {
-            this.div.style.left = (point.x - 19) + 'px';
-            this.div.style.top = (point.y - 41) + 'px';
-          }
-        };
-        dropoffMarker.setMap(liveMap);
-      } else {
-        dropoffMarker.pos = dropoffPos;
-        if (dropoffMarker.draw) dropoffMarker.draw();
-      }
-    }
+  // Rider Marker
+  if (riderPos) {
+    if (!riderMarker) {
+      const el = document.createElement('div');
+      el.className = 'v5-marker-shadow';
+      el.style.cssText = 'position:relative; pointer-events:none;';
+      el.innerHTML = `
+        <div style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative;">
+          <div class="sonar-pulse-ring-1"></div>
+          <div class="sonar-pulse-ring-2"></div>
+          <div class="moto-base-glow" style="position:absolute; width:24px; height:6px; background:rgba(225, 29, 72, 0.5); border-radius:50%; bottom:2px; left:50%; transform:translateX(-50%); filter:blur(2px); z-index:1;"></div>
+          <div class="rider-marker-avatar" style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.4s ease;">
+            <img src="/go-delivery-moto.png?v=2" style="width:44px; height:44px; object-fit:contain;" />
+          </div>
+        </div>`;
+      riderMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([riderPos.lng, riderPos.lat])
+        .addTo(liveMap);
+      riderMarker.lastPos = riderPos;
+      riderMarker.angle = 0;
+    } else {
+      if (riderMarker.lastPos && (riderMarker.lastPos.lat !== riderPos.lat || riderMarker.lastPos.lng !== riderPos.lng)) {
+        const lat1 = riderMarker.lastPos.lat * Math.PI / 180;
+        const lat2 = riderPos.lat * Math.PI / 180;
+        const dLon = (riderPos.lng - riderMarker.lastPos.lng) * Math.PI / 180;
+        const y = Math.sin(dLon) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+        let bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 
-    if (riderPos) {
-      if (!riderMarker) {
-        riderMarker = new google.maps.OverlayView();
-        riderMarker.pos = riderPos;
-        riderMarker.lastPos = null;
-        riderMarker.angle = 0;
-        riderMarker.onAdd = function() {
-          const div = document.createElement('div');
-          div.className = 'v5-marker-shadow';
-          div.style.position = 'absolute';
-          div.style.transition = 'left 1.5s linear, top 1.5s linear, transform 1.5s linear';
-          div.innerHTML = `
-            <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
-              <div class="sonar-pulse-ring-1"></div>
-              <div class="sonar-pulse-ring-2"></div>
-              <div class="moto-base-glow" style="position:absolute; width:22px; height:6px; background:rgba(225, 29, 72, 0.45); border-radius:50%; bottom:3px; left:50%; transform:translateX(-50%); filter:blur(1.5px); z-index:1;"></div>
-              <div class="rider-marker-avatar" style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.8s ease;">
-                <img src="/go-delivery-moto.png?v=2" style="width:42px; height:42px; object-fit:contain;" />
-              </div>
-            </div>`;
-          this.getPanes().overlayMouseTarget.appendChild(div);
-          this.div = div;
-        };
-        riderMarker.draw = function() {
-          const projection = this.getProjection();
-          if (!projection) return;
-          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-          if (point && this.div) {
-            this.div.style.left = (point.x - 20) + 'px';
-            this.div.style.top = (point.y - 20) + 'px';
-            const avatar = this.div.querySelector('.rider-marker-avatar');
-            if (avatar) {
-              const is3d = (order.tripType === 'moto' || order.isFavor);
-              const rotation = is3d ? (this.angle - 90) : this.angle;
-              avatar.style.transform = `rotate(${rotation}deg)`;
-            }
-          }
-        };
-        riderMarker.setMap(liveMap);
-      } else {
-        if (riderMarker.pos && (riderMarker.pos.lat !== riderPos.lat || riderMarker.pos.lng !== riderPos.lng)) {
-          // Calculate heading/bearing angle
-          const lat1 = riderMarker.pos.lat * Math.PI / 180;
-          const lat2 = riderPos.lat * Math.PI / 180;
-          const dLon = (riderPos.lng - riderMarker.pos.lng) * Math.PI / 180;
-          const y = Math.sin(dLon) * Math.cos(lat2);
-          const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-          let bearing = Math.atan2(y, x) * 180 / Math.PI;
-          bearing = (bearing + 360) % 360;
-          
-          // Smooth rotation logic: avoid spinning the full wheel around 360
-          let delta = bearing - (riderMarker.angle % 360);
-          if (delta > 180) delta -= 360;
-          if (delta < -180) delta += 360;
-          riderMarker.angle += delta;
+        let delta = bearing - (riderMarker.angle % 360);
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        riderMarker.angle += delta;
+
+        const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
+        if (avatar) {
+          avatar.style.transform = `rotate(${riderMarker.angle}deg)`;
         }
-        riderMarker.pos = riderPos;
-        // DO NOT overwrite with standard SVG icons for 3D marker
-        if (riderMarker.draw) riderMarker.draw();
       }
+      riderMarker.lastPos = riderPos;
+      riderMarker.setLngLat([riderPos.lng, riderPos.lat]);
     }
+  }
 
-    if (isFirstFit) {
-      const bounds = new google.maps.LatLngBounds();
-      if (pickupPos) bounds.extend(pickupPos);
-      if (dropoffPos) bounds.extend(dropoffPos);
-      if (riderPos) bounds.extend(riderPos);
-      liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
+  // Update Route Polyline & ETA
+  const targetPos = destPos || pickupPos;
+  if (riderPos && targetPos) {
+    updateRoute(riderPos, targetPos);
+  }
+
+  if (isFirstFit) {
+    if (riderPos && targetPos) {
+      const minLng = Math.min(riderPos.lng, targetPos.lng);
+      const maxLng = Math.max(riderPos.lng, targetPos.lng);
+      const minLat = Math.min(riderPos.lat, targetPos.lat);
+      const maxLat = Math.max(riderPos.lat, targetPos.lat);
+      liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 260, left: 50, right: 50 } });
       isFirstFit = false;
-    }
-
-    if (riderPos) {
-      const targetPos = (rawStatus === 'delivering' || rawStatus === 'en camino') ? dropoffPos : pickupPos;
-      if (targetPos) {
-        updateRoute(riderPos, targetPos);
-      }
-    }
-  } else {
-    const riderPos = parseCoords(order.driverLocation);
-    const destPos = parseCoords(order.deliveryCoords);
-
-    if (!liveMap) {
-      const theme = document.documentElement.getAttribute('data-theme') || 'light';
-      liveMap = new google.maps.Map(container, {
-        zoom: 16,
-        center: destPos || riderPos || { lat: -35.0315, lng: -57.5147 },
-        disableDefaultUI: true,
-        zoomControl: false,
-        styles: theme === 'dark' ? getDarkStyles() : [],
-        gestureHandling: 'greedy'
-      });
-    }
-
-    if (destPos && riderPos && isFirstFit) {
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend(destPos);
-      bounds.extend(riderPos);
-      liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
+    } else if (destPos) {
+      liveMap.easeTo({ center: [destPos.lng, destPos.lat], zoom: 16.5 });
       isFirstFit = false;
-    } else if (destPos && isFirstFit && !riderPos) {
-      liveMap.setCenter(destPos);
-      liveMap.setZoom(17);
-      isFirstFit = false;
-    }
-
-    if (destPos) {
-      if (!homeMarker) {
-        homeMarker = new google.maps.OverlayView();
-        homeMarker.pos = destPos;
-        homeMarker.onAdd = function() {
-          const div = document.createElement('div');
-          div.className = 'v5-marker-shadow';
-          div.style.position = 'absolute';
-          div.style.zIndex = '50';
-          div.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center;">
-              <div style="background:#111111; width:48px; height:48px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 10px 25px rgba(0,0,0, 0.45);">
-                <div style="transform:rotate(45deg); color:white; display:flex;">${icon('home', 24)}</div>
-              </div>
-              <div style="width:12px; height:4px; background:rgba(0,0,0,0.15); border-radius:50%; margin-top:4px; filter:blur(2px);"></div>
-            </div>`;
-          this.getPanes().overlayMouseTarget.appendChild(div);
-          this.div = div;
-        };
-        homeMarker.draw = function() {
-          const projection = this.getProjection();
-          if (!projection) return;
-          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-          if (point && this.div) {
-            this.div.style.left = (point.x - 24) + 'px';
-            this.div.style.top = (point.y - 52) + 'px';
-          }
-        };
-        homeMarker.setMap(liveMap);
-      } else {
-        homeMarker.pos = destPos;
-        if (homeMarker.draw) homeMarker.draw();
-      }
-    }
-
-    if (riderPos) {
-      if (!riderMarker) {
-        riderMarker = new google.maps.OverlayView();
-        riderMarker.pos = riderPos;
-        riderMarker.lastPos = null;
-        riderMarker.angle = 0;
-        riderMarker.onAdd = function() {
-          const div = document.createElement('div');
-          div.className = 'v5-marker-shadow';
-          // NO transition CSS on left/top to keep marker anchored during map pan/zoom
-          div.style.cssText = 'position:absolute; pointer-events:none; z-index:100;';
-          div.innerHTML = `
-            <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center; position:relative;">
-              <div class="sonar-pulse-ring-1"></div>
-              <div class="sonar-pulse-ring-2"></div>
-              <div class="moto-base-glow" style="position:absolute; width:22px; height:6px; background:rgba(225, 29, 72, 0.45); border-radius:50%; bottom:3px; left:50%; transform:translateX(-50%); filter:blur(1.5px); z-index:1;"></div>
-              <div class="rider-marker-avatar" style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.8s ease;">
-                <img src="/go-delivery-moto.png?v=2" style="width:42px; height:42px; object-fit:contain;" />
-              </div>
-            </div>`;
-          this.getPanes().overlayMouseTarget.appendChild(div);
-          this.div = div;
-        };
-        riderMarker.draw = function() {
-          const projection = this.getProjection();
-          if (!projection) return;
-          const point = projection.fromLatLngToDivPixel(new google.maps.LatLng(this.pos.lat, this.pos.lng));
-          if (point && this.div) {
-            this.div.style.left = (point.x - 20) + 'px';
-            this.div.style.top = (point.y - 20) + 'px';
-            const avatar = this.div.querySelector('.rider-marker-avatar');
-            if (avatar) {
-              const is3d = (order.tripType === 'moto' || order.isFavor);
-              const rotation = is3d ? (this.angle - 90) : this.angle;
-              avatar.style.transform = `rotate(${rotation}deg)`;
-            }
-          }
-        };
-        riderMarker.setMap(liveMap);
-      } else {
-        if (riderMarker.pos && (riderMarker.pos.lat !== riderPos.lat || riderMarker.pos.lng !== riderPos.lng)) {
-          // Calculate heading/bearing angle
-          const lat1 = riderMarker.pos.lat * Math.PI / 180;
-          const lat2 = riderPos.lat * Math.PI / 180;
-          const dLon = (riderPos.lng - riderMarker.pos.lng) * Math.PI / 180;
-          const y = Math.sin(dLon) * Math.cos(lat2);
-          const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-          let bearing = Math.atan2(y, x) * 180 / Math.PI;
-          bearing = (bearing + 360) % 360;
-          
-          // Smooth rotation logic: avoid spinning the full wheel around 360
-          let delta = bearing - (riderMarker.angle % 360);
-          if (delta > 180) delta -= 360;
-          if (delta < -180) delta += 360;
-          riderMarker.angle += delta;
-        }
-        riderMarker.pos = riderPos;
-        if (riderMarker.draw) riderMarker.draw();
-      }
-    }
-
-    if (riderPos && destPos) {
-      updateRoute(riderPos, destPos);
     }
   }
 }
@@ -1848,15 +1754,15 @@ function getTripStepClass(order, index) {
   const rawStatus = (order.status || '').toString().toLowerCase();
   let currentVal = 0;
   if (!order.driverId) {
-    currentVal = 0; // Buscando
+    currentVal = 0;
   } else if (rawStatus === 'confirmed') {
-    currentVal = 1; // Asignado
+    currentVal = 1;
   } else if (rawStatus === 'ready') {
-    currentVal = 2; // En camino
+    currentVal = 2;
   } else if (rawStatus === 'delivering' || rawStatus === 'en camino') {
-    currentVal = 3; // En viaje
+    currentVal = 3;
   } else if (rawStatus === 'completed' || rawStatus === 'entregado') {
-    currentVal = 4; // Llegaste
+    currentVal = 4;
   }
   
   if (currentVal > index) return 'completed';
@@ -1886,7 +1792,7 @@ let lastRouteStartCoords = null;
 let lastRouteEndCoords = null;
 
 function getHaversineDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // metres
+  const R = 6371e3;
   const phi1 = lat1 * Math.PI/180;
   const phi2 = lat2 * Math.PI/180;
   const deltaPhi = (lat2-lat1) * Math.PI/180;
@@ -1897,7 +1803,7 @@ function getHaversineDistance(lat1, lon1, lat2, lon2) {
             Math.sin(deltaLambda/2) * Math.sin(deltaLambda/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c; // in metres
+  return R * c;
 }
 
 async function updateRoute(start, end) {
@@ -1911,28 +1817,27 @@ async function updateRoute(start, end) {
     const startMoved = getHaversineDistance(start.lat, start.lng, lastRouteStartCoords.lat, lastRouteStartCoords.lng);
     const endMoved = getHaversineDistance(end.lat, end.lng, lastRouteEndCoords.lat, lastRouteEndCoords.lng);
     
-    // Fetch a new route every 10 seconds if start/end moved (for fluid polyline recalculation)
-    if (timeElapsed >= 10000 && (startMoved >= 12 || endMoved >= 8)) {
+    if (timeElapsed >= 8000 && (startMoved >= 10 || endMoved >= 8)) {
       shouldFetch = true;
     }
   }
 
-  if (!shouldFetch) {
-    if (routeLine && routeLineGlow) {
-      try {
-        const path = routeLine.getPath().getArray().map(p => ({ lat: p.lat(), lng: p.lng() }));
-        if (path.length >= 2) {
-          // Adjust start position of current route optimistically
-          path[0] = start;
-          routeLine.setPath(path);
-          routeLineGlow.setPath(path);
+  // Draw optimistic line immediately
+  if (liveMap) {
+    ensureTrackingRouteLayers();
+    const src = liveMap.getSource('tracking-route-source');
+    if (src && (!lastRouteStartCoords || shouldFetch)) {
+      src.setData({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[start.lng, start.lat], [end.lng, end.lat]]
         }
-      } catch (e) {
-        console.warn('Optimistic route path update failed:', e);
-      }
+      });
     }
-    return;
   }
+
+  if (!shouldFetch) return;
 
   lastRouteFetchTime = now;
   lastRouteStartCoords = { lat: start.lat, lng: start.lng };
@@ -1942,46 +1847,18 @@ async function updateRoute(start, end) {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`);
     const data = await res.json();
     if (data.routes?.[0] && liveMap) {
-      let coords = data.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+      let coords = data.routes[0].geometry.coordinates;
       
-      // EXTREME PRECISION: Prepend riderPos and append destPos to ensure the line "touches" the markers
-      coords.unshift(start);
-      coords.push(end);
-
-      let isNewLine = false;
-      if (!routeLineGlow) {
-        isNewLine = true;
-        routeLineGlow = new google.maps.Polyline({
-          path: coords,
-          geodesic: true,
-          strokeColor: '#E11D48',
-          strokeOpacity: 0.12,
-          strokeWeight: 6,
-          map: liveMap
+      ensureTrackingRouteLayers();
+      const src = liveMap.getSource('tracking-route-source');
+      if (src) {
+        src.setData({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: coords
+          }
         });
-      } else {
-        routeLineGlow.setPath(coords);
-      }
-
-      if (!routeLine) {
-        isNewLine = true;
-        routeLine = new google.maps.Polyline({
-          path: coords,
-          geodesic: true,
-          strokeColor: '#E11D48',
-          strokeOpacity: 0.85,
-          strokeWeight: 3,
-          map: liveMap
-        });
-      } else {
-        routeLine.setPath(coords);
-      }
-
-      if (isFirstFit || isNewLine) {
-        const bounds = new google.maps.LatLngBounds();
-        coords.forEach(c => bounds.extend(c));
-        liveMap.fitBounds(bounds, { top: 50, bottom: 250, left: 50, right: 50 });
-        isFirstFit = false;
       }
 
       const durationSec = data.routes[0].duration;

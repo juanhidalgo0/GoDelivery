@@ -3,12 +3,84 @@
 
 <head>
   <script>
+    window.addEventListener('error', function(e) {
+      var msg = (e && e.message) ? e.message : '';
+      if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {
+        if (!sessionStorage.getItem('gd_chunk_reload')) {
+          sessionStorage.setItem('gd_chunk_reload', 'true');
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              regs.forEach(function(r) { r.unregister(); });
+            });
+          }
+          if ('caches' in window) {
+            caches.keys().then(function(names) {
+              names.forEach(function(n) { caches.delete(n); });
+            });
+          }
+          window.location.reload(true);
+        }
+      }
+    }, true);
+
+    window.addEventListener('unhandledrejection', function(e) {
+      var reason = e && e.reason;
+      var msg = (reason && reason.message) ? reason.message : String(reason || '');
+      if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {
+        if (!sessionStorage.getItem('gd_chunk_reload')) {
+          sessionStorage.setItem('gd_chunk_reload', 'true');
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              regs.forEach(function(r) { r.unregister(); });
+            });
+          }
+          if ('caches' in window) {
+            caches.keys().then(function(names) {
+              names.forEach(function(n) { caches.delete(n); });
+            });
+          }
+          window.location.reload(true);
+        }
+      }
+    });
+
     if (window.location.hash.includes('/seguimiento/wa/')) {
       const match = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
       if (match && match[1]) {
         window.location.href = '/seguimiento.html?id=' + match[1];
       }
     }
+    (function() {
+      var isNative = !!(window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : (window.Capacitor && window.Capacitor.isNative));
+      if (!isNative && 'fetch' in window) {
+        fetch('/version.json?cb=' + Date.now(), { cache: 'no-store' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d && d.version) {
+              var v = String(d.version);
+              var cur = localStorage.getItem('gd_app_version');
+              var logoutDone = localStorage.getItem('gd_force_logout_v1.6') === 'true';
+              if (cur && cur !== v) {
+                localStorage.setItem('gd_app_version', v);
+
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    regs.forEach(function(r) { r.unregister(); });
+                  });
+                }
+                if ('caches' in window) {
+                  caches.keys().then(function(names) {
+                    names.forEach(function(n) { caches.delete(n); });
+                  });
+                }
+                setTimeout(function() { window.location.reload(true); }, 200);
+              } else {
+                localStorage.setItem('gd_app_version', v);
+              }
+            }
+          }).catch(function() {});
+      }
+    })();
   </script>
   <!-- Preload key brand icons for instant load -->
   <link rel="preload" as="image" href="/go-bag.png" />
@@ -483,9 +555,6 @@
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" media="print" onload="this.media='all'" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js" defer></script>
-
-  <!-- Google Maps API (Async Non-Blocking) -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places" async defer></script>
 
   <!-- Phosphor Icons (Non-Blocking) -->
   <script src="https://unpkg.com/@phosphor-icons/web" async defer></script>

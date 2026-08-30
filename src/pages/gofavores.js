@@ -597,9 +597,9 @@ export async function showMandadoForm(targetContainer = null) {
   modalEl.innerHTML = `
     <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0;">
       <!-- Paso 1 Container -->
-      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 14px; height: 100%; flex: 1; min-height: 0; justify-content: space-between; overflow:hidden;">
+      <div id="step-1-container" style="display: flex; flex-direction: column; gap: 10px; height: 100%; flex: 1; min-height: 0; justify-content: space-between; overflow:hidden;">
         <!-- Scrollable fields -->
-        <div style="display: flex; flex-direction: column; gap: 12px; scrollbar-width: none; flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; scrollbar-width: none; flex: 1; overflow-y: auto; -webkit-overflow-scrolling:touch; min-height: 0; padding-bottom: 24px;">
 
           <!-- Origen: ¿Dónde recogemos? -->
           <div style="display:flex; flex-direction:column; gap:6px;">
@@ -617,17 +617,17 @@ export async function showMandadoForm(targetContainer = null) {
             <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px; display:block;">Detalles de la Encomienda</label>
             <textarea id="favor-details" placeholder="Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456..." style="width: 100%; height: 80px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 10px 12px; background: var(--color-surface); color: var(--color-text-primary); font-size: 12.5px; font-weight: 600; resize: none; outline:none; font-family:inherit; transition:all 0.2s;"></textarea>
           </div>
-        </div>
 
-        <!-- Sticky Destino de Entrega (Always Visible at bottom) -->
-        <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
-          <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
-          <button id="delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-             <div style="width:28px; height:28px; border-radius:8px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
-             <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-             ${icon('chevronUp', 16)}
-          </button>
-          <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          <!-- Destino de Entrega -->
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
+            <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
+            <button id="delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
+               <div style="width:28px; height:28px; border-radius:8px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
+               <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
+               ${icon('chevronUp', 16)}
+            </button>
+            <input type="text" id="delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
+          </div>
         </div>
 
         <!-- Botón Siguiente -->
@@ -768,6 +768,18 @@ export async function showMandadoForm(targetContainer = null) {
     favorDetailsInput.style.cursor = 'text';
     favorDetailsInput.placeholder = 'Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456...';
   };
+
+  const setupScrollFocus = (el) => {
+    if (!el) return;
+    el.addEventListener('focus', () => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 250);
+    });
+  };
+  setupScrollFocus(pickupDetailsInput);
+  setupScrollFocus(deliveryDetailsInput);
+  setupScrollFocus(favorDetailsInput);
 
   // Call initially to disable fields
   updateDetailsFieldsState();
@@ -1214,7 +1226,7 @@ export async function showCompraForm(targetContainer = null) {
       <div id="compra-steps-slides-container" style="display:flex; width:200%; height:100%; transition:transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); will-change:transform;">
 
         <!-- ── Paso 1: Comercios, Productos y Destino de Entrega ──────────────── -->
-        <div id="compra-step-1-container" style="display:flex; flex-direction:column; height:100%; width:50%; box-sizing:border-box; overflow:hidden; gap:10px; flex-shrink:0;">
+        <div id="compra-step-1-container" style="display:flex; flex-direction:column; height:100%; width:50%; box-sizing:border-box; overflow-y:auto; -webkit-overflow-scrolling:touch; gap:10px; flex-shrink:0; padding-bottom:28px; scrollbar-width:none;">
           <!-- Preset Banner Premium Maxikiosco Paulos -->
           <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); border: 1.5px solid rgba(192, 132, 252, 0.35); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: 0 10px 28px rgba(76, 29, 149, 0.4); position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
             <div style="position: absolute; top: -30%; right: -15%; width: 140px; height: 140px; background: radial-gradient(circle, rgba(236, 72, 153, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
@@ -1262,7 +1274,7 @@ export async function showCompraForm(targetContainer = null) {
             </p>
           </div>
 
-          <div id="stores-subforms-container" style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:10px; padding-right:2px; min-height:80px;"></div>
+          <div id="stores-subforms-container" style="display:flex; flex-direction:column; gap:10px; padding-right:2px;"></div>
 
           <!-- Destino de Entrega -->
           <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
@@ -2027,6 +2039,18 @@ export async function showGoCashForm(targetContainer = null) {
   const previewBox = modalEl.querySelector('#gocash-cost-preview');
   const distCostEl = modalEl.querySelector('#gocash-dist-cost');
   const totalCostEl = modalEl.querySelector('#gocash-estimated-cost');
+  const deliveryDetailsInput = modalEl.querySelector('#gocash-delivery-details');
+
+  const setupScrollFocus = (el) => {
+    if (!el) return;
+    el.addEventListener('focus', () => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 250);
+    });
+  };
+  setupScrollFocus(amountInput);
+  setupScrollFocus(deliveryDetailsInput);
 
   let selectedType = 'cash_to_transfer'; // or 'transfer_to_cash'
   let deliveryData = currentAddress ? { address: currentAddress, coords: getState().deliveryCoords } : null;
@@ -2904,6 +2928,17 @@ export async function showPagoServiciosForm(targetContainer = null) {
   const deliveryBtn = modalEl.querySelector('#ps-delivery-addr-btn');
   const deliveryText = modalEl.querySelector('#ps-delivery-text');
   const deliveryDetailsInput = modalEl.querySelector('#ps-delivery-details');
+
+  const setupScrollFocus = (el) => {
+    if (!el) return;
+    el.addEventListener('focus', () => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 250);
+    });
+  };
+  setupScrollFocus(detailsInput);
+  setupScrollFocus(deliveryDetailsInput);
 
   const previewBox = modalEl.querySelector('#ps-cost-preview');
   const distRow = modalEl.querySelector('#ps-dist-row');

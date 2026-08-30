@@ -858,7 +858,7 @@ export async function renderAdminDeliveriesSettings(container) {
           collection2(db, "orders"),
           where("createdAt", ">=", Timestamp.fromDate(sixtyDaysAgo)),
           orderBy("createdAt", "desc"),
-          limit(200)
+          limit(1000)
         );
         const ordersSnap = await getDocs2(qOrders);
         globalPendingOrders = ordersSnap.docs.map((doc2) => ({ id: doc2.id, ...doc2.data() }));
@@ -1168,7 +1168,7 @@ export async function renderAdminDeliveriesSettings(container) {
       const isOnlineNow = d.isOnline === true;
       const photo = d.photoURL || d.avatarUrl || d.photo || d.profileImage || "";
       const displayId = d.deliveryId || d.goId || d.customId || "go-" + d.id.slice(0, 4);
-      const driverOrders = debt > 0 ? globalPendingOrders.filter((o) => o.driverId === d.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")) : [];
+      const driverOrders = debt > 0 ? globalPendingOrders.filter((o) => (o.driverId === d.id || o.driverDeliveryId === d.id) && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")) : [];
       const totalCouponsCredit = debt > 0 ? driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0) : 0;
       const finalSettleAmount = Math.max(0, debt - totalCouponsCredit);
       return `

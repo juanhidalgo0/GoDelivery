@@ -94,8 +94,44 @@ export function renderNavbar() {
         </span>
         <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Mis Chats</span>
       </a>
-    </div>
   `;
+
+  let floatingDriverBtn = document.getElementById('floating-driver-mode-pill');
+  if (isDelivery() && sessionStorage.getItem('gd_temp_client_mode') === 'true') {
+    if (!floatingDriverBtn) {
+      floatingDriverBtn = document.createElement('a');
+      floatingDriverBtn.id = 'floating-driver-mode-pill';
+      floatingDriverBtn.href = '#/delivery';
+      floatingDriverBtn.innerHTML = '🛵 Modo Repartidor';
+      floatingDriverBtn.style.cssText = `
+        position: fixed;
+        bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+        right: 16px;
+        z-index: 999999;
+        background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+        color: white;
+        padding: 10px 16px;
+        border-radius: 30px;
+        box-shadow: 0 8px 24px rgba(225, 29, 72, 0.4);
+        font-weight: 900;
+        font-size: 12px;
+        font-family: var(--font-display, sans-serif);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        text-decoration: none;
+        cursor: pointer;
+        border: 2px solid #ffffff;
+      `;
+      floatingDriverBtn.onclick = () => {
+        sessionStorage.removeItem('gd_temp_client_mode');
+        document.body.classList.add('is-delivery-mode');
+      };
+      document.body.appendChild(floatingDriverBtn);
+    }
+  } else if (floatingDriverBtn) {
+    floatingDriverBtn.remove();
+  }
 }
 
 export function updateGlobalCartFAB() {

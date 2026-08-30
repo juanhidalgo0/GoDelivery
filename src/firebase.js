@@ -36,20 +36,7 @@ const testingConfig = {
   measurementId: "G-DWNQDRZG27"
 };
 
-const getAuthDomain = (defaultDomain) => {
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.includes('local');
-    const isCapacitor = window.Capacitor;
-    if (!isLocal && !isCapacitor && host.includes('.')) {
-      return host;
-    }
-  }
-  return defaultDomain;
-};
-
 const firebaseConfig = isTesting ? testingConfig : prodConfig;
-firebaseConfig.authDomain = getAuthDomain(firebaseConfig.authDomain);
 
 if (isTesting) {
   console.log("🧪 Running in TESTING environment (godelivery-testing)");

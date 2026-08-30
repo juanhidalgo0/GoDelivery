@@ -41,12 +41,18 @@ export function initGlobalTracking() {
     }
     
     setupOrdersListener(user);
+    if (user.isOnline === true) {
+      startWatching();
+    }
   });
 
   // 2. Trigger immediately if user profile is already fully loaded in state
   const currentUser = getState().user;
   if (currentUser && isDelivery()) {
     setupOrdersListener(currentUser);
+    if (currentUser.isOnline === true) {
+      startWatching();
+    }
   }
 
   // 3. Re-acquire Wake Lock when tab becomes visible
@@ -69,9 +75,36 @@ async function handleVisibilityChange() {
 }
 
 function setupOrdersListener(user) {
+  // Listen to shared in-memory active orders stream if delivery panel is mounted
+  if (!window._driverOrdersSyncBound) {
+    window._driverOrdersSyncBound = true;
+    window.addEventListener('driver-active-orders-sync', (e) => {
+      if (Array.isArray(e.detail)) {
+        currentActiveOrders = e.detail;
+        const isOnline = getState().user?.isOnline === true;
+        if (currentActiveOrders.length > 0 || isOnline) {
+          startWatching();
+        } else {
+          stopWatching();
+        }
+        // If we received synced orders from active panel, stop duplicate standalone listener to save Firebase quota
+        if (activeOrdersUnsub) {
+          try { activeOrdersUnsub(); } catch(e) {}
+          activeOrdersUnsub = null;
+        }
+      }
+    });
+  }
+
+  // If panel is already active, don't open duplicate Firestore query
+  if (window.isDeliveryPanelActive && window.activeOrdersList) {
+    currentActiveOrders = window.activeOrdersList;
+    return;
+  }
+
   if (activeOrdersUnsub) return; // Already listening
 
-  console.log('Background Tracking: Setting up active orders listener for driver:', user.uid);
+  console.log('Background Tracking: Setting up fallback orders listener for driver:', user.uid);
 
   const q = query(
     collection(db, 'orders'),
@@ -88,10 +121,19 @@ function setupOrdersListener(user) {
   );
 
   activeOrdersUnsub = onSnapshot(q, (snap) => {
+    // If delivery panel mounted in the meantime, detach duplicate
+    if (window.isDeliveryPanelActive) {
+      if (activeOrdersUnsub) {
+        try { activeOrdersUnsub(); } catch(e) {}
+        activeOrdersUnsub = null;
+      }
+      return;
+    }
     currentActiveOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     console.log(`Background Tracking: Active orders updated. Count: ${currentActiveOrders.length}`);
     
-    if (currentActiveOrders.length > 0) {
+    const isOnline = getState().user?.isOnline === true;
+    if (currentActiveOrders.length > 0 || isOnline) {
       startWatching();
     } else {
       stopWatching();
@@ -124,59 +166,46 @@ let lastFirestoreWriteTime = 0;
 let lastFirestoreWriteCoords = null;
 
 async function handleLocationUpdate(pos) {
-  if (pos && pos.coords && typeof pos.coords.accuracy === 'number' && pos.coords.accuracy > 100) {
-    console.warn(`[Background Tracking] Ignoring location update with low precision (~${Math.round(pos.coords.accuracy)}m). High accuracy is required for delivery.`);
-    return;
-  }
+  if (!pos || !pos.coords) return;
 
-  const { latitude, longitude } = pos.coords;
+  const { latitude, longitude, heading } = pos.coords;
   lastLocationUpdateTime = Date.now();
   
   // Cache position in global window context for instant access across modals/maps
   window.lastRiderPos = { lat: latitude, lng: longitude };
   
-  // Módulo 3.1: Geofencing
-  window.triggeredGeofences = window.triggeredGeofences || {};
+  // Dispatch custom window event so in-memory UI updates smoothly with 0 network calls
+  window.dispatchEvent(new CustomEvent('driver-location-update', {
+    detail: {
+      coords: { lat: latitude, lng: longitude },
+      heading: heading || 0,
+      timestamp: lastLocationUpdateTime
+    }
+  }));
 
+  // Automatic Geofencing Evaluation
   let geofenceTriggeredThisTick = false;
-  let minDist = Infinity;
+  let minDist = 999999;
+
+  if (!window.triggeredGeofences) window.triggeredGeofences = {};
 
   for (const o of currentActiveOrders) {
     const orderGeofenceKey = o.id;
-    window.triggeredGeofences[orderGeofenceKey] = window.triggeredGeofences[orderGeofenceKey] || { commerce: false, customer: false };
+    if (!window.triggeredGeofences[orderGeofenceKey]) {
+      window.triggeredGeofences[orderGeofenceKey] = { commerce: false, customer: false };
+    }
 
-    // 1. Check distance to commerce (<= 200m)
-    const commerceCoords = o.comercioCoords || o.pickupCoords;
-    if (commerceCoords) {
-      const distToCommerce = getHaversineDistance(latitude, longitude, commerceCoords.lat, commerceCoords.lng);
+    // 1. Check distance to commerce (<= 80m)
+    if (o.pickupCoords || o.comercioCoords) {
+      const pCoords = o.pickupCoords || o.comercioCoords;
+      const distToCommerce = getHaversineDistance(latitude, longitude, pCoords.lat, pCoords.lng);
       if (distToCommerce < minDist) minDist = distToCommerce;
 
       if (!window.triggeredGeofences[orderGeofenceKey].commerce) {
-        if (distToCommerce <= 200) {
+        if (distToCommerce <= 80) {
           window.triggeredGeofences[orderGeofenceKey].commerce = true;
           geofenceTriggeredThisTick = true;
-          console.log(`[Geofencing] Driver is close to commerce for order ${o.id} (${Math.round(distToCommerce)}m). Triggering notification...`);
-          
-          try {
-            if (o.comercioId) {
-              const { getDoc, doc, collection, addDoc } = await import('firebase/firestore');
-              const comSnap = await getDoc(doc(db, 'comercios', o.comercioId));
-              if (comSnap.exists()) {
-                const ownerId = comSnap.data().ownerId;
-                if (ownerId) {
-                  await addDoc(collection(db, 'users', ownerId, 'notifications'), {
-                    title: 'Repartidor cerca',
-                    body: `El repartidor está a ${Math.round(distToCommerce)}m. Prepará el empaque final para el pedido #${o.orderId || o.id.slice(0, 6)}.`,
-                    type: 'system',
-                    status: 'unread',
-                    createdAt: serverTimestamp()
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            console.error('[Geofencing] Error notifying commerce:', e);
-          }
+          console.log(`[Geofencing] Driver arrived at commerce for order ${o.id} (${Math.round(distToCommerce)}m).`);
         }
       }
     }
@@ -211,14 +240,34 @@ async function handleLocationUpdate(pos) {
     }
   }
 
-  // High-precision real-time tracking (Uber / PedidosYa grade)
+  // High-precision adaptive real-time tracking (Battery & Network Optimized)
   const now = Date.now();
-  let timeThreshold = 1500; // 1.5 seconds for instant real-time updates
-  let distanceThreshold = 2.0; // 2 meters for micro-movements
+  const speedKmh = (typeof pos.coords.speed === 'number' && pos.coords.speed >= 0) ? pos.coords.speed * 3.6 : -1;
+  const hasActiveTrips = currentActiveOrders.length > 0;
+  
+  let distMoved = 0;
+  if (lastFirestoreWriteCoords) {
+    distMoved = getHaversineDistance(latitude, longitude, lastFirestoreWriteCoords.lat, lastFirestoreWriteCoords.lng);
+  }
+  
+  const isMoving = speedKmh > 2.5 || distMoved > 5.0;
 
-  if (minDist > 5000) {
-    timeThreshold = 4000;
-    distanceThreshold = 6.0;
+  // Dynamic interval based on movement and trip urgency
+  let timeThreshold = 3500; // 3.5s while in active transit
+  let distanceThreshold = 4.0; // 4 meters
+
+  if (!hasActiveTrips) {
+    // Idle driver waiting for orders: aggressive battery saving
+    timeThreshold = isMoving ? 8000 : 25000; // 8s if cruising, 25s if parked
+    distanceThreshold = 12.0;
+  } else if (!isMoving) {
+    // Stopped at traffic light or waiting inside restaurant
+    timeThreshold = 16000; // 16s heartbeat while stationary
+    distanceThreshold = 4.0;
+  } else if (minDist > 3000) {
+    // Cruising far from target
+    timeThreshold = 4500;
+    distanceThreshold = 7.0;
   }
 
   let shouldUpdate = false;
@@ -227,12 +276,13 @@ async function handleLocationUpdate(pos) {
   if (!lastFirestoreWriteCoords || geofenceTriggeredThisTick) {
     shouldUpdate = true;
   } else {
-    const distMoved = getHaversineDistance(latitude, longitude, lastFirestoreWriteCoords.lat, lastFirestoreWriteCoords.lng);
-    if (timeElapsed >= timeThreshold && distMoved >= distanceThreshold) {
+    if (distMoved >= distanceThreshold && timeElapsed >= timeThreshold) {
       shouldUpdate = true;
-    } else if (distMoved > 10) {
+    } else if (distMoved >= 20.0) {
+      // Significant position change
       shouldUpdate = true;
-    } else if (timeElapsed >= 3000) {
+    } else if (timeElapsed >= (hasActiveTrips ? 18000 : 35000)) {
+      // Periodic heartbeat even when stationary
       shouldUpdate = true;
     }
   }
@@ -241,7 +291,7 @@ async function handleLocationUpdate(pos) {
     return;
   }
 
-  console.log(`Background Tracking: Updating order & driver locations in Firestore: [${latitude}, ${longitude}]. Dist to target: ${minDist.toFixed(1)}m.`);
+  console.log(`Background Tracking (Adaptive): Updating Firestore [${latitude}, ${longitude}] (speed: ${speedKmh.toFixed(1)} km/h, moved: ${distMoved.toFixed(1)}m).`);
   lastFirestoreWriteTime = now;
   lastFirestoreWriteCoords = { lat: latitude, lng: longitude };
 
@@ -255,9 +305,14 @@ async function handleLocationUpdate(pos) {
     });
   });
 
-  // Also update driver user profile currentLocation
+  // Only update driver user profile currentLocation when driver is IDLE or on a 60s throttle
+  // to eliminate redundant dual-writes while navigating active orders
   const currentUser = getState().user;
-  if (currentUser && currentUser.uid) {
+  const isIdle = currentActiveOrders.length === 0;
+  const lastUserWriteTime = window._lastDriverUserLocationWriteTime || 0;
+
+  if (currentUser && currentUser.uid && (isIdle || (now - lastUserWriteTime > 60000))) {
+    window._lastDriverUserLocationWriteTime = now;
     updates.push(updateDoc(doc(db, 'users', currentUser.uid), {
       currentLocation: {
         lat: latitude,
@@ -280,7 +335,7 @@ let silentAudioEl = null;
 function startSilentAudioKeepAlive() {
   try {
     if (!silentAudioEl) {
-      const silentMp3Uri = 'data:audio/mp3;base64,SUQ3BAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//5AwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGFydGlzdAAAAAAAAGFscnVtAAAAAAAAdGl0bGUAAAAAAABjb21tZW50AAAAAAAA//5AwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const silentMp3Uri = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAP8A';
       silentAudioEl = new Audio(silentMp3Uri);
       silentAudioEl.loop = true;
       silentAudioEl.volume = 0.01;
