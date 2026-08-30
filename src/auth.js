@@ -57,16 +57,16 @@ export async function signInWithGoogle() {
       try {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
-        // Initialize first to ensure serverClientId and iosClientId are configured for Firebase Auth
         const SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
         const IOS_CLIENT_ID = '848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3.apps.googleusercontent.com';
+        const isIos = (window.Capacitor?.getPlatform ? window.Capacitor.getPlatform() === 'ios' : false) || (/iPad|iPhone|iPod/.test(navigator.userAgent));
+        
         try {
           await GoogleAuth.initialize({
-            clientId: IOS_CLIENT_ID,
-            iosClientId: IOS_CLIENT_ID,
+            clientId: isIos ? IOS_CLIENT_ID : SERVER_CLIENT_ID,
             serverClientId: SERVER_CLIENT_ID,
             scopes: ['profile', 'email'],
-            grantOfflineAccess: true
+            grantOfflineAccess: false
           });
         } catch (initErr) {
           console.warn('[Auth] GoogleAuth.initialize notice:', initErr);
@@ -83,13 +83,12 @@ export async function signInWithGoogle() {
         showToast(`¡Bienvenido, ${user.displayName || user.email}!`, 'success');
         return user;
       } catch (nativeErr) {
-        console.error('[Auth] Native Google Sign-In error:', nativeErr);
+        console.warn('[Auth] Native Google Sign-In notice/error:', nativeErr);
         if (nativeErr.code === '12501' || nativeErr.message?.toLowerCase().includes('cancel') || nativeErr.message?.toLowerCase().includes('dismissed')) {
           showToast('Inicio de sesión cancelado', 'info');
-        } else {
-          showToast('Error en inicio de sesión con Google: ' + (nativeErr.message || 'Error de autenticación'), 'error');
+          return null;
         }
-        return null;
+        console.log('[Auth] Falling back to Web Google Sign-In...');
       }
     }
 
