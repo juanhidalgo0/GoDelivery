@@ -15,7 +15,7 @@ if (import.meta.env.VITE_FIREBASE_ENV === 'testing') {
 AudioManager.init();
 
 async function init() {
-  // Always start on Home page (/#/) when opening the app, unless opening a specific tracking/shared link
+  // Delivery Driver instant routing or default Home page
   try {
     localStorage.removeItem('gd_last_hash');
     sessionStorage.setItem('gd_session_active', 'true');
@@ -28,11 +28,22 @@ async function init() {
       }
     }
 
-    const initialHash = window.location.hash;
-    const isDeepLink = initialHash && (initialHash.includes('/seguimiento/') || initialHash.includes('/comercio/') || initialHash.includes('/product/') || initialHash.includes('/delivery'));
-    
-    if (!isDeepLink) {
-      window.location.hash = '#/';
+    const isDriverCached = localStorage.getItem('gd_is_delivery') === 'true' || localStorage.getItem('gd_user_role') === 'delivery';
+    const isTempClient = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+
+    if (isDriverCached && !isTempClient) {
+      document.documentElement.classList.add('is-delivery-mode');
+      document.body.classList.add('is-delivery-mode');
+      if (!window.location.hash || window.location.hash === '#/' || window.location.hash === '#' || window.location.hash === '') {
+        window.location.hash = '#/delivery';
+      }
+    } else {
+      const initialHash = window.location.hash;
+      const isDeepLink = initialHash && (initialHash.includes('/seguimiento/') || initialHash.includes('/comercio/') || initialHash.includes('/product/') || initialHash.includes('/delivery'));
+      
+      if (!isDeepLink) {
+        window.location.hash = '#/';
+      }
     }
   } catch (e) {}
 

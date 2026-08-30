@@ -1013,15 +1013,15 @@ export async function renderDeliveryPanel(containerArg) {
   // Render Floating HUD overlays into hudContainer
   hudContainer.innerHTML = `
     <!-- LAYER 2: FLOATING TOP HEADER BAR -->
-    <div id="session-status-bar-container" style="position:fixed; top:max(12px, calc(8px + env(safe-area-inset-top, 0px))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
+    <div id="session-status-bar-container" style="position:fixed; top:max(36px, calc(18px + env(safe-area-inset-top, 24px))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
       ${renderStatusBar(user)}
     </div>
 
     <!-- LAYER 2.4: FLOATING TELEMETRY SPEEDOMETER -->
     ${isOnline ? (() => {
       const hasActiveOrders = Array.isArray(activeOrdersList) && activeOrdersList.length > 0;
-      const badgeBottom = hasActiveOrders ? 'max(214px, calc(204px + env(safe-area-inset-bottom, 12px)))' : 'max(154px, calc(144px + env(safe-area-inset-bottom, 12px)))';
-      const compassBottom = hasActiveOrders ? 'max(268px, calc(258px + env(safe-area-inset-bottom, 12px)))' : 'max(208px, calc(198px + env(safe-area-inset-bottom, 12px)))';
+      const badgeBottom = hasActiveOrders ? 'max(236px, calc(214px + env(safe-area-inset-bottom, 24px)))' : 'max(176px, calc(154px + env(safe-area-inset-bottom, 24px)))';
+      const compassBottom = hasActiveOrders ? 'max(290px, calc(268px + env(safe-area-inset-bottom, 24px)))' : 'max(230px, calc(208px + env(safe-area-inset-bottom, 24px)))';
       return `
         <div id="driver-speedometer-pill" style="
           position: fixed;
@@ -1104,7 +1104,7 @@ export async function renderDeliveryPanel(containerArg) {
     
     <!-- LAYER 3: CENTERED OFFLINE HERO (SHOWN WHEN OFFLINE) -->
     ${!isOnline ? `
-      <div id="driver-offline-hero" style="position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(24px, env(safe-area-inset-top, 0px)) 24px max(28px, env(safe-area-inset-bottom, 16px)) 24px; box-sizing:border-box; z-index:900; pointer-events:auto; background:${isLight ? '#f8fafc' : '#04070d'};">
+      <div id="driver-offline-hero" style="position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(36px, calc(24px + env(safe-area-inset-top, 24px))) 24px max(36px, calc(28px + env(safe-area-inset-bottom, 24px))) 24px; box-sizing:border-box; z-index:900; pointer-events:auto; background:${isLight ? '#f8fafc' : '#04070d'};">
         <div style="width:100%; max-width:340px; display:flex; flex-direction:column; align-items:center; text-align:center;">
           <div style="font-size:44px; margin-bottom:8px;">💤</div>
           <h3 style="font-family:var(--font-display, sans-serif); font-size:21px; font-weight:900; color:${isLight ? '#0f172a' : 'white'}; margin:0 0 8px 0; letter-spacing:0.2px;">Estás desconectado</h3>
@@ -1137,7 +1137,7 @@ export async function renderDeliveryPanel(containerArg) {
 
     <!-- LAYER 4: FLOATING RADAR DOCK (ALWAYS VISIBLE WHEN ONLINE WITH AUTO-ACCEPT) -->
     ${isOnline ? `
-      <div id="driver-footer-dock-container" style="position:fixed; bottom:max(18px, calc(12px + env(safe-area-inset-bottom, 12px))); left:16px; right:16px; z-index:9999; pointer-events:auto;">
+      <div id="driver-footer-dock-container" style="position:fixed; bottom:max(28px, calc(18px + env(safe-area-inset-bottom, 24px))); left:16px; right:16px; z-index:9999; pointer-events:auto;">
         ${renderBottomDockContent(user, activeOrdersList)}
       </div>
     ` : ''}
@@ -9482,6 +9482,8 @@ export async function showDeliveryHistoryModal(user) {
     background: ${isLight ? '#ffffff' : '#090d16'};
     color: ${isLight ? '#0f172a' : '#ffffff'};
     height: 100%;
+    min-height: 0;
+    max-height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -9611,7 +9613,7 @@ export async function showDeliveryHistoryModal(user) {
         </div>
 
         <!-- ORDERS LIST CONTAINER -->
-        <div style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:10px; padding-right:2px;">
+        <div class="scrollable modal-scrollable-list" style="flex:1; min-height:0; max-height:100%; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; overscroll-behavior-y:contain; display:flex; flex-direction:column; gap:10px; padding-right:2px;">
           ${filteredOrders.length === 0 ? `
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:45px 20px; text-align:center;">
               <div style="font-size:40px; margin-bottom:8px;">🔍</div>

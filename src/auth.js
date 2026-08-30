@@ -523,6 +523,14 @@ export function initAuth(callback) {
             };
           }
           
+          const isDriver = userData.role === 'delivery' || userData.isDelivery === true || userData.role === 'chofer' || userData.deliveryStatus === 'approved';
+          if (isDriver) {
+            localStorage.setItem('gd_is_delivery', 'true');
+            localStorage.setItem('gd_user_role', userData.role || 'delivery');
+          } else {
+            localStorage.removeItem('gd_is_delivery');
+          }
+          
           setState('user', { uid: user.uid, ...userData });
           setState('loading', false);
           

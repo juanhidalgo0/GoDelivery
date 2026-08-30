@@ -3,6 +3,64 @@
 
 <head>
   <script>
+    (function() {
+      try {
+        var userStr = localStorage.getItem('gd-user') || localStorage.getItem('gd_user');
+        var parsedRole = '';
+        if (userStr) {
+          try {
+            var u = JSON.parse(userStr);
+            if (u) parsedRole = u.role || (u.isDelivery ? 'delivery' : '');
+          } catch(e) {}
+        }
+        var isDriverCached = localStorage.getItem('gd_is_delivery') === 'true' || 
+                             localStorage.getItem('gd_user_role') === 'delivery' || 
+                             localStorage.getItem('gd_user_role') === 'chofer' ||
+                             parsedRole === 'delivery' || 
+                             parsedRole === 'chofer';
+        var isTempClient = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+        if (isDriverCached && !isTempClient) {
+          document.documentElement.classList.add('is-delivery-mode');
+          document.documentElement.setAttribute('data-theme', 'dark');
+          if (!window.location.hash || window.location.hash === '#/' || window.location.hash === '#' || window.location.hash === '') {
+            window.location.hash = '#/delivery';
+          }
+        }
+      } catch(e) {}
+    })();
+  </script>
+  <style>
+    html.is-delivery-mode .slide-panel:not(#page-delivery),
+    html.is-delivery-mode #page-home,
+    html.is-delivery-mode #app-header,
+    html.is-delivery-mode #app-navbar,
+    html.is-delivery-mode .bottom-nav,
+    html.is-delivery-mode .home-page,
+    body.is-delivery-mode #app-header,
+    body.is-delivery-mode #page-home,
+    body.is-delivery-mode .bottom-nav {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      height: 0 !important;
+      pointer-events: none !important;
+    }
+    html.is-delivery-mode,
+    body.is-delivery-mode {
+      background: #020617 !important;
+      color-scheme: dark !important;
+    }
+    html.is-delivery-mode #page-delivery,
+    body.is-delivery-mode #page-delivery {
+      display: block !important;
+      width: 100% !important;
+      height: 100% !important;
+      min-height: 100vh !important;
+      min-height: 100dvh !important;
+      background: #020617 !important;
+    }
+  </style>
+  <script>
     window.addEventListener('error', function(e) {
       var msg = (e && e.message) ? e.message : '';
       if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {

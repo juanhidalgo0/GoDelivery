@@ -16,7 +16,8 @@ export function navigate(path) {
 const getMainRoutes = () => {
   const user = getState().user;
   const inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
-  const isDriver = isDelivery() && !inTempClientMode;
+  const isDriverCached = localStorage.getItem('gd_is_delivery') === 'true' || localStorage.getItem('gd_user_role') === 'delivery';
+  const isDriver = (isDelivery() || isDriverCached) && !inTempClientMode;
 
   if (isDriver) {
     return {
