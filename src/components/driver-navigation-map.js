@@ -1,7 +1,12 @@
-// GoDelivery — True WebGL + SVG HUD Dual-Engine Navigation Map for Delivery Drivers
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { NavigationVoice } from '../utils/navigation-voice.js';
+
+try {
+  if (typeof maplibregl.setWorkerUrl === 'function') {
+    maplibregl.setWorkerUrl('https://cdn.jsdelivr.net/npm/maplibre-gl@6.6.0/dist/maplibre-gl-worker.mjs');
+  }
+} catch(e) {}
 
 let driverMap = null;
 let driverMarker = null;
@@ -24,46 +29,70 @@ let consecutiveOffRouteCount = 0;
 let lastRerouteTimestamp = 0;
 
 
-// Dark High-Legibility Map Style (Carto Dark Matter Retina 2x + Brightened Labels Overlay)
-// High-Definition Vector Map Styles (OpenFreeMap Dark & Liberty Vector)
-const DARK_MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark';
-const LIGHT_MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+import { getDeepOledDarkStyle, MAPTILER_STREETS, MAPTILER_OLED_DARK, MAPTILER_API_KEY } from '../utils/map-styles.js';
+
+export { MAPTILER_API_KEY };
+export const LIGHT_MAP_STYLE = MAPTILER_STREETS;
+export const DARK_MAP_STYLE = MAPTILER_OLED_DARK;
+
+export function add3dBuildingsLayer(map, isDark = true) {
+  if (!map || !map.isStyleLoaded()) return;
+  try {
+    if (map.getLayer('3d-buildings')) {
+      map.removeLayer('3d-buildings');
+    }
+  } catch(e) {}
+  return;
+}
+
+// Ensure default is always OLED Dark on fresh session
+if (typeof localStorage !== 'undefined' && localStorage.getItem('gd_driver_theme_v9') !== 'true') {
+  localStorage.setItem('gd_driver_theme_mode', 'dark');
+  localStorage.setItem('gd_driver_theme', 'dark');
+  localStorage.setItem('gd_driver_theme_v9', 'true');
+}
 
 export function getDriverMapTheme() {
-  return localStorage.getItem('gd_driver_theme') || 'dark';
+  const mode = localStorage.getItem('gd_driver_theme');
+  if (mode === 'light') return 'light';
+  return 'dark';
 }
 
 export function getDriverThemeMode() {
-  return localStorage.getItem('gd_driver_theme_mode') || 'auto';
+  return localStorage.getItem('gd_driver_theme') || 'dark';
 }
 
 export function setDriverThemeMode(mode) {
-  if (mode === 'auto') {
-    localStorage.setItem('gd_driver_theme_mode', 'auto');
-    checkAutoSolarTheme(true);
-  } else {
-    localStorage.setItem('gd_driver_theme_mode', mode);
-    setDriverMapTheme(mode, false);
-  }
+  setDriverMapTheme(mode, true);
 }
 
-export function setDriverMapTheme(theme, isManual = true) {
+export async function setDriverMapTheme(theme, isManual = true) {
   const newTheme = theme === 'light' ? 'light' : 'dark';
   localStorage.setItem('gd_driver_theme', newTheme);
   if (isManual) {
     localStorage.setItem('gd_driver_theme_mode', newTheme);
   }
 
+  const mapEl = document.getElementById('driver-fullscreen-map');
+
   if (newTheme === 'light') {
     document.documentElement.classList.add('driver-light-mode');
     document.body.classList.add('driver-light-mode');
     document.documentElement.classList.remove('driver-dark-mode');
     document.body.classList.remove('driver-dark-mode');
+    if (mapEl) {
+      mapEl.classList.add('driver-light-mode');
+      mapEl.classList.remove('driver-dark-mode');
+    }
   } else {
     document.documentElement.classList.remove('driver-light-mode');
     document.body.classList.remove('driver-light-mode');
     document.documentElement.classList.add('driver-dark-mode');
     document.body.classList.add('driver-dark-mode');
+    if (mapEl) {
+      mapEl.classList.add('driver-dark-mode');
+      mapEl.classList.remove('driver-light-mode');
+    }
   }
 
   if (driverMap) {
@@ -71,6 +100,7 @@ export function setDriverMapTheme(theme, isManual = true) {
       const activeStyle = newTheme === 'light' ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
       driverMap.setStyle(activeStyle);
       driverMap.once('style.load', () => {
+        add3dBuildingsLayer(driverMap, newTheme === 'dark');
         renderRouteHud();
         updateWebGlSource(activeRoutePathCoords);
         const currentPos = lastDriverPos || window.lastRiderPos;
@@ -387,7 +417,7 @@ export function updateSvgRouteOverlay() {}
 export function scheduleRouteHud() {}
 export function renderRouteHud() {}
 
-export function initDriverNavigationMap(container) {
+export async function initDriverNavigationMap(container) {
   if (!container) return null;
 
   const targetContainer = typeof container === 'string' ? document.getElementById(container) : container;
@@ -432,28 +462,39 @@ export function initDriverNavigationMap(container) {
     document.body.classList.add('driver-light-mode');
     document.documentElement.classList.remove('driver-dark-mode');
     document.body.classList.remove('driver-dark-mode');
+    targetContainer.classList.add('driver-light-mode');
+    targetContainer.classList.remove('driver-dark-mode');
   } else {
     document.documentElement.classList.remove('driver-light-mode');
     document.body.classList.remove('driver-light-mode');
     document.documentElement.classList.add('driver-dark-mode');
     document.body.classList.add('driver-dark-mode');
+    targetContainer.classList.add('driver-dark-mode');
+    targetContainer.classList.remove('driver-light-mode');
   }
 
   const initialStyle = currentTheme === 'light' ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
 
   try {
-    driverMap = new maplibregl.Map({
+    const MapLibreMap = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
+    if (!MapLibreMap) {
+      throw new Error('MapLibre Map constructor not found');
+    }
+
+    driverMap = new MapLibreMap({
       container: targetContainer,
       style: initialStyle,
       center: magdalenaCenter,
-      zoom: 15,
-      pitch: 0,
+      zoom: 15.5,
+      pitch: 45,
       bearing: 0,
       maxPitch: 75,
       attributionControl: false,
-      antialias: false, // Low-power GPU optimization for mobile devices
+      antialias: true,
       trackResize: true
     });
+
+    console.log('[DriverMap] Successfully created MapLibre GL instance on #driver-fullscreen-map');
 
     // User touch / pan / zoom interaction tracking (pauses auto-follow for 7 seconds)
     const onUserInteract = () => {
@@ -474,8 +515,22 @@ export function initDriverNavigationMap(container) {
     driverMap.on('boxzoomstart', onUserInteract);
     driverMap.on('wheel', onUserInteract);
 
+    // Fallback transparent 1x1 image resolver to prevent tile render cancellation on missing POI icons
+    try {
+      if (typeof driverMap.setMissingStyleImageResolver === 'function') {
+        const dummyImg = { width: 1, height: 1, data: new Uint8Array(4) };
+        driverMap.setMissingStyleImageResolver(() => dummyImg);
+      }
+    } catch(e) {}
+
+    driverMap.on('error', (e) => {
+      if (e?.error?.message?.includes('length') || e?.message?.includes('Image') || (e?.type === 'error' && !e?.error)) return;
+      console.warn('[DriverMap] MapLibre note:', e);
+    });
+
     driverMap.on('load', () => {
       try { driverMap.resize(); } catch(e) {}
+      add3dBuildingsLayer(driverMap, currentTheme === 'dark');
       ensureWebGlRouteLayers();
 
       if (pendingRouteCoords && pendingRouteCoords.length > 0) {
@@ -498,10 +553,14 @@ export function initDriverNavigationMap(container) {
       }
     });
 
+    setTimeout(() => { try { if (driverMap) driverMap.resize(); } catch(e) {} }, 150);
+    setTimeout(() => { try { if (driverMap) driverMap.resize(); } catch(e) {} }, 600);
+    setTimeout(() => { try { if (driverMap) driverMap.resize(); } catch(e) {} }, 1500);
+
     // Listen to real-time driver GPS updates from background-tracking
     if (!window._driverLocationTickBound) {
       window._driverLocationTickBound = true;
-      window.addEventListener('driver-location-tick', (e) => {
+      const handleGpsTick = (e) => {
         if (e.detail && e.detail.coords) {
           window.lastRiderPos = e.detail.coords;
           updateDriverMapLocation(e.detail.coords, e.detail.heading || 0);
@@ -516,7 +575,10 @@ export function initDriverNavigationMap(container) {
             }
           }
         }
-      });
+      };
+
+      window.addEventListener('driver-location-tick', handleGpsTick);
+      window.addEventListener('driver-location-update', handleGpsTick);
     }
   } catch(err) {
     console.warn('[DriverMap] MapLibre initialization warning:', err);
@@ -624,15 +686,21 @@ export function initDriverNavigationMap(container) {
         border-color: #22c55e !important;
       }
 
-      /* Native High-Resolution Vector Rendering (OpenFreeMap Dark & Liberty) */
-      .driver-dark-mode #driver-fullscreen-map .maplibregl-canvas {
-        filter: none !important;
+      /* High-Definition Contrast Inversion for Dark Mode */
+      .driver-dark-mode #driver-fullscreen-map .maplibregl-canvas,
+      .driver-dark-mode #driver-fullscreen-map canvas,
+      #driver-fullscreen-map.driver-dark-mode .maplibregl-canvas,
+      #driver-fullscreen-map.driver-dark-mode canvas {
+        filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.15) !important;
       }
-      .driver-light-mode #driver-fullscreen-map .maplibregl-canvas {
+      .driver-light-mode #driver-fullscreen-map .maplibregl-canvas,
+      .driver-light-mode #driver-fullscreen-map canvas,
+      #driver-fullscreen-map.driver-light-mode .maplibregl-canvas,
+      #driver-fullscreen-map.driver-light-mode canvas {
         filter: none !important;
       }
       .driver-dark-mode #driver-fullscreen-map {
-        background-color: #12161f !important;
+        background-color: #0d1117 !important;
       }
       .driver-light-mode #driver-fullscreen-map {
         background-color: #f8fafc !important;
@@ -673,6 +741,16 @@ export function initDriverNavigationMap(container) {
 
 export function getDriverMapInstance() {
   return driverMap;
+}
+
+export function zoomInDriverMap() {
+  if (!driverMap) return;
+  try { driverMap.zoomIn({ duration: 300 }); } catch(e) {}
+}
+
+export function zoomOutDriverMap() {
+  if (!driverMap) return;
+  try { driverMap.zoomOut({ duration: 300 }); } catch(e) {}
 }
 
 export function recenterOnDriver() {
@@ -1733,15 +1811,8 @@ export function renderDemandHotspots(hotspotsData = null) {
   });
 }
 
-export function checkAutoSolarTheme(force = false) {
-  const mode = getDriverThemeMode();
-  if (mode !== 'auto' && !force) return; // User explicitly selected their theme, preserve it!
-  const hour = new Date().getHours();
-  const shouldBeLight = (hour >= 7 && hour < 19);
-  const targetTheme = shouldBeLight ? 'light' : 'dark';
-  if (getDriverMapTheme() !== targetTheme || force) {
-    setDriverMapTheme(targetTheme, false);
-  }
+export function checkAutoSolarTheme() {
+  // 100% Manual Theme Control - No automatic time changes
 }
 
 export function clearDriverRoute() {

@@ -684,7 +684,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
     <div class="comercio-page">
       <!-- Minimal Sticky Navbar -->
       <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; padding: calc(env(safe-area-inset-top, 0px)) 16px 0 16px; box-sizing: border-box; transition: background 0.3s, box-shadow 0.3s; background: transparent;">
-        <button class="comercio-header-back" id="comercio-nav-back" onclick="location.hash = '#/'" style="position: relative; top: 0; left: 0; margin: 0; z-index: 10; border: none; background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: background 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: #000;">${icon('back', 20)}</button>
+        <button class="comercio-header-back" id="comercio-nav-back" style="position: relative; top: 0; left: 0; margin: 0; z-index: 10; border: none; background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: background 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: #000;">${icon('back', 20)}</button>
         <div id="comercio-nav-title" style="display: flex; align-items: center; gap: 10px; margin-left: 14px; opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(4px); overflow: hidden; flex: 1; height: 36px;">
           ${comercio.logo 
             ? `<img src="${comercio.logo}" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--color-surface); flex-shrink: 0;" />`
@@ -839,6 +839,25 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
   const navTitle = document.getElementById('comercio-nav-title');
   const navBack = document.getElementById('comercio-nav-back');
   const bannerImg = document.getElementById('comercio-banner-img');
+
+  if (navBack) {
+    navBack.onclick = (e) => {
+      e.preventDefault();
+      const oldHash = window.location.hash;
+      if (window.history.length > 1) {
+        window.history.back();
+        setTimeout(() => {
+          if (window.location.hash === oldHash) {
+            const lastCat = sessionStorage.getItem('gd_last_category') || comercio.category;
+            window.location.hash = lastCat ? `#/category/${encodeURIComponent(lastCat)}` : '#/';
+          }
+        }, 150);
+      } else {
+        const lastCat = sessionStorage.getItem('gd_last_category') || comercio.category;
+        window.location.hash = lastCat ? `#/category/${encodeURIComponent(lastCat)}` : '#/';
+      }
+    };
+  }
   
   if (navbar) {
     if (window._comercioScrollHandler) {

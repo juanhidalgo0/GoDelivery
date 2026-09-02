@@ -195,6 +195,11 @@ self.addEventListener('activate', (event) => {
     )).then(() => self.clients.claim())
   );
 });
+
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  const url = new URL(request.url);
+
   // STRATEGY: Offline Map Tiles, Vector Glyphs & Sprites Caching
   const isMapTile = url.hostname.includes('tile.openstreetmap.org') ||
                     url.hostname.includes('cartocdn.com') ||

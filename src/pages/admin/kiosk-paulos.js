@@ -50,28 +50,6 @@ async function loadKioskPaulosData() {
   if (!scrollArea) return;
 
   try {
-    // Ensure Maxikiosco Paulos commerce exists in 'comercios' collection
-    const { setDoc } = await import('firebase/firestore');
-    const paulosComRef = doc(db, 'comercios', 'maxikiosco_paulos');
-    const paulosComSnap = await getDoc(paulosComRef);
-    if (!paulosComSnap.exists()) {
-      await setDoc(paulosComRef, {
-        name: 'Maxikiosco Paulos',
-        category: 'Kiosco',
-        description: 'Convenio oficial con Maxikiosco Paulos',
-        deliveryCost: 0,
-        deliveryTime: 25,
-        phone: '5492215555555',
-        address: 'Magdalena',
-        coords: { lat: -35.0811, lng: -57.5146 },
-        ownerId: 'paulos_preset',
-        isActive: true,
-        approvedByAdmin: true,
-        promoted: false, // Publicidad/destaque desactivado
-        createdAt: new Date()
-      });
-    }
-
     // 1. Fetch Configuration
     const configDocRef = doc(db, 'settings', 'paulos_config');
     const configSnap = await getDoc(configDocRef);

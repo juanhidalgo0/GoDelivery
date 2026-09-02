@@ -167,16 +167,24 @@
 }
 
 .bubble-mine {
-  background: var(--color-primary);
-  color: white;
+  background: var(--color-primary, #e11d48);
+  color: #ffffff !important;
   border-bottom-right-radius: 4px;
 }
 
 .bubble-other {
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-  border: none;
+  background: #1e293b;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom-left-radius: 4px;
+}
+
+[data-theme="light"] .bubble-other,
+body.driver-light-mode .bubble-other,
+.driver-light-mode .bubble-other {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #e2e8f0 !important;
 }
 
 .consecutive .bubble-mine {

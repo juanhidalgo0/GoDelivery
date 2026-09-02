@@ -17,7 +17,7 @@ export function renderNavbar() {
 
   const user = getState().user;
 
-  const isOverlayFullscreen = hash.startsWith('/profile/') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/');
+  const isOverlayFullscreen = hash.startsWith('/profile') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/');
 
   // Hide on admin/panel pages or tracking
   if (hash.startsWith('/admin') || hash.startsWith('/pedido/')) {
@@ -41,17 +41,12 @@ export function renderNavbar() {
     appContent.style.paddingBottom = '';
     appContent.style.minHeight = '';
   }
-  const overlay = document.getElementById('app-overlay');
-  if (overlay) {
-    if (isOverlayFullscreen) {
-      overlay.classList.add('panel-fullscreen');
-    } else {
-      overlay.classList.remove('panel-fullscreen');
-    }
+  // When in fullscreen profile overlay, skip navbar DOM rebuild
+  if (hash.startsWith('/profile')) {
+    return;
   }
 
   const hashPath = hash.split('?')[0];
-  console.log('[NavBar Debug] isDelivery():', isDelivery(), 'userObject:', getState().user);
 
   navbar.innerHTML = `
     <div class="bottom-nav" style="background: var(--footer-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-top: 1px solid var(--footer-border); box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.05);">

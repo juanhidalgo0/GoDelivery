@@ -28,9 +28,7 @@
           localStorage.setItem('gd_live_build_ts', currentBuild);
         }
       } catch(e) {}
-    })();
-  </script>
-    (function() {
+
       try {
         var userStr = localStorage.getItem('gd-user') || localStorage.getItem('gd_user');
         var parsedRole = '';
@@ -88,8 +86,32 @@
     }
   </style>
   <script>
+    window.onerror = function(msg, url, line, col, error) {
+      var s = String(msg || '') + ' ' + String(url || '') + ' ' + (error ? String(error.message || '') : '');
+      if (s.indexOf('startTime') !== -1 || s.indexOf('reportAllChanges') !== -1) {
+        return true;
+      }
+      return false;
+    };
+
+    var _origConsoleError = console.error;
+    console.error = function() {
+      var argsStr = Array.prototype.slice.call(arguments).map(function(a) { 
+        return String(a && a.message ? a.message : (a || '')); 
+      }).join(' ');
+      if (argsStr.indexOf('startTime') !== -1 || argsStr.indexOf('reportAllChanges') !== -1) {
+        return;
+      }
+      _origConsoleError.apply(console, arguments);
+    };
+
     window.addEventListener('error', function(e) {
       var msg = (e && e.message) ? e.message : '';
+      if (msg.indexOf('startTime') !== -1 || msg.indexOf('reportAllChanges') !== -1) {
+        if (e.preventDefault) e.preventDefault();
+        if (e.stopPropagation) e.stopPropagation();
+        return false;
+      }
       if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {
         if (!sessionStorage.getItem('gd_chunk_reload')) {
           sessionStorage.setItem('gd_chunk_reload', 'true');
@@ -111,6 +133,10 @@
     window.addEventListener('unhandledrejection', function(e) {
       var reason = e && e.reason;
       var msg = (reason && reason.message) ? reason.message : String(reason || '');
+      if (msg.indexOf('startTime') !== -1 || msg.indexOf('reportAllChanges') !== -1) {
+        if (e.preventDefault) e.preventDefault();
+        return;
+      }
       if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {
         if (!sessionStorage.getItem('gd_chunk_reload')) {
           sessionStorage.setItem('gd_chunk_reload', 'true');
@@ -167,11 +193,11 @@
       }
     })();
   </script>
-  <!-- Preload key brand icons for instant load -->
-  <link rel="preload" as="image" href="/go-bag.png" />
-  <link rel="preload" as="image" href="/go-pickup-point.png" />
-  <link rel="preload" as="image" href="/go-cash.png" />
-  <link rel="preload" as="image" href="/go-clipboard.png" />
+  <!-- Prefetch key brand icons for instant load without premature warning -->
+  <link rel="prefetch" href="/go-bag.png" />
+  <link rel="prefetch" href="/go-pickup-point.png" />
+  <link rel="prefetch" href="/go-cash.png" />
+  <link rel="prefetch" href="/go-clipboard.png" />
   <meta charset="UTF-8" />
   <script>
     const savedTheme = localStorage.getItem('gd-theme') || 'light';
@@ -790,7 +816,8 @@
   <div id="toast-container"></div>
   <!-- Modal container -->
   <div id="modal-container"></div>
-  <div id="notifications-drawer-container"></div>
+  <!-- Google Maps Places & Geocoding API for Milimetric Address Accuracy -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places&language=es&region=AR" async defer></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 

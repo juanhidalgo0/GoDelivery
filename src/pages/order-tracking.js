@@ -8,6 +8,7 @@ import { showConfirm, closeModal, showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { getState } from '../state.js';
 import { openChat } from '../components/chat.js';
+import { getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -128,6 +129,14 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         <div style="display:flex; align-items:center; gap:10px;">
           <div id="v5-driver-map-tip-badge" style="background:#10b981; color:white; font-size:12.5px; font-weight:900; padding:10px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.25); white-space:nowrap; box-shadow:0 4px 14px rgba(16,185,129,0.35); display:none; align-items:center; gap:6px; font-family:system-ui, -apple-system, sans-serif;">
             💵 Propina: <span id="v5-driver-map-tip-value">$0</span>
+          </div>
+          <div style="display:flex; flex-direction:column; background:rgba(255,255,255,0.92); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-radius:14px; border:1.5px solid rgba(255,255,255,0.8); box-shadow:0 8px 25px rgba(0,0,0,0.12); overflow:hidden;">
+            <button type="button" id="tracking-zoom-in-btn" style="width:44px; height:40px; background:transparent; border:none; border-bottom:1px solid rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Acercar">
+              ${icon('plus', 18)}
+            </button>
+            <button type="button" id="tracking-zoom-out-btn" style="width:44px; height:40px; background:transparent; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Alejar">
+              ${icon('minus', 18)}
+            </button>
           </div>
           <button id="recenter-map-btn" class="v5-recenter-btn-premium" title="Centrar Recorrido" style="position:static; flex-shrink:0; margin:0;">
             <div class="v5-recenter-icon-wrapper">
@@ -813,6 +822,14 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       }
     }, 150);
   }
+
+  document.getElementById('tracking-zoom-in-btn')?.addEventListener('click', () => {
+    try { if (liveMap) liveMap.zoomIn({ duration: 300 }); } catch(e) {}
+  });
+
+  document.getElementById('tracking-zoom-out-btn')?.addEventListener('click', () => {
+    try { if (liveMap) liveMap.zoomOut({ duration: 300 }); } catch(e) {}
+  });
 
   document.getElementById('recenter-map-btn').onclick = () => {
     if (!liveMap) return;
@@ -1556,7 +1573,31 @@ function updateUI(order, isDriverViewOverride = false) {
   }, 50);
 }
 
-const TRACKING_DARK_STYLE = 'https://tiles.openfreemap.org/styles/dark';
+const TRACKING_DARK_STYLE = {
+  version: 8,
+  sources: {
+    'carto-dark': {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+      ],
+      tileSize: 256,
+      attribution: '&copy; OpenStreetMap &copy; CARTO'
+    }
+  },
+  layers: [
+    {
+      id: 'carto-dark-layer',
+      type: 'raster',
+      source: 'carto-dark',
+      minzoom: 0,
+      maxzoom: 20
+    }
+  ]
+};
 
 function ensureTrackingRouteLayers() {
   if (!liveMap || !liveMap.isStyleLoaded()) return;
@@ -1638,13 +1679,30 @@ function updateMap(order) {
     const magCenterLngLat = [-57.5147, -35.0815];
     const initialCenter = destPos ? [destPos.lng, destPos.lat] : (riderPos ? [riderPos.lng, riderPos.lat] : magCenterLngLat);
 
-    liveMap = new maplibregl.Map({
+    const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
+
+    liveMap = new MapConstructor({
       container,
-      style: TRACKING_DARK_STYLE,
+      style: OSM_MAP_STYLE,
       center: initialCenter,
       zoom: 16,
       attributionControl: false
     });
+
+    liveMap.on('error', () => {
+      try {
+        if (liveMap && liveMap.getStyle() !== OSM_MAP_STYLE) {
+          liveMap.setStyle(OSM_MAP_STYLE);
+        }
+      } catch(e) {}
+    });
+
+    liveMap.on('load', () => {
+      try { liveMap.resize(); } catch(e) {}
+    });
+
+    setTimeout(() => { try { if (liveMap) liveMap.resize(); } catch(e) {} }, 100);
+    setTimeout(() => { try { if (liveMap) liveMap.resize(); } catch(e) {} }, 400);
   }
 
   // Home / Destination Marker

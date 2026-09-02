@@ -615,6 +615,7 @@ async function init() {
     '/admin/settings/push': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminPushSettings(c)),
     '/admin/settings/maintenance': (c) => import('./pages/admin/settings.js').then(m => m.renderAdminMaintenanceSettings(c)),
     '/admin/broadcasts': (c) => import('./pages/admin/broadcasts.js').then(m => m.renderAdminBroadcasts(c)),
+    '/admin/broadcasts/automations': (c) => import('./pages/admin/broadcasts.js').then(m => m.renderAdminBroadcastsAutomations(c)),
     '/admin/broadcasts/history': (c) => import('./pages/admin/broadcasts.js').then(m => m.renderAdminBroadcastsHistory(c)),
     '/admin/ads': (c) => import('./pages/admin/ads.js').then(m => m.renderAdminAds(c)),
     '/admin/gomarket': (c) => import('./pages/admin/gomarket.js').then(m => m.renderAdminGoMarket(c)),

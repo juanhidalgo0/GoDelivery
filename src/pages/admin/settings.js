@@ -1823,20 +1823,30 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
     modalContent.querySelector("#confirm-settlement-btn").onclick = async () => {
       const btn = modalContent.querySelector("#confirm-settlement-btn");
       btn.disabled = true;
-      btn.innerHTML = "Procesando...";
       const amountToSettle = parseFloat(modalContent.querySelector("#settle-amount-input").value) || 0;
       const method = modalContent.querySelector("#settle-method-select").value;
       const notes = modalContent.querySelector("#settle-notes-input").value.trim();
-      if (amountToSettle <= 0 && currentDebt > 0) {
-        showToast("Ingres\xE1 un monto mayor a $0", "error");
+      if (amountToSettle <= 0 && currentDebt > 0 && finalSettleAmount > 0) {
+        showToast("Ingresá un monto mayor a $0", "error");
         btn.disabled = false;
-        btn.innerHTML = `${icon("checkCircle", 20)} Confirmar Liquidaci\xF3n`;
+        btn.innerHTML = `${icon("checkCircle", 20)} Confirmar Liquidación`;
         return;
       }
       try {
         const { writeBatch: writeBatch2, doc: doc2, collection: collection2 } = await import("firebase/firestore");
         const batch = writeBatch2(db);
-        const newDebt = Math.max(0, currentDebt - amountToSettle);
+
+        // Calculate remaining debt taking into account the coupon credit applied to the settled orders
+        let newDebt = 0;
+        if (amountToSettle >= finalSettleAmount) {
+          // Full liquidation of pending net amount -> debt is completely cleared to 0
+          newDebt = 0;
+        } else {
+          // Partial liquidation -> deduct paid cash plus proportional coupons credit
+          const totalSettledDebt = amountToSettle + (finalSettleAmount > 0 ? (amountToSettle / finalSettleAmount) * totalCouponsCredit : totalCouponsCredit);
+          newDebt = Math.max(0, currentDebt - totalSettledDebt);
+        }
+
         const adminEmail = getState().user?.email || "Admin";
         batch.update(doc2(db, "users", driver.id), {
           deliveryDebt: newDebt,
@@ -1848,6 +1858,9 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
           driverName: driver.displayName || driver.name || "Repartidor",
           driverEmail: driver.email || "",
           amount: amountToSettle,
+          grossDebt: currentDebt,
+          couponsCredit: totalCouponsCredit,
+          remainingDebt: newDebt,
           method,
           notes,
           settledBy: adminEmail,
@@ -1857,8 +1870,10 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         batch.set(transRef, {
           driverId: driver.id,
           type: "liquidation",
-          amount: -amountToSettle,
-          description: `Liquidaci\xF3n de deuda (${method === "transferencia" ? "Transferencia" : "Efectivo"})${notes ? ": " + notes : ""}`,
+          amount: -(currentDebt - newDebt),
+          amountPaid: amountToSettle,
+          couponsCredit: totalCouponsCredit,
+          description: `Liquidación de deuda (${method === "transferencia" ? "Transferencia" : "Efectivo"})${totalCouponsCredit > 0 ? ` [Neto: ${formatPrice(amountToSettle)} | Cupones: ${formatPrice(totalCouponsCredit)}]` : ""}${notes ? ": " + notes : ""}`,
           settledBy: adminEmail,
           createdAt: serverTimestamp()
         });

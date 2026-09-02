@@ -38,6 +38,12 @@ export async function renderCategoryPage(categoryName, content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
 
+  if (categoryName) {
+    try {
+      sessionStorage.setItem('gd_last_category', categoryName);
+    } catch(e) {}
+  }
+
   // Premium Header (Red)
   content.innerHTML = `
     <div class="category-page page-enter" style="display:flex; flex-direction:column; height: 100%; background: var(--color-bg); overflow: hidden;">
@@ -287,7 +293,7 @@ export async function renderCategoryPage(categoryName, content) {
                     <!-- Pill 1: Shipping dynamic cost -->
                     <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
                       ${icon('bike', 15, '', 'var(--color-primary)')}
-                      <span>${deliveryFee !== null ? `Envío $${deliveryFee}` : 'Envío gratis'}</span>
+                      <span>${deliveryFee !== null ? (deliveryFee === 0 ? 'Envío gratis' : `Envío $${deliveryFee}`) : 'Envío a calcular'}</span>
                     </span>
                     
                     <!-- Pill 2: Duration -->
@@ -384,7 +390,7 @@ export async function renderCategoryPage(categoryName, content) {
                       <!-- Pill 1: Shipping dynamic cost -->
                       <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
                         ${icon('bike', 15, '', 'var(--color-primary)')}
-                        <span>${deliveryFee !== null ? `Envío $${deliveryFee}` : 'Envío gratis'}</span>
+                        <span>${deliveryFee !== null ? (deliveryFee === 0 ? 'Envío gratis' : `Envío $${deliveryFee}`) : 'Envío a calcular'}</span>
                       </span>
                       
                       <!-- Pill 2: Duration -->

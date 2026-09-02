@@ -3508,6 +3508,108 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
         sentAt: admin.firestore.FieldValue.serverTimestamp()
       });
     }
+
+    // --- AUTOMATED RECURRING PUSH CAMPAIGNS (MEAL-TIMES & SMART TRIGGERS) ---
+    try {
+      const autoSnap = await db.collection("automated_broadcasts").where("enabled", "==", true).get();
+      if (!autoSnap.empty) {
+        // Current time in Argentina
+        const nowArg = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+        const currentDayOfWeek = nowArg.getDay(); // 0 = Domingo, 1 = Lunes, etc.
+        const currentHour = String(nowArg.getHours()).padStart(2, "0");
+        const currentMinute = String(nowArg.getMinutes()).padStart(2, "0");
+        const currentTimeStr = `${currentHour}:${currentMinute}`;
+        const todayDateStr = nowArg.toISOString().slice(0, 10); // YYYY-MM-DD
+
+        for (const docSnap of autoSnap.docs) {
+          const auto = docSnap.data();
+          const autoId = docSnap.id;
+          const scheduledDays = Array.isArray(auto.days) ? auto.days : [0, 1, 2, 3, 4, 5, 6];
+          const scheduledTime = auto.time || "12:00";
+          const lastSentDate = auto.lastSentDate || "";
+
+          // Check if scheduled for today's day of week and current minute
+          if (scheduledDays.includes(currentDayOfWeek) && currentTimeStr === scheduledTime && lastSentDate !== todayDateStr) {
+            logger.info(`[Automated Push] Triggering: ${auto.name} (${autoId}) at ${currentTimeStr}`);
+
+            // Mark lastSentDate immediately to prevent duplicate runs
+            await db.collection("automated_broadcasts").doc(autoId).update({
+              lastSentDate: todayDateStr,
+              lastSentAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            // 1. Fetch target tokens
+            let targetTokens = [];
+            try {
+              if (!auto.targetAudience || auto.targetAudience === "all") {
+                const tokensSnap = await db.collectionGroup("fcmTokens").get();
+                targetTokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+              } else {
+                let usersSnap;
+                if (auto.targetAudience === "clients") {
+                  usersSnap = await db.collection("users").where("role", "in", ["client", "admin"]).get();
+                } else if (auto.targetAudience === "drivers") {
+                  usersSnap = await db.collection("users").where("role", "in", ["driver", "delivery"]).get();
+                } else {
+                  usersSnap = await db.collection("users").where("role", "in", ["commerce", "comercio"]).get();
+                }
+
+                const userIds = usersSnap.docs.map(d => d.id);
+                for (const uId of userIds) {
+                  const tSnap = await db.collection("users").doc(uId).collection("fcmTokens").get();
+                  tSnap.docs.forEach(d => {
+                    if (d.data().token) targetTokens.push(d.data().token);
+                  });
+                }
+              }
+            } catch (tokenErr) {
+              logger.error(`[Automated Push] Error querying tokens for ${autoId}:`, tokenErr);
+            }
+
+            targetTokens = [...new Set(targetTokens)];
+            const sentCount = targetTokens.length;
+
+            // 2. Send the push
+            if (targetTokens.length > 0) {
+              try {
+                await sendPush(targetTokens, {
+                  title: auto.title || "Go Delivery",
+                  body: auto.body
+                }, {
+                  url: auto.url || "/#/",
+                  type: "automated_push",
+                  automationId: autoId,
+                  imageUrl: auto.imageUrl || ""
+                });
+                logger.info(`[Automated Push] ${autoId} sent successfully to ${sentCount} devices.`);
+              } catch (sendErr) {
+                logger.error(`[Automated Push] Error sending push for ${autoId}:`, sendErr);
+              }
+            }
+
+            // 3. Log to broadcasts history for analytics CTR tracking
+            await db.collection("broadcasts").add({
+              title: auto.title || "Go Delivery",
+              body: auto.body,
+              url: auto.url || "/#/",
+              imageUrl: auto.imageUrl || "",
+              targetAudience: auto.targetAudience || "clients",
+              status: "sent",
+              sentCount: sentCount,
+              clicks: 0,
+              isAutomated: true,
+              automationId: autoId,
+              automationName: auto.name || "Automatización",
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              sentAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+          }
+        }
+      }
+    } catch (autoErr) {
+      logger.error("[Automated Push] Error evaluating automated broadcasts:", autoErr);
+    }
+
   } catch (err) {
     logger.error("Error in processScheduledBroadcasts:", err);
   }

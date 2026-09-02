@@ -168,20 +168,23 @@ let lastFirestoreWriteCoords = null;
 async function handleLocationUpdate(pos) {
   if (!pos || !pos.coords) return;
 
-  const { latitude, longitude, heading } = pos.coords;
+  const { latitude, longitude, heading, speed } = pos.coords;
   lastLocationUpdateTime = Date.now();
   
   // Cache position in global window context for instant access across modals/maps
   window.lastRiderPos = { lat: latitude, lng: longitude };
   
-  // Dispatch custom window event so in-memory UI updates smoothly with 0 network calls
-  window.dispatchEvent(new CustomEvent('driver-location-update', {
-    detail: {
-      coords: { lat: latitude, lng: longitude },
-      heading: heading || 0,
-      timestamp: lastLocationUpdateTime
-    }
-  }));
+  const tickDetail = {
+    coords: { lat: latitude, lng: longitude, speed: (typeof speed === 'number' && speed >= 0) ? speed : 0 },
+    heading: heading || 0,
+    speed: (typeof speed === 'number' && speed >= 0) ? speed * 3.6 : 0,
+    timestamp: lastLocationUpdateTime
+  };
+
+  // Dispatch live in-memory events so navigation map & telemetry update with zero latency
+  window.dispatchEvent(new CustomEvent('driver-location-update', { detail: tickDetail }));
+  window.dispatchEvent(new CustomEvent('driver-location-tick', { detail: tickDetail }));
+  window.dispatchEvent(new CustomEvent('driver-speed-update', { detail: { speedKmh: Math.round(tickDetail.speed) } }));
 
   // Automatic Geofencing Evaluation
   let geofenceTriggeredThisTick = false;
@@ -392,11 +395,14 @@ async function startWatching() {
         stale: false,
         distanceFilter: 2
       }, async (location, error) => {
-        if (error) {
-          console.error('Background Tracking Native Error:', error);
-          return;
-        }
-        const pos = { coords: { latitude: location.latitude, longitude: location.longitude } };
+        const pos = {
+          coords: {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            heading: location.bearing || location.heading || 0,
+            speed: (typeof location.speed === 'number' && location.speed >= 0) ? location.speed : 0
+          }
+        };
         
         await handleLocationUpdate(pos);
       });

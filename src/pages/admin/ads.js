@@ -1073,7 +1073,7 @@ function openMandadoBannerEditor(banner = null) {
       const file = e.target.files[0];
       if (file) {
         try {
-          const base64 = await openCropper(file, { aspectRatio: 8 / 5, maxWidth: 800, maxHeight: 500 });
+          const base64 = await openCropper(file, { aspectRatio: 16 / 9, maxWidth: 800, maxHeight: 450 });
           croppedBase64 = base64;
           const previewContainer = modalContent.querySelector('#banner-editor-preview-container');
           if (previewContainer) {

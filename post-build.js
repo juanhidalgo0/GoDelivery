@@ -76,3 +76,19 @@ if (fs.existsSync(distIndexPath)) {
     console.error('[Post-Build] Error updating dist/index.html:', err);
   }
 }
+
+// 6. Ensure MapLibre Worker files are in dist/assets and dist/
+try {
+  const maplibreDist = path.join(process.cwd(), 'node_modules', 'maplibre-gl', 'dist');
+  const filesToCopy = ['maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs'];
+  for (const f of filesToCopy) {
+    const src = path.join(maplibreDist, f);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(process.cwd(), 'dist', 'assets', f));
+      fs.copyFileSync(src, path.join(process.cwd(), 'dist', f));
+    }
+  }
+  console.log('[Post-Build] Copied MapLibre worker files to dist/assets');
+} catch (err) {
+  console.error('[Post-Build] Error copying MapLibre worker files:', err);
+}

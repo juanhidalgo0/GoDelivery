@@ -60,11 +60,32 @@
           ]
         },
         {
+          "source": "/**/*.mjs",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/javascript"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
           "source": "/assets/**",
           "headers": [
             {
               "key": "Cache-Control",
               "value": "max-age=31536000, immutable"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
             }
           ]
         },

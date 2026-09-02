@@ -1,6 +1,7 @@
 // GoDelivery — Location Picker Modal (Refined with MapLibre GL)
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { DEFAULT_MAP_STYLE, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { icon } from '../utils/icons.js';
 import { showModal, closeModal } from './modal.js';
 
@@ -38,10 +39,20 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
            <div class="dest-pin" style="width:40px; height:40px;">${icon('mapPin', 24)}</div>
         </div>
       </div>
-      <!-- Center Button -->
-      <button id="picker-center-on-me" style="position:absolute; bottom:16px; right:16px; z-index:1000; width:44px; height:44px; border-radius:14px; border:none; background:var(--color-surface); color:var(--color-primary); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:var(--shadow-lg);">
-        ${icon('navigationArrow', 20)}
-      </button>
+      <!-- Floating Map Controls (Zoom In, Zoom Out, Center) -->
+      <div style="position:absolute; bottom:16px; right:16px; z-index:1000; display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; flex-direction:column; background:rgba(255,255,255,0.92); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-radius:14px; border:1.5px solid rgba(255,255,255,0.8); box-shadow:0 8px 25px rgba(0,0,0,0.12); overflow:hidden;">
+          <button type="button" id="picker-zoom-in" style="width:44px; height:40px; background:transparent; border:none; border-bottom:1px solid rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Acercar">
+            ${icon('plus', 18)}
+          </button>
+          <button type="button" id="picker-zoom-out" style="width:44px; height:40px; background:transparent; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Alejar">
+            ${icon('minus', 18)}
+          </button>
+        </div>
+        <button id="picker-center-on-me" style="width:44px; height:44px; border-radius:14px; border:1.5px solid rgba(255,255,255,0.8); background:rgba(255,255,255,0.92); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); color:var(--color-primary); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 25px rgba(0,0,0,0.12);" title="Mi ubicación">
+          ${icon('navigationArrow', 20)}
+        </button>
+      </div>
     </div>
 
     <!-- Footer -->
@@ -73,33 +84,47 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
     });
 
     function initMap() {
-      const magCenterLngLat = [-57.5147, -35.0815];
-      const mapCenter = initialCoords ? [initialCoords.lng, initialCoords.lat] : magCenterLngLat;
+      const magCenter = { lat: -35.0815, lng: -57.5147 };
+      const mapCenter = initialCoords ? { lat: Number(initialCoords.lat), lng: Number(initialCoords.lng) } : magCenter;
 
       const mapContainer = document.getElementById('map-picker');
       if (!mapContainer) return;
 
-      const map = new maplibregl.Map({
-        container: mapContainer,
-        style: 'https://tiles.openfreemap.org/styles/liberty',
-        center: mapCenter,
-        zoom: initialCoords ? 17 : 15,
-        attributionControl: false
-      });
-
       let selectedCoords = initialCoords || { lat: -35.0815, lng: -57.5147 };
       let selectedAddress = initialAddress;
-
-      map.on('moveend', () => {
-        const c = map.getCenter();
-        selectedCoords = { lat: c.lat, lng: c.lng };
-        reverseGeocode(c.lat, c.lng);
-      });
 
       const reverseGeocode = async (lat, lng) => {
         const addrDisplay = document.getElementById('detected-address');
         if (!addrDisplay) return;
         addrDisplay.innerHTML = `<span style="opacity:0.5;">Buscando...</span>`;
+
+        if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Geocoder) {
+          try {
+            const geocoder = new window.google.maps.Geocoder();
+            const gResult = await new Promise((resolve, reject) => {
+              geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+                if (status === 'OK' && results && results[0]) resolve(results[0]);
+                else reject(new Error('Status: ' + status));
+              });
+            });
+            if (gResult) {
+              let street = '';
+              let number = '';
+              let city = '';
+              (gResult.address_components || []).forEach(comp => {
+                if (comp.types.includes('route')) street = comp.long_name;
+                if (comp.types.includes('street_number')) number = comp.long_name;
+                if (comp.types.includes('locality')) city = comp.long_name;
+              });
+              let display = `${street} ${number}`.trim();
+              if (city && !display.includes(city)) display += `, ${city}`;
+              selectedAddress = display || gResult.formatted_address.split(',')[0];
+              addrDisplay.textContent = selectedAddress;
+              return;
+            }
+          } catch(e) {}
+        }
+
         try {
           const resp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=es&addressdetails=1`);
           const data = await resp.json();
@@ -120,6 +145,53 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
           addrDisplay.textContent = "Ubicación seleccionada";
         }
       };
+
+      // A. Google Maps Native
+      let map = null;
+      let isGoogleMap = false;
+
+      if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Map) {
+        try {
+          map = new window.google.maps.Map(mapContainer, {
+            center: mapCenter,
+            zoom: initialCoords ? 17 : 15.5,
+            disableDefaultUI: true,
+            gestureHandling: 'greedy',
+            clickableIcons: false
+          });
+
+          map.addListener('idle', () => {
+            const c = map.getCenter();
+            if (c) {
+              selectedCoords = { lat: c.lat(), lng: c.lng() };
+              reverseGeocode(c.lat(), c.lng());
+            }
+          });
+
+          isGoogleMap = true;
+        } catch(e) {
+          console.warn('[LocationModal] Google Maps init failed, falling back to MapLibre:', e);
+        }
+      }
+
+      // B. MapLibre Fallback
+      if (!isGoogleMap) {
+        const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
+
+        map = new MapConstructor({
+          container: mapContainer,
+          style: OSM_MAP_STYLE,
+          center: [mapCenter.lng, mapCenter.lat],
+          zoom: initialCoords ? 17 : 15,
+          attributionControl: false
+        });
+
+        map.on('moveend', () => {
+          const c = map.getCenter();
+          selectedCoords = { lat: c.lat, lng: c.lng };
+          reverseGeocode(c.lat, c.lng);
+        });
+      }
 
       // Autocomplete Suggestions logic
       const searchInput = document.getElementById('map-picker-search-input');
@@ -171,7 +243,14 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
                       selectedCoords = { lat: finalLat, lng: finalLng };
                       selectedAddress = addr;
 
-                      map.easeTo({ center: [finalLng, finalLat], zoom: 17 });
+                      if (map) {
+                        if (typeof map.panTo === 'function') {
+                          map.panTo({ lat: finalLat, lng: finalLng });
+                          map.setZoom(17);
+                        } else if (typeof map.easeTo === 'function') {
+                          map.easeTo({ center: [finalLng, finalLat], zoom: 17 });
+                        }
+                      }
 
                       const addrDisplay = document.getElementById('detected-address');
                       if (addrDisplay) addrDisplay.textContent = selectedAddress;
@@ -233,7 +312,14 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
           navigator.geolocation.getCurrentPosition((pos) => {
             const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             selectedCoords = p;
-            map.easeTo({ center: [p.lng, p.lat], zoom });
+            if (map) {
+              if (typeof map.panTo === 'function') {
+                map.panTo({ lat: p.lat, lng: p.lng });
+                map.setZoom(zoom);
+              } else if (typeof map.easeTo === 'function') {
+                map.easeTo({ center: [p.lng, p.lat], zoom });
+              }
+            }
             reverseGeocode(p.lat, p.lng);
           });
         }
@@ -243,12 +329,50 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
         centerMe(17);
       }
 
-      document.getElementById('use-loc-btn').onclick = () => centerMe(17);
-      document.getElementById('picker-center-on-me').onclick = () => centerMe(17);
+      const zoomInEl = document.getElementById('picker-zoom-in');
+      if (zoomInEl) {
+        zoomInEl.onclick = (e) => {
+          e.preventDefault();
+          try {
+            if (map) {
+              if (typeof map.setZoom === 'function') {
+                map.setZoom(map.getZoom() + 1);
+              } else if (typeof map.zoomIn === 'function') {
+                map.zoomIn({ duration: 300 });
+              }
+            }
+          } catch(err) {}
+        };
+      }
 
-      document.getElementById('confirm-loc-btn').onclick = () => {
-        onSelect({ coords: selectedCoords, address: selectedAddress });
-        closeModal();
-      };
+      const zoomOutEl = document.getElementById('picker-zoom-out');
+      if (zoomOutEl) {
+        zoomOutEl.onclick = (e) => {
+          e.preventDefault();
+          try {
+            if (map) {
+              if (typeof map.setZoom === 'function') {
+                map.setZoom(map.getZoom() - 1);
+              } else if (typeof map.zoomOut === 'function') {
+                map.zoomOut({ duration: 300 });
+              }
+            }
+          } catch(err) {}
+        };
+      }
+
+      const useLocBtn = document.getElementById('use-loc-btn');
+      if (useLocBtn) useLocBtn.onclick = () => centerMe(17);
+
+      const centerOnMeBtn = document.getElementById('picker-center-on-me');
+      if (centerOnMeBtn) centerOnMeBtn.onclick = () => centerMe(17);
+
+      const confirmLocBtn = document.getElementById('confirm-loc-btn');
+      if (confirmLocBtn) {
+        confirmLocBtn.onclick = () => {
+          onSelect({ coords: selectedCoords, address: selectedAddress });
+          closeModal();
+        };
+      }
     }
   }

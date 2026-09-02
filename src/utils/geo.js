@@ -42,6 +42,31 @@ export async function geocodeAddress(address) {
       query += `, Magdalena, Buenos Aires, Argentina`;
     }
 
+    // 1. Google Maps Geocoder
+    if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Geocoder) {
+      try {
+        const geocoder = new window.google.maps.Geocoder();
+        const result = await new Promise((resolve, reject) => {
+          geocoder.geocode({ address: query }, (results, status) => {
+            if (status === 'OK' && results && results[0]) {
+              resolve({
+                lat: results[0].geometry.location.lat(),
+                lng: results[0].geometry.location.lng(),
+                displayName: results[0].formatted_address
+              });
+            } else {
+              reject(new Error("Google Geocode status: " + status));
+            }
+          });
+        });
+        geocodeCache.set(address, result);
+        return result;
+      } catch (gErr) {
+        console.warn('Google Geocoding note, using fallback:', gErr);
+      }
+    }
+
+    // 2. OpenStreetMap Nominatim Fallback
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=1`);
     const data = await response.json();
     
@@ -104,22 +129,23 @@ export function calculateDynamicFee(distanceKm) {
 }
 
 const MAGDALENA_STREETS = [
-  { name: 'José María Miguens', keys: ['miguens', 'jose maria miguens', 'josé maría miguens', 'jose miguens', 'mig', 'miguen'], lat: -35.0825, lng: -57.5118, dir: 'nw-se' },
-  { name: 'Doctor Patricio Brenan', keys: ['brenan', 'patricio brenan', 'dr brenan', 'bre'], lat: -35.0818, lng: -57.5135, dir: 'nw-se' },
-  { name: 'Bernardino Rivadavia', keys: ['rivadavia', 'bernardino rivadavia', 'riva', 'riv'], lat: -35.0810, lng: -57.5152, dir: 'nw-se' },
-  { name: 'Goenaga', keys: ['goenaga', 'goen', 'goe'], lat: -35.0802, lng: -57.5132, dir: 'sw-ne' },
-  { name: 'San Martín', keys: ['san martin', 'san martín', 'san mart', 'av san martin'], lat: -35.0825, lng: -57.5145, dir: 'sw-ne' },
-  { name: 'Chacabuco', keys: ['chacabuco', 'chaca', 'chac'], lat: -35.0795, lng: -57.5160, dir: 'sw-ne' },
-  { name: '25 de Mayo', keys: ['25 de mayo', '25 de may', 'veinticinco de mayo', '25 mayo'], lat: -35.0818, lng: -57.5175, dir: 'nw-se' },
-  { name: 'Mariano Moreno', keys: ['moreno', 'mariano moreno', 'mor'], lat: -35.0835, lng: -57.5165, dir: 'sw-ne' },
-  { name: 'Juan Lavalle', keys: ['lavalle', 'juan lavalle', 'lav'], lat: -35.0840, lng: -57.5150, dir: 'sw-ne' },
-  { name: 'Ituzaingó', keys: ['ituzaingo', 'ituzaingó', 'itu'], lat: -35.0845, lng: -57.5130, dir: 'sw-ne' },
+  { name: 'José María Miguens', keys: ['miguens', 'jose maria miguens', 'josé maría miguens', 'jose miguens', 'mig', 'miguen'], lat: -35.08475, lng: -57.51599, dir: 'nw-se' },
+  { name: 'Presidente Juan D. Perón', keys: ['peron', 'juan d peron', 'presidente peron', 'presidente juan d. peron', 'presidente juan d peron', 'jd peron'], lat: -35.0815, lng: -57.5147, dir: 'nw-se' },
+  { name: 'Doctor Patricio Brenan', keys: ['brenan', 'patricio brenan', 'dr brenan', 'bre', 'doctor brenan'], lat: -35.0805, lng: -57.5140, dir: 'nw-se' },
+  { name: 'Bernardino Rivadavia', keys: ['rivadavia', 'bernardino rivadavia', 'riva', 'riv'], lat: -35.0813, lng: -57.5111, dir: 'nw-se' },
+  { name: 'Doctor Pedro Goenaga', keys: ['goenaga', 'goen', 'goe', 'pedro goenaga', 'dr goenaga'], lat: -35.0787, lng: -57.5178, dir: 'sw-ne' },
+  { name: 'San Martín', keys: ['san martin', 'san martín', 'san mart', 'av san martin'], lat: -35.0803, lng: -57.5115, dir: 'sw-ne' },
+  { name: 'Chacabuco', keys: ['chacabuco', 'chaca', 'chac'], lat: -35.0780, lng: -57.5188, dir: 'sw-ne' },
+  { name: '25 de Mayo', keys: ['25 de mayo', '25 de may', 'veinticinco de mayo', '25 mayo'], lat: -35.0792, lng: -57.5123, dir: 'nw-se' },
+  { name: 'Mariano Moreno', keys: ['moreno', 'mariano moreno', 'mor'], lat: -35.0740, lng: -57.5155, dir: 'sw-ne' },
+  { name: 'Juan Lavalle', keys: ['lavalle', 'juan lavalle', 'lav'], lat: -35.0815, lng: -57.5209, dir: 'sw-ne' },
+  { name: 'Ituzaingó', keys: ['ituzaingo', 'ituzaingó', 'itu'], lat: -35.0780, lng: -57.5035, dir: 'sw-ne' },
   { name: 'Coronel Pintos', keys: ['pintos', 'coronel pintos', 'pinto', 'pin'], lat: -35.0800, lng: -57.5110, dir: 'sw-ne' },
   { name: 'Manuel Rebufo', keys: ['rebufo', 'manuel rebufo', 'rebu'], lat: -35.0790, lng: -57.5125, dir: 'sw-ne' },
-  { name: 'Viamonte', keys: ['viamonte', 'viam', 'via'], lat: -35.0780, lng: -57.5140, dir: 'sw-ne' },
-  { name: 'Manuel Belgrano', keys: ['belgrano', 'manuel belgrano', 'belg'], lat: -35.0850, lng: -57.5160, dir: 'sw-ne' },
+  { name: 'Viamonte', keys: ['viamonte', 'viam', 'via'], lat: -35.0682, lng: -57.5164, dir: 'sw-ne' },
+  { name: 'Manuel Belgrano', keys: ['belgrano', 'manuel belgrano', 'belg'], lat: -35.0748, lng: -57.5055, dir: 'sw-ne' },
   { name: 'Caseros', keys: ['caseros', 'case', 'cas'], lat: -35.0855, lng: -57.5140, dir: 'sw-ne' },
-  { name: 'Hipólito Yrigoyen', keys: ['yrigoyen', 'hipolito yrigoyen', 'hipólito yrigoyen', 'yri', 'irigoyen'], lat: -35.0815, lng: -57.5130, dir: 'nw-se' },
+  { name: 'Hipólito Yrigoyen', keys: ['yrigoyen', 'hipolito yrigoyen', 'hipólito yrigoyen', 'yri', 'irigoyen'], lat: -35.0785, lng: -57.5166, dir: 'nw-se' },
   { name: 'Adolfo Alsina', keys: ['alsina', 'adolfo alsina', 'als'], lat: -35.0860, lng: -57.5125, dir: 'sw-ne' },
   { name: 'Bartolomé Mitre', keys: ['mitre', 'bartolome mitre', 'bartolomé mitre'], lat: -35.0822, lng: -57.5105, dir: 'nw-se' },
   { name: 'Julio A. Roca', keys: ['roca', 'julio a roca', 'julio roca'], lat: -35.0865, lng: -57.5155, dir: 'sw-ne' },
@@ -146,27 +172,110 @@ const MAGDALENA_STREETS = [
   { name: 'Hipólito Vieytes', keys: ['vieytes', 'hipolito vieytes', 'hipólito vieytes'], lat: -35.2815, lng: -57.5758, dir: 'nw-se' }
 ];
 
-const LOCAL_ZONE_KEYWORDS = ['magdalena', 'bavio', 'general mansilla', 'atalaya', 'vieytes', 'empalme', '7101'];
+const ALLOWED_LOCAL_ZONES = [
+  'magdalena',
+  'atalaya',
+  'general mansilla',
+  'mansilla',
+  'bavio',
+  'vieytes',
+  'empalme magdalena',
+  'empalme',
+  'partido de magdalena',
+  'b1913',
+  '7101',
+  '1913'
+];
 
 const DISALLOWED_LOCATION_TERMS = [
+  'brandsen', 'coronel brandsen', 'la plata', 'berisso', 'ensenada',
   'capital federal', 'caba', 'ciudad autonoma de buenos aires', 'ciudad autónoma de buenos aires',
   'san isidro', 'vicente lopez', 'vicente lópez', 'avellaneda', 'quilmes', 'lanus', 'lanús',
   'lomas de zamora', 'moron', 'morón', 'san martin, buenos aires', 'san martín, buenos aires'
 ];
 
-function isLocalAddress(desc) {
+export function isLocalAddress(desc) {
   if (!desc) return false;
   const lower = desc.toLowerCase();
   for (const forbidden of DISALLOWED_LOCATION_TERMS) {
-    if (lower.includes(forbidden)) return false;
+    if (lower.includes(forbidden) && !lower.includes('magdalena')) return false;
   }
-  return true;
+  return ALLOWED_LOCAL_ZONES.some(zone => lower.includes(zone));
 }
 
 export async function searchAddressSuggestions(term) {
   if (!term || term.trim().length < 2) return [];
   
   const rawInput = term.trim();
+
+  // 1. Google Places Autocomplete strictly scoped to Magdalena
+  if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.places && window.google.maps.places.AutocompleteService) {
+    try {
+      const service = new window.google.maps.places.AutocompleteService();
+      const magBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(-35.35, -57.85),
+        new window.google.maps.LatLng(-34.95, -57.20)
+      );
+
+      const queryWithZone = rawInput.toLowerCase().includes('magdalena') ? rawInput : `${rawInput}, Magdalena`;
+
+      const predictions = await new Promise((resolve) => {
+        service.getPlacePredictions({
+          input: queryWithZone,
+          locationBias: magBounds,
+          componentRestrictions: { country: 'ar' }
+        }, (preds, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && preds && preds.length > 0) {
+            resolve(preds);
+          } else {
+            service.getPlacePredictions({
+              input: rawInput,
+              locationBias: magBounds,
+              componentRestrictions: { country: 'ar' }
+            }, (fbPreds, fbStatus) => {
+              if (fbStatus === window.google.maps.places.PlacesServiceStatus.OK && fbPreds) {
+                resolve(fbPreds);
+              } else {
+                resolve([]);
+              }
+            });
+          }
+        });
+      });
+
+      const filteredPredictions = (predictions || []).filter(pred => isLocalAddress(pred.description));
+
+      if (filteredPredictions && filteredPredictions.length > 0) {
+        const geocoder = new window.google.maps.Geocoder();
+        const results = await Promise.all(filteredPredictions.slice(0, 5).map(async (pred) => {
+          try {
+            const geoRes = await new Promise((res, rej) => {
+              geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
+                if (s === 'OK' && r && r[0]) {
+                  res(r[0]);
+                } else {
+                  rej(new Error(s));
+                }
+              });
+            });
+            return {
+              lat: geoRes.geometry.location.lat(),
+              lng: geoRes.geometry.location.lng(),
+              address: pred.structured_formatting ? pred.structured_formatting.main_text : pred.description.split(',')[0],
+              displayName: pred.description
+            };
+          } catch(e) {
+            return null;
+          }
+        }));
+        const valid = results.filter(Boolean);
+        if (valid.length > 0) return valid;
+      }
+    } catch(gErr) {
+      console.warn('Google Places suggestion error, using local fallback:', gErr);
+    }
+  }
+  
   const normalizedTerm = rawInput.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   
   // Extract any numbers typed by the user (e.g., "mig 1250" -> number = 1250, cleanTerm = "mig")

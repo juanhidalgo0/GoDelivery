@@ -734,39 +734,45 @@ export async function showMandadoForm(targetContainer = null) {
     updateCost();
   }, () => calculatedFee);
 
+  const pickupDetailsInput = modalEl.querySelector('#pickup-details');
+  const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+  const favorDetailsInput = modalEl.querySelector('#favor-details');
+
   const updateDetailsFieldsState = () => {
-    const pickupDetailsInput = modalEl.querySelector('#pickup-details');
-    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
-    const favorDetailsInput = modalEl.querySelector('#favor-details');
-
-    if (pickupData) {
-      pickupDetailsInput.disabled = false;
-      pickupDetailsInput.style.opacity = '1';
-      pickupDetailsInput.style.cursor = 'text';
-      pickupDetailsInput.placeholder = 'Detalle: Nro, depto, timbre, local o ref (Obligatorio)';
-    } else {
-      pickupDetailsInput.disabled = true;
-      pickupDetailsInput.style.opacity = '0.6';
-      pickupDetailsInput.style.cursor = 'not-allowed';
-      pickupDetailsInput.placeholder = 'Primero selecciona el origen...';
+    if (pickupDetailsInput) {
+      if (pickupData) {
+        pickupDetailsInput.disabled = false;
+        pickupDetailsInput.style.opacity = '1';
+        pickupDetailsInput.style.cursor = 'text';
+        pickupDetailsInput.placeholder = 'Detalle: Nro, depto, timbre, local o ref (Obligatorio)';
+      } else {
+        pickupDetailsInput.disabled = true;
+        pickupDetailsInput.style.opacity = '0.6';
+        pickupDetailsInput.style.cursor = 'not-allowed';
+        pickupDetailsInput.placeholder = 'Primero selecciona el origen...';
+      }
     }
 
-    if (deliveryData) {
-      deliveryDetailsInput.disabled = false;
-      deliveryDetailsInput.style.opacity = '1';
-      deliveryDetailsInput.style.cursor = 'text';
-      deliveryDetailsInput.placeholder = 'Detalle: Nro, depto, timbre, local o ref (Obligatorio)';
-    } else {
-      deliveryDetailsInput.disabled = true;
-      deliveryDetailsInput.style.opacity = '0.6';
-      deliveryDetailsInput.style.cursor = 'not-allowed';
-      deliveryDetailsInput.placeholder = 'Primero selecciona la dirección de destino...';
+    if (deliveryDetailsInput) {
+      if (deliveryData) {
+        deliveryDetailsInput.disabled = false;
+        deliveryDetailsInput.style.opacity = '1';
+        deliveryDetailsInput.style.cursor = 'text';
+        deliveryDetailsInput.placeholder = 'Detalle: Nro, depto, timbre, local o ref (Obligatorio)';
+      } else {
+        deliveryDetailsInput.disabled = true;
+        deliveryDetailsInput.style.opacity = '0.6';
+        deliveryDetailsInput.style.cursor = 'not-allowed';
+        deliveryDetailsInput.placeholder = 'Primero selecciona la dirección de destino...';
+      }
     }
 
-    favorDetailsInput.disabled = false;
-    favorDetailsInput.style.opacity = '1';
-    favorDetailsInput.style.cursor = 'text';
-    favorDetailsInput.placeholder = 'Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456...';
+    if (favorDetailsInput) {
+      favorDetailsInput.disabled = false;
+      favorDetailsInput.style.opacity = '1';
+      favorDetailsInput.style.cursor = 'text';
+      favorDetailsInput.placeholder = 'Ej: Recoger llaves en el portero y traerlas. Contacto: Juan 123456...';
+    }
   };
 
   const setupScrollFocus = (el) => {

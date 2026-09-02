@@ -39,6 +39,11 @@ export function renderHeader() {
   const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category');
   const slider = document.getElementById('app-slider');
 
+  // When opening fullscreen overlays like Profile, do not alter home header/slider layout to prevent glitches underneath
+  if (hash.startsWith('#/profile')) {
+    return;
+  }
+
   if (!isHome && !isSubPage) {
     header.style.display = 'none';
     document.body.classList.add('header-hidden');

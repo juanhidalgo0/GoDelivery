@@ -1,6 +1,7 @@
-/* GoDelivery — Address Modal Component with MapLibre GL & PedidosYa Style */
+// GoDelivery — Address Modal Component with Google Maps & MapLibre Fallback
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { DEFAULT_MAP_STYLE, getAppMapStyle, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { showModal, closeModal, closeMultipleModals } from './modal.js';
 import { icon } from '../utils/icons.js';
 import { setDeliveryAddress, getState, setState } from '../state.js';
@@ -49,7 +50,10 @@ export function showAddressPrompt(onSuccess, config = {}) {
     }, ms);
   };
 
-  const showMapView = () => {
+  const showMapView = (customCoords = null) => {
+    if (customCoords && !isNaN(customCoords.lat) && !isNaN(customCoords.lng)) {
+      selectedCoords = { lat: Number(customCoords.lat), lng: Number(customCoords.lng) };
+    }
     const titleEl = document.getElementById('address-modal-title');
     const backBtn = document.getElementById('address-modal-back-btn');
     const closeBtn = document.getElementById('address-modal-close-btn');
@@ -63,20 +67,29 @@ export function showAddressPrompt(onSuccess, config = {}) {
       slidesContainer.style.transform = 'translateX(-50%)';
     }
 
+    const targetCenter = selectedCoords || { lat: -35.0815, lng: -57.5147 };
+    disableGeocodingTemporarily(3500);
+
     if (!googleMap) {
       setTimeout(() => {
         initMap();
       }, 50);
     } else {
-      setTimeout(() => {
-        try {
-          googleMap.resize();
-          if (selectedCoords) {
-            disableGeocodingTemporarily(2000);
-            googleMap.easeTo({ center: [selectedCoords.lng, selectedCoords.lat], zoom: 17, duration: 400 });
-          }
-        } catch(e) {}
-      }, 100);
+      [60, 200, 450].forEach((delay) => {
+        setTimeout(() => {
+          try {
+            if (googleMap) {
+              if (typeof googleMap.panTo === 'function') {
+                googleMap.panTo({ lat: Number(targetCenter.lat), lng: Number(targetCenter.lng) });
+                googleMap.setZoom(17.5);
+              } else if (typeof googleMap.jumpTo === 'function') {
+                if (typeof googleMap.resize === 'function') googleMap.resize();
+                googleMap.jumpTo({ center: [Number(targetCenter.lng), Number(targetCenter.lat)], zoom: 17.5 });
+              }
+            }
+          } catch(e) {}
+        }, delay);
+      });
     }
   };
 
@@ -131,7 +144,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
                  </div>
 
                  <!-- Lista de Sugerencias (DIRECTAMENTE DEBAJO DEL INPUT) -->
-                 <div id="address-suggestions" class="address-suggestions-list" style="display:none; position:absolute; top:calc(100% + 6px); left:0; right:0; width:100%; max-height:280px; overflow-y:auto; -webkit-overflow-scrolling:touch; background:var(--color-surface); border-radius:16px; border:1.5px solid var(--color-border-light); z-index:9999; box-shadow:0 12px 30px rgba(0,0,0,0.16); padding:4px 0; box-sizing:border-box;"></div>
+                 <div id="address-suggestions" class="address-suggestions-list" style="display:none; flex-direction:column; position:absolute; top:calc(100% + 6px); left:0; right:0; width:100%; max-height:280px; overflow-y:auto; -webkit-overflow-scrolling:touch; background:var(--color-surface); border-radius:16px; border:1.5px solid var(--color-border-light); z-index:9999; box-shadow:0 12px 30px rgba(0,0,0,0.16); padding:4px 0; box-sizing:border-box;"></div>
                </div>
              </div>
 
@@ -159,22 +172,46 @@ export function showAddressPrompt(onSuccess, config = {}) {
              <!-- Map Area (Center Pin + Floating GPS Button 🎯) -->
              <div id="address-map-container" style="flex: 1; min-height: 220px; position: relative; background: var(--color-bg-secondary);">
                <div id="address-map-picker" style="width: 100%; height: 100%;"></div>
-               
-               <!-- Center Marker Teardrop -->
-               <div id="address-center-marker" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); pointer-events: none; z-index: 10;">
-                  <div style="filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));">
-                    <svg width="36" height="48" viewBox="0 0 40 52" fill="none">
-                      <path d="M20 52C20 52 40 33.7258 40 20C40 8.9543 31.0457 0 20 0C8.9543 0 0 8.9543 0 20C0 33.7258 20 52 20 52Z" fill="#E11D48"/>
-                      <circle cx="20" cy="20" r="6" fill="white"/>
-                    </svg>
-                  </div>
-               </div>
+                
+                <!-- Center Marker Teardrop with Dynamic Floating Shadow -->
+                <div id="address-center-marker" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); pointer-events: none; z-index: 10; display: flex; flex-direction: column; align-items: center;">
+                   <!-- Floating Pin Body -->
+                   <div id="marker-body" style="filter: drop-shadow(0 10px 18px rgba(225,29,72,0.45)); transform: translateY(0); transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); will-change: transform;">
+                     <svg width="40" height="52" viewBox="0 0 40 52" fill="none">
+                       <defs>
+                         <linearGradient id="pinRedGrad" x1="20" y1="0" x2="20" y2="52" gradientUnits="userSpaceOnUse">
+                           <stop stop-color="#FF2E63"/>
+                           <stop offset="1" stop-color="#BE123C"/>
+                         </linearGradient>
+                       </defs>
+                       <path d="M20 52C20 52 40 33.7258 40 20C40 8.9543 31.0457 0 20 0C8.9543 0 0 8.9543 0 20C0 33.7258 20 52 20 52Z" fill="url(#pinRedGrad)"/>
+                       <circle cx="20" cy="20" r="7.5" fill="white"/>
+                       <circle cx="20" cy="20" r="4" fill="#E11D48"/>
+                     </svg>
+                   </div>
+                   <!-- Ground Shadow -->
+                   <div id="marker-shadow" style="width: 14px; height: 5px; background: rgba(15,23,42,0.35); border-radius: 50%; filter: blur(1.5px); margin-top: -3px; transform: scale(1); transition: transform 0.25s ease, opacity 0.25s ease;"></div>
+                </div>
 
-               <button id="my-location-btn" style="position: absolute; bottom: 12px; right: 12px; width: 44px; height: 44px; border-radius: 12px; background: var(--color-surface); border: 1px solid var(--color-border); box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 15; color: var(--color-primary); transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);">
-                 <div id="loc-btn-icon" style="display:flex; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);">
-                   ${icon('target', 20)}
-                 </div>
-               </button>
+                <!-- Glassmorphism Floating Map Controls (Zoom In, Zoom Out, GPS) -->
+                <div style="position: absolute; bottom: 14px; right: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 15;">
+                  <!-- Zoom In / Out Group -->
+                  <div style="display: flex; flex-direction: column; background: rgba(255,255,255,0.92); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 14px; border: 1.5px solid rgba(255,255,255,0.8); box-shadow: 0 8px 25px rgba(0,0,0,0.12); overflow: hidden;">
+                    <button type="button" id="map-zoom-in-btn" style="width: 44px; height: 40px; background: transparent; border: none; border-bottom: 1px solid rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--color-text-primary, #0f172a); transition: background 0.15s ease;" title="Acercar">
+                      ${icon('plus', 18)}
+                    </button>
+                    <button type="button" id="map-zoom-out-btn" style="width: 44px; height: 40px; background: transparent; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--color-text-primary, #0f172a); transition: background 0.15s ease;" title="Alejar">
+                      ${icon('minus', 18)}
+                    </button>
+                  </div>
+
+                  <!-- GPS Button -->
+                  <button type="button" id="my-location-btn" style="width: 44px; height: 44px; border-radius: 14px; background: rgba(255,255,255,0.92); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1.5px solid rgba(255,255,255,0.8); box-shadow: 0 8px 25px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--color-primary, #E11D48); transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);" title="Mi ubicación">
+                    <div id="loc-btn-icon" style="display:flex; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);">
+                      ${icon('target', 20)}
+                    </div>
+                  </button>
+                </div>
 
                <!-- Professional Loading Overlay -->
                <div id="map-loading-overlay" style="position:absolute; inset:0; background:rgba(255,255,255,0.7); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:100; transition:opacity 0.4s; pointer-events:none; opacity:0;">
@@ -345,35 +382,144 @@ export function showAddressPrompt(onSuccess, config = {}) {
     const mapContainer = document.getElementById('address-map-picker');
     if (!mapContainer) return;
 
-    const magCenterLngLat = [-57.5147, -35.0815];
-    const initialCenter = selectedCoords ? [selectedCoords.lng, selectedCoords.lat] : magCenterLngLat;
+    const magCenter = { lat: -35.0815, lng: -57.5147 };
+    const initialCenter = selectedCoords ? { lat: Number(selectedCoords.lat), lng: Number(selectedCoords.lng) } : magCenter;
 
-    googleMap = new maplibregl.Map({
-      container: mapContainer,
-      style: 'https://tiles.openfreemap.org/styles/liberty',
-      center: initialCenter,
-      zoom: 16.5,
-      attributionControl: false
-    });
+    // A. Native Google Maps SDK (100% updated streets, house numbers & rooftop accuracy)
+    let mapInitialized = false;
+    if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Map) {
+      try {
+        googleMap = new window.google.maps.Map(mapContainer, {
+          center: initialCenter,
+          zoom: 17,
+          disableDefaultUI: true,
+          gestureHandling: 'greedy',
+          clickableIcons: false,
+          styles: [
+            { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+            { featureType: 'transit', elementType: 'labels', stylers: [{ visibility: 'off' }] }
+          ]
+        });
 
-    googleMap.on('load', () => {
-      googleMap.resize();
-      if (selectedCoords) {
-        disableGeocodingTemporarily(2000);
-        googleMap.easeTo({ center: [selectedCoords.lng, selectedCoords.lat], zoom: 17, duration: 0 });
+        // Pin Lift Animation while dragging
+        googleMap.addListener('dragstart', () => {
+          const markerBody = document.getElementById('marker-body');
+          const markerShadow = document.getElementById('marker-shadow');
+          if (markerBody) markerBody.style.transform = 'translateY(-16px) scale(1.08)';
+          if (markerShadow) {
+            markerShadow.style.transform = 'scale(0.6)';
+            markerShadow.style.opacity = '0.2';
+          }
+        });
+
+        // Pin Drop & Settle Animation when drag finishes
+        googleMap.addListener('idle', () => {
+          const markerBody = document.getElementById('marker-body');
+          const markerShadow = document.getElementById('marker-shadow');
+          if (markerBody) markerBody.style.transform = 'translateY(0) scale(1)';
+          if (markerShadow) {
+            markerShadow.style.transform = 'scale(1)';
+            markerShadow.style.opacity = '0.35';
+          }
+
+          const center = googleMap.getCenter();
+          if (center) {
+            selectedCoords = { lat: center.lat(), lng: center.lng() };
+            if (geocodingDisabled) return;
+            if (isManualAddress) return;
+            reverseGeocode(selectedCoords.lat, selectedCoords.lng);
+          }
+        });
+
+        mapInitialized = true;
+      } catch (gErr) {
+        console.warn('[AddressModal] Google Maps init failed, falling back to MapLibre:', gErr);
       }
-    });
+    }
 
-    googleMap.on('moveend', () => {
-      const center = googleMap.getCenter();
-      selectedCoords = { lat: center.lat, lng: center.lng };
+    // B. Fallback to MapLibre GL
+    if (!mapInitialized) {
+      const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
 
-      if (geocodingDisabled) return;
-      if (isManualAddress) return;
-      reverseGeocode(selectedCoords.lat, selectedCoords.lng);
-    });
+      googleMap = new MapConstructor({
+        container: mapContainer,
+        style: OSM_MAP_STYLE,
+        center: [initialCenter.lng, initialCenter.lat],
+        zoom: 16.5,
+        attributionControl: false
+      });
 
-    // Ensure listeners are attached correctly
+      googleMap.on('load', () => {
+        try { googleMap.resize(); } catch(e) {}
+        if (selectedCoords) {
+          disableGeocodingTemporarily(3500);
+          googleMap.jumpTo({ center: [selectedCoords.lng, selectedCoords.lat], zoom: 17.5 });
+        }
+      });
+
+      // Pin Lift Animation while dragging
+      googleMap.on('movestart', () => {
+        const markerBody = document.getElementById('marker-body');
+        const markerShadow = document.getElementById('marker-shadow');
+        if (markerBody) markerBody.style.transform = 'translateY(-16px) scale(1.08)';
+        if (markerShadow) {
+          markerShadow.style.transform = 'scale(0.6)';
+          markerShadow.style.opacity = '0.2';
+        }
+      });
+
+      // Pin Drop & Settle Animation when drag finishes
+      googleMap.on('moveend', () => {
+        const markerBody = document.getElementById('marker-body');
+        const markerShadow = document.getElementById('marker-shadow');
+        if (markerBody) markerBody.style.transform = 'translateY(0) scale(1)';
+        if (markerShadow) {
+          markerShadow.style.transform = 'scale(1)';
+          markerShadow.style.opacity = '0.35';
+        }
+
+        const center = googleMap.getCenter();
+        selectedCoords = { lat: center.lat, lng: center.lng };
+
+        if (geocodingDisabled) return;
+        if (isManualAddress) return;
+        reverseGeocode(selectedCoords.lat, selectedCoords.lng);
+      });
+    }
+
+    // Common Control Buttons (Zoom, Recenter, Confirm)
+    const zoomInBtn = document.getElementById('map-zoom-in-btn');
+    if (zoomInBtn) {
+      zoomInBtn.onclick = (e) => {
+        e.preventDefault();
+        try {
+          if (googleMap) {
+            if (typeof googleMap.setZoom === 'function') {
+              googleMap.setZoom(googleMap.getZoom() + 1);
+            } else if (typeof googleMap.zoomIn === 'function') {
+              googleMap.zoomIn({ duration: 300 });
+            }
+          }
+        } catch(err) {}
+      };
+    }
+
+    const zoomOutBtn = document.getElementById('map-zoom-out-btn');
+    if (zoomOutBtn) {
+      zoomOutBtn.onclick = (e) => {
+        e.preventDefault();
+        try {
+          if (googleMap) {
+            if (typeof googleMap.setZoom === 'function') {
+              googleMap.setZoom(googleMap.getZoom() - 1);
+            } else if (typeof googleMap.zoomOut === 'function') {
+              googleMap.zoomOut({ duration: 300 });
+            }
+          }
+        } catch(err) {}
+      };
+    }
+
     const locBtn = document.getElementById('my-location-btn');
     if (locBtn) {
       locBtn.onclick = (e) => {
@@ -466,7 +612,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
       const input = document.getElementById('address-search-input');
       if (input) input.value = '';
       disableGeocodingTemporarily(1500);
-      googleMap.easeTo({ center: [config.editAddress.coords.lng, config.editAddress.coords.lat], zoom: 17 });
+      if (typeof googleMap.panTo === 'function') {
+        googleMap.panTo({ lat: Number(config.editAddress.coords.lat), lng: Number(config.editAddress.coords.lng) });
+        googleMap.setZoom(17);
+      } else if (typeof googleMap.easeTo === 'function') {
+        googleMap.easeTo({ center: [config.editAddress.coords.lng, config.editAddress.coords.lat], zoom: 17 });
+      }
     }
   };
 
@@ -509,7 +660,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
         isPreciseLocation = true;
         if (googleMap) {
           disableGeocodingTemporarily(1500);
-          googleMap.easeTo({ center: [myPos.lng, myPos.lat], zoom: 17 });
+          if (typeof googleMap.panTo === 'function') {
+            googleMap.panTo({ lat: myPos.lat, lng: myPos.lng });
+            googleMap.setZoom(17.5);
+          } else if (typeof googleMap.easeTo === 'function') {
+            googleMap.easeTo({ center: [myPos.lng, myPos.lat], zoom: 17.5 });
+          }
           if (iconWrap) {
             iconWrap.classList.add('loc-pulse-anim');
             setTimeout(() => iconWrap.classList.remove('loc-pulse-anim'), 400);
@@ -533,6 +689,58 @@ export function showAddressPrompt(onSuccess, config = {}) {
     const searchIconEl = document.getElementById('search-icon-wrapper');
     if (searchIconEl) searchIconEl.innerHTML = `<div class="mini-spinner"></div>`;
 
+    // 1. Google Maps Geocoder (Fastest, zero rate limits, rooftop precision)
+    if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Geocoder) {
+      try {
+        const geocoder = new window.google.maps.Geocoder();
+        const gResult = await new Promise((resolve, reject) => {
+          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+            if (status === 'OK' && results && results[0]) {
+              resolve(results[0]);
+            } else {
+              reject(new Error('Google Geocoder status: ' + status));
+            }
+          });
+        });
+
+        if (gResult) {
+          isGeocoding = false;
+          if (searchIconEl) searchIconEl.innerHTML = icon('search', 20);
+
+          let street = '';
+          let streetNumber = '';
+          let neighborhood = '';
+
+          (gResult.address_components || []).forEach(comp => {
+            if (comp.types.includes('route')) street = comp.long_name;
+            if (comp.types.includes('street_number')) streetNumber = comp.long_name;
+            if (comp.types.includes('sublocality') || comp.types.includes('neighborhood')) neighborhood = comp.long_name;
+          });
+
+          let display = `${street} ${streetNumber}`.trim();
+          if (!display) display = gResult.formatted_address.split(',')[0];
+          if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
+
+          lastGeocodedAddress = display;
+          updateSelectedAddress(lastGeocodedAddress);
+
+          if (pendingConfirm) {
+            pendingConfirm = false;
+            const confirmBtn = document.getElementById('confirm-location-btn');
+            if (confirmBtn) {
+              confirmBtn.innerHTML = 'Confirmar Dirección';
+              confirmBtn.disabled = false;
+              confirmBtn.click();
+            }
+          }
+          return;
+        }
+      } catch (gErr) {
+        console.warn('Google reverse geocode note, using fallback:', gErr);
+      }
+    }
+
+    // 2. Fallback: OpenStreetMap Nominatim
     try {
       const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=es`);
       const data = await response.json();
@@ -578,7 +786,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
   function askAddressConfirmation(detectedAddress, referenceNotes, onConfirm, onEdit) {
     const overlay = document.createElement('div');
     overlay.className = 'address-confirm-dialog-overlay';
-    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); z-index:99999; display:flex; align-items:center; justify-content:center; padding:20px; animation:fadeIn 0.2s ease-out;';
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); z-index:25000000; display:flex; align-items:center; justify-content:center; padding:20px; animation:fadeIn 0.2s ease-out;';
     
     overlay.innerHTML = `
       <div style="background:var(--color-bg, #ffffff); border-radius:24px; padding:24px 20px; max-width:380px; width:100%; box-shadow:0 20px 45px rgba(0,0,0,0.3); border:1.5px solid var(--color-border-light, #e2e8f0); text-align:center; display:flex; flex-direction:column; gap:16px;">
@@ -717,13 +925,14 @@ export function showAddressPrompt(onSuccess, config = {}) {
     if (openMapBtn) openMapBtn.style.display = 'none';
     if (savedWrapper) savedWrapper.style.display = 'none';
     suggestionsBox.style.display = 'flex';
+    suggestionsBox.style.flexDirection = 'column';
     
     let html = suggestions.map((s, idx) => `
-      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-addr="${s.address}" style="padding:12px 14px; display:flex; align-items:center; gap:12px; cursor:pointer; ${idx < suggestions.length - 1 ? 'border-bottom:1px solid var(--color-border-light);' : ''} background:transparent; transition:background 0.15s ease;">
+      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-addr="${s.address}" style="width:100%; box-sizing:border-box; padding:12px 14px; display:flex; flex-direction:row; align-items:center; gap:12px; cursor:pointer; ${idx < suggestions.length - 1 ? 'border-bottom:1px solid var(--color-border-light);' : ''} background:transparent; transition:background 0.15s ease;">
         <div style="width:34px; height:34px; border-radius:50%; background:rgba(225, 29, 72, 0.09); color:#E11D48; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
           ${icon('mapPin', 16)}
         </div>
-        <div style="flex:1; min-width:0;">
+        <div style="flex:1; min-width:0; text-align:left;">
           <div style="font-weight:800; font-size:14px; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.address}</div>
           <div style="font-size:11.5px; color:var(--color-text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;">${s.displayName || ''}</div>
         </div>
@@ -753,10 +962,18 @@ export function showAddressPrompt(onSuccess, config = {}) {
         if (savedWrapper) savedWrapper.style.display = 'flex';
 
         // Transition to Map view (Slide 2)
-        disableGeocodingTemporarily(2000);
-        showMapView();
+        disableGeocodingTemporarily(2500);
+        showMapView({ lat, lng });
         if (googleMap) {
-          googleMap.easeTo({ center: [lng, lat], zoom: 17, duration: 400 });
+          try {
+            if (typeof googleMap.panTo === 'function') {
+              googleMap.panTo({ lat, lng });
+              googleMap.setZoom(17.5);
+            } else if (typeof googleMap.jumpTo === 'function') {
+              if (typeof googleMap.resize === 'function') googleMap.resize();
+              googleMap.jumpTo({ center: [lng, lat], zoom: 17.5 });
+            }
+          } catch(err) {}
         }
       };
     });

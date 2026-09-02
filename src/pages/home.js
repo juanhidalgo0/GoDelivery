@@ -15,11 +15,13 @@ export async function renderHome(content) {
   if (!content) content = document.getElementById('page-home') || document.getElementById('app-content');
   if (!content) return;
 
+  let unsubComercios = null;
+
   // Tab caching check: if already rendered once, keep it as is (do not touch DOM or trigger reloading)
   if (content.querySelector('#brands-slider-container')) {
     return {
       cleanup: () => {
-        if (unsubComercios) unsubComercios();
+        try { if (typeof unsubComercios === 'function') unsubComercios(); } catch(e) {}
       }
     };
   }
@@ -30,7 +32,6 @@ export async function renderHome(content) {
   let comercios = [];
   let offers = [];
   let activeCategory = 'Todos';
-  let unsubComercios = null;
   let onlyInAppProducts = [];
 
   // Try loading complete cache from localStorage
@@ -1045,14 +1046,14 @@ async function renderPromotedSection(comercios) {
         const priorityBorder = p.isPriority ? 'border: 2px solid var(--color-warning);' : 'border: 1px solid var(--color-border-light);';
 
         return `
-          <a href="${targetHref}" ${p.link && p.link.startsWith('http') ? 'target="_blank" rel="noopener noreferrer"' : ''} style="flex: 0 0 280px; text-decoration: none; display: flex; flex-direction: column; gap: 12px;">
-            <div style="position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 20px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.08); background: var(--color-surface); ${priorityBorder}">
-              <img src="${p.banner}" alt="${p.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
-              <div style="position: absolute; top: 12px; left: 12px; background: ${badgeBg}; color: ${badgeColor}; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <a href="${targetHref}" ${p.link && p.link.startsWith('http') ? 'target="_blank" rel="noopener noreferrer"' : ''} style="flex: 0 0 280px; width: 280px; max-width: 280px; text-decoration: none; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
+            <div style="position: relative; width: 100%; height: 155px; min-height: 155px; max-height: 155px; border-radius: 20px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.08); background: var(--color-surface); ${priorityBorder} box-sizing: border-box;">
+              <img src="${p.banner}" alt="${p.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover; display: block;" />
+              <div style="position: absolute; top: 12px; left: 12px; background: ${badgeBg}; color: ${badgeColor}; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 2;">
                 ${p.label}
               </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px; padding: 0 4px;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 0 4px; min-height: 46px;">
               <div style="width: 46px; height: 46px; border-radius: 50%; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.03); background: white; border: 1px solid var(--color-border-light); display: flex; align-items: center; justify-content: center;">
                 <img src="${p.logo || '/logo.png'}" alt="" loading="lazy" decoding="async" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
               </div>
@@ -1693,7 +1694,7 @@ async function renderComercios(comercios, category, search, filters) {
                 <!-- Pill 1: Shipping dynamic cost -->
                 <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
                   ${icon('bike', 15, '', 'var(--color-primary)')}
-                  <span>${deliveryFee !== null ? `Envío $${deliveryFee}` : 'Envío gratis'}</span>
+                  <span>${deliveryFee !== null ? (deliveryFee === 0 ? 'Envío gratis' : `Envío $${deliveryFee}`) : 'Envío a calcular'}</span>
                 </span>
                 
                 <!-- Pill 2: Duration -->

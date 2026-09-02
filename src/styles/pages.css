@@ -210,19 +210,25 @@
   z-index: 150;
   pointer-events: auto;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   display: none;
 }
 .slide-overlay.slide-from-right {
-  animation: slideInRight 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: slideInRight 0.30s cubic-bezier(0.32, 0.72, 0, 1) both;
+  will-change: transform;
 }
 .slide-overlay.slide-from-left {
-  animation: slideInLeft 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: slideInLeft 0.30s cubic-bezier(0.32, 0.72, 0, 1) both;
+  will-change: transform;
 }
 .slide-overlay.slide-exit-left {
-  animation: slideOutLeft 0.48s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+  animation: slideOutLeft 0.25s cubic-bezier(0.32, 0.72, 0, 1) both !important;
+  will-change: transform;
 }
 .slide-overlay.slide-exit-right {
-  animation: slideOutRight 0.48s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+  animation: slideOutRight 0.25s cubic-bezier(0.32, 0.72, 0, 1) both !important;
+  will-change: transform;
 }
 
 .slide-overlay.active {
@@ -233,7 +239,7 @@
 .slide-overlay #app-content {
   min-height: 100% !important;
   height: auto !important;
-  padding-bottom: 24px !important;
+  padding-bottom: 0 !important;
   box-sizing: border-box !important;
 }
 
@@ -243,8 +249,16 @@
 .slide-overlay.panel-fullscreen,
 body.header-hidden .slide-overlay {
   top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
   bottom: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
   z-index: 10000000 !important;
+  box-shadow: -10px 0 35px rgba(0, 0, 0, 0.22);
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  background: var(--color-bg);
 }
 
 .hide-mobile {
@@ -499,9 +513,10 @@ body.header-hidden .slide-overlay {
 
 /* ── Profile Page ── */
 .profile-page {
-  padding: var(--space-6) var(--space-4);
+  padding: 0 0 90px 0;
   max-width: 600px;
   margin: 0 auto;
+  width: 100%;
 }
 
 .profile-header-card {

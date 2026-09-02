@@ -6,10 +6,9 @@ import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { AudioManager } from '../utils/audio-manager.js';
+import { checkIfInstalled, isIOS, showInstallUI } from '../components/install-prompt.js';
 
 export async function renderProfile(content) {
-  const { checkIfInstalled, isIOS, showInstallUI } = await import('../components/install-prompt.js');
-
   const updateInstallVisibility = () => {
     const isInstalled = checkIfInstalled();
     const pwaSkipped = sessionStorage.getItem('pwa_skipped') === 'true';
@@ -223,16 +222,27 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
 
     content.innerHTML = `
-      <div class="profile-page page-enter" style="background:var(--color-bg); padding-bottom: 90px;">
-        <!-- Header estilo Mis Chats -->
-        <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: relative; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0;">
+      <div class="profile-page" style="background:var(--color-bg); padding: 0 0 90px 0; width: 100%; min-height: 100%; box-sizing: border-box;">
+        <!-- Header estilo Mis Chats (Sticky) -->
+        <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; width: 100%; position: sticky; top: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0; box-sizing: border-box; -webkit-backface-visibility: hidden; backface-visibility: hidden; will-change: transform;">
           <!-- Decorative Circles -->
           <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
             <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
             <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
           </div>
 
-          <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 16px; position: relative; z-index: 2;">
+          <div style="height: 56px; padding: 0 16px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 2;">
+            <button id="profile-btn-back" onclick="(() => {
+              const oldHash = window.location.hash;
+              window.history.back();
+              setTimeout(() => {
+                if (window.location.hash === oldHash) {
+                  window.location.hash = '#/';
+                }
+              }, 100);
+            })()" style="background: rgba(255,255,255,0.18); border: none; color: white; cursor: pointer; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); flex-shrink: 0; transition: all 0.2s;" title="Volver">
+              ${icon('chevronLeft', 22)}
+            </button>
             <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Perfil</span>
           </div>
         </div>
@@ -277,7 +287,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
 
           
           <!-- User Profile Info -->
-          <div style="padding:16px 20px; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; gap:14px;">
+          <div style="padding:16px 20px; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; gap:14px; width: 100%; box-sizing: border-box;">
             <div style="position:relative; cursor:pointer;" id="profile-avatar-container" title="Cambiar foto de perfil">
               <img src="${user.photoURL || '/logo.png'}" alt="${user.displayName}" style="width:58px; height:58px; border-radius:18px; object-fit:cover; border:2.5px solid var(--color-bg-secondary); box-shadow:var(--shadow-md);" referrerpolicy="no-referrer" />
               <div class="avatar-edit-overlay" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); border-radius:18px; display:flex; align-items:center; justify-content:center; color:white; opacity:0; transition:opacity 0.2s;">

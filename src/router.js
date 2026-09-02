@@ -34,9 +34,6 @@ const getMainRoutes = () => {
     '/delivery': 'page-delivery',
     '/delivery-panel': 'page-delivery',
     '/cart': 'page-cart',
-    '/profile': 'page-profile',
-    '/profile/orders': 'page-profile',
-    '/profile/appearance': 'page-profile',
     '/mis-chats': 'page-mis-chats'
   };
   if (user && !isDelivery() && !isAdmin()) {
@@ -185,7 +182,7 @@ export async function handleRoute() {
         setTimeout(() => {
           currentTarget.classList.remove('active', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-exit-left', 'slide-exit-right');
           currentTarget.innerHTML = '';
-        }, 480);
+        }, 260);
       } else if (overlay) {
         overlay.classList.remove('active', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-exit-left', 'slide-exit-right');
         overlay.innerHTML = '';
@@ -267,7 +264,7 @@ export async function handleRoute() {
     } else {
       // Overlay routes (Sub-pages, Modals, etc.)
       if (overlay) {
-        if (hash.startsWith('/profile/') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
+        if (hash.startsWith('/profile') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
           overlay.classList.add('panel-fullscreen');
         } else {
           overlay.classList.remove('panel-fullscreen');
@@ -347,7 +344,7 @@ const updateUI = (index, scrollX) => {
   const targetHash = '#' + firstRoute;
   
   // Hide/Show panels based on authorization
-  ['page-home', 'page-offers', 'page-commerce', 'page-delivery', 'page-cart', 'page-profile', 'page-mis-chats'].forEach(id => {
+  ['page-home', 'page-offers', 'page-commerce', 'page-delivery', 'page-cart', 'page-mis-chats'].forEach(id => {
     const p = document.getElementById(id);
     if (!p) return;
     if (Object.values(mainRoutes).includes(id)) {

@@ -95,6 +95,17 @@ function stopListening() {
 }
 
 function updateBannerState(order, allOrders = []) {
+  // Never show customer order indicator in delivery mode or delivery panel
+  if (
+    document.body.classList.contains('is-delivery-mode') ||
+    document.documentElement.classList.contains('is-delivery-mode') ||
+    window.location.hash.includes('repartidor') ||
+    window.location.hash.includes('delivery')
+  ) {
+    clearOrderIndicator();
+    return;
+  }
+
   if (!order) {
     clearOrderIndicator();
     return;

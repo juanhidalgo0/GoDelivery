@@ -1054,8 +1054,21 @@ body.is-delivery-mode #driver-fullscreen-map {
   box-sizing: border-box !important;
 }
 
+html.is-delivery-mode #app,
+html.is-delivery-mode #main-content,
+html.is-delivery-mode #content,
+html.is-delivery-mode .app-container,
+html.is-delivery-mode .slide-panel,
+body.is-delivery-mode #app,
+body.is-delivery-mode #main-content,
+body.is-delivery-mode #content,
+body.is-delivery-mode .app-container,
+body.is-delivery-mode .slide-panel {
+  background: transparent !important;
+}
+
 #driver-fullscreen-map {
-  z-index: 1 !important;
+  z-index: 100 !important;
   pointer-events: auto !important;
 }
 
@@ -1070,11 +1083,27 @@ body.is-delivery-mode #driver-fullscreen-map {
   left: 0 !important;
   bottom: 0 !important;
   right: 0 !important;
+  z-index: 100 !important;
 }
 
+html.driver-dark-mode #driver-fullscreen-map canvas,
+body.driver-dark-mode #driver-fullscreen-map canvas,
+#driver-fullscreen-map.driver-dark-mode canvas,
+#driver-fullscreen-map.driver-dark-mode .maplibregl-canvas,
+html.is-delivery-mode.driver-dark-mode #driver-fullscreen-map canvas,
 body.is-delivery-mode.driver-dark-mode #driver-fullscreen-map canvas,
-body.is-delivery-mode:not(.driver-light-mode) #driver-fullscreen-map canvas {
-  filter: contrast(1.18) brightness(1.1);
+body.is-delivery-mode:not(.driver-light-mode) #driver-fullscreen-map canvas,
+html.is-delivery-mode:not(.driver-light-mode) #driver-fullscreen-map canvas {
+  filter: none !important;
+}
+
+html.driver-light-mode #driver-fullscreen-map canvas,
+body.driver-light-mode #driver-fullscreen-map canvas,
+#driver-fullscreen-map.driver-light-mode canvas,
+#driver-fullscreen-map.driver-light-mode .maplibregl-canvas,
+body.is-delivery-mode.driver-light-mode #driver-fullscreen-map canvas,
+html.is-delivery-mode.driver-light-mode #driver-fullscreen-map canvas {
+  filter: none !important;
 }
 
 /* ====================================================
@@ -1098,6 +1127,19 @@ body.is-delivery-mode.driver-light-mode #driver-fullscreen-map {
 }
 
 /* 1. Status Bar & Top Badges in Light Mode */
+body.is-delivery-mode.driver-light-mode #session-status-bar-container {
+  background: #ffffff !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+}
+
+body.is-delivery-mode.driver-dark-mode #session-status-bar-container,
+body.is-delivery-mode:not(.driver-light-mode) #session-status-bar-container {
+  background: #090d16 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
+}
+
 body.is-delivery-mode.driver-light-mode #session-status-bar,
 body.is-delivery-mode.driver-light-mode #session-status-bar > div,
 body.is-delivery-mode.driver-light-mode .status-bar,
@@ -1122,12 +1164,28 @@ body.is-delivery-mode.driver-light-mode #driver-hamburger-btn {
   color: #0f172a !important;
 }
 
-/* 2. Recenter GPS FAB */
-body.is-delivery-mode.driver-light-mode #driver-recenter-fab-btn {
+/* 2. Recenter GPS FAB & Map Controls Group in Light Mode */
+body.is-delivery-mode.driver-light-mode #driver-recenter-fab-btn,
+body.is-delivery-mode.driver-light-mode #driver-recenter-compass-btn {
   background: #ffffff !important;
   border: 1.5px solid #e2e8f0 !important;
   color: #0284c7 !important;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+}
+
+body.is-delivery-mode.driver-light-mode #driver-map-controls-group > div {
+  background: #ffffff !important;
+  border: 1.5px solid #e2e8f0 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+}
+
+body.is-delivery-mode.driver-light-mode #driver-zoom-in-btn,
+body.is-delivery-mode.driver-light-mode #driver-zoom-out-btn {
+  color: #0f172a !important;
+}
+
+body.is-delivery-mode.driver-light-mode #driver-zoom-in-btn {
+  border-bottom: 1px solid #f1f5f9 !important;
 }
 
 /* 3. Floating Instruction Pill */
@@ -1380,6 +1438,15 @@ body.is-delivery-mode #delivery-scroll-area {
 
 body.is-delivery-mode #delivery-scroll-area > * {
   pointer-events: auto !important;
+}
+
+/* Hide customer active order FAB when driver is in delivery mode */
+body.is-delivery-mode #global-order-fab,
+html.is-delivery-mode #global-order-fab {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
 }
 
 body:not(.is-delivery-mode) #page-delivery,

@@ -26,7 +26,7 @@ export function getOrderDriverEarnings(o) {
 
   return delivery + purchaseFee + extraStops + rain + tip + night + incentive;
 }
-import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clearDriverRoute, setMap3DPerspective, recenterOnDriver, getDriverMapTheme, setDriverMapTheme, getDriverThemeMode, setDriverThemeMode, renderDemandHotspots, checkAutoSolarTheme, startGpsRouteSimulation, stopGpsRouteSimulation, isGpsSimulationRunning, renderMultiStopRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
+import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clearDriverRoute, setMap3DPerspective, recenterOnDriver, zoomInDriverMap, zoomOutDriverMap, getDriverMapTheme, setDriverMapTheme, getDriverThemeMode, setDriverThemeMode, renderDemandHotspots, checkAutoSolarTheme, startGpsRouteSimulation, stopGpsRouteSimulation, isGpsSimulationRunning, renderMultiStopRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { NavigationVoice } from '../utils/navigation-voice.js';
 
 export function cleanMandadoText(text) {
@@ -641,7 +641,15 @@ export async function renderDeliveryPanel(containerArg) {
   document.documentElement.classList.add('is-delivery-mode');
   document.body.classList.add('is-delivery-mode');
 
-  const initialDriverTheme = getDriverMapTheme();
+  // Enforce Dark Mode by default on fresh session
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('gd_driver_theme_v9') !== 'true') {
+    localStorage.setItem('gd_driver_theme', 'dark');
+    localStorage.setItem('gd_driver_theme_mode', 'dark');
+    localStorage.setItem('gd_driver_theme_v9', 'true');
+  }
+
+  const savedTheme = localStorage.getItem('gd_driver_theme') || 'dark';
+  const initialDriverTheme = (savedTheme === 'light') ? 'light' : 'dark';
   if (initialDriverTheme === 'light') {
     document.documentElement.classList.add('driver-light-mode');
     document.body.classList.add('driver-light-mode');
@@ -961,7 +969,7 @@ export async function renderDeliveryPanel(containerArg) {
     document.body.appendChild(mapContainer);
   }
 
-  mapContainer.style.setProperty('display', isOnline ? 'block' : 'none', 'important');
+  mapContainer.style.setProperty('display', 'block', 'important');
   mapContainer.style.setProperty('position', 'fixed', 'important');
   mapContainer.style.setProperty('inset', '0', 'important');
   mapContainer.style.setProperty('top', '0', 'important');
@@ -975,7 +983,7 @@ export async function renderDeliveryPanel(containerArg) {
   mapContainer.style.setProperty('min-height', '100dvh', 'important');
   mapContainer.style.setProperty('max-height', '100vh', 'important');
   mapContainer.style.setProperty('max-height', '100dvh', 'important');
-  mapContainer.style.setProperty('z-index', '10', 'important');
+  mapContainer.style.setProperty('z-index', '100', 'important');
   mapContainer.style.setProperty('background', isLight ? '#f8fafc' : '#04070d', 'important');
   mapContainer.style.setProperty('margin', '0', 'important');
   mapContainer.style.setProperty('padding', '0', 'important');
@@ -1012,16 +1020,27 @@ export async function renderDeliveryPanel(containerArg) {
 
   // Render Floating HUD overlays into hudContainer
   hudContainer.innerHTML = `
-    <!-- LAYER 2: FLOATING TOP HEADER BAR -->
-    <div id="session-status-bar-container" style="position:fixed; top:max(36px, calc(18px + env(safe-area-inset-top, 24px))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
+    <!-- LAYER 2: SOLID INTEGRATED TOP STATUS BAR HEADER (WITH SYSTEM NOTIFICATION INTEGRATION) -->
+    <div id="session-status-bar-container" style="
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) 12px 10px 12px;
+      z-index: 9999;
+      pointer-events: auto;
+      background: ${isLight ? '#ffffff' : '#090d16'};
+      border-bottom: 1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'};
+      box-shadow: 0 4px 20px ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.6)'};
+    ">
       ${renderStatusBar(user)}
     </div>
 
     <!-- LAYER 2.4: FLOATING TELEMETRY SPEEDOMETER -->
     ${isOnline ? (() => {
       const hasActiveOrders = Array.isArray(activeOrdersList) && activeOrdersList.length > 0;
-      const badgeBottom = hasActiveOrders ? 'max(236px, calc(214px + env(safe-area-inset-bottom, 24px)))' : 'max(176px, calc(154px + env(safe-area-inset-bottom, 24px)))';
-      const compassBottom = hasActiveOrders ? 'max(290px, calc(268px + env(safe-area-inset-bottom, 24px)))' : 'max(230px, calc(208px + env(safe-area-inset-bottom, 24px)))';
+      const isMinimized = hasActiveOrders ? window._driverDockMinimized === true : false;
+      const badgeBottom = hasActiveOrders 
+        ? (isMinimized ? 'max(140px, calc(120px + env(safe-area-inset-bottom, 24px)))' : 'max(168px, calc(150px + env(safe-area-inset-bottom, 24px)))') 
+        : 'max(116px, calc(98px + env(safe-area-inset-bottom, 24px)))';
       return `
         <div id="driver-speedometer-pill" style="
           position: fixed;
@@ -1074,31 +1093,72 @@ export async function renderDeliveryPanel(containerArg) {
           <span id="driver-street-name-text">${window.lastDriverManeuver?.currentStreet ? `Circulando por: ${window.lastDriverManeuver.currentStreet}` : 'Magdalena en tiempo real'}</span>
         </div>
 
-        <!-- FLOATING RECENTER TARGET BUTTON -->
-        <button id="driver-recenter-compass-btn" style="
+        <!-- FLOATING DRIVER MAP CONTROLS (ZOOM & RECENTER) - PERMANENTLY VERTICALLY CENTERED -->
+        <div id="driver-map-controls-group" style="
           position: fixed;
           right: 16px;
-          bottom: ${compassBottom};
-          width: 44px; height: 44px; border-radius: 50%;
-          background: ${isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)'};
-          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-          border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'};
-          color: ${isLight ? '#0f172a' : '#38bdf8'};
-          display: flex; align-items: center; justify-content: center;
-          cursor: pointer; z-index: 9990;
-          box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.5)'};
-          transition: bottom 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+          top: 50%;
+          transform: translateY(-50%);
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          z-index: 9990;
           pointer-events: auto;
-        " title="Recentrar mi ubicación">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="7.5"></circle>
-            <line x1="12" y1="2" x2="12" y2="4.5"></line>
-            <line x1="12" y1="19.5" x2="12" y2="22"></line>
-            <line x1="2" y1="12" x2="4.5" y2="12"></line>
-            <line x1="19.5" y1="12" x2="22" y2="12"></line>
-            <circle cx="12" cy="12" r="2.2" fill="currentColor"></circle>
-          </svg>
-        </button>
+        ">
+          <!-- Zoom In / Out Group -->
+          <div style="
+            display: flex;
+            flex-direction: column;
+            background: ${isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)'};
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'};
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.5)'};
+          ">
+            <button type="button" id="driver-zoom-in-btn" style="
+              width: 44px; height: 40px;
+              background: transparent; border: none;
+              border-bottom: 1px solid ${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)'};
+              display: flex; align-items: center; justify-content: center;
+              cursor: pointer; color: ${isLight ? '#0f172a' : '#ffffff'};
+              transition: background 0.15s ease;
+            " title="Acercar mapa">
+              ${icon('plus', 18)}
+            </button>
+            <button type="button" id="driver-zoom-out-btn" style="
+              width: 44px; height: 40px;
+              background: transparent; border: none;
+              display: flex; align-items: center; justify-content: center;
+              cursor: pointer; color: ${isLight ? '#0f172a' : '#ffffff'};
+              transition: background 0.15s ease;
+            " title="Alejar mapa">
+              ${icon('minus', 18)}
+            </button>
+          </div>
+
+          <!-- Recenter Compass Target Button -->
+          <button id="driver-recenter-compass-btn" style="
+            width: 44px; height: 44px; border-radius: 50%;
+            background: ${isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)'};
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'};
+            color: ${isLight ? '#0f172a' : '#38bdf8'};
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.5)'};
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+          " title="Recentrar mi ubicación">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="7.5"></circle>
+              <line x1="12" y1="2" x2="12" y2="4.5"></line>
+              <line x1="12" y1="19.5" x2="12" y2="22"></line>
+              <line x1="2" y1="12" x2="4.5" y2="12"></line>
+              <line x1="19.5" y1="12" x2="22" y2="12"></line>
+              <circle cx="12" cy="12" r="2.2" fill="currentColor"></circle>
+            </svg>
+          </button>
+        </div>
       `;
     })() : ''}
     
@@ -1153,12 +1213,12 @@ export async function renderDeliveryPanel(containerArg) {
     attachBottomDockListeners(user, activeOrdersList);
   }
 
-  // Initialize 3D Navigation Map ONLY WHEN ONLINE
-  if (isOnline) {
-    setTimeout(() => {
-      initDriverNavigationMap(mapContainer);
-    }, 50);
+  // Initialize 3D Navigation Map
+  setTimeout(() => {
+    initDriverNavigationMap(mapContainer);
+  }, 50);
 
+  if (isOnline) {
     attachBottomDockListeners(user, activeOrdersList);
 
     // Live connected timer
@@ -1599,19 +1659,35 @@ export async function renderDeliveryPanel(containerArg) {
         releaseDriverWakeLock();
       }
 
-      // Refresh Scanning Radar Bottom Dock with live orders & auto-accept
-      const bottomDock = document.getElementById('driver-footer-dock-container');
-      if (bottomDock) {
-        bottomDock.style.removeProperty('display');
-        bottomDock.innerHTML = renderBottomDockContent(getState().user || user, activeOrders);
-        attachBottomDockListeners(getState().user || user, activeOrders);
-      }
+      // Structural Signature Check to Eliminate DOM Tearing / Flickering
+      const currentOrdersSig = activeOrders.map(o => `${o.id}_${o.status}_${o.pickedUpAt || ''}_${o.paymentMethod || ''}_${o.totalAmount || o.total || 0}`).join('|');
+      const hasStructureChanged = window._lastActiveOrdersSignature !== currentOrdersSig;
 
-      // Refresh Top Status Bar with Full-Width Customer Header
-      const barContainer = document.getElementById('session-status-bar-container');
-      if (barContainer) {
-        barContainer.innerHTML = renderStatusBar(getState().user || user);
-        attachStatusBarListeners(getState().user || user);
+      if (hasStructureChanged) {
+        window._lastActiveOrdersSignature = currentOrdersSig;
+
+        // Refresh Scanning Radar Bottom Dock with live orders & auto-accept
+        const bottomDock = document.getElementById('driver-footer-dock-container');
+        if (bottomDock) {
+          bottomDock.style.removeProperty('display');
+          bottomDock.innerHTML = renderBottomDockContent(getState().user || user, activeOrders);
+          attachBottomDockListeners(getState().user || user, activeOrders);
+        }
+
+        // Refresh Top Status Bar with Full-Width Customer Header
+        const barContainer = document.getElementById('session-status-bar-container');
+        if (barContainer) {
+          barContainer.innerHTML = renderStatusBar(getState().user || user);
+          attachStatusBarListeners(getState().user || user);
+        }
+
+        // 1. Cache active orders locally for offline signal resilience
+        if (activeOrders.length > 0) {
+          saveActiveOrdersOffline(activeOrders);
+          syncDriverNavigationWithOrders(activeOrders);
+        } else {
+          syncDriverNavigationWithOrders([]);
+        }
       }
 
       // Group active by bundleId to count "tasks"
@@ -1627,14 +1703,6 @@ export async function renderDeliveryPanel(containerArg) {
           pill.insertAdjacentHTML('beforeend', `<span class="tab-count-badge" style="background:var(--color-primary); color:white; font-size:10px; font-weight:900; padding:2px 6px; border-radius:10px; margin-left:6px; animation: badge-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);">${count}</span>`);
         }
       }
-
-      if (count > 0) {
-        // 1. Cache active orders locally for offline signal resilience
-        saveActiveOrdersOffline(activeOrders);
-        syncDriverNavigationWithOrders(activeOrders);
-      } else {
-        syncDriverNavigationWithOrders([]);
-      }
     });
 
     if (!document.getElementById('badge-animations')) {
@@ -1643,11 +1711,7 @@ export async function renderDeliveryPanel(containerArg) {
       document.head.appendChild(s);
     }
 
-    // Auto Solar Theme Check on boot and every 10 minutes
-    checkAutoSolarTheme();
-    if (!window._solarThemeInterval) {
-      window._solarThemeInterval = setInterval(checkAutoSolarTheme, 600000);
-    }
+    // 100% Manual Theme Control (Auto Solar Theme completely removed)
 
     // Real-time Speed Telemetry Listener
     if (!window._driverSpeedBound) {
@@ -6870,31 +6934,31 @@ function renderStatusBar(user) {
         }
       </style>
 
-      <!-- 1. TOP HEADER: REAL CLIENT PHOTO & FULL NAME + SEPARATE STANDALONE HAMBURGER -->
-      <div style="width: 100%; display: flex; align-items: center; gap: 8px;">
+      <!-- 1. TOP HEADER: REAL CLIENT PHOTO & FULL NAME + INTEGRATED HAMBURGER -->
+      <div style="width: 100%;">
         <div id="session-status-bar" style="
-          flex: 1; min-width: 0;
+          width: 100%;
           display: flex; align-items: center; justify-content: space-between;
-          gap: 10px;
+          gap: 8px;
           background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9, 13, 22, 0.95)'};
           backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-          padding: 8px 12px;
-          border-radius: 26px;
+          padding: 8px 10px;
+          border-radius: 24px;
           border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(225, 29, 72, 0.4)'};
           box-shadow: 0 10px 30px ${isLight ? 'rgba(225,29,72,0.08)' : 'rgba(0,0,0,0.65)'};
           box-sizing: border-box;
         ">
-          <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
+          <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
             <div style="position:relative; flex-shrink:0;">
               ${clientPhoto ? `
-                <img src="${clientPhoto}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid #e11d48; box-shadow:0 0 12px rgba(225,29,72,0.4);" />
+                <img src="${clientPhoto}" style="width:38px; height:38px; border-radius:50%; object-fit:cover; border:2px solid #e11d48; box-shadow:0 0 12px rgba(225,29,72,0.4);" />
               ` : `
                 <div style="
-                  width: 40px; height: 40px; border-radius: 50%;
+                  width: 38px; height: 38px; border-radius: 50%;
                   background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
                   border: 2px solid rgba(225, 29, 72, 0.6);
                   display: flex; align-items: center; justify-content: center;
-                  font-size: 16px; font-weight: 900; color: white;
+                  font-size: 15px; font-weight: 900; color: white;
                   box-shadow: 0 4px 14px rgba(225, 29, 72, 0.45);
                 ">
                   ${clientFullName.charAt(0).toUpperCase()}
@@ -6902,70 +6966,70 @@ function renderStatusBar(user) {
               `}
               <div style="
                 position: absolute; bottom: -1px; right: -1px;
-                width: 11px; height: 11px; border-radius: 50%;
+                width: 10px; height: 10px; border-radius: 50%;
                 background: #22c55e; border: 2px solid ${isLight ? '#ffffff' : '#0f172a'};
               "></div>
             </div>
 
             <div style="min-width:0; flex:1;">
-              <div style="font-size:13.5px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
+              <div style="font-size:13px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
                 ${clientFullName} ${multipleBadge}
               </div>
-              <div style="font-size:11px; font-weight:700; color:${isLight ? '#e11d48' : '#fb7185'}; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              <div style="font-size:10.5px; font-weight:700; color:${isLight ? '#e11d48' : '#fb7185'}; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                 Pedido #${o.orderId || o.id.slice(0, 6)} • ${isEncomienda ? 'Encomienda' : (o.isFavor ? 'Mandado' : (o.favorTypeLabel || o.comercioName || 'En curso'))}
               </div>
             </div>
           </div>
 
-          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+          <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
             ${waUrl ? `
               <a href="${waUrl}" target="_blank" rel="noopener noreferrer" title="Abrir WhatsApp" style="
-                width: 38px; height: 38px; border-radius: 50%;
+                width: 36px; height: 36px; border-radius: 50%;
                 background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
                 border: none; color: white;
                 display: flex; align-items: center; justify-content: center; text-decoration: none;
                 box-shadow: 0 4px 14px rgba(37, 211, 102, 0.4);
                 flex-shrink: 0;
               ">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
                   <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
                 </svg>
               </a>
             ` : ''}
 
             <button id="driver-bar-chat-btn" data-order-id="${o.id}" title="Chat con el cliente" style="
-              width: 38px; height: 38px; border-radius: 50%;
+              width: 36px; height: 36px; border-radius: 50%;
               background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
               border: none; color: white;
               display: flex; align-items: center; justify-content: center; cursor: pointer;
               box-shadow: 0 4px 14px rgba(225, 29, 72, 0.45);
               flex-shrink: 0;
             ">
-              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
               </svg>
             </button>
+
+            <!-- INTEGRATED HAMBURGER MENU BUTTON -->
+            <button id="driver-hamburger-btn" style="
+              width: 36px; height: 36px; border-radius: 50%;
+              background: ${isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.12)'};
+              border: 1px solid ${isLight ? '#cbd5e1' : 'rgba(255, 255, 255, 0.18)'};
+              color: ${isLight ? '#0f172a' : '#ffffff'}; font-size: 17px; font-weight: 900;
+              display: flex; align-items: center; justify-content: center;
+              cursor: pointer; flex-shrink: 0;
+              box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.4)'};
+              transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            ">
+              ${icon('menu', 18)}
+            </button>
           </div>
         </div>
-
-        <!-- SEPARATE STANDALONE FLOATING HAMBURGER BUTTON -->
-        <button id="driver-hamburger-btn" style="
-          width: 44px; height: 44px; border-radius: 50%;
-          background: ${isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)'};
-          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-          border: 1.5px solid ${isLight ? '#cbd5e1' : 'rgba(255, 255, 255, 0.18)'};
-          color: ${isLight ? '#0f172a' : '#ffffff'}; font-size: 19px; font-weight: 900;
-          display: flex; align-items: center; justify-content: center;
-          cursor: pointer; flex-shrink: 0;
-          box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.55)'};
-          transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
-        ">
-          ${icon('menu', 20)}
-        </button>
       </div>
 
       <!-- 2. FLOATING DIRECTIVE INSTRUCTION PILL (WHERE TO GO) - MINIMALIST & MODERN -->
       <div id="driver-instruction-floating-pill" style="
+        width: 100%;
         margin-top: 5px;
         background: ${isLight ? 'rgba(255, 255, 255, 0.98)' : 'rgba(11, 16, 28, 0.96)'};
         backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
@@ -7036,72 +7100,55 @@ function renderStatusBar(user) {
         </div>
 
         ${((!isFavor || isEncomienda || !isPickupStage) && targetCoords) ? `
-          <a href="${wazeUrl}" target="_blank" rel="noopener noreferrer" style="
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${targetCoords.lat},${targetCoords.lng}&travelmode=driving" target="_blank" rel="noopener noreferrer" style="
             flex-shrink: 0;
             display: flex; align-items: center; gap: 5px;
-            background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: #ffffff;
             font-size: 11px; font-weight: 900;
             padding: 6px 11px; border-radius: 12px;
             text-decoration: none;
             border: 1px solid rgba(255, 255, 255, 0.25);
-            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
             transition: transform 0.15s ease;
           ">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12c0 2.85 1.2 5.42 3.12 7.24l-1.07 3.22a.5.5 0 0 0 .63.63l3.22-1.07C9.58 22.8 10.77 23 12 23c5.52 0 10-4.48 10-10S17.52 2 12 2zm-3.5 12c-.83 0-1.5-.67-1.5-1.5S7.67 11 8.5 11s1.5.67 1.5 1.5S9.33 14 8.5 14zm7 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="3 11 22 2 13 21 11 13 3 11"></polygon>
             </svg>
-            <span>Waze</span>
+            <span>Maps</span>
           </a>
         ` : ''}
       </div>
 
-      <!-- 3. TURN-BY-TURN HUD MANEUVER CARD (REAL-TIME LIVE NAVIGATION HUD - HIDDEN IN MANDADO PICKUP) -->
+      <!-- 3. SUBTLE FLOATING MANEUVER PILL (FULL WIDTH MATCHING HEADER) -->
       <div id="driver-maneuver-hud-card" style="
         display: ${(isFavor && isPickupStage) ? 'none' : 'flex'};
+        width: 100%;
         margin-top: 5px;
-        background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9, 13, 22, 0.94)'};
-        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-        border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(244, 63, 94, 0.35)'};
-        border-radius: 16px;
-        padding: 8px 12px 6px 12px;
-        flex-direction: column; gap: 6px;
-        box-shadow: 0 8px 24px ${isLight ? 'rgba(225,29,72,0.1)' : 'rgba(0,0,0,0.6)'};
+        background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9, 13, 22, 0.92)'};
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border: 1px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(244, 63, 94, 0.35)'};
+        border-radius: 18px;
+        padding: 6px 12px;
+        align-items: center;
+        gap: 8px;
+        box-shadow: 0 6px 18px ${isLight ? 'rgba(225,29,72,0.1)' : 'rgba(0,0,0,0.5)'};
+        box-sizing: border-box;
       ">
-        <!-- TOP ROW: ICON, INSTRUCTION & ETA -->
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-          <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
-            <div id="driver-maneuver-icon" style="width:36px; height:36px; border-radius:12px; background:linear-gradient(135deg, #e11d48, #9f1239); color:white; font-size:19px; font-weight:900; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(225,29,72,0.5); flex-shrink:0;">
-              ${window.lastDriverManeuver?.icon || '⬆'}
-            </div>
-            <div style="min-width:0; flex:1;">
-              <div id="driver-maneuver-text" style="font-size:12.5px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${window.lastDriverManeuver?.instruction || 'Calculando ruta...'}
-              </div>
-              <div id="driver-maneuver-subtext" style="font-size:11px; font-weight:800; color:${isLight ? '#e11d48' : '#fb7185'}; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${window.lastDriverManeuver?.distanceMeters ? `En ${window.lastDriverManeuver.distanceMeters > 999 ? (window.lastDriverManeuver.distanceMeters / 1000).toFixed(1) + ' km' : window.lastDriverManeuver.distanceMeters + ' m'}` : 'En curso'}
-              </div>
-            </div>
-          </div>
-
-          <!-- ETA PILL -->
-          <div id="driver-maneuver-eta" style="background:${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)'}; border:1px solid ${isLight ? '#cbd5e1' : 'rgba(255,255,255,0.12)'}; padding:4px 8px; border-radius:10px; text-align:right; flex-shrink:0;">
-            <div id="driver-eta-time" style="font-size:12px; font-weight:900; color:${isLight ? '#e11d48' : '#fb7185'};">${window.lastDriverManeuver?.etaMinutes || 1} min</div>
-            <div id="driver-eta-dist" style="font-size:9.5px; font-weight:700; color:${isLight ? '#64748b' : '#94a3b8'};">${window.lastDriverManeuver?.totalDistanceMeters ? (window.lastDriverManeuver.totalDistanceMeters > 999 ? (window.lastDriverManeuver.totalDistanceMeters / 1000).toFixed(1) + ' km' : window.lastDriverManeuver.totalDistanceMeters + ' m') : '-- m'}</div>
-          </div>
+        <div id="driver-maneuver-icon" style="width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg, #e11d48, #be123c); color:white; font-size:14px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 8px rgba(225,29,72,0.4);">
+          ${window.lastDriverManeuver?.icon || '⬆'}
         </div>
-
-        <!-- SECONDARY MANEUVER ("LUEGO...") ROW (IF PRESENT) -->
-        <div id="driver-then-row" style="display:${window.lastDriverManeuver?.thenManeuver ? 'flex' : 'none'}; align-items:center; gap:6px; font-size:10.5px; font-weight:800; color:${isLight ? '#475569' : '#94a3b8'}; background:${isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)'}; padding:3px 8px; border-radius:8px; border:1px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.06)'};">
-          <span style="color:${isLight ? '#e11d48' : '#fb7185'}; font-weight:900;">Luego</span>
-          <span id="driver-then-icon">${window.lastDriverManeuver?.thenManeuver?.icon || '⬆'}</span>
-          <span id="driver-then-text" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">${window.lastDriverManeuver?.thenManeuver?.instruction || ''}</span>
-          <span id="driver-then-dist" style="font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">${window.lastDriverManeuver?.thenManeuver?.distanceMeters ? `en ${window.lastDriverManeuver.thenManeuver.distanceMeters} m` : ''}</span>
+        <div style="min-width:0; display:flex; align-items:center; gap:6px; flex:1;">
+          <span id="driver-maneuver-subtext" style="font-size:11.5px; font-weight:900; color:${isLight ? '#e11d48' : '#fb7185'}; white-space:nowrap;">
+            ${window.lastDriverManeuver?.distanceMeters ? `${window.lastDriverManeuver.distanceMeters > 999 ? (window.lastDriverManeuver.distanceMeters / 1000).toFixed(1) + ' km' : window.lastDriverManeuver.distanceMeters + ' m'}` : 'Ruta'}
+          </span>
+          <span style="opacity:0.4;">•</span>
+          <span id="driver-maneuver-text" style="font-size:11.5px; font-weight:800; color:${isLight ? '#0f172a' : '#ffffff'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">
+            ${window.lastDriverManeuver?.instruction || 'En curso'}
+          </span>
         </div>
-
-        <!-- APPROACH PROGRESS BAR -->
-        <div style="width:100%; height:4px; border-radius:2px; background:${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'}; overflow:hidden;">
-          <div id="driver-turn-progress-fill" style="height:100%; width:${window.lastDriverManeuver?.progressPct || 0}%; background:linear-gradient(90deg, #e11d48, #22c55e); transition:width 0.4s ease; border-radius:2px;"></div>
+        <div id="driver-eta-time" style="font-size:11px; font-weight:900; color:${isLight ? '#64748b' : '#94a3b8'}; margin-left:auto; padding-left:4px; flex-shrink:0;">
+          ${window.lastDriverManeuver?.etaMinutes || 1} min
         </div>
       </div>
     `;
@@ -8491,6 +8538,51 @@ export function renderBottomDockContent(user, activeOrders = []) {
                     </div>
                   ` : ''}
 
+                  <!-- DIRECT CUSTOMER CONTACT ACTIONS (WHATSAPP, CHAT APP, CALL) -->
+                  ${(() => {
+                    const clientPhone = order.userPhone || order.clientPhone || order.phone || '';
+                    let orderWaUrl = '';
+                    if (clientPhone) {
+                      const cleanPhone = clientPhone.replace(/\D/g, '');
+                      if (cleanPhone.length >= 8) {
+                        const fullPhone = cleanPhone.startsWith('54') ? cleanPhone : (cleanPhone.startsWith('9') ? `54${cleanPhone}` : `549${cleanPhone}`);
+                        orderWaUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`¡Hola ${order.userName || 'Cliente'}! Soy el repartidor de GO Delivery con tu pedido #${order.orderId || (order.id ? order.id.slice(-4) : '')}.`)}`;
+                      }
+                    }
+                    return `
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:6px; padding:6px 10px; border-radius:12px; background:${isLight ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
+                        <span style="font-size:11px; font-weight:800; color:${isLight ? '#475569' : '#cbd5e1'};">Contactar:</span>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                          ${orderWaUrl ? `
+                            <a href="${orderWaUrl}" target="_blank" rel="noopener noreferrer" title="WhatsApp con ${order.userName || 'Cliente'}" style="
+                              display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px;
+                              background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+                              color: white; font-size: 11px; font-weight: 900; text-decoration: none;
+                              box-shadow: 0 2px 6px rgba(37, 211, 102, 0.35);
+                            ">
+                              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+                                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                              </svg>
+                              <span>WhatsApp</span>
+                            </a>
+                          ` : ''}
+
+                          <button class="driver-dock-chat-btn" data-order-id="${order.id}" data-customer-name="${order.userName || order.clientName || 'Cliente'}" title="Chat en la App" style="
+                            display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px;
+                            background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+                            color: white; border: none; font-size: 11px; font-weight: 900; cursor: pointer;
+                            box-shadow: 0 2px 6px rgba(225, 29, 72, 0.35);
+                          ">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                            </svg>
+                            <span>Chat App</span>
+                          </button>
+                        </div>
+                      </div>
+                    `;
+                  })()}
+
                   <!-- PAYMENT SUMMARY -->
                   <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; background:${paymentBg}; border:1px solid ${paymentBorder}; padding:8px 12px; border-radius:12px;">
                     <div style="display:flex; flex-direction:column;">
@@ -8887,7 +8979,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       const { showModal, closeModal } = await import('../components/modal.js');
 
       const modalEl = document.createElement('div');
-      modalEl.style.cssText = `padding: 20px 18px; font-family: var(--font-body, sans-serif); color: ${isLight ? '#0f172a' : '#ffffff'};`;
+      modalEl.style.cssText = `padding: 28px 20px calc(24px + env(safe-area-inset-bottom, 20px)) 20px; font-family: var(--font-body, sans-serif); color: ${isLight ? '#0f172a' : '#ffffff'};`;
 
       const renderFilterCards = () => `
         <div style="display: flex; flex-direction: column; gap: 10px; margin: 16px 0 20px 0;">
@@ -8968,7 +9060,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       `;
 
       modalEl.innerHTML = `
-        <div style="text-align:center;">
+        <div style="text-align:center; padding-top: 8px;">
           <div style="width: 52px; height: 52px; border-radius: 16px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; background: ${isCurrentlyEnabled ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)'}; color: white; box-shadow: 0 8px 20px rgba(0,0,0,0.2);">
             ⚡
           </div>
@@ -9343,6 +9435,28 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       const targetOrder = (activeOrdersList || []).find(o => o.id === oId) || (activeOrdersList || [])[0];
       if (targetOrder) {
         openOrderBreakdownModal(targetOrder);
+      }
+    };
+  });
+
+  // OPEN CHAT FOR INDIVIDUAL ORDERS IN BOTTOM DOCK
+  const dockChatBtns = document.querySelectorAll('.driver-dock-chat-btn');
+  dockChatBtns.forEach(btn => {
+    btn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const oId = btn.dataset.orderId;
+      const cName = btn.dataset.customerName || 'Cliente';
+      const targetOrder = (activeOrdersList || []).find(o => o.id === oId) || (activeOrdersList || [])[0];
+      if (targetOrder) {
+        const { openChat } = await import('../components/chat.js');
+        openChat({
+          orderId: targetOrder.id,
+          type: 'client-delivery',
+          otherName: cName,
+          orderNum: targetOrder.orderId,
+          senderDisplayName: latestUser.displayName || latestUser.name || 'Repartidor'
+        });
       }
     };
   });
@@ -10282,7 +10396,7 @@ export function openDriverDrawerMenu(user) {
       height: 100%;
       background: ${isLight ? '#ffffff' : '#090d16'};
       border-left: 1px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.12)'};
-      padding: 24px 18px calc(24px + env(safe-area-inset-bottom, 16px)) 18px;
+      padding: calc(16px + env(safe-area-inset-top, 24px)) 18px calc(24px + env(safe-area-inset-bottom, 16px)) 18px;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -10350,21 +10464,21 @@ export function openDriverDrawerMenu(user) {
                   Tema Visual y Mapa
                 </div>
                 <div style="font-size:10.5px; color:${isLight ? '#64748b' : '#94a3b8'}; margin-top:2px;">
-                  ${mode === 'auto' ? `Automático (${theme === 'light' ? 'Día ☀️' : 'Noche 🌙'})` : (theme === 'light' ? 'Modo Claro fijo' : 'Modo Oscuro fijo')}
+                  ${theme === 'light' ? 'Modo Claro ☀️' : 'Modo Oscuro 🌙'}
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 3-Way Segment Tabs -->
+          <!-- 2-Way Segment Tabs (Claro / Oscuro) -->
           <div style="
-            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
             background: ${isLight ? '#e2e8f0' : 'rgba(0,0,0,0.35)'};
             padding: 4px; border-radius: 12px;
           ">
             <button class="drawer-theme-btn" data-theme-choice="light" style="
-              height: 32px; border: none; border-radius: 9px; font-size: 11px; font-weight: 850;
-              cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;
+              height: 34px; border: none; border-radius: 9px; font-size: 11.5px; font-weight: 850;
+              cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
               background: ${mode === 'light' ? (isLight ? '#ffffff' : '#1e293b') : 'transparent'};
               color: ${mode === 'light' ? (isLight ? '#0f172a' : '#ffffff') : (isLight ? '#64748b' : '#94a3b8')};
               box-shadow: ${mode === 'light' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'};
@@ -10374,25 +10488,14 @@ export function openDriverDrawerMenu(user) {
             </button>
 
             <button class="drawer-theme-btn" data-theme-choice="dark" style="
-              height: 32px; border: none; border-radius: 9px; font-size: 11px; font-weight: 850;
-              cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;
+              height: 34px; border: none; border-radius: 9px; font-size: 11.5px; font-weight: 850;
+              cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
               background: ${mode === 'dark' ? (isLight ? '#ffffff' : '#1e293b') : 'transparent'};
               color: ${mode === 'dark' ? (isLight ? '#0f172a' : '#ffffff') : (isLight ? '#64748b' : '#94a3b8')};
               box-shadow: ${mode === 'dark' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'};
               transition: all 0.2s ease;
             ">
               <span>🌙</span> <span>Oscuro</span>
-            </button>
-
-            <button class="drawer-theme-btn" data-theme-choice="auto" style="
-              height: 32px; border: none; border-radius: 9px; font-size: 11px; font-weight: 850;
-              cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;
-              background: ${mode === 'auto' ? (isLight ? '#ffffff' : '#1e293b') : 'transparent'};
-              color: ${mode === 'auto' ? (isLight ? '#0f172a' : '#ffffff') : (isLight ? '#64748b' : '#94a3b8')};
-              box-shadow: ${mode === 'auto' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'};
-              transition: all 0.2s ease;
-            ">
-              <span>⚡</span> <span>Auto</span>
             </button>
           </div>
           
@@ -10656,6 +10759,20 @@ export function openDriverDrawerMenu(user) {
         setDriverThemeMode(choice);
         currentTheme = getDriverMapTheme();
         currentMode = getDriverThemeMode();
+        
+        // Live update top header and floating dock without page reload
+        const statusBarContainer = document.getElementById('session-status-bar-container');
+        if (statusBarContainer) {
+          statusBarContainer.style.background = currentTheme === 'light' ? '#ffffff' : '#090d16';
+          statusBarContainer.innerHTML = renderStatusBar(latestUser);
+          attachStatusBarListeners(latestUser);
+        }
+        const bottomDock = document.getElementById('driver-footer-dock-container');
+        if (bottomDock) {
+          bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
+          attachBottomDockListeners(latestUser, activeOrdersList);
+        }
+
         overlay.innerHTML = renderDrawerHTML(currentTheme, currentMode);
         const newPanel = overlay.querySelector('#driver-drawer-panel');
         if (newPanel) newPanel.style.transform = 'translateX(0)';
@@ -10917,6 +11034,28 @@ export async function promptStartSession(user) {
 function attachStatusBarListeners(user) {
   const latestUser = getState().user || user;
   const btn = document.getElementById('session-toggle-btn');
+
+  const driverZoomInBtn = document.getElementById('driver-zoom-in-btn');
+  if (driverZoomInBtn) {
+    driverZoomInBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      driverZoomInBtn.style.transform = 'scale(0.9)';
+      setTimeout(() => driverZoomInBtn.style.transform = 'scale(1)', 150);
+      zoomInDriverMap();
+    };
+  }
+
+  const driverZoomOutBtn = document.getElementById('driver-zoom-out-btn');
+  if (driverZoomOutBtn) {
+    driverZoomOutBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      driverZoomOutBtn.style.transform = 'scale(0.9)';
+      setTimeout(() => driverZoomOutBtn.style.transform = 'scale(1)', 150);
+      zoomOutDriverMap();
+    };
+  }
 
   const recenterCompassBtn = document.getElementById('driver-recenter-compass-btn');
   if (recenterCompassBtn) {
