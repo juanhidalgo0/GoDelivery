@@ -1856,19 +1856,23 @@ function loadTabContent(tab, container, user) {
         }
 
         if (orderToTake && !orderToTake.driverId) {
-          showConfirm({
-            title: `¿Tomar Pedido #${orderToTake.orderId || orderToTake.displayId || ''}?`,
-            message: `<strong>${orderToTake.comercioName || 'Pedido'}</strong><br>Cliente: ${orderToTake.userName || 'Cliente'}<br>Dirección: ${orderToTake.deliveryAddress || ''}`,
-            confirmText: 'SÍ, TOMAR PEDIDO',
-            onConfirm: () => {
-              takeBatch(orderToTake.bundleId || orderToTake.id, user);
-            }
-          });
+          const batch = {
+            id: orderToTake.bundleId || orderToTake.id,
+            isBundle: !!orderToTake.bundleId,
+            isFavor: !!orderToTake.isFavor,
+            isTrip: !!orderToTake.isTrip,
+            order: orderToTake,
+            orders: [orderToTake],
+            total: orderToTake.total || 0,
+            subtotal: orderToTake.subtotal || 0,
+            deliveryCost: orderToTake.deliveryCost || 0
+          };
+          showExclusiveOfferOverlay(batch, user);
         }
       } catch (e) {
         console.warn('[Delivery Panel] Error auto-opening target take order modal:', e);
       }
-    }, 400);
+    }, 250);
   }
 
   try {
@@ -1923,7 +1927,7 @@ function loadTabContent(tab, container, user) {
           const offerAgeMs = now - offeredAt;
           const needsQueueAssign = isCommerceReady && !isOwn && (
                                    !o.queueTargetDriverId || 
-                                   (o.queueTargetDriverId && offerAgeMs >= 30000)
+                                   (o.queueTargetDriverId && offerAgeMs >= 60000)
                                    );
           if (needsQueueAssign) {
             updateDispatchQueue(o.id);
@@ -5109,9 +5113,9 @@ export async function showEditFavorPriceModal(order, isPersistent = false) {
     </div>
 
     <!-- Content Area (Scrollable) -->
-    <div style="flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;">
-      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:20px; border:1.5px solid var(--color-border-light); display:flex; flex-direction:column; gap:16px; box-shadow: var(--shadow-sm);">
-        <div style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; text-align:left; margin-bottom:4px;">
+    <div style="flex: 1; overflow-y: auto; padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 14px; -webkit-overflow-scrolling: touch;">
+      <div style="background:var(--color-bg-secondary); border-radius:24px; padding:18px; border:1.5px solid var(--color-border-light); display:flex; flex-direction:column; gap:14px; box-shadow: var(--shadow-sm);">
+        <div style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em; text-align:left; margin-bottom:2px;">
           ${order.favorType === 'pagodeservicios' ? 'Costo facturas' : 'Costo de productos'}
         </div>
         
@@ -5131,12 +5135,12 @@ export async function showEditFavorPriceModal(order, isPersistent = false) {
           `;
         }).join('')}
 
-        <div style="border-top:1.5px dashed var(--color-border-light); padding-top:14px; display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800; color:var(--color-text-primary);">
+        <div style="border-top:1.5px dashed var(--color-border-light); padding-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800; color:var(--color-text-primary);">
           <span>${order.favorType === 'pagodeservicios' ? 'Total Servicios:' : 'Total Productos:'}</span>
           <span id="favor-products-sum" style="font-size:17px; font-weight:950; color:#10b981;">${formatPrice(order.subtotal || 0)}</span>
         </div>
 
-        <div style="border-top:1.5px dashed var(--color-border-light); padding-top:14px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
+        <div style="border-top:1.5px dashed var(--color-border-light); padding-top:12px; display:flex; flex-direction:column; gap:8px; text-align:left; font-size:13px; font-weight:600; color:var(--color-text-secondary);">
           <div style="display:flex; justify-content:space-between;">
             <span>Servicio (Envío/Gestión/App):</span>
             <span>+ ${formatPrice(deliveryFee + appFee + pFee + extraStops)}</span>
@@ -5153,17 +5157,18 @@ export async function showEditFavorPriceModal(order, isPersistent = false) {
             <span>+ ${formatPrice(tip)}</span>
           </div>
           ` : ''}
-          <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:900; color:var(--color-primary); margin-top:4px;">
+          <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:900; color:var(--color-primary); margin-top:2px;">
             <span>Cobrar al cliente:</span>
             <span id="client-total-preview">${formatPrice((parseFloat(order.subtotal) || 0) + serviceTotal)}</span>
           </div>
         </div>
       </div>
+    </div>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:4px;">
-        <button id="cancel-edit-price" style="height:50px; border-radius:16px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1px solid var(--color-border-light); font-weight:900; font-size:13.5px; cursor:pointer;">CANCELAR</button>
-        <button id="confirm-edit-price" style="height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:950; font-size:13.5px; cursor:pointer; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.2);">GUARDAR</button>
-      </div>
+    <!-- Action Buttons Footer -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px 20px calc(14px + max(env(safe-area-inset-bottom, 0px), 24px)) 20px; background:var(--color-bg); border-top:1.5px solid var(--color-border-light); flex-shrink:0;">
+      <button id="cancel-edit-price" style="height:48px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1.5px solid var(--color-border-light); font-weight:900; font-size:13.5px; cursor:pointer;">CANCELAR</button>
+      <button id="confirm-edit-price" style="height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:950; font-size:13.5px; cursor:pointer; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.25);">GUARDAR</button>
     </div>
   `;
 
@@ -9584,7 +9589,7 @@ function hideBlockingLoading() {
 
 export async function showDeliveryHistoryModal(user) {
   const { showModal, closeModal } = await import('../components/modal.js');
-  const { collection, query, where, getDocs, limit } = await import('firebase/firestore');
+  const { collection, query, where, getDocs, limit, orderBy } = await import('firebase/firestore');
 
   const latestUser = getState().user || user;
   const currentTheme = getDriverMapTheme();
@@ -9592,7 +9597,7 @@ export async function showDeliveryHistoryModal(user) {
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = `
-    padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 16px)) 16px;
+    padding: 12px 14px 0 14px;
     background: ${isLight ? '#ffffff' : '#090d16'};
     color: ${isLight ? '#0f172a' : '#ffffff'};
     height: 100%;
@@ -9618,20 +9623,30 @@ export async function showDeliveryHistoryModal(user) {
   });
 
   try {
-    const q = query(
-      collection(db, 'orders'),
-      where('driverId', '==', latestUser.uid),
-      where('status', 'in', ['completed', 'cancelled']),
-      limit(100)
-    );
+    let currentLimit = 35;
+    let hasMoreOrders = true;
+    let allOrders = [];
 
-    const snap = await getDocs(q);
-    const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => {
-        const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
-        const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
-        return tB - tA;
-      });
+    async function fetchOrdersBatch() {
+      const q = query(
+        collection(db, 'orders'),
+        where('driverId', '==', latestUser.uid),
+        where('status', 'in', ['completed', 'cancelled']),
+        limit(currentLimit)
+      );
+
+      const snap = await getDocs(q);
+      allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+          const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+
+      hasMoreOrders = snap.docs.length >= currentLimit;
+    }
+
+    await fetchOrdersBatch();
 
     let filterSettlement = 'all'; // 'all' | 'unsettled'
     let filterPeriod = 'all'; // 'all' | 'today'
@@ -9663,7 +9678,7 @@ export async function showDeliveryHistoryModal(user) {
 
       modalEl.innerHTML = `
         <!-- FILTER CONTROLS BAR -->
-        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; flex-shrink:0;">
+        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px; flex-shrink:0;">
           <!-- ROW 1: LIQUIDACION FILTER -->
           <div style="display:flex; gap:6px; background:${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.06)'}; padding:4px; border-radius:14px;">
             <button id="filter-settle-all" style="
@@ -9711,23 +9726,35 @@ export async function showDeliveryHistoryModal(user) {
 
         <!-- TOP STATS KPI -->
         <div style="
-          display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;
+          display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;
           background: ${isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.04)'};
           border: 1px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'};
-          border-radius: 18px; padding: 12px 14px; flex-shrink: 0;
+          border-radius: 16px; padding: 10px 14px; flex-shrink: 0;
         ">
           <div style="display:flex; flex-direction:column;">
-            <span style="font-size:10.5px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; text-transform:uppercase;">Entregas Filtradas</span>
-            <span style="font-size:22px; font-weight:950; color:${isLight ? '#0f172a' : '#ffffff'};">${totalDelivered}</span>
+            <span style="font-size:10px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; text-transform:uppercase;">Entregas Filtradas</span>
+            <span style="font-size:20px; font-weight:950; color:${isLight ? '#0f172a' : '#ffffff'};">${totalDelivered}</span>
           </div>
           <div style="display:flex; flex-direction:column; text-align:right;">
-            <span style="font-size:10.5px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; text-transform:uppercase;">Ganancia Real Total</span>
-            <span style="font-size:22px; font-weight:950; color:#10b981;">$${totalEarnings.toLocaleString('es-AR')}</span>
+            <span style="font-size:10px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; text-transform:uppercase;">Ganancia Real Total</span>
+            <span style="font-size:20px; font-weight:950; color:#10b981;">$${totalEarnings.toLocaleString('es-AR')}</span>
           </div>
         </div>
 
-        <!-- ORDERS LIST CONTAINER -->
-        <div class="scrollable modal-scrollable-list" style="flex:1; min-height:0; max-height:100%; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; overscroll-behavior-y:contain; display:flex; flex-direction:column; gap:10px; padding-right:2px;">
+        <!-- ORDERS LIST CONTAINER WITH NATIVE TOUCH SCROLL -->
+        <div id="driver-history-scrollable-list" class="scrollable modal-scrollable-list delivery-orders-list" style="
+          flex: 1 1 0;
+          min-height: 0;
+          overflow-y: auto !important;
+          -webkit-overflow-scrolling: touch !important;
+          touch-action: pan-y !important;
+          overscroll-behavior-y: contain;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding-bottom: calc(48px + max(env(safe-area-inset-bottom, 0px), 28px));
+          padding-right: 2px;
+        ">
           ${filteredOrders.length === 0 ? `
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:45px 20px; text-align:center;">
               <div style="font-size:40px; margin-bottom:8px;">🔍</div>
@@ -9816,6 +9843,21 @@ export async function showDeliveryHistoryModal(user) {
               </div>
             `;
           }).join('')}
+
+          ${hasMoreOrders ? `
+            <button id="btn-load-more-history" style="
+              height: 48px; border-radius: 14px;
+              background: ${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.06)'};
+              color: ${isLight ? '#0f172a' : '#ffffff'};
+              border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)'};
+              font-weight: 850; font-size: 13px;
+              cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+              margin-top: 4px; margin-bottom: 12px; transition: all 0.2s;
+            ">
+              <span>📜</span>
+              <span>Cargar más entregas anteriores...</span>
+            </button>
+          ` : ''}
         </div>
       `;
 
@@ -9824,11 +9866,22 @@ export async function showDeliveryHistoryModal(user) {
       const btnSettleUnsettled = modalEl.querySelector('#filter-settle-unsettled');
       const btnPeriodAll = modalEl.querySelector('#filter-period-all');
       const btnPeriodToday = modalEl.querySelector('#filter-period-today');
+      const btnLoadMore = modalEl.querySelector('#btn-load-more-history');
 
       if (btnSettleAll) btnSettleAll.onclick = () => { filterSettlement = 'all'; renderHistoryList(); };
       if (btnSettleUnsettled) btnSettleUnsettled.onclick = () => { filterSettlement = 'unsettled'; renderHistoryList(); };
       if (btnPeriodAll) btnPeriodAll.onclick = () => { filterPeriod = 'all'; renderHistoryList(); };
       if (btnPeriodToday) btnPeriodToday.onclick = () => { filterPeriod = 'today'; renderHistoryList(); };
+
+      if (btnLoadMore) {
+        btnLoadMore.onclick = async () => {
+          btnLoadMore.disabled = true;
+          btnLoadMore.innerHTML = `<span>⏳</span> <span>Cargando entregas...</span>`;
+          currentLimit += 35;
+          await fetchOrdersBatch();
+          renderHistoryList();
+        };
+      }
 
       // Attach order card click listeners
       modalEl.querySelectorAll('.history-order-card-item').forEach(card => {
@@ -13155,9 +13208,9 @@ export async function updateDispatchQueue(orderId) {
       ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime())
       : null;
 
-    // GUARD 1: Si la oferta actual está dirigida y tiene menos de 28s de emitida, NO ROTAR.
+    // GUARD 1: Si la oferta actual está dirigida y tiene menos de 58s de emitida, NO ROTAR.
     // Esto evita que relojes desfasados salten ofertas activas a los pocos segundos.
-    if (o.queueTargetDriverId && offeredAt && (now - offeredAt < 28000)) {
+    if (o.queueTargetDriverId && offeredAt && (now - offeredAt < 58000)) {
       return;
     }
 
@@ -13522,7 +13575,7 @@ export function showExclusiveOfferOverlay(batch, user) {
   let destAddress = batch.isBundle ? batch.orders.map(o => o.destinationAddress || o.address || o.deliveryAddress).join(' • ') : (orderObj.destinationAddress || orderObj.address || orderObj.deliveryAddress || 'Dirección de entrega');
   let driverEarnings = getOrderDriverEarnings(batch.order || orderObj || batch);
 
-  const TOTAL_DURATION = 30;
+  const TOTAL_DURATION = 60;
   const offeredAt = orderObj?.queueOfferedAt ? (orderObj.queueOfferedAt.toMillis ? orderObj.queueOfferedAt.toMillis() : new Date(orderObj.queueOfferedAt).getTime()) : (Date.now() + (getState().serverTimeOffset || 0));
   const calcRemaining = () => {
     const now = Date.now() + (getState().serverTimeOffset || 0);

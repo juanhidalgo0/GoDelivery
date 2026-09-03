@@ -89,10 +89,10 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
             <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
         ` : ''}
-        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:${hideHeader ? 'hidden' : 'auto'} !important; -webkit-overflow-scrolling:touch !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''}">
+        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''} ${!footer && !isFullscreen ? 'padding-bottom: calc(20px + max(env(safe-area-inset-bottom, 0px), 28px)) !important;' : ''}">
           ${typeof content === 'string' ? content : ''}
         </div>
-        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:20px 24px calc(20px + env(safe-area-inset-bottom, 0px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
+        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:16px 24px calc(16px + max(env(safe-area-inset-bottom, 0px), 28px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
       </div>
     </div>
   `;
@@ -180,12 +180,11 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
   let currentX = 0;
   let isDragging = false;
   let startTime = 0;
-
   const onTouchStart = (e) => {
-    if (['INPUT', 'BUTTON', 'A', 'TEXTAREA'].includes(e.target.tagName)) return;
+    if (['INPUT', 'BUTTON', 'A', 'TEXTAREA', 'LABEL', 'SELECT'].includes(e.target.tagName)) return;
     
-    // Disable card dragging when touching inside scrollable containers (like the flavors list)
-    const scrollableArea = e.target.closest('.pm-content, .pm-scrollable-body, .pm-options-list, .scrollable, [style*="overflow-y: auto"], [style*="overflow-y:auto"]');
+    // Disable card dragging when touching inside scrollable containers (like delivery list, products, options)
+    const scrollableArea = e.target.closest('.pm-content, .pm-scrollable-body, .pm-options-list, .scrollable, .modal-scrollable-list, .delivery-orders-list, [style*="overflow-y: auto"], [style*="overflow-y:auto"], [style*="overflow-y: scroll"]');
     if (scrollableArea) {
       if (!e.target.closest('.modal-handle, #modal-handle, [id*="-handle"], [id*="-header-drag"]')) {
         return;
@@ -268,9 +267,9 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
         const relativeY = e.touches[0].clientY - rect.top;
         const relativeX = e.touches[0].clientX - rect.left;
         
-        const isEdgeTouch = slideFromRight ? (relativeX < 40 || e.target.closest('.chat-header-bar')) : (relativeY < 60 || e.target.closest('.chat-header-bar, .ticket-chat-header, .modal-handle'));
-        const isInteractive = e.target.closest('input, select, textarea, button');
-        const isScrollableContent = e.target.closest('.pm-scrollable-body, .chat-messages, #ticket-messages-container');
+        const isEdgeTouch = slideFromRight ? (relativeX < 40 || e.target.closest('.chat-header-bar')) : (relativeY < 50 || e.target.closest('.chat-header-bar, .ticket-chat-header, .modal-handle'));
+        const isInteractive = e.target.closest('input, select, textarea, button, a');
+        const isScrollableContent = e.target.closest('.pm-scrollable-body, .chat-messages, #ticket-messages-container, .scrollable, .modal-scrollable-list, .delivery-orders-list, [style*="overflow-y: auto"], [style*="overflow-y:auto"]');
         if (isEdgeTouch && !isInteractive && (!isScrollableContent || relativeX < 40)) {
           onTouchStart(e);
         }
@@ -282,9 +281,12 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
         if (isDragging) onTouchEnd(e);
       });
     }
+  }
 
+  if (!persistent) {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   }
+
   const closeBtn = document.getElementById(`${modalId}-close-btn`);
   if (closeBtn) closeBtn.addEventListener('click', close);
 

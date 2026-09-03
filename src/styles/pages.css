@@ -2997,20 +2997,21 @@ body.header-hidden .slide-overlay {
 /* Mobile Cart Styles */
 #page-cart {
   overflow-y: hidden !important;
-  height: calc(100dvh - var(--navbar-height, 60px)) !important;
+  height: calc(100dvh - var(--navbar-height, 68px)) !important;
 }
 
 .cart-container {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--navbar-height, 60px)) !important;
+  height: 100% !important;
+  max-height: 100% !important;
   background: var(--color-bg);
   overflow: hidden;
 }
 
 @media (max-width: 768px) {
-  #page-cart, .cart-container {
-    height: calc(100dvh - var(--navbar-height, 60px)) !important;
+  #page-cart {
+    height: calc(100dvh - var(--navbar-height, 68px)) !important;
   }
 }
 
@@ -3047,7 +3048,7 @@ body.header-hidden .slide-overlay {
 .cart-fixed-footer {
   background: var(--color-bg-card);
   border-top: 1px solid var(--color-border-light);
-  padding: 12px 16px 12px 16px;
+  padding: 12px 16px calc(12px + max(env(safe-area-inset-bottom, 0px), 8px)) 16px;
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.06);
   z-index: 1000;
   border-radius: 20px 20px 0 0;

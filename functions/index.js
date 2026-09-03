@@ -753,7 +753,7 @@ async function serverSideDispatch(orderId, order) {
           title: pushTitle,
           body: pushBody,
           status: "unread",
-          url: "#/delivery",
+          url: `#/delivery?takeOrderId=${orderId}`,
           orderId: orderId,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -765,9 +765,10 @@ async function serverSideDispatch(orderId, order) {
             body: pushBody
           }, { 
             tag: `exclusive-offer-${orderId}-${Date.now()}`, 
-            url: "#/delivery",
+            url: `#/delivery?takeOrderId=${orderId}`,
             type: "exclusive_offer",
             orderId: orderId,
+            takeOrderId: orderId,
             sound: "alert.mp3",
             channelId: "exclusive_offers"
           });
@@ -1197,9 +1198,10 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                 body: pushBody
               }, { 
                 tag: `exclusive-offer-${orderId}-${Date.now()}`, 
-                url: "#/delivery",
+                url: `#/delivery?takeOrderId=${orderId}`,
                 type: "new_exclusive_offer",
                 orderId: orderId,
+                takeOrderId: orderId,
                 sound: "cash.mp3",
                 channelId: "exclusive_offers",
                 click_action: 'FLUTTER_NOTIFICATION_CLICK'
@@ -1213,7 +1215,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
               title: pushTitle,
               body: pushBody,
               status: "unread",
-              url: "#/delivery",
+              url: `#/delivery?takeOrderId=${orderId}`,
               orderId: orderId,
               createdAt: new Date()
             });
@@ -3699,7 +3701,7 @@ exports.getServerTime = onRequest({ cors: true }, (req, res) => {
  * if all apps are in background or closed.
  */
 async function processExpiredAndUnassignedOffers() {
-  const OFFER_TIMEOUT_MS = 28 * 1000; // Strict 28-second limit for server rotation
+  const OFFER_TIMEOUT_MS = 60 * 1000; // 60-second limit for driver offer acceptance
   const now = Date.now();
   const cutoff = new Date(now - OFFER_TIMEOUT_MS);
 

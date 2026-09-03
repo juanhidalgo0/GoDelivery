@@ -92,7 +92,9 @@ export function renderNavbar() {
   `;
 
   let floatingDriverBtn = document.getElementById('floating-driver-mode-pill');
-  if (isDelivery() && sessionStorage.getItem('gd_temp_client_mode') === 'true') {
+  const isCartOrCheckout = hashPath.startsWith('/cart') || document.body.classList.contains('modal-open');
+  
+  if (isDelivery() && sessionStorage.getItem('gd_temp_client_mode') === 'true' && !isCartOrCheckout) {
     if (!floatingDriverBtn) {
       floatingDriverBtn = document.createElement('a');
       floatingDriverBtn.id = 'floating-driver-mode-pill';
@@ -100,16 +102,16 @@ export function renderNavbar() {
       floatingDriverBtn.innerHTML = '🛵 Modo Repartidor';
       floatingDriverBtn.style.cssText = `
         position: fixed;
-        bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(var(--navbar-height, 68px) + 16px + max(env(safe-area-inset-bottom, 0px), 16px));
         right: 16px;
-        z-index: 999999;
+        z-index: 99999;
         background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
         color: white;
-        padding: 10px 16px;
+        padding: 8px 14px;
         border-radius: 30px;
         box-shadow: 0 8px 24px rgba(225, 29, 72, 0.4);
         font-weight: 900;
-        font-size: 12px;
+        font-size: 11.5px;
         font-family: var(--font-display, sans-serif);
         display: flex;
         align-items: center;
@@ -123,6 +125,8 @@ export function renderNavbar() {
         document.body.classList.add('is-delivery-mode');
       };
       document.body.appendChild(floatingDriverBtn);
+    } else {
+      floatingDriverBtn.style.display = 'flex';
     }
   } else if (floatingDriverBtn) {
     floatingDriverBtn.remove();

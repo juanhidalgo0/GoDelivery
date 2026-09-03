@@ -215,31 +215,41 @@ export async function initPushNotifications() {
             url = url || n.url || n.click_action || '';
           }
 
-          if (url) {
-            if (url.includes('localhost') || url.includes('127.0.0.1')) {
-              url = url.replace(/^https?:\/\/[^\/]+/, 'https://godelivery-magdalena.web.app');
-            }
-            let targetHash = '';
-            if (url.includes('#')) {
-              targetHash = url.split('#')[1];
-            } else if (url.startsWith('/')) {
-              targetHash = url;
-            }
+          if (url.includes('localhost') || url.includes('127.0.0.1')) {
+            url = url.replace(/^https?:\/\/[^\/]+/, 'https://godelivery-magdalena.web.app');
+          }
+          let targetHash = '';
+          if (url.includes('#')) {
+            targetHash = url.split('#')[1];
+          } else if (url.startsWith('/')) {
+            targetHash = url;
+          }
 
-            if (targetHash) {
-              const loggedIn = getState().user;
-              if (loggedIn) {
-                console.log('[Push] Navigating directly to hash:', targetHash);
-                window.location.hash = targetHash;
-                
-                // Dispatch HashChangeEvent with a short delay to ensure app webview is awake and routes trigger
+          if (orderId && (targetHash.includes('delivery') || !targetHash)) {
+            if (!targetHash.includes('takeOrderId')) {
+              targetHash = targetHash.includes('?') ? `${targetHash}&takeOrderId=${orderId}` : `/delivery?takeOrderId=${orderId}`;
+            }
+          }
+
+          if (targetHash) {
+            const loggedIn = getState().user;
+            if (loggedIn) {
+              console.log('[Push] Navigating directly to hash:', targetHash);
+              delete window._processedTakeOrderId;
+              
+              const finalHash = targetHash.startsWith('/') ? `#${targetHash}` : (targetHash.startsWith('#') ? targetHash : `#/${targetHash}`);
+              if (window.location.hash === finalHash) {
+                // Force event even if hash didn't change
+                window.dispatchEvent(new HashChangeEvent('hashchange'));
+              } else {
+                window.location.hash = finalHash;
                 setTimeout(() => {
                   window.dispatchEvent(new HashChangeEvent('hashchange'));
                 }, 150);
-              } else {
-                console.log('[Push] Deferring navigation, saving to pending URL:', targetHash);
-                localStorage.setItem('gd_pending_notification_url', targetHash);
               }
+            } else {
+              console.log('[Push] Deferring navigation, saving to pending URL:', targetHash);
+              localStorage.setItem('gd_pending_notification_url', targetHash);
             }
           }
         });
