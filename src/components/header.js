@@ -411,15 +411,7 @@ export function renderHeader() {
           
           <div style="background: none; border: none; color: white; display: flex; align-items: center; gap: 12px; padding: 0; position: relative; z-index: 2;">
             ${(hash === '#/profile' || hash.startsWith('#/profile/orders') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats')) ? '' : `
-              <button onclick="(() => {
-                const oldHash = window.location.hash;
-                window.history.back();
-                setTimeout(() => {
-                  if (window.location.hash === oldHash) {
-                    window.location.hash = '#/';
-                  }
-                }, 100);
-              })()" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex;">
+              <button onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex;">
                 ${icon('chevronLeft', 28)}
               </button>
             `}

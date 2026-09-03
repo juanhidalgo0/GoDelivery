@@ -70,9 +70,9 @@ export async function renderProfileOrders(content) {
         <div style="display:flex; align-items:center; gap:12px; padding: 12px 16px 20px 16px; color:white; position:relative; overflow:hidden;">
           <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
           
-          <a href="#/profile" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.15); color:white; text-decoration:none; position:relative; z-index:2;">
+          <button onclick="window.safeGoBack ? window.safeGoBack('#/profile') : (window.location.hash = '#/profile')" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.15); border:none; color:white; cursor:pointer; position:relative; z-index:2; padding:0;">
             ${icon('chevronLeft', 24)}
-          </a>
+          </button>
           <div>
             <h1 style="font-family:var(--font-display); font-weight:800; font-size:18px; margin:0; line-height:1.2; letter-spacing:-0.01em;">Mis Pedidos</h1>
             <p style="font-size:10px; color:rgba(255,255,255,0.85); font-weight:700; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.5px;">Historial y estado de tus compras</p>

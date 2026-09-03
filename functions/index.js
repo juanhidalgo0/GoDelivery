@@ -323,7 +323,16 @@ async function getUserTokens(userId) {
     }
 
     const tokensSnap = await db.collection("users").doc(userId).collection("fcmTokens").get();
-    return tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+    let tokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+
+    if (tokens.length === 0) {
+      const userSnap = await db.collection("users").doc(userId).get();
+      if (userSnap.exists && userSnap.data().lastFcmToken) {
+        tokens.push(userSnap.data().lastFcmToken);
+      }
+    }
+
+    return [...new Set(tokens)].slice(-10);
   } catch (err) {
     logger.warn(`Error getting tokens for user ${userId}:`, err);
     return [];
@@ -378,6 +387,9 @@ async function sendPush(tokens, notification, data = {}) {
         priority: "high",
         ttl: 3600000,
         notification: {
+          title: displayTitle,
+          body: displayBody,
+          channelId: data.channelId || "exclusive_offers",
           priority: "max",
           sound: "default",
           defaultSound: true,
@@ -387,14 +399,17 @@ async function sendPush(tokens, notification, data = {}) {
       },
       apns: {
         headers: {
-          "apns-priority": "10"
+          "apns-priority": "10",
+          "apns-push-type": "alert"
         },
         payload: {
           aps: {
+            alert: {
+              title: displayTitle,
+              body: displayBody
+            },
             sound: "default",
-            badge: 1,
-            contentAvailable: true,
-            mutableContent: true
+            badge: 1
           }
         }
       },
@@ -436,44 +451,7 @@ async function sendPush(tokens, notification, data = {}) {
       const response = await admin.messaging().sendEachForMulticast(message);
       totalSuccess += response.successCount;
       totalFailure += response.failureCount;
-      
-      // Clean up invalid tokens
-      if (response.failureCount > 0) {
-        const tokensToDelete = [];
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            logger.error(`[FCM Error] Failed to send to token index ${idx} (${chunk[idx].substring(0, 10)}...):`, resp.error);
-            const errorCode = resp.error?.code;
-            if (errorCode === "messaging/invalid-registration-token" || 
-                errorCode === "messaging/registration-token-not-registered") {
-              tokensToDelete.push(chunk[idx]);
-            }
-          }
-        });
-
-        if (tokensToDelete.length > 0) {
-          logger.info(`Cleaning up ${tokensToDelete.length} invalid tokens`);
-          
-          // Chunk tokensToDelete into groups of 30 for parallel search and destroy
-          const chunks = [];
-          for (let i = 0; i < tokensToDelete.length; i += 30) {
-            chunks.push(tokensToDelete.slice(i, i + 30));
-          }
-
-          await Promise.all(chunks.map(async (c) => {
-            try {
-              const snap = await db.collectionGroup("fcmTokens").where("token", "in", c).get();
-              if (!snap.empty) {
-                const batch = db.batch();
-                snap.docs.forEach(d => batch.delete(d.ref));
-                await batch.commit();
-              }
-            } catch (err) {
-              logger.error("Error deleting fcmToken chunk:", err);
-            }
-          }));
-        }
-      }
+      logger.info(`[sendPush] Multicast result: ${response.successCount} success, ${response.failureCount} failed for target ${displayTitle}`);
     } catch (err) {
       logger.error("Error sending chunk of push notifications:", err);
     }

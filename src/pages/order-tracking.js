@@ -120,7 +120,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         ${inModal ? `
           <button id="v5-modal-back-btn" class="v5-back-btn" style="pointer-events:auto; border:1px solid var(--color-border); cursor:pointer;">${icon('chevronLeft', 24)}</button>
         ` : `
-          <a href="#/profile/orders" class="v5-back-btn">${icon('chevronLeft', 24)}</a>
+          <button onclick="window.safeGoBack ? window.safeGoBack('#/profile/orders') : (window.location.hash = '#/profile/orders')" class="v5-back-btn" style="cursor:pointer; border:none; background:rgba(255,255,255,0.92);">${icon('chevronLeft', 24)}</button>
         `}
         <div id="v5-header-driver-card" style="flex:1; margin-left:10px; pointer-events:auto; min-width:0;"></div>
       </div>

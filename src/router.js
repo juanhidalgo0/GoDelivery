@@ -4,6 +4,7 @@ import { clearActiveListeners } from './utils/cleanup.js';
 
 let routes = {};
 let currentCleanup = null;
+const navigationHistory = [];
 
 export function registerRoutes(routeMap) {
   routes = routeMap;
@@ -11,6 +12,40 @@ export function registerRoutes(routeMap) {
 
 export function navigate(path) {
   window.location.hash = path;
+}
+
+export function safeGoBack(fallback = '#/') {
+  const fullHash = window.location.hash || '#/';
+  const cleanHash = fullHash.split('?')[0] || '#/';
+
+  // 1. Root main tabs always return to Home to prevent trapping users in circular loops
+  const rootTabs = ['#/profile', '#/cart', '#/offers', '#/mi-comercio', '#/mis-chats', '#/delivery'];
+  if (rootTabs.includes(cleanHash)) {
+    window.location.hash = '#/';
+    return;
+  }
+
+  // 2. Pop current page if on top of stack
+  if (navigationHistory.length > 0 && navigationHistory[navigationHistory.length - 1] === cleanHash) {
+    navigationHistory.pop();
+  }
+
+  // 3. Find the previous route that is different from current page
+  while (navigationHistory.length > 0) {
+    const prev = navigationHistory.pop();
+    if (prev && prev !== cleanHash) {
+      window.location.hash = prev;
+      return;
+    }
+  }
+
+  // 4. Default fallback
+  const finalFallback = fallback.startsWith('#') ? fallback : (fallback.startsWith('/') ? `#${fallback}` : `#/${fallback}`);
+  window.location.hash = finalFallback;
+}
+
+if (typeof window !== 'undefined') {
+  window.safeGoBack = safeGoBack;
 }
 
 const getMainRoutes = () => {
@@ -90,6 +125,14 @@ let isRouting = false;
 export async function handleRoute() {
   isRouting = true;
   try {
+    const currentCleanHash = window.location.hash ? window.location.hash.split('?')[0] : '#/';
+    if (navigationHistory.length === 0 || navigationHistory[navigationHistory.length - 1] !== currentCleanHash) {
+      navigationHistory.push(currentCleanHash);
+      if (navigationHistory.length > 30) {
+        navigationHistory.shift();
+      }
+    }
+
     const fullHash = window.location.hash.slice(1) || '/';
     const hash = fullHash.split('?')[0]; // Ignore query params for matching
     const slider = document.getElementById('app-slider');

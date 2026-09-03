@@ -232,15 +232,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           </div>
 
           <div style="height: 56px; padding: 0 16px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 2;">
-            <button id="profile-btn-back" onclick="(() => {
-              const oldHash = window.location.hash;
-              window.history.back();
-              setTimeout(() => {
-                if (window.location.hash === oldHash) {
-                  window.location.hash = '#/';
-                }
-              }, 100);
-            })()" style="background: rgba(255,255,255,0.18); border: none; color: white; cursor: pointer; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); flex-shrink: 0; transition: all 0.2s;" title="Volver">
+            <button id="profile-btn-back" onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')" style="background: rgba(255,255,255,0.18); border: none; color: white; cursor: pointer; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); flex-shrink: 0; transition: all 0.2s;" title="Volver al Inicio">
               ${icon('chevronLeft', 22)}
             </button>
             <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Perfil</span>

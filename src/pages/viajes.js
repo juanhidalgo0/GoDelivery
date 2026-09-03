@@ -50,7 +50,7 @@ export async function renderViajes(content) {
       <!-- Premium Unified Blue Header with smooth gradient -->
       <div style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); padding:calc(18px + env(safe-area-inset-top, 0px)) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(37, 99, 235, 0.2); z-index:100;">
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
-        <button onclick="history.back()" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+        <button onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
           ${icon('chevronLeft', 24)}
         </button>
         <div style="flex:1; position:relative; z-index:2;">
