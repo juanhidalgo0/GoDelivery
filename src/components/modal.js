@@ -89,10 +89,10 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
             <button class="modal-close" id="${modalId}-close-btn" style="width:40px; height:40px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
         ` : ''}
-        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''} ${!footer && !isFullscreen ? 'padding-bottom: calc(20px + max(env(safe-area-inset-bottom, 0px), 28px)) !important;' : ''}">
+        <div class="modal-body" id="${modalId}-body" style="flex:1 !important; min-height:0 !important; overflow-y:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; position:relative !important; display:flex !important; flex-direction:column !important; background:var(--color-bg) !important; ${hideHeader || isFullscreen ? 'padding:0 !important;' : ''} ${!footer && !isFullscreen ? 'padding-bottom: calc(20px + max(env(safe-area-inset-bottom, 0px), 32px)) !important;' : ''}">
           ${typeof content === 'string' ? content : ''}
         </div>
-        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:16px 24px calc(16px + max(env(safe-area-inset-bottom, 0px), 28px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
+        ${footer && !isFullscreen ? `<div class="modal-footer" style="padding:16px 24px calc(16px + max(env(safe-area-inset-bottom, 0px), 32px)) 24px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0;">${footer}</div>` : ''}
       </div>
     </div>
   `;

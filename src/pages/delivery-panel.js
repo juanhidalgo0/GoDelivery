@@ -1197,7 +1197,7 @@ export async function renderDeliveryPanel(containerArg) {
 
     <!-- LAYER 4: FLOATING RADAR DOCK (ALWAYS VISIBLE WHEN ONLINE WITH AUTO-ACCEPT) -->
     ${isOnline ? `
-      <div id="driver-footer-dock-container" style="position:fixed; bottom:max(28px, calc(18px + env(safe-area-inset-bottom, 24px))); left:16px; right:16px; z-index:9999; pointer-events:auto;">
+      <div id="driver-footer-dock-container" style="position:fixed; bottom:max(24px, calc(16px + max(env(safe-area-inset-bottom, 0px), 20px))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
         ${renderBottomDockContent(user, activeOrdersList)}
       </div>
     ` : ''}
@@ -8293,91 +8293,45 @@ export function renderBottomDockContent(user, activeOrders = []) {
         `;
       })() : ''}
 
-      <!-- COMPACT ROW: PRIMARY ACTION SLIDER (IF COLLAPSED) -->
-      ${(hasActive && !isExpanded) ? `
-        <div id="dock-compact-slider-row" style="display:flex; flex-direction:column; gap:6px; animation: dockContentFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
-          <!-- TOTAL A COBRAR CALLOUT WHEN DELIVERING -->
-          ${(!isPickup && primaryOrder) ? (() => {
-            const isCash = primaryOrder.paymentMethod === 'efectivo' || (primaryOrder.paymentMethod && primaryOrder.paymentMethod.toString().toLowerCase().includes('efect'));
-            const totalAmount = Number(primaryOrder.totalAmount || primaryOrder.total || 0);
-            return `
-              <div style="
-                display: flex; align-items: center; justify-content: space-between; gap: 8px;
-                padding: 8px 12px; border-radius: 14px;
-                background: ${isCash ? (isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.14)') : (isLight ? '#f0fdf4' : 'rgba(34, 197, 94, 0.12)')};
-                border: 1.5px solid ${isCash ? '#fde68a' : (isLight ? '#bbf7d0' : 'rgba(34, 197, 94, 0.3)')};
-              ">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span style="font-size:18px;">${isCash ? '💵' : '💳'}</span>
-                  <div style="display:flex; flex-direction:column;">
-                    <span style="font-size:9.5px; font-weight:900; color:${isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#15803d' : '#4ade80')}; text-transform:uppercase; letter-spacing:0.5px;">
-                      ${isCash ? 'TOTAL A COBRAR EN MANO:' : 'PAGO POR TRANSFERENCIA:'}
-                    </span>
-                    <span style="font-size:16px; font-weight:950; color:${isCash ? (isLight ? '#78350f' : '#fef08a') : (isLight ? '#14532d' : '#86efac')}; line-height:1.1;">
-                      $${totalAmount.toLocaleString('es-AR')}
-                    </span>
-                  </div>
-                </div>
-
-                <button class="open-order-breakdown-btn" data-order-id="${primaryOrder.id}" style="
-                  background: ${isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.1)'};
-                  border: 1px solid ${isCash ? '#fde68a' : (isLight ? '#bbf7d0' : 'rgba(255, 255, 255, 0.2)')};
-                  color: ${isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#15803d' : '#4ade80')};
-                  padding: 6px 10px; border-radius: 10px;
-                  font-size: 11px; font-weight: 800; cursor: pointer;
-                  display: flex; align-items: center; gap: 4px;
-                  box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
-                ">
-                  <span>ℹ️</span>
-                  <span>Ver Desglose</span>
-                </button>
-              </div>
-            `;
-          })() : ''}
-
-          <div class="driver-swipe-slider" data-action="${isPickup ? 'pickup' : 'deliver'}" data-id="${primaryOrder.id}" data-codes="${primaryOrder.verificationCode || ''}" style="
-            position: relative;
-            width: 100%;
-            height: 52px;
-            border-radius: 26px;
-            background: ${isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)'};
-            border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
-            overflow: hidden;
-            user-select: none;
-            touch-action: none;
-            box-shadow: 0 8px 24px ${isLight ? 'rgba(225, 29, 72, 0.12)' : 'rgba(0, 0, 0, 0.55)'};
-            display: flex; align-items: center;
+      <!-- COMPACT ROW: TOTAL CALLOUT (IF COLLAPSED & DELIVERING) -->
+      ${(hasActive && !isExpanded && !isPickup && primaryOrder) ? (() => {
+        const isCash = primaryOrder.paymentMethod === 'efectivo' || (primaryOrder.paymentMethod && primaryOrder.paymentMethod.toString().toLowerCase().includes('efect'));
+        const totalAmount = Number(primaryOrder.totalAmount || primaryOrder.total || 0);
+        return `
+          <div style="
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding: 8px 12px; border-radius: 14px;
+            background: ${isCash ? (isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.14)') : (isLight ? '#f0fdf4' : 'rgba(34, 197, 94, 0.12)')};
+            border: 1.5px solid ${isCash ? '#fde68a' : (isLight ? '#bbf7d0' : 'rgba(34, 197, 94, 0.3)')};
+            animation: dockContentFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
           ">
-            <div class="swipe-slider-fill" style="
-              position: absolute; top: 0; left: 0; height: 100%; width: 0%;
-              background: linear-gradient(90deg, #e11d48 0%, #be123c 100%);
-              border-radius: 26px; pointer-events: none;
-            "></div>
-
-            <div class="swipe-slider-label" style="
-              position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-              font-size: 13.5px; font-weight: 900; letter-spacing: 2.5px;
-              color: ${isLight ? '#9f1239' : '#ffffff'};
-              text-transform: uppercase; pointer-events: none; padding-left: 24px;
-              transition: opacity 0.15s ease;
-            ">
-              ${isPickup ? 'RETIRADO › › ›' : 'ENTREGADO › › ›'}
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:18px;">${isCash ? '💵' : '💳'}</span>
+              <div style="display:flex; flex-direction:column;">
+                <span style="font-size:9.5px; font-weight:900; color:${isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#15803d' : '#4ade80')}; text-transform:uppercase; letter-spacing:0.5px;">
+                  ${isCash ? 'TOTAL A COBRAR EN MANO:' : 'PAGO POR TRANSFERENCIA:'}
+                </span>
+                <span style="font-size:16px; font-weight:950; color:${isCash ? (isLight ? '#78350f' : '#fef08a') : (isLight ? '#14532d' : '#86efac')}; line-height:1.1;">
+                  $${totalAmount.toLocaleString('es-AR')}
+                </span>
+              </div>
             </div>
 
-            <div class="swipe-slider-handle" style="
-              position: absolute; top: 3px; left: 3px; width: 46px; height: 46px;
-              background: #ffffff; border-radius: 50%;
-              box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4);
-              display: flex; align-items: center; justify-content: center;
-              cursor: grab; touch-action: none; z-index: 2;
+            <button class="open-order-breakdown-btn" data-order-id="${primaryOrder.id}" style="
+              background: ${isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.1)'};
+              border: 1px solid ${isCash ? '#fde68a' : (isLight ? '#bbf7d0' : 'rgba(255, 255, 255, 0.2)')};
+              color: ${isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#15803d' : '#4ade80')};
+              padding: 6px 10px; border-radius: 10px;
+              font-size: 11px; font-weight: 800; cursor: pointer;
+              display: flex; align-items: center; gap: 4px;
+              box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
             ">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
-                <polyline points="9 18 15 12 9 6"></polyline>
-              </svg>
-            </div>
+              <span>ℹ️</span>
+              <span>Ver Desglose</span>
+            </button>
           </div>
-        </div>
-      ` : ''}
+        `;
+      })() : ''}
 
       <!-- IDLE RADAR STATUS & PREDICTIVE DEMAND (IF NO ACTIVE ORDERS) -->
       ${!hasActive ? `
@@ -8418,9 +8372,9 @@ export function renderBottomDockContent(user, activeOrders = []) {
         </div>
       ` : ''}
 
-      <!-- EXPANDED DETAILED MULTI-ORDER BREAKDOWN LIST -->
+      <!-- EXPANDED DETAILED MULTI-ORDER BREAKDOWN LIST (SCROLLABLE CONTENT AREA) -->
       ${(hasActive && isExpanded) ? `
-        <div id="dock-expanded-orders-list" style="display:flex; flex-direction:column; gap:14px; margin-top:4px; flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; padding-bottom: 6px; animation: dockContentFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);">
+        <div id="dock-expanded-orders-list" style="display:flex; flex-direction:column; gap:10px; margin-top:2px; flex: 1; min-height: 0; max-height: min(44vh, 320px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; padding-bottom: 2px; animation: dockContentFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);">
           ${activeOrders.map((order, idx) => {
             const orderIsPickup = (order.status === 'pending' || order.status === 'accepted' || order.status === 'preparing' || order.status === 'ready' || (!order.pickedUpAt && order.status !== 'delivering'));
             const itemsList = Array.isArray(order.items) ? order.items : (Array.isArray(order.products) ? order.products : []);
@@ -8441,10 +8395,10 @@ export function renderBottomDockContent(user, activeOrders = []) {
               <div style="
                 background: ${isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.04)'};
                 border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(225, 29, 72, 0.35)'};
-                border-radius: 20px;
-                padding: 14px;
-                display: flex; flex-direction: column; gap: 10px;
-                box-shadow: 0 4px 16px ${isLight ? 'rgba(225,29,72,0.06)' : 'rgba(0,0,0,0.3)'};
+                border-radius: 18px;
+                padding: 12px;
+                display: flex; flex-direction: column; gap: 8px;
+                box-shadow: 0 4px 14px ${isLight ? 'rgba(225,29,72,0.06)' : 'rgba(0,0,0,0.3)'};
               ">
                 <!-- ORDER TOP BADGE -->
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -8466,7 +8420,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
                   <div style="font-size:10px; font-weight:800; color:${isLight ? '#e11d48' : '#fb7185'}; text-transform:uppercase;">
                     ${isEncomienda ? '📦 ENCOMIENDA A REALIZAR:' : (order.isFavor ? '🛍️ MANDADO / COMPRA A REALIZAR:' : '🏬 PUNTO DE RETIRO:')}
                   </div>
-                  <div style="font-size:14px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">
+                  <div style="font-size:13.5px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">
                     ${displayComercioTitle}
                   </div>
                   ${isEncomienda ? `
@@ -8546,7 +8500,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
                     </div>
                   ` : ''}
 
-                  <!-- DIRECT CUSTOMER CONTACT ACTIONS (WHATSAPP, CHAT APP, CALL) -->
+                  <!-- DIRECT CUSTOMER CONTACT ACTIONS (WHATSAPP, CHAT APP) -->
                   ${(() => {
                     const clientPhone = order.userPhone || order.clientPhone || order.phone || '';
                     let orderWaUrl = '';
@@ -8616,54 +8570,56 @@ export function renderBottomDockContent(user, activeOrders = []) {
                     </button>
                   </div>
                 </div>
-
-                <!-- STOP ACTION SWIPE SLIDER -->
-                <div style="margin-top:4px;">
-                  <div class="driver-swipe-slider" data-action="${orderIsPickup ? 'pickup' : 'deliver'}" data-id="${order.id}" data-codes="${order.verificationCode || ''}" style="
-                    position: relative;
-                    width: 100%;
-                    height: 48px;
-                    border-radius: 24px;
-                    background: ${isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)'};
-                    border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
-                    overflow: hidden;
-                    user-select: none;
-                    touch-action: none;
-                    box-shadow: 0 4px 14px ${isLight ? 'rgba(225, 29, 72, 0.1)' : 'rgba(0,0,0,0.4)'};
-                    display: flex; align-items: center;
-                  ">
-                    <div class="swipe-slider-fill" style="
-                      position: absolute; top: 0; left: 0; height: 100%; width: 0%;
-                      background: linear-gradient(90deg, #e11d48 0%, #be123c 100%);
-                      border-radius: 24px; pointer-events: none;
-                    "></div>
-
-                    <div class="swipe-slider-label" style="
-                      position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-                      font-size: 12.5px; font-weight: 900; letter-spacing: 2px;
-                      color: ${isLight ? '#9f1239' : '#ffffff'};
-                      text-transform: uppercase; pointer-events: none; padding-left: 24px;
-                      transition: opacity 0.15s ease;
-                    ">
-                      ${orderIsPickup ? 'RETIRADO › › ›' : 'ENTREGADO › › ›'}
-                    </div>
-
-                    <div class="swipe-slider-handle" style="
-                      position: absolute; top: 3px; left: 3px; width: 42px; height: 42px;
-                      background: #ffffff; border-radius: 50%;
-                      box-shadow: 0 3px 10px rgba(225, 29, 72, 0.35);
-                      display: flex; align-items: center; justify-content: center;
-                      cursor: grab; touch-action: none; z-index: 2;
-                    ">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
-                        <polyline points="9 18 15 12 9 6"></polyline>
-                      </svg>
-                    </div>
-                  </div>
-                </div>
               </div>
             `;
           }).join('')}
+        </div>
+      ` : ''}
+
+      <!-- PINNED PRIMARY ACTION SLIDER (ALWAYS VISIBLE & STICKY OUTSIDE SCROLLING!) -->
+      ${(hasActive && primaryOrder) ? `
+        <div id="dock-pinned-action-slider-row" style="flex-shrink: 0; width: 100%; margin-top: 2px;">
+          <div class="driver-swipe-slider" data-action="${isPickup ? 'pickup' : 'deliver'}" data-id="${primaryOrder.id}" data-codes="${primaryOrder.verificationCode || ''}" style="
+            position: relative;
+            width: 100%;
+            height: 52px;
+            border-radius: 26px;
+            background: ${isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)'};
+            border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
+            overflow: hidden;
+            user-select: none;
+            touch-action: none;
+            box-shadow: 0 6px 20px ${isLight ? 'rgba(225, 29, 72, 0.12)' : 'rgba(0, 0, 0, 0.55)'};
+            display: flex; align-items: center;
+          ">
+            <div class="swipe-slider-fill" style="
+              position: absolute; top: 0; left: 0; height: 100%; width: 0%;
+              background: linear-gradient(90deg, #e11d48 0%, #be123c 100%);
+              border-radius: 26px; pointer-events: none;
+            "></div>
+
+            <div class="swipe-slider-label" style="
+              position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+              font-size: 13.5px; font-weight: 900; letter-spacing: 2.5px;
+              color: ${isLight ? '#9f1239' : '#ffffff'};
+              text-transform: uppercase; pointer-events: none; padding-left: 24px;
+              transition: opacity 0.15s ease;
+            ">
+              ${isPickup ? 'RETIRADO › › ›' : 'ENTREGADO › › ›'}
+            </div>
+
+            <div class="swipe-slider-handle" style="
+              position: absolute; top: 3px; left: 3px; width: 46px; height: 46px;
+              background: #ffffff; border-radius: 50%;
+              box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4);
+              display: flex; align-items: center; justify-content: center;
+              cursor: grab; touch-action: none; z-index: 2;
+            ">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+          </div>
         </div>
       ` : ''}
 
@@ -11747,7 +11703,7 @@ export function openMandadoPurchaseModal({ order, isEdit = false, onConfirm, onC
       </div>
 
       <!-- ACTION BUTTONS -->
-      <div style="padding: 0 18px 18px 18px; display: flex; gap: 10px;">
+      <div style="padding: 0 18px calc(18px + max(env(safe-area-inset-bottom, 0px), 24px)) 18px; display: flex; gap: 10px; flex-shrink: 0; background: ${isLight ? '#ffffff' : '#0b111e'};">
         <button id="mandado-modal-cancel-btn" style="
           flex: 1; height: 50px; border-radius: 16px;
           background: ${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)'};
