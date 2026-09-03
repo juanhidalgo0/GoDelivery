@@ -5447,64 +5447,67 @@ async function startSession(user) {
 }
 
 async function endSession(user) {
-  const { doc, updateDoc, getDoc } = await import('firebase/firestore');
-  
-  try {
-    if (user.currentSessionId) {
-      const sessRef = doc(db, 'deliverySessions', user.currentSessionId);
-      const snap = await getDoc(sessRef);
-      
-      if (snap.exists()) {
-        const { getDocs, query, collection, where } = await import('firebase/firestore');
-        const ordersSnap = await getDocs(query(
-          collection(db, 'orders'),
-          where('deliverySessionId', '==', user.currentSessionId),
-          where('status', '==', 'completed')
-        ));
-        const total = ordersSnap.docs.reduce((s, d) => {
-          return s + getOrderDriverEarnings(d.data());
-        }, 0);
-        
-        await updateDoc(sessRef, {
-          endTime: serverTimestamp(),
-          totalEarned: total,
-          ordersCount: ordersSnap.size
-        });
-      } else {
-        console.warn('endSession: Session document missing, skipping updateDoc');
-      }
-    }
-  } catch (err) {
-    console.error('Error updating session endTime:', err);
-  }
-  
-  // Optimistic update FIRST
-  const { setState, getState } = await import('../state.js');
-  setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
-
-  try {
-    await updateDoc(doc(db, 'users', user.uid), {
-      isOnline: false,
-      currentSessionId: null,
-      lastActivityAt: null
-    });
-  } catch (err) {
-    console.error('Error updating user status in endSession:', err);
-  }
-
+  // 1. Instant Optimistic State Update (< 50ms)
   if (inactivityTimer) {
     clearInterval(inactivityTimer);
     inactivityTimer = null;
   }
+  if (window._driverLiveTimerInterval) {
+    clearInterval(window._driverLiveTimerInterval);
+    window._driverLiveTimerInterval = null;
+  }
   stopHeartbeat();
+  hideExclusiveOfferOverlay();
+  stopExclusiveOfferAlert();
 
-  // Notify all admins about driver disconnection
-  notifyAdminsOnDriverConnection(user, 'disconnect');
-
-  showToast('Sesión finalizada. Hasta pronto.', 'info');
-  
-  // Re-render driver panel immediately to switch to offline centered view and hide map
+  const { setState, getState } = await import('../state.js');
+  setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
+  showToast('Te has desconectado correctamente.', 'info');
   renderDeliveryPanel();
+
+  // 2. Background Firestore synchronization
+  (async () => {
+    try {
+      const { doc, updateDoc, getDoc, serverTimestamp } = await import('firebase/firestore');
+      
+      // Update user document
+      await updateDoc(doc(db, 'users', user.uid), {
+        isOnline: false,
+        currentSessionId: null,
+        lastActivityAt: null
+      });
+
+      // Update session statistics if session was active
+      if (user.currentSessionId) {
+        try {
+          const sessRef = doc(db, 'deliverySessions', user.currentSessionId);
+          const snap = await getDoc(sessRef);
+          
+          if (snap.exists()) {
+            const { getDocs, query, collection, where } = await import('firebase/firestore');
+            const ordersSnap = await getDocs(query(
+              collection(db, 'orders'),
+              where('deliverySessionId', '==', user.currentSessionId),
+              where('status', '==', 'completed')
+            ));
+            const total = ordersSnap.docs.reduce((s, d) => s + getOrderDriverEarnings(d.data()), 0);
+            
+            await updateDoc(sessRef, {
+              endTime: serverTimestamp(),
+              totalEarned: total,
+              ordersCount: ordersSnap.size
+            });
+          }
+        } catch (sessErr) {
+          console.warn('[endSession] Background session update error:', sessErr);
+        }
+      }
+
+      notifyAdminsOnDriverConnection(user, 'disconnect');
+    } catch (err) {
+      console.error('[endSession] Background disconnect error:', err);
+    }
+  })();
 }
 
 let inactivityTimer = null;
@@ -10936,17 +10939,9 @@ export async function promptEndSession(user) {
     title: '¿Desconectarte de la jornada?',
     message: 'Dejarás de recibir notificaciones de nuevos pedidos en tu zona.<br><br>💡 <b>Aviso:</b> Si volvés a conectarte más tarde en el día de hoy, <b>NO se te volverá a cobrar la cuota diaria</b>.',
     confirmText: 'Sí, desconectar',
-    onConfirm: async () => {
+    onConfirm: () => {
       closeModal();
-      showBlockingLoading('Desconectando sesión...');
-      try {
-        await endSession(currentUser);
-      } catch (err) {
-        console.error('Disconnection error:', err);
-        showToast('Error al desconectar', 'error');
-      } finally {
-        hideBlockingLoading();
-      }
+      endSession(currentUser);
     }
   });
 }
