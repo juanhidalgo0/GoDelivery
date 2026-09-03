@@ -8149,20 +8149,18 @@ export function showDriverHelpBottomSheet(user) {
 export function renderBottomDockContent(user, activeOrders = []) {
   const isLight = getDriverMapTheme() === 'light';
   const hasActive = Array.isArray(activeOrders) && activeOrders.length > 0;
-  const primaryOrder = hasActive ? activeOrders[0] : null;
-  const isPickup = primaryOrder ? (primaryOrder.status === 'pending' || primaryOrder.status === 'accepted' || primaryOrder.status === 'preparing' || primaryOrder.status === 'ready' || (!primaryOrder.pickedUpAt && primaryOrder.status !== 'delivering')) : false;
   const isExpanded = window.driverDockExpanded === true;
   const isHidden = window.driverDockHidden === true;
 
-  // Calculate total cash to collect across all active orders
-  let totalCashToCollect = 0;
-  let totalTripEarnings = 0;
-  activeOrders.forEach(o => {
-    if (o.paymentMethod === 'efectivo') {
-      totalCashToCollect += Number(o.totalAmount || o.total || 0);
-    }
-    totalTripEarnings += Number(o.driverEarnings || o.shippingCost || o.deliveryFee || 0);
-  });
+  // Selected order index for multi-order tabs
+  let selectedOrderIdx = (typeof window.driverSelectedOrderIndex === 'number' && window.driverSelectedOrderIndex < activeOrders.length && window.driverSelectedOrderIndex >= 0)
+    ? window.driverSelectedOrderIndex
+    : 0;
+  if (selectedOrderIdx >= activeOrders.length) selectedOrderIdx = 0;
+  const currentOrder = hasActive ? (activeOrders[selectedOrderIdx] || activeOrders[0]) : null;
+  const currentIsPickup = currentOrder 
+    ? (currentOrder.status === 'pending' || currentOrder.status === 'accepted' || currentOrder.status === 'preparing' || currentOrder.status === 'ready' || (!currentOrder.pickedUpAt && currentOrder.status !== 'delivering')) 
+    : false;
 
   // 1. MINIMIZED COLLAPSIBLE DOCK CARD PILL (WHEN HIDDEN)
   if (isHidden) {
@@ -8183,11 +8181,11 @@ export function renderBottomDockContent(user, activeOrders = []) {
         <div style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span style="font-size:16px; flex-shrink:0;">🛵</span>
           <div style="font-size:13px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-            ${hasActive ? (activeOrders.length === 1 ? '1 Pedido en Curso' : `${activeOrders.length} Pedidos`) : 'Buscando Pedidos'}
+            ${hasActive ? (activeOrders.length === 1 ? '1 Pedido en Curso' : `${activeOrders.length} Pedidos en Cola`) : 'Buscando Pedidos'}
           </div>
-          ${(hasActive && primaryOrder) ? `
+          ${(hasActive && currentOrder) ? `
             <span style="font-size:12px; font-weight:900; color:${isLight ? '#16a34a' : '#22c55e'}; background:${isLight ? '#dcfce7' : 'rgba(34,197,94,0.15)'}; padding:2px 8px; border-radius:8px; flex-shrink:0;">
-              $${Number(primaryOrder.totalAmount || primaryOrder.total || 0).toLocaleString('es-AR')}
+              $${Number(currentOrder.totalAmount || currentOrder.total || 0).toLocaleString('es-AR')}
             </span>
           ` : ''}
         </div>
@@ -8201,7 +8199,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
           flex-shrink: 0;
         ">
           <span>▲</span>
-          <span>Mostrar Card</span>
+          <span>Mostrar</span>
         </button>
       </div>
     `;
@@ -8219,7 +8217,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
       display: flex; flex-direction: column; gap: 8px;
       box-shadow: 0 -12px 40px ${isLight ? 'rgba(225,29,72,0.1)' : 'rgba(0,0,0,0.75)'};
       max-width: 480px; margin: 0 auto;
-      max-height: ${isExpanded ? 'min(82vh, 620px)' : 'auto'};
+      max-height: ${isExpanded ? 'min(84vh, 640px)' : 'auto'};
       overflow: hidden;
       transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.25s ease, box-shadow 0.3s ease;
       animation: dockCardSpring 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -8233,105 +8231,26 @@ export function renderBottomDockContent(user, activeOrders = []) {
         <div style="width:100%; display:flex; align-items:center; justify-content:space-between; gap:8px;">
           <div style="display:flex; align-items:center; gap:6px;">
             <span style="font-size:14px;">🛵</span>
-            <span style="font-size:12.5px; font-weight:900; color:${isLight ? '#0f172a' : '#f8fafc'};">
-              ${hasActive ? (activeOrders.length === 1 ? '1 Pedido en Curso' : `${activeOrders.length} Pedidos en Cola`) : 'Buscando Pedidos'}
+            <span style="font-size:13px; font-weight:900; color:${isLight ? '#0f172a' : '#f8fafc'};">
+              ${hasActive ? (activeOrders.length === 1 ? '1 Pedido en Curso' : `${activeOrders.length} Pedidos en Curso`) : 'Buscando Pedidos'}
             </span>
           </div>
 
           <div style="display:flex; align-items:center; gap:6px;">
             ${hasActive ? `
-              <button id="dock-expand-toggle-btn" style="background:${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)'}; border:1px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.12)'}; color:${isLight ? '#e11d48' : '#fb7185'}; font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; padding:4px 9px; border-radius:10px; transition: transform 0.2s ease;">
+              <button id="dock-expand-toggle-btn" style="background:${isExpanded ? (isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)') : (isLight ? '#fff1f2' : 'rgba(225,29,72,0.18)')}; border:1.5px solid ${isExpanded ? (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.12)') : (isLight ? '#fecaca' : 'rgba(225,29,72,0.35)')}; color:${isLight ? '#e11d48' : '#fb7185'}; font-size:11.5px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; padding:5px 10px; border-radius:10px; transition: transform 0.2s ease;">
                 <span>${isExpanded ? '▼ Menos' : '▲ Detalles'}</span>
               </button>
             ` : ''}
 
             <!-- MINIMIZE / HIDE CARD BUTTON -->
-            <button id="dock-hide-card-btn" title="Ocultar Card temporalmente" style="background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.15)'}; border:1px solid ${isLight ? '#fecaca' : 'rgba(225,29,72,0.3)'}; color:${isLight ? '#be123c' : '#fb7185'}; font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; padding:4px 9px; border-radius:10px;">
+            <button id="dock-hide-card-btn" title="Ocultar Card temporalmente" style="background:${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.06)'}; border:1px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)'}; color:${isLight ? '#64748b' : '#94a3b8'}; font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; padding:5px 9px; border-radius:10px;">
               <span>▼</span>
               <span>Ocultar</span>
             </button>
           </div>
         </div>
       </div>
-
-      <!-- MULTI-STOP ITINERARY ROADMAP STRIP (ONLY VISIBLE WHEN EXPANDED) -->
-      ${(hasActive && isExpanded && activeOrders.length > 1) ? (() => {
-        const multiStops = calculateOptimalMultiStopSequence(window.lastRiderPos, activeOrders);
-        if (!multiStops || multiStops.length === 0) return '';
-        return `
-          <div style="display:flex; flex-direction:column; gap:6px; margin: 2px 0 6px 0; flex-shrink: 0;">
-            <div style="display:flex; align-items:center; justify-content:space-between;">
-              <span style="font-size:11px; font-weight:900; color:${isLight ? '#e11d48' : '#fb7185'}; display:flex; align-items:center; gap:4px;">
-                <span>🗺️</span> <span>Secuencia Óptima de Paradas (${multiStops.length}):</span>
-              </span>
-              <span style="font-size:9.5px; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.18)'}; color:${isLight ? '#be123c' : '#fb7185'}; font-weight:800; padding:1px 6px; border-radius:6px;">
-                Ruta Inteligente
-              </span>
-            </div>
-            <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch;">
-              ${multiStops.map((stop, i) => `
-                <div style="
-                  flex-shrink:0; display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:12px;
-                  background:${i === 0 ? (isLight ? '#fff1f2' : 'rgba(225,29,72,0.18)') : (isLight ? '#f1f5f9' : 'rgba(255,255,255,0.05)')};
-                  border:1.5px solid ${i === 0 ? '#e11d48' : (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.08)')};
-                ">
-                  <span style="font-size:11px; font-weight:900; background:linear-gradient(135deg, #e11d48 0%, #be123c 100%); color:white; width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(225,29,72,0.4);">
-                    ${i + 1}
-                  </span>
-                  <div style="display:flex; flex-direction:column;">
-                    <span style="font-size:11px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'}; white-space:nowrap;">
-                      ${stop.type === 'pickup' ? (stop.isEncomienda ? '📦 ' : '🛍️ ') : '📍 '}${stop.shortTitle}
-                    </span>
-                    <span style="font-size:9.5px; color:${isLight ? '#64748b' : '#94a3b8'}; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                      ${stop.address}
-                    </span>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        `;
-      })() : ''}
-
-      <!-- COMPACT ROW: TOTAL CALLOUT (IF COLLAPSED & DELIVERING) -->
-      ${(hasActive && !isExpanded && !isPickup && primaryOrder) ? (() => {
-        const isCash = primaryOrder.paymentMethod === 'efectivo' || (primaryOrder.paymentMethod && primaryOrder.paymentMethod.toString().toLowerCase().includes('efect'));
-        const totalAmount = Number(primaryOrder.totalAmount || primaryOrder.total || 0);
-        return `
-          <div style="
-            display: flex; align-items: center; justify-content: space-between; gap: 8px;
-            padding: 8px 12px; border-radius: 14px;
-            background: ${isCash ? (isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.14)') : (isLight ? '#f0fdf4' : 'rgba(34, 197, 94, 0.12)')};
-            border: 1.5px solid ${isCash ? '#fde68a' : (isLight ? '#bbf7d0' : 'rgba(34, 197, 94, 0.3)')};
-            animation: dockContentFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-          ">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:18px;">${isCash ? '💵' : '💳'}</span>
-              <div style="display:flex; flex-direction:column;">
-                <span style="font-size:9.5px; font-weight:900; color:${isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#15803d' : '#4ade80')}; text-transform:uppercase; letter-spacing:0.5px;">
-                  ${isCash ? 'TOTAL A COBRAR EN MANO:' : 'PAGO POR TRANSFERENCIA:'}
-                </span>
-                <span style="font-size:16px; font-weight:950; color:${isCash ? (isLight ? '#78350f' : '#fef08a') : (isLight ? '#14532d' : '#86efac')}; line-height:1.1;">
-                  $${totalAmount.toLocaleString('es-AR')}
-                </span>
-              </div>
-            </div>
-
-            <button class="open-order-breakdown-btn" data-order-id="${primaryOrder.id}" style="
-              background: ${isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.1)'};
-              border: 1px solid ${isCash ? '#fde68a' : (isLight ? '#bbf7d0' : 'rgba(255, 255, 255, 0.2)')};
-              color: ${isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#15803d' : '#4ade80')};
-              padding: 6px 10px; border-radius: 10px;
-              font-size: 11px; font-weight: 800; cursor: pointer;
-              display: flex; align-items: center; gap: 4px;
-              box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
-            ">
-              <span>ℹ️</span>
-              <span>Ver Desglose</span>
-            </button>
-          </div>
-        `;
-      })() : ''}
 
       <!-- IDLE RADAR STATUS & PREDICTIVE DEMAND (IF NO ACTIVE ORDERS) -->
       ${!hasActive ? `
@@ -8372,259 +8291,277 @@ export function renderBottomDockContent(user, activeOrders = []) {
         </div>
       ` : ''}
 
-      <!-- EXPANDED DETAILED MULTI-ORDER BREAKDOWN LIST (SCROLLABLE CONTENT AREA) -->
-      ${(hasActive && isExpanded) ? `
-        <div id="dock-expanded-orders-list" style="display:flex; flex-direction:column; gap:10px; margin-top:2px; flex: 1; min-height: 0; max-height: min(44vh, 320px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; padding-bottom: 2px; animation: dockContentFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);">
-          ${activeOrders.map((order, idx) => {
-            const orderIsPickup = (order.status === 'pending' || order.status === 'accepted' || order.status === 'preparing' || order.status === 'ready' || (!order.pickedUpAt && order.status !== 'delivering'));
-            const itemsList = Array.isArray(order.items) ? order.items : (Array.isArray(order.products) ? order.products : []);
-
-            const isEncomienda = isOrderEncomienda(order);
-            const parsedOrderMandado = (order.isFavor && !isEncomienda) ? parseMandadoDetails(order.description || order.itemsText || order.notes || order.details, order.comercioName || order.originAddress) : null;
-            const displayComercioTitle = order.isFavor 
-              ? (isEncomienda ? (order.pickupAddress || order.originAddress || 'Dirección de Retiro') : (parsedOrderMandado?.comercio || order.comercioName || 'Comercio indicado')) 
-              : (order.comercioName || order.originAddress || 'Comercio / Local');
-            
-            const isCash = order.paymentMethod === 'efectivo' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('efect'));
-            const paymentLabel = isCash ? '💵 PAGA EN EFECTIVO:' : '💳 PAGA CON TRANSFERENCIA:';
-            const paymentColor = isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#be123c' : '#fb7185');
-            const paymentBg = isCash ? (isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') : (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)');
-            const paymentBorder = isCash ? '#fde68a' : (isLight ? '#fecaca' : 'rgba(225, 29, 72, 0.35)');
+      <!-- HORIZONTAL ORDER SELECTOR TABS (ONLY WHEN EXPANDED AND MULTIPLE ORDERS) -->
+      ${(hasActive && isExpanded && activeOrders.length > 1) ? `
+        <div id="dock-order-tabs-scroll" style="display:flex; gap:8px; overflow-x:auto; padding:2px 2px 6px 2px; -webkit-overflow-scrolling:touch; flex-shrink:0; animation: dockContentFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+          ${activeOrders.map((o, idx) => {
+            const isSelected = idx === selectedOrderIdx;
+            const oIsPickup = (o.status === 'pending' || o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || (!o.pickedUpAt && o.status !== 'delivering'));
+            const isEncomienda = isOrderEncomienda(o);
+            const typeIcon = oIsPickup ? (isEncomienda ? '📦' : (o.isFavor ? '🛍️' : '🏬')) : '📍';
+            const typeLabel = oIsPickup ? (isEncomienda ? 'Encomienda' : (o.isFavor ? 'Mandado' : 'Retiro')) : 'Entrega';
+            const clientOrStore = oIsPickup 
+              ? (isEncomienda ? (o.pickupAddress || 'Retiro') : (o.comercioName || o.originAddress || 'Comercio'))
+              : (o.userName || o.clientName || 'Cliente');
 
             return `
-              <div style="
-                background: ${isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.04)'};
-                border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(225, 29, 72, 0.35)'};
-                border-radius: 18px;
-                padding: 12px;
-                display: flex; flex-direction: column; gap: 8px;
-                box-shadow: 0 4px 14px ${isLight ? 'rgba(225,29,72,0.06)' : 'rgba(0,0,0,0.3)'};
+              <button class="dock-order-tab-btn" data-index="${idx}" style="
+                flex-shrink:0; display:flex; align-items:center; gap:6px; padding:7px 12px; border-radius:14px;
+                background: ${isSelected ? 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)' : (isLight ? '#f1f5f9' : 'rgba(255,255,255,0.06)')};
+                border: 1.5px solid ${isSelected ? '#e11d48' : (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)')};
+                color: ${isSelected ? '#ffffff' : (isLight ? '#0f172a' : '#cbd5e1')};
+                font-family: var(--font-display, sans-serif); font-size: 11.5px; font-weight: 900; cursor: pointer;
+                box-shadow: ${isSelected ? '0 4px 12px rgba(225,29,72,0.35)' : 'none'};
+                transition: all 0.2s ease;
               ">
-                <!-- ORDER TOP BADGE -->
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                  <div style="display:flex; align-items:center; gap:6px;">
-                    <span style="background:linear-gradient(135deg, #e11d48 0%, #be123c 100%); color:#ffffff; font-size:10.5px; font-weight:900; padding:2px 8px; border-radius:10px; box-shadow:0 2px 6px rgba(225,29,72,0.35);">
-                      Parada #${idx + 1}
-                    </span>
-                    <span style="font-size:12px; font-weight:900; color:${isLight ? '#e11d48' : '#fb7185'};">
-                      ${orderIsPickup ? (isEncomienda ? '📦 Realizar Encomienda' : (order.isFavor ? '🛍️ Realizar Mandado' : '🛍️ Retirar en Local')) : '📍 Entregar al Cliente'}
-                    </span>
-                  </div>
-                  <span style="font-size:11px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'};">
-                    #${order.id ? order.id.slice(-4) : ''}
-                  </span>
-                </div>
-
-                <!-- 1. RETIRO / MANDADO -->
-                <div style="display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:12px; background:${isLight ? '#ffffff' : 'rgba(0,0,0,0.25)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
-                  <div style="font-size:10px; font-weight:800; color:${isLight ? '#e11d48' : '#fb7185'}; text-transform:uppercase;">
-                    ${isEncomienda ? '📦 ENCOMIENDA A REALIZAR:' : (order.isFavor ? '🛍️ MANDADO / COMPRA A REALIZAR:' : '🏬 PUNTO DE RETIRO:')}
-                  </div>
-                  <div style="font-size:13.5px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">
-                    ${displayComercioTitle}
-                  </div>
-                  ${isEncomienda ? `
-                    <div style="font-size:11.5px; color:${isLight ? '#1e293b' : '#f8fafc'}; font-weight:700; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.1)'}; padding:8px 10px; border-radius:10px; margin-top:3px; border-left:3px solid #e11d48; line-height:1.35;">
-                      📦 <strong>Paquete / Detalle:</strong> ${cleanMandadoText(order.details || order.description || order.itemsText || 'Paquete')}
-                    </div>
-                  ` : (order.isFavor ? `
-                    <div style="font-size:11.5px; color:${isLight ? '#1e293b' : '#f8fafc'}; font-weight:700; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.1)'}; padding:8px 10px; border-radius:10px; margin-top:3px; border-left:3px solid #e11d48; line-height:1.35;">
-                      📦 <strong>Pedido:</strong> ${parsedOrderMandado?.items || cleanMandadoText(order.description || order.itemsText || order.notes || order.details || 'Realizar compra o trámite')}
-                    </div>
-                  ` : `
-                    <div style="font-size:11.5px; color:${isLight ? '#475569' : '#cbd5e1'}; font-weight:600;">
-                      📍 ${order.pickupAddress || order.originAddress || order.comercioAddress || 'Magdalena'}
-                    </div>
-                  `)}
-
-                  <!-- PRODUCT ITEMS BREAKDOWN -->
-                  ${itemsList.length > 0 ? `
-                    <div style="margin-top:6px; padding-top:6px; border-top:1px dashed ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)'}; font-size:11.5px;">
-                      <div style="font-size:10.5px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; margin-bottom:3px;">
-                        🛍️ Detalle del Pedido (${itemsList.length} ítems):
-                      </div>
-                      ${itemsList.map(it => `
-                        <div style="display:flex; justify-content:space-between; color:${isLight ? '#1e293b' : '#f1f5f9'}; font-weight:700; margin-bottom:2px;">
-                          <span>${it.quantity || it.cant || 1}x ${it.name || it.title || 'Producto'}</span>
-                          ${it.price ? `<span style="font-weight:800;">$${(it.price * (it.quantity || 1)).toLocaleString('es-AR')}</span>` : ''}
-                        </div>
-                      `).join('')}
-                    </div>
-                  ` : ''}
-
-                  <!-- MANDADO PURCHASE COST SUMMARY & EDIT BUTTON -->
-                  ${(order.isFavor && !isEncomienda) ? `
-                    <div style="
-                      margin-top: 6px; padding: 10px 12px; border-radius: 12px;
-                      background: ${isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.12)'};
-                      border: 1.5px solid ${isLight ? '#fde68a' : 'rgba(245, 158, 11, 0.3)'};
-                      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-                    ">
-                      <div style="display:flex; flex-direction:column; gap:2px;">
-                        <div style="font-size:10px; font-weight:900; color:${isLight ? '#b45309' : '#f59e0b'}; text-transform:uppercase; letter-spacing:0.5px;">
-                          🛍️ Valor de Compra en Locales:
-                        </div>
-                        <div style="font-size:15px; font-weight:900; color:${isLight ? '#78350f' : '#fef08a'};">
-                          $${((order.purchaseCost !== undefined) ? order.purchaseCost : (order.purchaseItemsTotal || 0)).toLocaleString('es-AR')}
-                        </div>
-                      </div>
-                      <button class="edit-mandado-purchase-btn" data-order-id="${order.id}" style="
-                        background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-                        color: white; border: none; padding: 7px 12px; border-radius: 10px;
-                        font-size: 11.5px; font-weight: 900; cursor: pointer; display: flex; align-items: center; gap: 5px;
-                        box-shadow: 0 3px 10px rgba(225,29,72,0.35); flex-shrink: 0;
-                      ">
-                        <span>✏️</span>
-                        <span>Modificar Valor</span>
-                      </button>
-                    </div>
-                  ` : ''}
-                </div>
-
-                <!-- 2. ENTREGA (CLIENTE) -->
-                <div style="display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:12px; background:${isLight ? '#ffffff' : 'rgba(0,0,0,0.25)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
-                  <div style="font-size:10px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; text-transform:uppercase;">
-                    👤 Punto de Entrega:
-                  </div>
-                  <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="font-size:13.5px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">
-                      ${order.userName || order.clientName || 'Cliente'}
-                    </div>
-                  </div>
-                  <div style="font-size:11.5px; color:${isLight ? '#475569' : '#cbd5e1'}; font-weight:600;">
-                    📍 ${order.deliveryAddress || order.address || 'Magdalena'}
-                  </div>
-                  ${(order.addressNotes || order.notes) ? `
-                    <div style="font-size:11px; color:#e11d48; font-weight:700; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.1)'}; padding:4px 8px; border-radius:6px; margin-top:2px;">
-                      📝 "${order.addressNotes || order.notes}"
-                    </div>
-                  ` : ''}
-
-                  <!-- DIRECT CUSTOMER CONTACT ACTIONS (WHATSAPP, CHAT APP) -->
-                  ${(() => {
-                    const clientPhone = order.userPhone || order.clientPhone || order.phone || '';
-                    let orderWaUrl = '';
-                    if (clientPhone) {
-                      const cleanPhone = clientPhone.replace(/\D/g, '');
-                      if (cleanPhone.length >= 8) {
-                        const fullPhone = cleanPhone.startsWith('54') ? cleanPhone : (cleanPhone.startsWith('9') ? `54${cleanPhone}` : `549${cleanPhone}`);
-                        orderWaUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`¡Hola ${order.userName || 'Cliente'}! Soy el repartidor de GO Delivery con tu pedido #${order.orderId || (order.id ? order.id.slice(-4) : '')}.`)}`;
-                      }
-                    }
-                    return `
-                      <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:6px; padding:6px 10px; border-radius:12px; background:${isLight ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
-                        <span style="font-size:11px; font-weight:800; color:${isLight ? '#475569' : '#cbd5e1'};">Contactar:</span>
-                        <div style="display:flex; align-items:center; gap:6px;">
-                          ${orderWaUrl ? `
-                            <a href="${orderWaUrl}" target="_blank" rel="noopener noreferrer" title="WhatsApp con ${order.userName || 'Cliente'}" style="
-                              display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px;
-                              background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-                              color: white; font-size: 11px; font-weight: 900; text-decoration: none;
-                              box-shadow: 0 2px 6px rgba(37, 211, 102, 0.35);
-                            ">
-                              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-                                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
-                              </svg>
-                              <span>WhatsApp</span>
-                            </a>
-                          ` : ''}
-
-                          <button class="driver-dock-chat-btn" data-order-id="${order.id}" data-customer-name="${order.userName || order.clientName || 'Cliente'}" title="Chat en la App" style="
-                            display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px;
-                            background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-                            color: white; border: none; font-size: 11px; font-weight: 900; cursor: pointer;
-                            box-shadow: 0 2px 6px rgba(225, 29, 72, 0.35);
-                          ">
-                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-                            </svg>
-                            <span>Chat App</span>
-                          </button>
-                        </div>
-                      </div>
-                    `;
-                  })()}
-
-                  <!-- PAYMENT SUMMARY -->
-                  <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; background:${paymentBg}; border:1px solid ${paymentBorder}; padding:8px 12px; border-radius:12px;">
-                    <div style="display:flex; flex-direction:column;">
-                      <span style="font-size:10.5px; font-weight:900; color:${paymentColor}; text-transform:uppercase;">
-                        ${paymentLabel}
-                      </span>
-                      <strong style="font-size:15px; font-weight:950; color:${paymentColor};">
-                        $${Number(order.totalAmount || order.total || 0).toLocaleString('es-AR')}
-                      </strong>
-                    </div>
-
-                    <button class="open-order-breakdown-btn" data-order-id="${order.id}" style="
-                      background: ${isLight ? '#ffffff' : 'rgba(0,0,0,0.35)'};
-                      border: 1px solid ${paymentBorder};
-                      color: ${paymentColor};
-                      padding: 5px 10px; border-radius: 9px;
-                      font-size: 11px; font-weight: 800; cursor: pointer;
-                      display: flex; align-items: center; gap: 4px;
-                      box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
-                    ">
-                      <span>ℹ️</span>
-                      <span>Ver Desglose</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
+                <span style="font-size:12px;">${typeIcon}</span>
+                <span>#${o.orderId || (o.id ? o.id.slice(-4) : '')} • ${typeLabel} (${clientOrStore.slice(0, 10)})</span>
+              </button>
             `;
           }).join('')}
         </div>
       ` : ''}
 
-      <!-- PINNED PRIMARY ACTION SLIDER (ALWAYS VISIBLE & STICKY OUTSIDE SCROLLING!) -->
-      ${(hasActive && primaryOrder) ? `
-        <div id="dock-pinned-action-slider-row" style="flex-shrink: 0; width: 100%; margin-top: 2px;">
-          <div class="driver-swipe-slider" data-action="${isPickup ? 'pickup' : 'deliver'}" data-id="${primaryOrder.id}" data-codes="${primaryOrder.verificationCode || ''}" style="
-            position: relative;
-            width: 100%;
-            height: 52px;
-            border-radius: 26px;
-            background: ${isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)'};
-            border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
-            overflow: hidden;
-            user-select: none;
-            touch-action: none;
-            box-shadow: 0 6px 20px ${isLight ? 'rgba(225, 29, 72, 0.12)' : 'rgba(0, 0, 0, 0.55)'};
-            display: flex; align-items: center;
-          ">
-            <div class="swipe-slider-fill" style="
-              position: absolute; top: 0; left: 0; height: 100%; width: 0%;
-              background: linear-gradient(90deg, #e11d48 0%, #be123c 100%);
-              border-radius: 26px; pointer-events: none;
-            "></div>
+      <!-- EXPANDED DETAILED ORDER VIEW FOR currentOrder (SCROLLABLE CONTENT AREA) -->
+      ${(hasActive && isExpanded && currentOrder) ? (() => {
+        const order = currentOrder;
+        const orderIsPickup = currentIsPickup;
+        const itemsList = Array.isArray(order.items) ? order.items : (Array.isArray(order.products) ? order.products : []);
 
-            <div class="swipe-slider-label" style="
-              position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-              font-size: 13.5px; font-weight: 900; letter-spacing: 2.5px;
-              color: ${isLight ? '#9f1239' : '#ffffff'};
-              text-transform: uppercase; pointer-events: none; padding-left: 24px;
-              transition: opacity 0.15s ease;
-            ">
-              ${isPickup ? 'RETIRADO › › ›' : 'ENTREGADO › › ›'}
+        const isEncomienda = isOrderEncomienda(order);
+        const parsedOrderMandado = (order.isFavor && !isEncomienda) ? parseMandadoDetails(order.description || order.itemsText || order.notes || order.details, order.comercioName || order.originAddress) : null;
+        const displayComercioTitle = order.isFavor 
+          ? (isEncomienda ? (order.pickupAddress || order.originAddress || 'Dirección de Retiro') : (parsedOrderMandado?.comercio || order.comercioName || 'Comercio indicado')) 
+          : (order.comercioName || order.originAddress || 'Comercio / Local');
+        
+        const isCash = order.paymentMethod === 'efectivo' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('efect'));
+        const paymentLabel = isCash ? '💵 PAGA EN EFECTIVO:' : '💳 PAGA CON TRANSFERENCIA:';
+        const paymentColor = isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#be123c' : '#fb7185');
+        const paymentBg = isCash ? (isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') : (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)');
+        const paymentBorder = isCash ? '#fde68a' : (isLight ? '#fecaca' : 'rgba(225, 29, 72, 0.35)');
+
+        const clientPhone = order.userPhone || order.clientPhone || order.phone || '';
+        let orderWaUrl = '';
+        if (clientPhone) {
+          const cleanPhone = clientPhone.replace(/\D/g, '');
+          if (cleanPhone.length >= 8) {
+            const fullPhone = cleanPhone.startsWith('54') ? cleanPhone : (cleanPhone.startsWith('9') ? `54${cleanPhone}` : `549${cleanPhone}`);
+            orderWaUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`¡Hola ${order.userName || 'Cliente'}! Soy el repartidor de GO Delivery con tu pedido #${order.orderId || (order.id ? order.id.slice(-4) : '')}.`)}`;
+          }
+        }
+
+        return `
+          <div id="dock-expanded-selected-order-body" style="display:flex; flex-direction:column; gap:8px; flex: 1; min-height: 0; max-height: min(38vh, 280px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; padding-bottom: 2px; animation: dockContentFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);">
+            
+            <!-- ORDER TOP HEADER BADGE -->
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding: 2px 4px;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="background:linear-gradient(135deg, #e11d48 0%, #be123c 100%); color:#ffffff; font-size:10.5px; font-weight:900; padding:2px 8px; border-radius:10px; box-shadow:0 2px 6px rgba(225,29,72,0.35);">
+                  ${activeOrders.length > 1 ? `Parada #${selectedOrderIdx + 1}` : 'Pedido Actual'}
+                </span>
+                <span style="font-size:12px; font-weight:900; color:${isLight ? '#e11d48' : '#fb7185'};">
+                  ${orderIsPickup ? (isEncomienda ? '📦 Realizar Encomienda' : (order.isFavor ? '🛍️ Realizar Mandado' : '🛍️ Retirar en Local')) : '📍 Entregar al Cliente'}
+                </span>
+              </div>
+              <span style="font-size:11px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'};">
+                #${order.orderId || (order.id ? order.id.slice(-4) : '')}
+              </span>
             </div>
 
-            <div class="swipe-slider-handle" style="
-              position: absolute; top: 3px; left: 3px; width: 46px; height: 46px;
-              background: #ffffff; border-radius: 50%;
-              box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4);
-              display: flex; align-items: center; justify-content: center;
-              cursor: grab; touch-action: none; z-index: 2;
+            <!-- 1. RETIRO / MANDADO -->
+            <div style="display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:14px; background:${isLight ? '#ffffff' : 'rgba(0,0,0,0.25)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
+              <div style="font-size:10px; font-weight:800; color:${isLight ? '#e11d48' : '#fb7185'}; text-transform:uppercase;">
+                ${isEncomienda ? '📦 ENCOMIENDA A REALIZAR:' : (order.isFavor ? '🛍️ MANDADO / COMPRA A REALIZAR:' : '🏬 PUNTO DE RETIRO:')}
+              </div>
+              <div style="font-size:14px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">
+                ${displayComercioTitle}
+              </div>
+              ${isEncomienda ? `
+                <div style="font-size:11.5px; color:${isLight ? '#1e293b' : '#f8fafc'}; font-weight:700; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.1)'}; padding:8px 10px; border-radius:10px; margin-top:3px; border-left:3px solid #e11d48; line-height:1.35;">
+                  📦 <strong>Paquete / Detalle:</strong> ${cleanMandadoText(order.details || order.description || order.itemsText || 'Paquete')}
+                </div>
+              ` : (order.isFavor ? `
+                <div style="font-size:11.5px; color:${isLight ? '#1e293b' : '#f8fafc'}; font-weight:700; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.1)'}; padding:8px 10px; border-radius:10px; margin-top:3px; border-left:3px solid #e11d48; line-height:1.35;">
+                  📦 <strong>Pedido:</strong> ${parsedOrderMandado?.items || cleanMandadoText(order.description || order.itemsText || order.notes || order.details || 'Realizar compra o trámite')}
+                </div>
+              ` : `
+                <div style="font-size:11.5px; color:${isLight ? '#475569' : '#cbd5e1'}; font-weight:600;">
+                  📍 ${order.pickupAddress || order.originAddress || order.comercioAddress || 'Magdalena'}
+                </div>
+              `)}
+
+              <!-- PRODUCT ITEMS BREAKDOWN -->
+              ${itemsList.length > 0 ? `
+                <div style="margin-top:6px; padding-top:6px; border-top:1px dashed ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)'}; font-size:11.5px;">
+                  <div style="font-size:10.5px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; margin-bottom:3px;">
+                    🛍️ Detalle del Pedido (${itemsList.length} ítems):
+                  </div>
+                  ${itemsList.map(it => `
+                    <div style="display:flex; justify-content:space-between; color:${isLight ? '#1e293b' : '#f1f5f9'}; font-weight:700; margin-bottom:2px;">
+                      <span>${it.quantity || it.cant || 1}x ${it.name || it.title || 'Producto'}</span>
+                      ${it.price ? `<span style="font-weight:800;">$${(it.price * (it.quantity || 1)).toLocaleString('es-AR')}</span>` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+
+              <!-- MANDADO PURCHASE COST SUMMARY & EDIT BUTTON -->
+              ${(order.isFavor && !isEncomienda) ? `
+                <div style="
+                  margin-top: 6px; padding: 10px 12px; border-radius: 12px;
+                  background: ${isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.12)'};
+                  border: 1.5px solid ${isLight ? '#fde68a' : 'rgba(245, 158, 11, 0.3)'};
+                  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+                ">
+                  <div style="display:flex; flex-direction:column; gap:2px;">
+                    <div style="font-size:10px; font-weight:900; color:${isLight ? '#b45309' : '#f59e0b'}; text-transform:uppercase; letter-spacing:0.5px;">
+                      🛍️ Valor de Compra en Locales:
+                    </div>
+                    <div style="font-size:15px; font-weight:900; color:${isLight ? '#78350f' : '#fef08a'};">
+                      $${((order.purchaseCost !== undefined) ? order.purchaseCost : (order.purchaseItemsTotal || 0)).toLocaleString('es-AR')}
+                    </div>
+                  </div>
+                  <button class="edit-mandado-purchase-btn" data-order-id="${order.id}" style="
+                    background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+                    color: white; border: none; padding: 7px 12px; border-radius: 10px;
+                    font-size: 11.5px; font-weight: 900; cursor: pointer; display: flex; align-items: center; gap: 5px;
+                    box-shadow: 0 3px 10px rgba(225,29,72,0.35); flex-shrink: 0;
+                  ">
+                    <span>✏️</span>
+                    <span>Modificar Valor</span>
+                  </button>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- 2. ENTREGA (CLIENTE) -->
+            <div style="display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:14px; background:${isLight ? '#ffffff' : 'rgba(0,0,0,0.25)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
+              <div style="font-size:10px; font-weight:800; color:${isLight ? '#64748b' : '#94a3b8'}; text-transform:uppercase;">
+                👤 Punto de Entrega:
+              </div>
+              <div style="font-size:13.5px; font-weight:900; color:${isLight ? '#0f172a' : '#ffffff'};">
+                ${order.userName || order.clientName || 'Cliente'}
+              </div>
+              <div style="font-size:11.5px; color:${isLight ? '#475569' : '#cbd5e1'}; font-weight:600;">
+                📍 ${order.deliveryAddress || order.address || 'Magdalena'}
+              </div>
+              ${(order.addressNotes || order.notes) ? `
+                <div style="font-size:11px; color:#e11d48; font-weight:700; background:${isLight ? '#fff1f2' : 'rgba(225,29,72,0.1)'}; padding:4px 8px; border-radius:6px; margin-top:2px;">
+                  📝 "${order.addressNotes || order.notes}"
+                </div>
+              ` : ''}
+
+              <!-- DIRECT CUSTOMER CONTACT ACTIONS -->
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:6px; padding:6px 10px; border-radius:12px; background:${isLight ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)'}; border:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'};">
+                <span style="font-size:11px; font-weight:800; color:${isLight ? '#475569' : '#cbd5e1'};">Contactar:</span>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  ${orderWaUrl ? `
+                    <a href="${orderWaUrl}" target="_blank" rel="noopener noreferrer" title="WhatsApp con ${order.userName || 'Cliente'}" style="
+                      display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px;
+                      background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+                      color: white; font-size: 11px; font-weight: 900; text-decoration: none;
+                      box-shadow: 0 2px 6px rgba(37, 211, 102, 0.35);
+                    ">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+                        <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                      </svg>
+                      <span>WhatsApp</span>
+                    </a>
+                  ` : ''}
+
+                  <button class="driver-dock-chat-btn" data-order-id="${order.id}" data-customer-name="${order.userName || order.clientName || 'Cliente'}" title="Chat en la App" style="
+                    display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px;
+                    background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+                    color: white; border: none; font-size: 11px; font-weight: 900; cursor: pointer;
+                    box-shadow: 0 2px 6px rgba(225, 29, 72, 0.35);
+                  ">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                    </svg>
+                    <span>Chat App</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- PINNED BOTTOM PAYMENT SUMMARY & ACTION SLIDER FOR currentOrder (ALWAYS VISIBLE & STICKY!) -->
+          <div id="dock-pinned-action-slider-row" style="flex-shrink: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+            
+            <!-- PAYMENT SUMMARY -->
+            <div style="display:flex; align-items:center; justify-content:space-between; background:${paymentBg}; border:1px solid ${paymentBorder}; padding:7px 12px; border-radius:12px;">
+              <div style="display:flex; flex-direction:column;">
+                <span style="font-size:9.5px; font-weight:900; color:${paymentColor}; text-transform:uppercase; letter-spacing:0.4px;">
+                  ${paymentLabel}
+                </span>
+                <strong style="font-size:15px; font-weight:950; color:${paymentColor};">
+                  $${Number(order.totalAmount || order.total || 0).toLocaleString('es-AR')}
+                </strong>
+              </div>
+
+              <button class="open-order-breakdown-btn" data-order-id="${order.id}" style="
+                background: ${isLight ? '#ffffff' : 'rgba(0,0,0,0.35)'};
+                border: 1px solid ${paymentBorder};
+                color: ${paymentColor};
+                padding: 5px 10px; border-radius: 9px;
+                font-size: 11px; font-weight: 800; cursor: pointer;
+                display: flex; align-items: center; gap: 4px;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
+              ">
+                <span>ℹ️</span>
+                <span>Ver Desglose</span>
+              </button>
+            </div>
+
+            <!-- ACTION SLIDER -->
+            <div class="driver-swipe-slider" data-action="${orderIsPickup ? 'pickup' : 'deliver'}" data-id="${order.id}" data-codes="${order.verificationCode || ''}" style="
+              position: relative;
+              width: 100%;
+              height: 50px;
+              border-radius: 25px;
+              background: ${isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)'};
+              border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
+              overflow: hidden;
+              user-select: none;
+              touch-action: none;
+              box-shadow: 0 6px 20px ${isLight ? 'rgba(225, 29, 72, 0.12)' : 'rgba(0, 0, 0, 0.55)'};
+              display: flex; align-items: center;
             ">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
-                <polyline points="9 18 15 12 9 6"></polyline>
-              </svg>
+              <div class="swipe-slider-fill" style="
+                position: absolute; top: 0; left: 0; height: 100%; width: 0%;
+                background: linear-gradient(90deg, #e11d48 0%, #be123c 100%);
+                border-radius: 25px; pointer-events: none;
+              "></div>
+
+              <div class="swipe-slider-label" style="
+                position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+                font-size: 13px; font-weight: 900; letter-spacing: 2px;
+                color: ${isLight ? '#9f1239' : '#ffffff'};
+                text-transform: uppercase; pointer-events: none; padding-left: 24px;
+                transition: opacity 0.15s ease;
+              ">
+                ${orderIsPickup ? 'RETIRADO › › ›' : 'ENTREGADO › › ›'}
+              </div>
+
+              <div class="swipe-slider-handle" style="
+                position: absolute; top: 3px; left: 3px; width: 44px; height: 44px;
+                background: #ffffff; border-radius: 50%;
+                box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4);
+                display: flex; align-items: center; justify-content: center;
+                cursor: grab; touch-action: none; z-index: 2;
+              ">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+              </div>
             </div>
           </div>
-        </div>
-      ` : ''}
+        `;
+      })() : ''}
 
       <!-- BOTTOM ROW: QUICK CONTROLS (ALWAYS VISIBLE & PINNED!) -->
-      <div style="display:flex; align-items:center; gap:6px; padding-top:8px; border-top:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'}; flex-shrink: 0; margin-top: auto;">
+      <div style="display:flex; align-items:center; gap:6px; padding-top:6px; border-top:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'}; flex-shrink: 0; margin-top: auto;">
         <!-- AUTO ACCEPT TOGGLE SWITCH WITH FILTER INDICATOR -->
         ${(() => {
           const isChofer = isDriverChoferApproved(user);
@@ -9171,6 +9108,22 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       showDriverHelpBottomSheet(latestUser);
     };
   }
+
+  // ATTACH HORIZONTAL ORDER SELECTOR TAB CLICKS
+  const orderTabs = document.querySelectorAll('.dock-order-tab-btn');
+  orderTabs.forEach(tab => {
+    tab.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = parseInt(tab.dataset.index) || 0;
+      window.driverSelectedOrderIndex = idx;
+      const bottomDock = document.getElementById('driver-footer-dock-container');
+      if (bottomDock) {
+        bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
+        attachBottomDockListeners(latestUser, activeOrdersList);
+      }
+    };
+  });
 
   // ATTACH SLIDE-TO-ACTION (SWIPE GESTURE HANDLER)
   const sliders = document.querySelectorAll('.driver-swipe-slider');

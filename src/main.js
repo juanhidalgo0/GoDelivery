@@ -159,10 +159,6 @@ async function init() {
 
   // Force-update check against version.json (Runs on Web, PWA and Native apps to always keep app in sync in real time)
   const checkAppVersion = async () => {
-    // Guard against infinite reload loops within the same browser session
-    if (sessionStorage.getItem('gd_update_attempted') === 'true') {
-      return;
-    }
     try {
       const versionUrl = (window.location.origin.includes('localhost') || window.location.origin.includes('capacitor://') || window.location.origin.includes('http://localhost'))
         ? 'https://godelivery-magdalena.web.app/version.json?cb=' + Date.now()
@@ -171,21 +167,18 @@ async function init() {
 
       if (vRes && vRes.ok) {
         const vData = await vRes.json();
-        const serverVersion = String(vData?.version || vData?.buildTime || '');
-        const runningBuildTime = String(BUNDLE_BUILD_VERSION);
-        const currentVer = localStorage.getItem('gd_app_version');
+        const serverVersion = String(vData?.version || vData?.buildTime || '').trim();
+        const runningBuildTime = String(BUNDLE_BUILD_VERSION).trim();
 
-        const isOutdated = currentVer && currentVer !== serverVersion && runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && runningBuildTime !== serverVersion;
-
-        if (isOutdated) {
-          console.log('[Version] New version detected on web/app. Server:', serverVersion, 'Local:', currentVer || runningBuildTime);
-          sessionStorage.setItem('gd_update_attempted', 'true');
-          localStorage.setItem('gd_app_version', serverVersion);
-          if ('caches' in window) {
-            caches.keys().then(names => {
-              names.forEach(name => caches.delete(name));
-            });
+        // Direct check: if server version is different from the running code bundle, reload immediately
+        if (serverVersion && runningBuildTime && runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && serverVersion !== runningBuildTime) {
+          // Guard against infinite reload loop if cache served old bundle once
+          if (sessionStorage.getItem('gd_last_reloaded_ver') === serverVersion) {
+            return;
           }
+          console.log('[Version] New version detected live! Server:', serverVersion, 'Running:', runningBuildTime);
+          sessionStorage.setItem('gd_last_reloaded_ver', serverVersion);
+          localStorage.setItem('gd_app_version', serverVersion);
           showUpdateSplashAndReload();
           return;
         } else if (serverVersion) {
@@ -198,12 +191,13 @@ async function init() {
   };
   window.checkAppVersion = checkAppVersion;
 
-  // Run version check on startup, on visibility change, on window focus, and periodically every 15s
+  // Run version check on startup, on visibility change, on window focus, and periodically every 10s
   checkAppVersion();
-  setInterval(checkAppVersion, 15000);
+  setInterval(checkAppVersion, 10000);
   window.addEventListener('focus', () => checkAppVersion());
+  window.addEventListener('online', () => checkAppVersion());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !sessionStorage.getItem('gd_update_attempted')) {
+    if (document.visibilityState === 'visible') {
       checkAppVersion();
     }
   });
