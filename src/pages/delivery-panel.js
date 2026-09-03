@@ -12327,24 +12327,49 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
 
 export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, orders, onConfirm, onCancel }) {
   const modalContent = document.createElement('div');
-  modalContent.style.cssText = 'padding: 8px 16px 16px;';
+  modalContent.style.cssText = 'padding: 4px 12px 16px;';
 
   const isLight = getDriverMapTheme() === 'light';
   const needsCode = !isTrip && !noCodeRequired;
   let isConfirmed = false;
+  let currentDigits = [];
+  let isProcessing = false;
 
   modalContent.innerHTML = `
-    <div>
+    <div style="max-width: 340px; margin: 0 auto;">
       ${needsCode ? `
-        <p style="font-size:14px; color:${isLight ? '#475569' : '#94a3b8'}; margin-bottom:16px; line-height:1.5; text-align:center; font-weight:600;">
-          Pedile al cliente su <strong>código de 4 dígitos</strong> para validar la entrega.
+        <p style="font-size:13.5px; color:${isLight ? '#475569' : '#94a3b8'}; margin: 0 0 14px; line-height:1.45; text-align:center; font-weight:600;">
+          Pedile al cliente su <strong>código de 4 dígitos</strong>:
         </p>
-        <div style="margin-bottom:12px; display:flex; flex-direction:column; align-items:center;">
-          <input type="text" id="modal-verification-input" 
-                 placeholder="0000" maxlength="4" inputmode="numeric" autocomplete="one-time-code"
-                 style="width:100%; max-width:280px; height:68px; border-radius:22px; background:${isLight ? '#f8fafc' : 'rgba(255,255,255,0.06)'}; border:2.5px solid ${isLight ? '#cbd5e1' : 'rgba(255,255,255,0.18)'}; text-align:center; font-size:34px; font-weight:950; letter-spacing:12px; color:${isLight ? '#0f172a' : '#ffffff'}; box-shadow:0 6px 20px rgba(0,0,0,0.08); transition:all 0.25s ease; outline:none;">
-          <div id="modal-verification-status" style="min-height:28px; margin-top:8px; display:flex; align-items:center; justify-content:center;"></div>
+        
+        <!-- 4 Visual PIN Boxes -->
+        <div id="pin-boxes-wrapper" style="display:flex; justify-content:center; gap:10px; margin-bottom:10px; width:100%;">
+          <div class="pin-digit-box active" data-idx="0" style="flex:1; max-width:64px; height:64px; border-radius:18px; background:${isLight ? '#ffffff' : 'rgba(255,255,255,0.06)'}; border:2.5px solid var(--color-primary, #e11d48); color:${isLight ? '#0f172a' : '#ffffff'}; font-family:var(--font-display, sans-serif); font-size:28px; font-weight:950; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(225,29,72,0.15); transition:all 0.2s cubic-bezier(0.16,1,0.3,1);"></div>
+          <div class="pin-digit-box" data-idx="1" style="flex:1; max-width:64px; height:64px; border-radius:18px; background:${isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)'}; border:2px solid ${isLight ? '#cbd5e1' : 'rgba(255,255,255,0.15)'}; color:${isLight ? '#0f172a' : '#ffffff'}; font-family:var(--font-display, sans-serif); font-size:28px; font-weight:950; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(0,0,0,0.04); transition:all 0.2s cubic-bezier(0.16,1,0.3,1);"></div>
+          <div class="pin-digit-box" data-idx="2" style="flex:1; max-width:64px; height:64px; border-radius:18px; background:${isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)'}; border:2px solid ${isLight ? '#cbd5e1' : 'rgba(255,255,255,0.15)'}; color:${isLight ? '#0f172a' : '#ffffff'}; font-family:var(--font-display, sans-serif); font-size:28px; font-weight:950; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(0,0,0,0.04); transition:all 0.2s cubic-bezier(0.16,1,0.3,1);"></div>
+          <div class="pin-digit-box" data-idx="3" style="flex:1; max-width:64px; height:64px; border-radius:18px; background:${isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)'}; border:2px solid ${isLight ? '#cbd5e1' : 'rgba(255,255,255,0.15)'}; color:${isLight ? '#0f172a' : '#ffffff'}; font-family:var(--font-display, sans-serif); font-size:28px; font-weight:950; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(0,0,0,0.04); transition:all 0.2s cubic-bezier(0.16,1,0.3,1);"></div>
         </div>
+
+        <div id="modal-verification-status" style="min-height:26px; margin-bottom:12px; display:flex; align-items:center; justify-content:center; text-align:center;"></div>
+
+        <!-- Custom On-Screen Keypad (Prevents iOS virtual keyboard displacement) -->
+        <div id="driver-pin-keypad" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; width:100%; margin-bottom:6px;">
+          <button type="button" class="pin-key-btn" data-key="1">1</button>
+          <button type="button" class="pin-key-btn" data-key="2">2</button>
+          <button type="button" class="pin-key-btn" data-key="3">3</button>
+          <button type="button" class="pin-key-btn" data-key="4">4</button>
+          <button type="button" class="pin-key-btn" data-key="5">5</button>
+          <button type="button" class="pin-key-btn" data-key="6">6</button>
+          <button type="button" class="pin-key-btn" data-key="7">7</button>
+          <button type="button" class="pin-key-btn" data-key="8">8</button>
+          <button type="button" class="pin-key-btn" data-key="9">9</button>
+          <button type="button" class="pin-key-btn pin-action-key" data-key="clear" style="font-size:12px; font-weight:850; letter-spacing:0.5px; text-transform:uppercase;">Borrar</button>
+          <button type="button" class="pin-key-btn" data-key="0">0</button>
+          <button type="button" class="pin-key-btn pin-action-key" data-key="backspace" style="font-size:20px;">⌫</button>
+        </div>
+
+        <!-- Hidden input for hardware keyboard / scanner compatibility -->
+        <input type="text" id="modal-verification-hidden-input" inputmode="numeric" maxlength="4" autocomplete="off" style="position:absolute; opacity:0; pointer-events:none; width:1px; height:1px; left:-9999px;">
       ` : `
         <p style="font-size:14px; color:${isLight ? '#475569' : '#94a3b8'}; margin-bottom:24px; line-height:1.5; text-align:center; font-weight:600;">
           ${isTrip ? 'Confirmá que llegaste al destino y que el pasajero descendió del vehículo.' : 'Confirmá la entrega de este pedido manual. No requiere código.'}
@@ -12374,8 +12399,37 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
           </div>
         </div>
       `}
-      <p style="font-size:11px; text-align:center; color:${isLight ? '#94a3b8' : '#64748b'}; margin-top:18px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Seguridad GoDelivery</p>
+      <p style="font-size:10px; text-align:center; color:${isLight ? '#94a3b8' : '#64748b'}; margin-top:14px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Seguridad GoDelivery</p>
     </div>
+
+    <style>
+      .pin-key-btn {
+        height: 52px;
+        border-radius: 16px;
+        background: ${isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)'};
+        border: 1px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.12)'};
+        color: ${isLight ? '#0f172a' : '#ffffff'};
+        font-family: var(--font-display, sans-serif);
+        font-size: 22px;
+        font-weight: 900;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+        transition: transform 0.08s ease, background 0.12s ease;
+      }
+      .pin-key-btn:active {
+        transform: scale(0.92);
+        background: ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.22)'};
+      }
+      .pin-action-key {
+        color: ${isLight ? '#64748b' : '#94a3b8'};
+        background: ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.04)'};
+      }
+    </style>
   `;
 
   showModal({
@@ -12389,85 +12443,147 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
     }
   });
 
-  const input = modalContent.querySelector('#modal-verification-input');
+  const boxes = modalContent.querySelectorAll('.pin-digit-box');
   const statusEl = modalContent.querySelector('#modal-verification-status');
+  const hiddenInput = modalContent.querySelector('#modal-verification-hidden-input');
+  const keypad = modalContent.querySelector('#driver-pin-keypad');
 
-  if (input) {
-    setTimeout(() => {
-      input.focus();
-      try { input.select(); } catch(e){}
-    }, 250);
+  const updatePinUI = () => {
+    boxes.forEach((b, idx) => {
+      const val = currentDigits[idx];
+      b.textContent = val !== undefined ? val : '';
+      b.style.borderColor = idx === currentDigits.length 
+        ? 'var(--color-primary, #e11d48)' 
+        : (val !== undefined ? (isLight ? '#64748b' : 'rgba(255,255,255,0.4)') : (isLight ? '#cbd5e1' : 'rgba(255,255,255,0.15)'));
+      b.style.background = idx === currentDigits.length 
+        ? (isLight ? '#ffffff' : 'rgba(255,255,255,0.08)') 
+        : (val !== undefined ? (isLight ? '#ffffff' : 'rgba(255,255,255,0.08)') : (isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)'));
+      b.style.boxShadow = idx === currentDigits.length ? '0 0 0 3px rgba(225,29,72,0.2)' : 'none';
+      b.style.transform = idx === currentDigits.length ? 'translateY(-2px)' : 'none';
+    });
+  };
 
-    let isProcessing = false;
+  const handleValidation = () => {
+    if (isProcessing) return;
+    const typedCode = currentDigits.join('').trim();
+    const validCodes = (codes || []).map(c => String(c).trim());
+    const isMaster = typedCode === '9999' || typedCode === '0000';
+    const isCorrect = validCodes.includes(typedCode) || isMaster;
 
-    input.addEventListener('input', () => {
-      input.value = input.value.replace(/\D/g, '').slice(0, 4);
-      input.style.borderColor = isLight ? '#e11d48' : 'rgba(225,29,72,0.8)';
-      if (statusEl) statusEl.innerHTML = '';
+    if (isCorrect) {
+      isProcessing = true;
+      isConfirmed = true;
 
-      if (input.value.length === 4 && !isProcessing) {
-        const typedCode = input.value.trim();
-        const validCodes = (codes || []).map(c => String(c).trim());
-        const isMaster = typedCode === '9999' || typedCode === '0000';
-        const isCorrect = validCodes.includes(typedCode) || isMaster;
+      boxes.forEach(b => {
+        b.style.borderColor = '#10b981';
+        b.style.background = isLight ? '#f0fdf4' : 'rgba(16, 185, 129, 0.2)';
+        b.style.color = '#10b981';
+        b.style.boxShadow = '0 0 16px rgba(16,185,129,0.35)';
+      });
 
-        if (isCorrect) {
-          isProcessing = true;
-          isConfirmed = true;
-          input.disabled = true;
-          input.style.borderColor = '#10b981';
-          input.style.background = isLight ? '#f0fdf4' : 'rgba(16, 185, 129, 0.15)';
-          input.style.color = '#10b981';
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div style="display:flex; align-items:center; gap:6px; color:#10b981; font-weight:900; font-size:14px; animation:fadeIn 0.2s ease;">
+            <span>✅</span> <span>¡Código correcto! Completando entrega...</span>
+          </div>
+        `;
+      }
 
-          if (statusEl) {
-            statusEl.innerHTML = `
-              <div style="display:flex; align-items:center; gap:6px; color:#10b981; font-weight:900; font-size:14px; animation:fadeIn 0.2s ease;">
-                <span>✅</span> <span>¡Código correcto! Completando entrega...</span>
-              </div>
-            `;
-          }
+      if (navigator.vibrate) {
+        try { navigator.vibrate([70, 40, 70]); } catch(e) {}
+      }
+      try {
+        AudioManager.playSynthChime();
+      } catch(e) {}
 
-          if (navigator.vibrate) {
-            try { navigator.vibrate([70, 40, 70]); } catch(e) {}
-          }
-          try {
-            AudioManager.playSynthChime();
-          } catch(e) {}
+      setTimeout(() => {
+        closeModal();
+        onConfirm();
+      }, 380);
+    } else {
+      boxes.forEach(b => {
+        b.style.borderColor = '#ef4444';
+        b.style.background = isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.2)';
+        b.style.color = '#ef4444';
+      });
 
-          setTimeout(() => {
-            closeModal();
-            onConfirm();
-          }, 420);
-        } else {
-          input.style.borderColor = '#ef4444';
-          input.style.background = isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)';
-          input.style.color = '#ef4444';
-          input.style.animation = 'shake 0.4s ease';
+      const wrapper = modalContent.querySelector('#pin-boxes-wrapper');
+      if (wrapper) wrapper.style.animation = 'shake 0.4s ease';
 
-          if (statusEl) {
-            statusEl.innerHTML = `
-              <div style="display:flex; align-items:center; gap:6px; color:#ef4444; font-weight:800; font-size:13.5px; animation:fadeIn 0.2s ease;">
-                <span>❌</span> <span>Código incorrecto. Verificalo con el cliente.</span>
-              </div>
-            `;
-          }
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div style="display:flex; align-items:center; gap:6px; color:#ef4444; font-weight:800; font-size:13px; animation:fadeIn 0.2s ease;">
+            <span>❌</span> <span>Código incorrecto. Verificalo con el cliente.</span>
+          </div>
+        `;
+      }
 
-          if (navigator.vibrate) {
-            try { navigator.vibrate([200, 100, 200]); } catch(e) {}
-          }
-          try {
-            AudioManager.hapticError();
-          } catch(e) {}
+      if (navigator.vibrate) {
+        try { navigator.vibrate([200, 100, 200]); } catch(e) {}
+      }
+      try {
+        AudioManager.hapticError();
+      } catch(e) {}
 
-          setTimeout(() => {
-            input.style.animation = '';
-            input.value = '';
-            input.style.borderColor = isLight ? '#cbd5e1' : 'rgba(255,255,255,0.18)';
-            input.style.background = isLight ? '#f8fafc' : 'rgba(255,255,255,0.06)';
-            input.style.color = isLight ? '#0f172a' : '#ffffff';
-            input.focus();
-          }, 550);
+      setTimeout(() => {
+        if (wrapper) wrapper.style.animation = '';
+        currentDigits = [];
+        boxes.forEach(b => {
+          b.style.color = isLight ? '#0f172a' : '#ffffff';
+        });
+        updatePinUI();
+        if (statusEl) statusEl.innerHTML = '';
+      }, 650);
+    }
+  };
+
+  if (keypad) {
+    keypad.querySelectorAll('.pin-key-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isProcessing) return;
+
+        const key = btn.dataset.key;
+        if (navigator.vibrate) {
+          try { navigator.vibrate([15]); } catch(err) {}
         }
+
+        if (key === 'clear') {
+          currentDigits = [];
+          updatePinUI();
+          if (statusEl) statusEl.innerHTML = '';
+        } else if (key === 'backspace') {
+          currentDigits.pop();
+          updatePinUI();
+          if (statusEl) statusEl.innerHTML = '';
+        } else if (currentDigits.length < 4) {
+          currentDigits.push(key);
+          updatePinUI();
+          if (currentDigits.length === 4) {
+            handleValidation();
+          }
+        }
+      };
+    });
+
+    // Hardware keyboard / scanner fallback
+    window.addEventListener('keydown', function onPinKey(e) {
+      if (!document.body.contains(modalContent) || isProcessing) {
+        window.removeEventListener('keydown', onPinKey);
+        return;
+      }
+      if (e.key >= '0' && e.key <= '9') {
+        if (currentDigits.length < 4) {
+          currentDigits.push(e.key);
+          updatePinUI();
+          if (currentDigits.length === 4) handleValidation();
+        }
+      } else if (e.key === 'Backspace') {
+        currentDigits.pop();
+        updatePinUI();
+      } else if (e.key === 'Escape') {
+        closeModal();
       }
     });
   }

@@ -198,9 +198,10 @@ async function init() {
   };
   window.checkAppVersion = checkAppVersion;
 
-  // Run version check on startup, on visibility change, and periodically every 60s
+  // Run version check on startup, on visibility change, on window focus, and periodically every 15s
   checkAppVersion();
-  setInterval(checkAppVersion, 60000);
+  setInterval(checkAppVersion, 15000);
+  window.addEventListener('focus', () => checkAppVersion());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !sessionStorage.getItem('gd_update_attempted')) {
       checkAppVersion();
