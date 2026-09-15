@@ -1,9 +1,9 @@
 // GoDelivery — Location Picker Modal (Refined with MapLibre GL)
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { getMapLibre } from '../utils/map-loader.js';
 import { DEFAULT_MAP_STYLE, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { icon } from '../utils/icons.js';
 import { showModal, closeModal } from './modal.js';
+import { loadGoogleMaps } from '../utils/geo.js';
 
 export async function showLocationPicker({ onSelect, initialCoords = null, initialAddress = '' }) {
   const modalContent = document.createElement('div');
@@ -83,12 +83,17 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
       }
     });
 
-    function initMap() {
+    async function initMap() {
       const magCenter = { lat: -35.0815, lng: -57.5147 };
       const mapCenter = initialCoords ? { lat: Number(initialCoords.lat), lng: Number(initialCoords.lng) } : magCenter;
 
       const mapContainer = document.getElementById('map-picker');
       if (!mapContainer) return;
+
+      // Load Google Maps on demand
+      try {
+        await loadGoogleMaps();
+      } catch(e) {}
 
       let selectedCoords = initialCoords || { lat: -35.0815, lng: -57.5147 };
       let selectedAddress = initialAddress;
@@ -176,6 +181,7 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
 
       // B. MapLibre Fallback
       if (!isGoogleMap) {
+        const maplibregl = await getMapLibre();
         const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
 
         map = new MapConstructor({

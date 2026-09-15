@@ -55,15 +55,23 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-// Modern Firestore initialization with Persistent Local Cache (with iOS WKWebView fallback)
+// Modern Firestore initialization with Persistent Local Cache & Multi-Tab Synchronization
 let dbInstance;
 try {
   dbInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache()
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
   });
 } catch (err) {
-  console.warn('[Firebase] persistentLocalCache error, falling back to standard Firestore:', err);
-  dbInstance = initializeFirestore(app, {});
+  console.warn('[Firebase] persistentLocalCache with tabManager error, falling back to standard cache or memory:', err);
+  try {
+    dbInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache()
+    });
+  } catch (fallbackErr) {
+    dbInstance = initializeFirestore(app, {});
+  }
 }
 export const db = dbInstance;
 

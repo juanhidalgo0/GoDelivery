@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { formatPrice } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { getLocalDateString } from '../../utils/analytics.js';
@@ -1182,9 +1182,15 @@ async function loadData(forceRefresh = false) {
 
   try {
     if (!isDemoMode && (ordersData.length === 0 || forceRefresh)) {
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+      const visitsQuery = query(collection(db, 'visits'), where('timestamp', '>=', Timestamp.fromDate(ninetyDaysAgo)), limit(2000));
+      const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(1500));
+
       const [ordersSnap, visitsSnap, settlementsSnap] = await Promise.all([
-        getDocs(collection(db, 'orders')),
-        getDocs(collection(db, 'visits')),
+        getDocs(ordersQuery).catch(() => getDocs(collection(db, 'orders'))),
+        getDocs(visitsQuery).catch(() => getDocs(query(collection(db, 'visits'), limit(1000)))).catch(() => ({ forEach: () => {} })),
         getDocs(collection(db, 'owner_settlements')).catch(err => {
           console.warn("owner_settlements collection doesn't exist yet, returning empty snap:", err);
           return { forEach: () => {} };

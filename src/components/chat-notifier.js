@@ -30,8 +30,12 @@ export function initChatNotifier() {
     }
   }, { once: true });
 
-  // Listen to all chats where the user is a participant
-  const chatsQ = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid));
+  // Listen to recent active chats where the user is a participant (prevent memory leaks)
+  const chatsQ = query(
+    collection(db, 'chats'), 
+    where('participants', 'array-contains', user.uid),
+    limit(30)
+  );
   const chatsUnsub = onSnapshot(chatsQ, (snap) => {
     snap.docs.forEach(chatDoc => {
       const chat = { id: chatDoc.id, ...chatDoc.data() };
@@ -43,9 +47,16 @@ export function initChatNotifier() {
 
 function listenToChat(chatId, userId, chatData) {
   if (unreadCounts[chatId] !== undefined) return;
+
+  // Do not spawn subcollection listeners for closed/completed chats
+  if (chatData.status === 'completed' || chatData.status === 'closed' || chatData.isClosed === true || chatData.closed === true) {
+    unreadCounts[chatId] = 0;
+    return;
+  }
+
   unreadCounts[chatId] = 0;
 
-  const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('timestamp', 'desc'), limit(20));
+  const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('timestamp', 'desc'), limit(15));
   let isInitialLoad = true;
   const unsub = onSnapshot(q, async (snap) => {
     let unread = 0;

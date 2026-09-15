@@ -75,9 +75,13 @@ export async function renderOffersPage(container) {
   // Bind search event
   const searchInput = document.getElementById('offers-search-input');
   if (searchInput) {
+    let offersSearchTimer = null;
     searchInput.addEventListener('input', (e) => {
       searchQuery = e.target.value.toLowerCase().trim();
-      renderFilteredOffers();
+      if (offersSearchTimer) clearTimeout(offersSearchTimer);
+      offersSearchTimer = setTimeout(() => {
+        renderFilteredOffers();
+      }, 120);
     });
   }
 

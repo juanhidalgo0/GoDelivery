@@ -244,84 +244,82 @@ export async function renderAdminUsers() {
   }
 
   try {
-    // Fetch comercios list once
-    try {
-      const comSnap = await getDocs(collection(db, 'comercios'));
-      comerciosMap = {};
-      comSnap.docs.forEach(d => {
-        comerciosMap[d.id] = d.data();
+    // 1. Fetch comercios and users IN PARALLEL for instant rendering
+    const [comSnap, usersSnap] = await Promise.all([
+      getDocs(collection(db, 'comercios')).catch(() => ({ docs: [] })),
+      getDocs(collection(db, 'users')).catch(() => ({ docs: [] }))
+    ]);
+
+    comerciosMap = {};
+    (comSnap.docs || []).forEach(d => {
+      comerciosMap[d.id] = d.data();
+    });
+
+    users = (usersSnap.docs || []).map(d => ({ uid: d.id, ...d.data() }));
+
+    const totalBadge = document.getElementById('users-total-badge');
+    if (totalBadge) {
+      totalBadge.textContent = `${users.length}`;
+      totalBadge.style.display = 'inline-block';
+    }
+
+    const androidCount = users.filter(u => (u.deviceOS || '').toLowerCase() === 'android').length;
+    const iosCount = users.filter(u => (u.deviceOS || '').toLowerCase() === 'ios').length;
+    const subtitle = document.getElementById('users-subtitle');
+    if (subtitle) {
+      subtitle.textContent = `Panel administrativo • ${androidCount} Android • ${iosCount} iOS`;
+    }
+
+    // Render list IMMEDIATELY!
+    updateList();
+
+    // 2. Fetch driver liquidations in background asynchronously without blocking user list render
+    getDocs(collection(db, 'delivery_transactions')).then(transSnap => {
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+
+      const startOfWeek = new Date(now);
+      const day = startOfWeek.getDay();
+      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+      startOfWeek.setDate(diff);
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      deliveryLiquidationsMap = {};
+      (transSnap.docs || []).forEach(dDoc => {
+        const tData = dDoc.data();
+        const dId = tData.driverId;
+        if (!dId) return;
+
+        if (!deliveryLiquidationsMap[dId]) {
+          deliveryLiquidationsMap[dId] = { week: 0, month: 0, total: 0 };
+        }
+
+        const amt = Number(tData.amount || 0);
+        if (tData.type === 'settlement' || tData.type === 'pago') {
+          deliveryLiquidationsMap[dId].total += amt;
+          const tDate = tData.createdAt ? (tData.createdAt.toDate ? tData.createdAt.toDate() : new Date(tData.createdAt)) : null;
+          if (tDate) {
+            if (tDate >= startOfWeek) deliveryLiquidationsMap[dId].week += amt;
+            if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) deliveryLiquidationsMap[dId].month += amt;
+          }
+        }
       });
-    } catch (comErr) {
-      console.error('Error fetching comercios:', comErr);
-    }
 
-    // Fetch all users to display exact total, Android and iOS counts in header
-    try {
-      const usersSnap = await getDocs(collection(db, 'users'));
-      users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+      users.forEach(u => {
+        const liq = deliveryLiquidationsMap[u.uid] || { week: 0, month: 0, total: 0 };
+        u.weekLiquidated = liq.week;
+        u.monthLiquidated = liq.month;
+        u.totalLiquidated = liq.total;
+      });
 
-      const totalBadge = document.getElementById('users-total-badge');
-      if (totalBadge) {
-        totalBadge.textContent = `${users.length}`;
-        totalBadge.style.display = 'inline-block';
+      // Update if delivery tab is currently selected
+      if (currentFilter === 'delivery' || currentFilter === 'chofer') {
+        updateList();
       }
-
-      const androidCount = users.filter(u => (u.deviceOS || '').toLowerCase() === 'android').length;
-      const iosCount = users.filter(u => (u.deviceOS || '').toLowerCase() === 'ios').length;
-      const subtitle = document.getElementById('users-subtitle');
-      if (subtitle) {
-        subtitle.textContent = `Panel administrativo • ${androidCount} Android • ${iosCount} iOS`;
-      }
-    } catch (usersErr) {
-      console.error('Error fetching users:', usersErr);
-    }
-
-      // Fetch delivery_transactions to compute liquidations per driver
-      try {
-        const transSnap = await getDocs(collection(db, 'delivery_transactions'));
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-
-        const startOfWeek = new Date(now);
-        const day = startOfWeek.getDay();
-        const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
-        startOfWeek.setDate(diff);
-        startOfWeek.setHours(0, 0, 0, 0);
-
-        deliveryLiquidationsMap = {};
-        transSnap.docs.forEach(dDoc => {
-          const tData = dDoc.data();
-          const dId = tData.driverId;
-          if (!dId) return;
-
-          if (!deliveryLiquidationsMap[dId]) {
-            deliveryLiquidationsMap[dId] = { week: 0, month: 0, total: 0 };
-          }
-
-          const amt = Number(tData.amount || 0);
-          if (tData.type === 'settlement' || tData.type === 'pago') {
-            deliveryLiquidationsMap[dId].total += amt;
-            const tDate = tData.createdAt ? (tData.createdAt.toDate ? tData.createdAt.toDate() : new Date(tData.createdAt)) : null;
-            if (tDate) {
-              if (tDate >= startOfWeek) deliveryLiquidationsMap[dId].week += amt;
-              if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) deliveryLiquidationsMap[dId].month += amt;
-            }
-          }
-        });
-
-        users.forEach(u => {
-          const liq = deliveryLiquidationsMap[u.uid] || { week: 0, month: 0, total: 0 };
-          u.weekLiquidated = liq.week;
-          u.monthLiquidated = liq.month;
-          u.totalLiquidated = liq.total;
-        });
-      } catch (tErr) {
-        console.warn('Error fetching driver liquidations:', tErr);
-      }
-
-      // Re-trigger rendering
-      updateList();
+    }).catch(tErr => {
+      console.warn('Error fetching driver liquidations:', tErr);
+    });
 
   } catch (e) { 
     console.error(e); 

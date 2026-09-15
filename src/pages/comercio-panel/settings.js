@@ -7,7 +7,9 @@ import { showToast } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
 import { openCropper } from '../../utils/cropper.js';
+import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 import { isAdmin } from '../../auth.js';
+import { createSlug } from '../../utils/slug.js';
 
 export async function renderComercioSettings() {
   const content = document.getElementById('app-content');
@@ -829,9 +831,17 @@ export async function renderComercioSettings() {
           return;
         }
 
+        const [logoUrl, bannerUrl] = await Promise.all([
+          uploadDataUrlImage(croppedLogo, `comercios/${comercioId}/logo`),
+          uploadDataUrlImage(croppedBanner, `comercios/${comercioId}/banner`)
+        ]);
+        croppedLogo = logoUrl;
+        croppedBanner = bannerUrl;
+
         const docRef = doc(db, 'comercios', comercioId);
         await setDoc(docRef, {
           name,
+          slug: comercio.slug || createSlug(name),
           description: desc,
           category: cat,
           categories: uniqueCategories,
@@ -839,8 +849,8 @@ export async function renderComercioSettings() {
           coords: comercioCoords,
           schedules: finalSchedules,
           daysOpen: daysOpen,
-          logo: croppedLogo,
-          banner: croppedBanner,
+          logo: logoUrl,
+          banner: bannerUrl,
           isActive: isActive,
           pin: pin || '',
           bidirectionalSyncEnabled: bidirectionalSyncEnabled

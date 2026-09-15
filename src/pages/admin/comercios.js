@@ -4,8 +4,10 @@ import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
 import { openCropper } from '../../utils/cropper.js';
+import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 import { formatPrice } from '../../utils/format.js';
 import { getState } from '../../state.js';
+import { createSlug } from '../../utils/slug.js';
 
 export async function renderAdminComercios() {
   const content = document.getElementById('app-content');
@@ -292,7 +294,7 @@ Por favor, enviá el comprobante de transferencia por este medio una vez realiza
     try {
       const [comerciosSnap, ordersSnap] = await Promise.all([
         getDocs(collection(db, 'comercios')),
-        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc')))
+        getDocs(query(collection(db, 'orders'), where('isSettled', '!=', true)))
       ]);
       allComercios = comerciosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       allComercios.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -655,6 +657,13 @@ async function openComercioEditor(comercio, onSaved) {
 
     const commValue = document.getElementById('edit-com-commission').value;
 
+    const [logoUrl, bannerUrl] = await Promise.all([
+      uploadDataUrlImage(croppedLogo, `comercios/${comercio.id}/logo`),
+      uploadDataUrlImage(croppedBanner, `comercios/${comercio.id}/banner`)
+    ]);
+    croppedLogo = logoUrl;
+    croppedBanner = bannerUrl;
+
     const updateData = {
       name: document.getElementById('edit-com-name').value.trim(),
       category: document.getElementById('edit-com-cat').value.trim(),
@@ -762,6 +771,10 @@ async function openComercioEditor(comercio, onSaved) {
       updateData.commissionRate = parseFloat(commValue) / 100;
     } else {
       updateData.commissionRate = null;
+    }
+
+    if (updateData.name) {
+      updateData.slug = comercio.slug || createSlug(updateData.name);
     }
 
     try {

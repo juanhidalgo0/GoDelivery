@@ -18,6 +18,19 @@ export function safeGoBack(fallback = '#/') {
   const fullHash = window.location.hash || '#/';
   const cleanHash = fullHash.split('?')[0] || '#/';
 
+  // 0. If in direct store mode, isolate navigation within that merchant's store
+  if (cleanHash.startsWith('#/tienda/')) {
+    const parts = cleanHash.split('/');
+    // e.g. #/tienda/:id/cart or #/tienda/:id/tracking/:orderId
+    if (parts.length > 3) {
+      const storeHome = `#/tienda/${parts[2]}`;
+      window.location.hash = storeHome;
+      return;
+    }
+    // Already on merchant store home: stay on store home
+    return;
+  }
+
   // 1. Root main tabs always return to Home to prevent trapping users in circular loops
   const rootTabs = ['#/profile', '#/cart', '#/offers', '#/mi-comercio', '#/mis-chats', '#/delivery'];
   if (rootTabs.includes(cleanHash)) {
@@ -50,8 +63,16 @@ if (typeof window !== 'undefined') {
 
 const getMainRoutes = () => {
   const user = getState().user;
-  const inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
-  const isDriverCached = localStorage.getItem('gd_is_delivery') === 'true' || localStorage.getItem('gd_user_role') === 'delivery';
+  let inTempClientMode = false;
+  let isDriverCached = false;
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+    }
+    if (typeof localStorage !== 'undefined') {
+      isDriverCached = localStorage.getItem('gd_is_delivery') === 'true' || localStorage.getItem('gd_user_role') === 'delivery';
+    }
+  } catch (e) {}
   const isDriver = (isDelivery() || isDriverCached) && !inTempClientMode;
 
   if (isDriver) {
@@ -71,20 +92,30 @@ const getMainRoutes = () => {
     '/cart': 'page-cart',
     '/mis-chats': 'page-mis-chats'
   };
-  if (user && !isDelivery() && !isAdmin()) {
+  if (!isDelivery() && !isAdmin()) {
     delete list['/delivery'];
     delete list['/delivery-panel'];
   }
-  if (user && !isComercio() && !isAdmin()) {
+  if (!isComercio() && !isAdmin()) {
     delete list['/mi-comercio'];
     delete list['/mi-comercio/:id/orders'];
   }
   return list;
 };
 
+export function normalizeRoutePath(str) {
+  if (!str) return '/';
+  let path = str.split('?')[0];
+  if (path.startsWith('#')) path = path.slice(1);
+  if (!path.startsWith('/')) path = '/' + path;
+  if (path.length > 1 && path.endsWith('/')) {
+    path = path.slice(0, -1);
+  }
+  return path;
+}
+
 export function getRouteParams() {
-  const fullHash = window.location.hash.slice(1) || '/';
-  const hash = fullHash.split('?')[0]; // Ignore query params for matching
+  const hash = normalizeRoutePath(window.location.hash);
   const params = {};
   
   // Match dynamic routes like /comercio/:id
@@ -105,14 +136,16 @@ export function getRouteParams() {
 }
 
 function patternToRegex(pattern) {
-  const regexStr = '^' + pattern.replace(/:(\w+)/g, '([^/]+)') + '$';
+  const normPattern = pattern.endsWith('/') && pattern.length > 1 ? pattern.slice(0, -1) : pattern;
+  const regexStr = '^' + normPattern.replace(/:(\w+)/g, '([^/]+)') + '/?$';
   return new RegExp(regexStr);
 }
 
 function matchRoute(hash) {
+  const normalized = normalizeRoutePath(hash);
   for (const pattern of Object.keys(routes)) {
     const regex = patternToRegex(pattern);
-    if (regex.test(hash)) {
+    if (regex.test(normalized)) {
       return { pattern, handler: routes[pattern] };
     }
   }
@@ -125,7 +158,7 @@ let isRouting = false;
 export async function handleRoute() {
   isRouting = true;
   try {
-    const currentCleanHash = window.location.hash ? window.location.hash.split('?')[0] : '#/';
+    const currentCleanHash = normalizeRoutePath(window.location.hash);
     if (navigationHistory.length === 0 || navigationHistory[navigationHistory.length - 1] !== currentCleanHash) {
       navigationHistory.push(currentCleanHash);
       if (navigationHistory.length > 30) {
@@ -134,15 +167,32 @@ export async function handleRoute() {
     }
 
     const fullHash = window.location.hash.slice(1) || '/';
-    const hash = fullHash.split('?')[0]; // Ignore query params for matching
+    const hash = normalizeRoutePath(window.location.hash);
     const slider = document.getElementById('app-slider');
     const overlay = document.getElementById('app-overlay');
     
-    // Automatic Driver Guard: Delivery users default to /#/delivery in Dark Mode unless in temporary Client Mode
+    // Automatic Driver Guard: Delivery users default to /#/delivery in Dark Mode unless in temporary Client/Admin Mode
     const userIsDelivery = isDelivery();
-    const inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+    let inTempClientMode = false;
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        inTempClientMode = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+      }
+    } catch (e) {}
 
-    if (userIsDelivery && !inTempClientMode && !hash.startsWith('/delivery') && !hash.startsWith('/admin') && !hash.startsWith('/profile')) {
+    // If navigating to any admin route, sales audit, profile, or merchant view, automatically activate client/admin view
+    if (hash.startsWith('/admin') || hash.startsWith('/profile') || hash.startsWith('/tienda') || hash.startsWith('/mi-comercio')) {
+      inTempClientMode = true;
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('gd_temp_client_mode', 'true');
+        }
+      } catch (e) {}
+      document.documentElement.classList.remove('is-delivery-mode');
+      document.body.classList.remove('is-delivery-mode');
+    }
+
+    if (userIsDelivery && !inTempClientMode && !hash.startsWith('/delivery')) {
       document.documentElement.classList.add('is-delivery-mode');
       document.body.classList.add('is-delivery-mode');
       window.location.hash = '#/delivery';
@@ -153,32 +203,62 @@ export async function handleRoute() {
     if (hash.startsWith('/delivery')) {
       document.documentElement.classList.add('is-delivery-mode');
       document.body.classList.add('is-delivery-mode');
-      sessionStorage.removeItem('gd_temp_client_mode');
-    } else if (!userIsDelivery || inTempClientMode) {
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem('gd_temp_client_mode');
+        }
+      } catch (e) {}
+    } else {
       document.documentElement.classList.remove('is-delivery-mode');
       document.body.classList.remove('is-delivery-mode');
     }
 
-    if (hash.startsWith('/seguimiento/wa')) {
-      // Hide global headers, footers, bottom navs and sliders so tracking page fills full screen
+    const isDirectStoreRoute = hash.startsWith('/tienda') || fullHash.includes('direct=true') || hash.startsWith('/seguimiento/wa');
+    if (isDirectStoreRoute) {
+      // Hide global headers, footers, bottom navs and sliders so merchant direct store fills full screen
+      document.body.classList.add('is-direct-store-mode');
       const bNav = document.getElementById('bottom-nav');
       const gHead = document.getElementById('global-header');
       const slider = document.getElementById('app-slider');
+      const overlay = document.getElementById('app-overlay');
       if (bNav) bNav.style.display = 'none';
       if (gHead) gHead.style.display = 'none';
       if (slider) slider.style.display = 'none';
-      document.body.classList.remove('overlay-open');
+      
+      if (overlay) {
+        overlay.classList.add('panel-fullscreen');
+        overlay.classList.add('active');
+        document.body.classList.add('overlay-open');
+        overlay.innerHTML = '<div id="overlay-render-target" style="width:100%; height:100%;"></div>';
+        const target = document.getElementById('overlay-render-target');
+        overlay.scrollTop = 0;
 
-      const match = matchRoute(hash);
-      if (match) {
-        const content = document.getElementById('app-content');
-        if (content) {
-          content.style.display = 'block';
-          currentCleanup = await match.handler(content);
+        const match = matchRoute(hash);
+        if (match) {
+          if (currentCleanup) {
+            currentCleanup();
+            currentCleanup = null;
+          }
+          try {
+            const result = await match.handler(target);
+            if (result && result.cleanup) {
+              currentCleanup = result.cleanup;
+            }
+          } catch (err) {
+            console.error('Error rendering direct store route:', err);
+          }
+          isRouting = false;
+          return;
         }
-        isRouting = false;
-        return;
       }
+    } else {
+      document.body.classList.remove('is-direct-store-mode');
+      const bNav = document.getElementById('bottom-nav');
+      const gHead = document.getElementById('global-header');
+      const slider = document.getElementById('app-slider');
+      if (bNav && !document.body.classList.contains('overlay-open')) bNav.style.display = '';
+      if (gHead) gHead.style.display = '';
+      if (slider) slider.style.display = '';
     }
 
     if (getState().loading) return;
@@ -250,18 +330,27 @@ export async function handleRoute() {
       
       // 1. First, start the animation to the target panel (Immediate visual feedback)
       if (slider) {
-        const uniquePanels = [...new Set(Object.values(mainRoutes))];
-        const panelId = mainRoutes[pattern];
-        const index = uniquePanels.indexOf(panelId);
+        const allPanels = Array.from(slider.querySelectorAll('.slide-panel'));
+        allPanels.forEach(p => {
+          if (Object.values(mainRoutes).includes(p.id)) {
+            p.style.display = 'block';
+          } else {
+            p.style.display = 'none';
+          }
+        });
+
+        const visiblePanels = allPanels.filter(p => p.style.display !== 'none');
+        const index = visiblePanels.findIndex(p => p.id === targetId);
+        const activeIdx = index >= 0 ? index : 0;
         const width = slider.clientWidth || window.innerWidth;
-        const targetX = index * width;
+        const targetX = activeIdx * width;
         
         if (Math.abs(slider.scrollLeft - targetX) > 10) {
           isProgrammaticScroll = true;
           slider.scrollTo({ left: targetX, behavior: 'auto' });
           setTimeout(() => { isProgrammaticScroll = false; }, 100);
         }
-        updateUI(index, targetX);
+        updateUI(activeIdx, targetX);
       }
 
       // 2. Then, update the content
@@ -307,7 +396,7 @@ export async function handleRoute() {
     } else {
       // Overlay routes (Sub-pages, Modals, etc.)
       if (overlay) {
-        if (hash.startsWith('/profile') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
+        if (hash.startsWith('/profile') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash.startsWith('/tienda') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
           overlay.classList.add('panel-fullscreen');
         } else {
           overlay.classList.remove('panel-fullscreen');
@@ -369,6 +458,9 @@ export async function handleRoute() {
     }
   } finally {
     isRouting = false;
+    try {
+      import('./components/navbar.js').then(m => m.updateGlobalDriverReturnBadge && m.updateGlobalDriverReturnBadge());
+    } catch (e) {}
   }
 }
 
@@ -379,26 +471,29 @@ const updateUI = (index, scrollX) => {
   
   const mainRoutes = getMainRoutes();
   const width = slider.clientWidth || window.innerWidth;
-  const uniquePanels = [...new Set(Object.values(mainRoutes))];
-  const routesList = Object.keys(mainRoutes);
-  // Map index to the first route that uses that panel
-  const panelId = uniquePanels[index];
-  const firstRoute = routesList.find(r => mainRoutes[r] === panelId);
-  const targetHash = '#' + firstRoute;
   
-  // Hide/Show panels based on authorization
-  ['page-home', 'page-offers', 'page-commerce', 'page-delivery', 'page-cart', 'page-mis-chats'].forEach(id => {
-    const p = document.getElementById(id);
-    if (!p) return;
-    if (Object.values(mainRoutes).includes(id)) {
+  const allPanels = Array.from(slider.querySelectorAll('.slide-panel'));
+  allPanels.forEach(p => {
+    if (Object.values(mainRoutes).includes(p.id)) {
       p.style.display = 'block';
-      if (id === panelId) {
-        p.classList.add('active');
-      } else {
-        p.classList.remove('active');
-      }
     } else {
       p.style.display = 'none';
+      p.classList.remove('active');
+    }
+  });
+
+  const visiblePanels = allPanels.filter(p => p.style.display !== 'none');
+  const activePanel = visiblePanels[index] || visiblePanels[0];
+  const panelId = activePanel ? activePanel.id : '';
+  
+  const routesList = Object.keys(mainRoutes);
+  const firstRoute = routesList.find(r => mainRoutes[r] === panelId) || '/';
+  const targetHash = '#' + firstRoute;
+  
+  visiblePanels.forEach(p => {
+    if (p.id === panelId) {
+      p.classList.add('active');
+    } else {
       p.classList.remove('active');
     }
   });
@@ -409,14 +504,16 @@ const updateUI = (index, scrollX) => {
     const href = item.getAttribute('href') || '';
     const label = item.innerText.toLowerCase();
     
-    // Match by href or by label (Home/Cart/Profile/Delivery)
+    // Match by href or by label
     const isHome = (targetHash === '#/' || targetHash === '#') && (href === '#/' || href === '#' || label.includes('inicio'));
+    const isOffers = targetHash === '#/offers' && (href === '#/offers' || label.includes('ofertas') || label.includes('promociones'));
     const isCommerce = targetHash.startsWith('#/mi-comercio') && (href === '#/mi-comercio' || label.includes('comercio'));
     const isCart = targetHash === '#/cart' && (href === '#/cart' || label.includes('carrito'));
     const isProfile = targetHash === '#/profile' && (href === '#/profile' || label.includes('perfil'));
     const isDeliveryNav = targetHash === '#/delivery' && (href === '#/delivery' || label.includes('delivery'));
+    const isMisChats = targetHash === '#/mis-chats' && (href === '#/mis-chats' || label.includes('chat'));
     
-    const isMatch = isHome || isCommerce || isCart || isProfile || isDeliveryNav;
+    const isMatch = isHome || isOffers || isCommerce || isCart || isProfile || isDeliveryNav || isMisChats;
     
     if (isMatch) {
       item.classList.add('active');
@@ -499,7 +596,7 @@ export function initRouter() {
         const currentPattern = currentMatch ? currentMatch.pattern : null;
         const currentPanelId = currentPattern ? mainRoutes[currentPattern] : null;
 
-        if (currentPanelId !== targetPanelId) {
+        if (currentPanelId && currentPanelId !== targetPanelId) {
           const routesList = Object.keys(mainRoutes);
           const firstRouteForPanel = routesList.find(r => mainRoutes[r] === targetPanelId);
           const targetHash = '#' + firstRouteForPanel;

@@ -2,13 +2,35 @@
 import { showModal, closeModal } from '../components/modal.js';
 import { icon } from './icons.js';
 
+async function ensureCropperLoaded() {
+  if (typeof window.Cropper !== 'undefined') return;
+  if (!document.getElementById('cropper-css')) {
+    const link = document.createElement('link');
+    link.id = 'cropper-css';
+    link.rel = 'stylesheet';
+    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css';
+    document.head.appendChild(link);
+  }
+  if (!document.getElementById('cropper-js')) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.id = 'cropper-js';
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+}
+
 /**
  * Opens a modal to crop an image.
  * @param {File|string} imageSource - The image file or URL to crop.
  * @param {Object} options - Cropper options (aspectRatio, etc).
  * @returns {Promise<string>} - The cropped image as Base64 string.
  */
-export function openCropper(imageSource, options = {}) {
+export async function openCropper(imageSource, options = {}) {
+  await ensureCropperLoaded();
   return new Promise((resolve, reject) => {
     const defaultOptions = {
       aspectRatio: 1, // Square by default
@@ -101,5 +123,56 @@ export function openCropper(imageSource, options = {}) {
         resolve(croppedBase64);
       });
     }, 100);
+  });
+}
+
+/**
+ * Compresses an image File or Blob directly via Canvas without opening a UI cropper.
+ * Automatically downscales large camera photos to ~150kB in WebP / JPEG.
+ * @param {File|Blob} file 
+ * @param {number} maxWidth 
+ * @param {number} quality 
+ * @returns {Promise<string>} Base64 string
+ */
+export async function compressImageFile(file, maxWidth = 1000, quality = 0.78) {
+  if (!file) return null;
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+
+        let base64 = canvas.toDataURL('image/webp', quality);
+        if (!base64.startsWith('data:image/webp')) {
+          base64 = canvas.toDataURL('image/jpeg', quality);
+        }
+        resolve(base64);
+      };
+      img.onerror = () => reject(new Error('Failed to load image for compression'));
+      img.src = e.target.result;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
   });
 }

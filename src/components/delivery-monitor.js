@@ -87,18 +87,18 @@ function startMonitoring(user) {
   // 1. Listen for Available Orders
   const qAvailable = query(
     collection(db, 'orders'),
-    where('status', 'in', ['ready', 'pending', 'confirmed'])
+    where('status', 'in', ['ready', 'pending', 'confirmed', 'preparing'])
   );
 
-  availableUnsub = onSnapshot(qAvailable, (snap) => {
+  availableUnsub = onSnapshot(qAvailable, async (snap) => {
     console.log(`DeliveryMonitor: Received update for available orders. Count: ${snap.docs.length}`);
     const mode = user.deliveryMode || 'both';
     const orders = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(o => !o.driverId)
       .filter(o => {
-        // Queue target driver check: Only notify/show if offered to me!
-        if (o.queueTargetDriverId !== user.uid) return false;
+        // Queue target driver check: If targeted specifically to me, ALWAYS include!
+        if (o.queueTargetDriverId === user.uid) return true;
         
         if (mode === 'trip' && !o.isTrip) return false;
         if (mode === 'delivery' && o.isTrip) return false;
@@ -110,34 +110,54 @@ function startMonitoring(user) {
         return false;
       });
 
-    console.log(`DeliveryMonitor: Filtered available orders: ${orders.length}`);
+    console.log(`DeliveryMonitor: Filtered available orders for user: ${orders.length}`);
     currentAvailableOrders = orders;
 
+    // Check for exclusive offer targeted to this driver
+    const exclusiveOrder = orders.find(o => !o.driverId && o.queueTargetDriverId === user.uid);
+    if (exclusiveOrder) {
+      const batch = {
+        id: exclusiveOrder.bundleId || exclusiveOrder.id,
+        isBundle: !!exclusiveOrder.bundleId,
+        isFavor: !!exclusiveOrder.isFavor,
+        isTrip: !!exclusiveOrder.isTrip,
+        order: exclusiveOrder,
+        orders: [exclusiveOrder],
+        total: exclusiveOrder.total || 0,
+        subtotal: exclusiveOrder.subtotal || 0,
+        deliveryCost: exclusiveOrder.deliveryCost || 0
+      };
+      try {
+        const { showExclusiveOfferOverlay } = await import('./exclusive-offer-modal.js');
+        showExclusiveOfferOverlay(batch, user);
+      } catch (err) {
+        console.error('[DeliveryMonitor] Error displaying exclusive offer modal:', err);
+      }
+    } else {
+      try {
+        const { hideExclusiveOfferOverlay } = await import('./exclusive-offer-modal.js');
+        hideExclusiveOfferOverlay();
+      } catch (err) {
+        console.error('[DeliveryMonitor] Error dismissing exclusive offer modal:', err);
+      }
+    }
+
     snap.docChanges().forEach(change => {
-      if (change.type === 'added') {
+      if (change.type === 'added' || change.type === 'modified') {
         const order = { id: change.doc.id, ...change.doc.data() };
-        if (!order.driverId && !lastKnownConfirmedIds.has(order.id)) {
-          lastKnownConfirmedIds.add(order.id);
+        if (!order.driverId && order.queueTargetDriverId === user.uid) {
+          const offeredMs = order.queueOfferedAt ? (order.queueOfferedAt.toMillis ? order.queueOfferedAt.toMillis() : new Date(order.queueOfferedAt).getTime()) : Date.now();
+          const offerKey = `${order.id}_${offeredMs}`;
           
-          if (!order.isTrip && !order.isFavor) {
-            if (order.queueTargetDriverId !== user.uid) return;
-          } else {
-            if (order.queueTargetDriverId && order.queueTargetDriverId !== user.uid) return;
-          }
-          if (mode === 'trip' && !order.isTrip) return;
-          if (mode === 'delivery' && order.isTrip) return;
-          
-          const qualifies = order.isFavor || order.isTrip || order.status === 'ready' || (['pending', 'confirmed'].includes(order.status) && order.isMultiOrder);
-          if (qualifies && currentActiveCount === 0) {
-            isDeliveryMutedGlobally = false; // Reset mute state so alarm rings again for the new order!
+          if (!lastKnownConfirmedIds.has(offerKey) && currentActiveCount === 0) {
+            lastKnownConfirmedIds.add(offerKey);
+            isDeliveryMutedGlobally = false; // Reset mute state so alarm rings again for the offer!
             notifyNewOrder(order);
           }
         }
       }
     });
 
-    const currentIds = new Set(orders.map(d => d.id));
-    lastKnownConfirmedIds = currentIds;
     updateBannerState();
   });
 
@@ -172,9 +192,10 @@ function stopMonitoring() {
   currentActiveOrder = null;
   clearBanner('delivery');
   clearDeliveryIndicator();
-  if (!isDriverOnDeliveryPanel()) {
-    AudioManager.stopDriverOfferLoop();
-  }
+  import('../pages/delivery-panel.js').then(({ hideExclusiveOfferOverlay }) => {
+    hideExclusiveOfferOverlay();
+  }).catch(() => {});
+  AudioManager.stopDriverOfferLoop();
   clearDeliverySystemNotifications();
 }
 
@@ -198,28 +219,30 @@ function notifyNewOrder(order) {
     return;
   }
 
-  // If driver is on the delivery panel, delivery-panel.js handles the single modern radar chime and vibration
-  if (!isDriverOnDeliveryPanel()) {
-    AudioManager.vibrate([400, 150, 400, 150, 600]);
-  }
+  // Strong vibration pattern on every incoming offer
+  AudioManager.vibrate([400, 150, 400, 150, 600]);
 
   // Use swRegistration.showNotification with requireInteraction: true for mobile persistence
   if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
     navigator.serviceWorker.ready.then(reg => {
-      let body = `¡Nuevo pedido! ${order.comercioName} tiene un pedido listo para retirar.`;
+      let body = `¡Nuevo pedido! ${order.comercioName || 'Comercio'} tiene un pedido listo para retirar.`;
       if (order.isFavor) {
-        const favorTypeLabel = order.favorType === 'compra' ? 'MANDADO' : 'ENCOMIENDA';
-        body = `🛵 ¡Nuevo GoFavor disponible! Hay un nuevo GoFavor (${favorTypeLabel}) listo para tomar.`;
+        const favorTypeLabel = order.favorType === 'compra' ? 'MANDADO' : (order.favorType === 'encomienda' ? 'ENCOMIENDA' : (order.favorType === 'gocash' ? 'GO CASH' : 'PAGO DE SERVICIOS'));
+        body = `🛵 ¡Nuevo GoFavor disponible! (${favorTypeLabel}) listo para tomar.`;
+      } else if (order.isTrip) {
+        body = `🚕 ¡Nuevo Viaje disponible! Pasajero listo para traslado.`;
       }
+
+      const offeredMs = order.queueOfferedAt ? (order.queueOfferedAt.toMillis ? order.queueOfferedAt.toMillis() : new Date(order.queueOfferedAt).getTime()) : Date.now();
 
       reg.showNotification('Go Delivery', {
         body: body,
         icon: '/logo-pwa.png',
         badge: '/logo-pwa.png',
-        tag: `delivery-order-${order.id}`,
+        tag: `delivery-order-${order.id}-${offeredMs}`,
         renotify: true,
         requireInteraction: true, // Permanent notification until order is taken/rotated/cancelled
-        data: { url: '#/delivery' },
+        data: { url: `#/delivery?takeOrderId=${order.id}` },
         vibrate: [400, 150, 400, 150, 600]
       });
     });

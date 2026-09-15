@@ -69,3 +69,59 @@ export function compressImage(base64OrUrl, maxWidth = 800, maxHeight = 800, qual
     img.src = base64OrUrl;
   });
 }
+
+/**
+ * Compresses an image File or Blob directly to a lightweight WebP File/Blob (max 1200px, quality 0.82)
+ * @param {File|Blob} file 
+ * @param {number} maxWidth 
+ * @param {number} maxHeight 
+ * @param {number} quality 
+ * @returns {Promise<File|Blob>}
+ */
+export async function compressImageFile(file, maxWidth = 1200, maxHeight = 1200, quality = 0.82) {
+  if (!file || !(file instanceof Blob)) return file;
+  if (file.type && !file.type.startsWith('image/')) return file;
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+      if (height > maxHeight) {
+        width = Math.round((width * maxHeight) / height);
+        height = maxHeight;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          resolve(file);
+          return;
+        }
+        const fileName = (file.name || 'upload.webp').replace(/\.[^/.]+$/, "") + ".webp";
+        const compressedFile = new File([blob], fileName, { type: 'image/webp' });
+        resolve(compressedFile);
+      }, 'image/webp', quality);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.src = objectUrl;
+  });
+}
+

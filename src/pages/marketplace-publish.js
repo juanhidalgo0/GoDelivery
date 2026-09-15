@@ -2,6 +2,7 @@ import { db } from '../firebase.js';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { getState } from '../state.js';
 import { icon } from '../utils/icons.js';
+import { uploadDataUrlImage } from '../utils/storage-upload.js';
 
 export async function renderPublishProduct(content) {
   if (!content) content = document.getElementById('app-content');
@@ -130,12 +131,13 @@ export async function renderPublishProduct(content) {
     }
 
     try {
+      const imageUrl = await uploadDataUrlImage(croppedImage, `marketplace/${user.uid}_${Date.now()}/image`);
       await addDoc(collection(db, 'marketplace_products'), {
         title,
         price,
         condition,
         description,
-        images: [croppedImage],
+        images: [imageUrl],
         sellerId: user.uid,
         sellerName: user.displayName || 'Usuario de GoDelivery',
         status: 'pending', // Requerirá aprobación de administrador

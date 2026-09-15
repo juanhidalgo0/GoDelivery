@@ -1,0 +1,504 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GO! Portal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --brand:#E11D48;
+    --brand-hover:#BE123C;
+    --brand-tint:#FFE4E9;
+    --dark:#1A1A1A;
+    --bg:#FFFFFF;
+    --bg-alt:#F8FAFC;
+    --surface:#FFFFFF;
+    --ink:#17161A;
+    --ink-2:#5B6472;
+    --border:#E2E8F0;
+    --success:#10B981;
+    --success-bg:#ECFDF5;
+    --warning:#F59E0B;
+    --info:#3B82F6;
+    --shadow:0 2px 8px rgba(20,20,30,0.06);
+    --shadow-md:0 8px 28px -10px rgba(20,20,30,0.16);
+    --radius-card:16px;
+    --radius-btn:12px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --brand:#FB3A63;
+      --brand-hover:#FF6685;
+      --brand-tint:#3A1420;
+      --dark:#F1F5F9;
+      --bg:#0F172A;
+      --bg-alt:#1E293B;
+      --surface:#182338;
+      --ink:#F1F5F9;
+      --ink-2:#94A3B8;
+      --border:#334155;
+      --success:#34D399;
+      --success-bg:#0F2E23;
+      --warning:#FBBF24;
+      --info:#60A5FA;
+      --shadow:none;
+      --shadow-md:0 8px 28px -10px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --brand:#FB3A63;
+    --brand-hover:#FF6685;
+    --brand-tint:#3A1420;
+    --dark:#F1F5F9;
+    --bg:#0F172A;
+    --bg-alt:#1E293B;
+    --surface:#182338;
+    --ink:#F1F5F9;
+    --ink-2:#94A3B8;
+    --border:#334155;
+    --success:#34D399;
+    --success-bg:#0F2E23;
+    --warning:#FBBF24;
+    --info:#60A5FA;
+    --shadow:none;
+    --shadow-md:0 8px 28px -10px rgba(0,0,0,0.5);
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:'Inter', system-ui, -apple-system, sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--brand-tint); color:var(--ink); }
+  h1,h2,h3{ font-family:'Outfit', system-ui, sans-serif; text-wrap:balance; letter-spacing:-0.01em; margin:0; }
+  p{ margin:0; }
+  a{ color:inherit; text-decoration:none; }
+  button{ font-family:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+  :focus-visible{ outline:2px solid var(--brand); outline-offset:2px; }
+
+  .shell{ max-width:1120px; margin:0 auto; padding:0 24px; }
+  .eyebrow{ font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--brand); }
+
+  /* ---------- Nav ---------- */
+  nav.top{
+    position:sticky; top:0; z-index:40; background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--border);
+  }
+  nav.top .shell{ display:flex; align-items:center; justify-content:space-between; padding-top:14px; padding-bottom:14px; }
+  .brand{ display:flex; align-items:center; gap:9px; font-family:'Outfit',sans-serif; font-weight:700; font-size:1.08rem; }
+  .brand .mark{
+    width:30px; height:30px; border-radius:9px; background:var(--dark); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; flex:none;
+  }
+  .nav-links{ display:flex; gap:28px; font-size:14.5px; font-weight:500; color:var(--ink-2); }
+  .nav-links a:hover{ color:var(--ink); }
+  @media (max-width:720px){ .nav-links{ display:none; } }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 24px; border-radius:var(--radius-btn); font-weight:600; font-size:14.5px;
+    transition:transform .12s ease, opacity .12s ease, background-color .15s ease, border-color .15s ease;
+  }
+  .btn:active{ transform:scale(0.98); opacity:.9; }
+  .btn-primary{ background:var(--brand); color:#fff; }
+  .btn-primary:hover{ background:var(--brand-hover); }
+  .btn-outline{ background:transparent; border:1.5px solid var(--border); color:var(--ink); }
+  .btn-outline:hover{ border-color:var(--brand); color:var(--brand); }
+  .btn-ghost{ background:transparent; color:var(--ink); border:1.5px solid var(--brand); }
+  .btn-ghost:hover{ background:var(--brand-tint); }
+  .btn-sm{ padding:9px 16px; font-size:13.5px; }
+  .btn-block{ width:100%; }
+
+  /* ---------- Hero ---------- */
+  .hero{ padding:64px 0 40px; }
+  .hero-grid{ display:grid; grid-template-columns:1.05fr 0.95fr; gap:56px; align-items:center; }
+  @media (max-width:920px){ .hero-grid{ grid-template-columns:1fr; gap:40px; } }
+
+  h1.headline{ font-size:clamp(2.1rem, 4.3vw, 3.15rem); font-weight:800; line-height:1.06; margin:14px 0 18px; }
+  h1.headline .rule{ color:var(--brand); }
+  p.sub{ font-size:1.08rem; color:var(--ink-2); max-width:46ch; margin-bottom:28px; }
+  .hero-ctas{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .hero-note{ font-size:13px; color:var(--ink-2); display:flex; align-items:center; gap:8px; }
+  .hero-note .dot{ width:6px; height:6px; border-radius:50%; background:var(--success); }
+
+  /* ---- Ticket illustration ---- */
+  .ticket-wrap{ position:relative; display:flex; justify-content:center; padding:10px; }
+  .ticket{
+    width:280px; background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:22px 20px 18px; box-shadow:var(--shadow-md); transform:rotate(-3deg); font-family:'Inter',sans-serif;
+    position:relative; z-index:2;
+  }
+  .ticket-head{ text-align:center; margin-bottom:12px; }
+  .ticket-head .store{ font-family:'Outfit',sans-serif; font-weight:700; font-size:14px; }
+  .ticket-head .addr{ font-size:10.5px; color:var(--ink-2); margin-top:2px; }
+  .ticket-rule{ border-top:1.5px dashed var(--border); margin:10px 0; }
+  .ticket-line{ display:flex; justify-content:space-between; font-size:11.5px; padding:3.5px 0; gap:8px; }
+  .ticket-line .name{ color:var(--ink); }
+  .ticket-line .amt{ font-variant-numeric:tabular-nums; color:var(--ink-2); white-space:nowrap; }
+  .ticket-total{ display:flex; justify-content:space-between; font-weight:700; font-size:14px; margin-top:8px; }
+  .ticket-total .amt{ color:var(--brand); font-variant-numeric:tabular-nums; }
+  .ticket-foot{ text-align:center; font-size:9.5px; color:var(--ink-2); margin-top:12px; letter-spacing:.04em; }
+
+  .order-chip{
+    position:absolute; z-index:3; right:-6px; bottom:36px; background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:10px 13px; box-shadow:var(--shadow-md); display:flex; align-items:center; gap:9px;
+    transform:rotate(3deg); font-size:11.5px; font-weight:600;
+  }
+  .order-chip .ping{ width:8px; height:8px; border-radius:50%; background:var(--success); flex:none; }
+  @media (max-width:920px){ .order-chip{ right:8%; } }
+
+  /* ---------- Section shell ---------- */
+  section{ padding:64px 0; }
+  section.alt{ background:var(--bg-alt); }
+  .sec-head{ max-width:52ch; margin-bottom:36px; }
+  .sec-head h2{ font-size:clamp(1.6rem,2.6vw,2.1rem); font-weight:700; margin-top:10px; }
+  .sec-head p{ color:var(--ink-2); margin-top:10px; font-size:1.02rem; }
+
+  /* ---------- Features ---------- */
+  .feat-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media (max-width:860px){ .feat-grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:600px){ .feat-grid{ grid-template-columns:1fr; } }
+  .feat{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-card);
+    padding:22px 20px; box-shadow:var(--shadow);
+  }
+  .feat .ico{
+    width:38px; height:38px; border-radius:10px; background:var(--brand-tint); color:var(--brand);
+    display:flex; align-items:center; justify-content:center; margin-bottom:14px;
+  }
+  .feat h3{ font-size:1rem; font-weight:600; margin-bottom:6px; }
+  .feat p{ font-size:.92rem; color:var(--ink-2); }
+
+  /* ---------- Sync strip ---------- */
+  .sync{
+    display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:22px;
+    background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:30px 28px; box-shadow:var(--shadow);
+  }
+  @media (max-width:760px){ .sync{ grid-template-columns:1fr; text-align:center; } .sync .arrow{ transform:rotate(90deg); } }
+  .sync-side{ display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+  @media (max-width:760px){ .sync-side{ align-items:center; } }
+  .sync-side .tag{
+    font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:3px 9px; border-radius:6px;
+  }
+  .sync-side.pos .tag{ background:var(--brand-tint); color:var(--brand); }
+  .sync-side.gd .tag{ background:var(--success-bg); color:var(--success); }
+  .sync-side h3{ font-size:1.05rem; font-weight:700; }
+  .sync-side p{ font-size:.88rem; color:var(--ink-2); max-width:30ch; }
+  .arrow{ color:var(--ink-2); font-size:22px; }
+
+  /* ---------- Pricing ---------- */
+  .toggle{
+    display:inline-flex; align-items:center; gap:4px; background:var(--surface); border:1px solid var(--border);
+    border-radius:999px; padding:4px; margin-bottom:34px;
+  }
+  .toggle button{
+    padding:8px 18px; border-radius:999px; font-size:13.5px; font-weight:600; color:var(--ink-2);
+    transition:background-color .15s ease, color .15s ease;
+  }
+  .toggle button.active{ background:var(--brand); color:#fff; }
+  .toggle .save{ font-size:11px; font-weight:700; color:var(--success); margin-left:6px; }
+
+  .plans{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; align-items:stretch; }
+  @media (max-width:900px){ .plans{ grid-template-columns:1fr; max-width:400px; margin:0 auto; } }
+
+  .plan{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-card);
+    padding:28px 26px; display:flex; flex-direction:column; box-shadow:var(--shadow); position:relative;
+  }
+  .plan.featured{ border-color:var(--brand); box-shadow:var(--shadow-md); }
+  .plan .badge{
+    position:absolute; top:-13px; left:26px; background:var(--brand); color:#fff; font-size:11px; font-weight:700;
+    letter-spacing:.04em; text-transform:uppercase; padding:5px 12px; border-radius:999px;
+  }
+  .plan .pname{ font-family:'Outfit',sans-serif; font-weight:700; font-size:1.2rem; margin-bottom:4px; }
+  .plan .pfor{ font-size:.86rem; color:var(--ink-2); margin-bottom:20px; min-height:34px; }
+  .plan .price{ display:flex; align-items:baseline; gap:6px; margin-bottom:2px; }
+  .plan .price .amt{ font-family:'Outfit',sans-serif; font-size:2.1rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .plan .price .per{ font-size:.85rem; color:var(--ink-2); }
+  .plan .price-note{ font-size:12px; color:var(--ink-2); margin-bottom:22px; }
+  .plan ul{ list-style:none; padding:0; margin:0 0 26px; display:flex; flex-direction:column; gap:11px; flex:1; }
+  .plan li{ display:flex; gap:9px; font-size:.9rem; align-items:flex-start; }
+  .plan li svg{ flex:none; margin-top:2px; color:var(--success); }
+  .plan li.off{ color:var(--ink-2); }
+  .plan li.off svg{ color:var(--ink-2); opacity:.5; }
+
+  /* ---------- Sync detail / FAQ ---------- */
+  .faq{ display:grid; gap:1px; background:var(--border); border:1px solid var(--border); border-radius:var(--radius-card); overflow:hidden; }
+  .faq-item{ background:var(--surface); padding:20px 22px; }
+  .faq-item summary{ cursor:pointer; font-weight:600; font-size:.98rem; list-style:none; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .faq-item summary::-webkit-details-marker{ display:none; }
+  .faq-item summary .plus{ flex:none; font-size:20px; color:var(--brand); transition:transform .2s ease; }
+  .faq-item[open] summary .plus{ transform:rotate(45deg); }
+  .faq-item p{ margin-top:12px; color:var(--ink-2); font-size:.92rem; max-width:62ch; }
+
+  /* ---------- CTA band ---------- */
+  .band{
+    background:var(--dark); color:#fff; border-radius:24px; padding:52px 40px; text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:16px;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .band{ background:var(--surface); border:1px solid var(--border); } }
+  :root[data-theme="dark"] .band{ background:var(--surface); border:1px solid var(--border); }
+  .band h2{ font-size:clamp(1.5rem,3vw,2rem); max-width:22ch; }
+  .band p{ color:#B8B4C0; max-width:46ch; }
+  :root[data-theme="dark"] .band p, :root:not([data-theme="light"]) .band p{ color:var(--ink-2); }
+
+  /* ---------- Footer ---------- */
+  footer{ padding:40px 0 56px; border-top:1px solid var(--border); margin-top:20px; }
+  .foot-row{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+  .foot-note{ font-size:13px; color:var(--ink-2); }
+
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="shell">
+    <div class="brand"><span class="mark">G!</span>GO! Portal</div>
+    <div class="nav-links">
+      <a href="#funciones">Funciones</a>
+      <a href="#conexion">Conexión con GoDelivery</a>
+      <a href="#planes">Planes</a>
+      <a href="#preguntas">Preguntas</a>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <a href="https://go-portal-pos.fly.dev" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Probar demo</a>
+      <a href="#planes" class="btn btn-primary btn-sm">Ver planes</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="shell hero-grid">
+    <div>
+      <span class="eyebrow">POS + tienda online, un solo sistema</span>
+      <h1 class="headline">Tu caja, tu stock y tu <span class="rule">tienda en GoDelivery</span>, sincronizados al segundo.</h1>
+      <p class="sub">GO! Portal es el sistema de ventas que ya usás en el mostrador — ahora también desde el navegador, sin instalar nada, y conectado a tu tienda en GoDelivery Magdalena.</p>
+      <div class="hero-ctas">
+        <a href="https://go-portal-pos.fly.dev" target="_blank" rel="noopener" class="btn btn-primary">Probar demo gratis</a>
+        <a href="#planes" class="btn btn-outline">Ver planes</a>
+      </div>
+      <div class="hero-note"><span class="dot"></span>Sin registro — entrás directo con datos de ejemplo</div>
+    </div>
+
+    <div class="ticket-wrap">
+      <div class="ticket">
+        <div class="ticket-head">
+          <div class="store">GO! MARKET</div>
+          <div class="addr">Calle 50 · Magdalena, BA</div>
+        </div>
+        <div class="ticket-rule"></div>
+        <div class="ticket-line"><span class="name">Coca-Cola 2L</span><span class="amt">$3.200</span></div>
+        <div class="ticket-line"><span class="name">Pan lactal Bimbo</span><span class="amt">$2.850</span></div>
+        <div class="ticket-line"><span class="name">Yerba mate 1kg</span><span class="amt">$5.100</span></div>
+        <div class="ticket-line"><span class="name">Alfajor Jorgito x3</span><span class="amt">$1.950</span></div>
+        <div class="ticket-rule"></div>
+        <div class="ticket-total"><span>Total</span><span class="amt">$13.100</span></div>
+        <div class="ticket-foot">MERCADO PAGO · CAJA 1 · 09:41</div>
+      </div>
+      <div class="order-chip"><span class="ping"></span>Pedido online recibido</div>
+    </div>
+  </div>
+</header>
+
+<section id="funciones">
+  <div class="shell">
+    <div class="sec-head">
+      <span class="eyebrow">Funciones</span>
+      <h2>Todo lo que ya hacés en el mostrador, ahora también en la nube</h2>
+      <p>Nada nuevo que aprender: es el mismo POS, corriendo en un navegador en vez de solo en la PC de la caja.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div>
+        <h3>Caja y arqueo</h3>
+        <p>Apertura y cierre de turno, arqueo de caja, reporte Z diario con diferencias por método de pago.</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h4l2 12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2l1-8H7"/><circle cx="9" cy="21" r="1"/><circle cx="18" cy="21" r="1"/></svg></div>
+        <h3>Stock y código de barras</h3>
+        <p>Control de inventario, alertas de stock mínimo, kits y presentaciones (unidad, kg, pack).</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6M16 2h6v6M10 14 22 2"/></svg></div>
+        <h3>Promos y combos</h3>
+        <p>2x1, combos a precio fijo, descuentos por porcentaje — con tope de stock o de fecha si querés.</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <h3>Cuenta corriente</h3>
+        <p>Clientes fiado con límite de crédito, historial de pagos y retiros autorizados.</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h3>Multi-terminal</h3>
+        <p>Varias cajas trabajando en simultáneo, cada una con su usuario, rol y permisos.</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M7 15l4-6 4 3 4-7"/></svg></div>
+        <h3>Reportes</h3>
+        <p>Ventas por período, productos más vendidos, historial de precios y auditoría de cambios.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="conexion">
+  <div class="shell">
+    <div class="sec-head">
+      <span class="eyebrow">Conexión en tiempo real</span>
+      <h2>Un mostrador, una tienda online, un solo stock</h2>
+      <p>GO! Portal y GoDelivery comparten la misma cuenta de Google del comercio — el stock y los pedidos viajan solos entre los dos.</p>
+    </div>
+    <div class="sync">
+      <div class="sync-side pos">
+        <span class="tag">GO! Portal</span>
+        <h3>Vendés en el mostrador</h3>
+        <p>Cada venta descuenta stock al instante y actualiza el precio si cambió.</p>
+      </div>
+      <div class="arrow">⇄</div>
+      <div class="sync-side gd">
+        <span class="tag">GoDelivery</span>
+        <h3>Aparece en tu tienda online</h3>
+        <p>Y cuando entra un pedido nuevo por GoDelivery, se descuenta el stock local automáticamente.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="planes">
+  <div class="shell">
+    <div class="sec-head" style="max-width:60ch">
+      <span class="eyebrow">Planes</span>
+      <h2>Elegí cómo querés vender</h2>
+      <p>Empezá solo con la caja, sumá la tienda online cuando quieras, o arrancá directo por GoDelivery si todavía no tenés POS.</p>
+    </div>
+
+    <div class="toggle" role="tablist" aria-label="Frecuencia de pago">
+      <button type="button" class="active" data-period="monthly">Mensual</button>
+      <button type="button" data-period="annual">Anual <span class="save">2 meses gratis</span></button>
+    </div>
+
+    <div class="plans">
+      <div class="plan">
+        <div class="pname">GO! Caja</div>
+        <div class="pfor">Para el mostrador: caja, stock y reportes, sin tienda online.</div>
+        <div class="price"><span class="amt" data-monthly="$14.900" data-annual="$12.400">$14.900</span><span class="per">/ mes</span></div>
+        <div class="price-note" data-monthly-note="Facturado mes a mes" data-annual-note="Facturado anual · $148.800/año">Facturado mes a mes</div>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Caja, arqueo y reporte Z</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Stock, código de barras y kits</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Promos, combos y cuenta corriente</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>1 terminal incluida</li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Tienda online en GoDelivery</li>
+        </ul>
+        <a href="#contacto" class="btn btn-outline btn-block">Elegir GO! Caja</a>
+      </div>
+
+      <div class="plan featured">
+        <span class="badge">Más elegido</span>
+        <div class="pname">GO! Full</div>
+        <div class="pfor">Todo GO! Caja + tienda online sincronizada con GoDelivery.</div>
+        <div class="price"><span class="amt" data-monthly="$24.900" data-annual="$20.750">$24.900</span><span class="per">/ mes</span></div>
+        <div class="price-note" data-monthly-note="Facturado mes a mes" data-annual-note="Facturado anual · $249.000/año">Facturado mes a mes</div>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Todo lo de GO! Caja</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Tienda online en GoDelivery</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Stock y precios sincronizados en vivo</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Panel de pedidos y estadísticas online</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Hasta 3 terminales</li>
+        </ul>
+        <a href="#contacto" class="btn btn-primary btn-block">Elegir GO! Full</a>
+      </div>
+
+      <div class="plan">
+        <div class="pname">GO! Delivery</div>
+        <div class="pfor">Para vender online en GoDelivery sin instalar una caja registradora.</div>
+        <div class="price"><span class="amt" data-monthly="$9.900" data-annual="$8.250">$9.900</span><span class="per">/ mes</span></div>
+        <div class="price-note" data-monthly-note="Facturado mes a mes" data-annual-note="Facturado anual · $99.000/año">Facturado mes a mes</div>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Tienda online en GoDelivery</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Catálogo con fotos y categorías</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Recepción de pedidos en el momento</li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Caja registradora / arqueo</li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Control de stock avanzado</li>
+        </ul>
+        <a href="#contacto" class="btn btn-outline btn-block">Elegir GO! Delivery</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="preguntas">
+  <div class="shell">
+    <div class="sec-head">
+      <span class="eyebrow">Preguntas frecuentes</span>
+      <h2>Antes de que preguntes</h2>
+    </div>
+    <div class="faq">
+      <details class="faq-item" open>
+        <summary>¿Necesito instalar algo?</summary>
+        <p>No. GO! Portal corre en el navegador. Si preferís tenerlo instalado en la PC de la caja para trabajar sin depender de internet, también existe esa versión de escritorio.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Funciona sin conexión a internet?</summary>
+        <p>La versión de escritorio sigue vendiendo aunque se corte internet, y sincroniza apenas vuelve la conexión. La versión web necesita internet para operar, igual que tu tienda de GoDelivery.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Cómo se conecta con GoDelivery?</summary>
+        <p>Iniciás sesión con la misma cuenta de Google del comercio en los dos sistemas. A partir de ahí, stock, precios y pedidos se sincronizan solos.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Puedo cambiar de plan más adelante?</summary>
+        <p>Sí, en cualquier momento. Si empezás con GO! Caja o GO! Delivery y después querés el combo, pasás a GO! Full sin perder tu historial de ventas ni tu catálogo.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Qué pasa con lo que cargo en la demo?</summary>
+        <p>La demo tiene productos y ventas de ejemplo para que pruebes todo libremente — se reinicia sola cada pocas horas, así que no la uses para datos reales. Cuando contratás un plan, arrancás con tu catálogo propio, vacío y privado.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="contacto">
+  <div class="shell">
+    <div class="band">
+      <span class="eyebrow" style="color:var(--brand)">Empezá hoy</span>
+      <h2>Armamos tu caja online en el día</h2>
+      <p>Contanos qué plan te sirve y te ayudamos a migrar tu catálogo desde el primer día.</p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+        <a href="https://go-portal-pos.fly.dev" target="_blank" rel="noopener" class="btn btn-primary">Probar demo gratis</a>
+        <a href="#" class="btn btn-outline" style="border-color:#3A3A3E; color:#fff;">Hablar por WhatsApp</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="shell foot-row">
+    <div class="brand" style="font-size:1rem"><span class="mark" style="width:24px;height:24px;font-size:13px;">G!</span>GO! Portal</div>
+    <div class="foot-note">Parte de la familia GoDelivery · Magdalena, Buenos Aires</div>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var buttons = document.querySelectorAll('.toggle button');
+    var amounts = document.querySelectorAll('.plan .amt');
+    var notes = document.querySelectorAll('.price-note');
+
+    buttons.forEach(function(btn){
+      btn.addEventListener('click', function(){
+        buttons.forEach(function(b){ b.classList.remove('active'); });
+        btn.classList.add('active');
+        var period = btn.getAttribute('data-period');
+        amounts.forEach(function(el){
+          el.textContent = el.getAttribute('data-' + period) || el.textContent;
+        });
+        notes.forEach(function(el){
+          el.textContent = el.getAttribute('data-' + period + '-note') || el.textContent;
+        });
+      });
+    });
+  })();
+</script>
+</body></html>

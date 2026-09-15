@@ -8,6 +8,7 @@ import { showToast } from '../../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
 import { openCropper } from '../../utils/cropper.js';
+import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 import { isAdmin } from '../../auth.js';
 import { renderPendingCommissionStickyFooter } from '../../components/pending-commission-footer.js';
 
@@ -1723,9 +1724,15 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     try {
 
       const currentExistingImage = product ? (product.image || product.imageUrl || '') : '';
-      const savedImage = (croppedImage && typeof croppedImage === 'string' && croppedImage.trim() !== '')
+      const pendingImage = (croppedImage && typeof croppedImage === 'string' && croppedImage.trim() !== '')
         ? croppedImage
         : currentExistingImage;
+
+      const productRef = product
+        ? doc(db, 'comercios', comercioId, 'products', product.id)
+        : doc(collection(db, 'comercios', comercioId, 'products'));
+
+      const savedImage = await uploadDataUrlImage(pendingImage, `products/${comercioId}/${productRef.id}`);
 
       const isAvailableToggle = document.getElementById('prod-status-toggle');
       const isAvailable = isAvailableToggle ? isAvailableToggle.checked : (product ? product.isAvailable !== false : true);
@@ -1761,13 +1768,12 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
       const doSaveCloud = async () => {
         if (product) {
-          await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), productData);
+          await updateDoc(productRef, productData);
           onSave({ id: product.id, ...productData });
         } else {
-          const newRef = doc(collection(db, 'comercios', comercioId, 'products'));
-          await setDoc(newRef, productData);
-          firestoreDocId = newRef.id;
-          onSave({ id: newRef.id, ...productData });
+          await setDoc(productRef, productData);
+          firestoreDocId = productRef.id;
+          onSave({ id: productRef.id, ...productData });
         }
       };
 

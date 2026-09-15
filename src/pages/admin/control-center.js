@@ -1,7 +1,7 @@
 // GoDelivery — Premium Operations Control Center (Centro de Control Unificado)
 import { getState } from '../../state.js';
 import { db } from '../../firebase.js';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, limit } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
 import { showToast } from '../../components/toast.js';
@@ -304,7 +304,7 @@ export async function renderAdminControlCenter(content) {
         const offeredAt = parseInt(t.dataset.offeredAt, 10);
         if (!offeredAt) return;
         const elapsedSec = Math.floor((now - offeredAt) / 1000);
-        const remainingSec = Math.max(0, 30 - elapsedSec);
+        const remainingSec = Math.max(0, 60 - elapsedSec);
         t.textContent = `${remainingSec}s`;
       });
     }, 1000);
@@ -312,9 +312,13 @@ export async function renderAdminControlCenter(content) {
 
   return {
     cleanup: () => {
-      if (unsubOrders) unsubOrders();
-      if (unsubSupport) unsubSupport();
-      if (unsubDrivers) unsubDrivers();
+      if (unsubOrders) { unsubOrders(); unsubOrders = null; }
+      if (unsubSupport) { unsubSupport(); unsubSupport = null; }
+      if (unsubDrivers) { unsubDrivers(); unsubDrivers = null; }
+      if (window.adminOfferTimerInterval) {
+        clearInterval(window.adminOfferTimerInterval);
+        window.adminOfferTimerInterval = null;
+      }
     }
   };
 }
@@ -344,8 +348,8 @@ function startListeners(content) {
     renderOrdersColumn();
   }, err => console.error('Error in CC orders listener:', err));
 
-  // 2. Listen to support chats
-  const supportQuery = query(collection(db, 'support_chats'));
+  // 2. Listen to recent support chats
+  const supportQuery = query(collection(db, 'support_chats'), limit(50));
   unsubSupport = onSnapshot(supportQuery, (snap) => {
     allSupportChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     allSupportChats.sort((a, b) => {
@@ -471,10 +475,11 @@ function renderOrdersColumn() {
                     const nowMs = Date.now() + (getState().serverTimeOffset || 0);
                     const offeredAtMs = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : nowMs;
                     const elapsedSec = Math.floor((nowMs - offeredAtMs) / 1000);
-                    const remainingSec = Math.max(0, 30 - elapsedSec);
+                    const remainingSec = Math.max(0, 60 - elapsedSec);
                     return `⏳ Ofrecido: <strong>${o.queueTargetDriverName}</strong> <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 5px; border-radius:4px; font-weight:900;">${remainingSec}s</span>`;
                   }
                   if (o.status === 'confirmed' || o.status === 'preparing') return `🍳 En preparación`;
+                  if (o.isFavor || o.isTrip) return `🔍 Buscando repartidor en tiempo real...`;
                   if (o.status === 'pending') return `🏪 Esperando confirmación del local`;
                   return `🔍 Buscando moto...`;
                 })()}

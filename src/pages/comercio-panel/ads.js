@@ -1,11 +1,12 @@
 import { db } from '../../firebase.js';
-import { doc, getDoc, getDocs, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, where, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../../components/modal.js';
 import { formatPrice } from '../../utils/format.js';
 import { openCropper } from '../../utils/cropper.js';
+import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 
 let currentComercioName = '';
 let pricingSettings = {
@@ -446,6 +447,10 @@ export async function renderComercioAds(container) {
 
       try {
         const finalPrice = getEstimatedCost();
+        const [imageUrl, logoUrl] = await Promise.all([
+          uploadDataUrlImage(adType === 'banner' ? croppedBase64 : '', `ads/requests/${comercioId}_${Date.now()}/image`),
+          uploadDataUrlImage(logoBase64, `ads/requests/${comercioId}_${Date.now()}/logo`)
+        ]);
         const requestData = {
           name,
           type: adType === 'sponsored' ? 'sponsored_listing' : 'banner',
@@ -458,8 +463,8 @@ export async function renderComercioAds(container) {
           hasDiscount: adType === 'banner' ? hasDiscount : false,
           discountAmount: (adType === 'banner' && hasDiscount) ? parseInt(modalContent.querySelector('#req-discount-amount').value) || 0 : 0,
           discountLimitPerDay: (adType === 'banner' && hasDiscount) ? parseInt(modalContent.querySelector('#req-discount-limit').value) || 0 : 0,
-          imageUrl: adType === 'banner' ? croppedBase64 : '',
-          logoUrl: logoBase64,
+          imageUrl,
+          logoUrl,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
@@ -589,10 +594,11 @@ function openPushAdModal(comercioId, comercioName) {
       });
 
       // 2. Add to customAds collection (triggers FCM push broadcast & shows on home)
+      const pushBannerUrl = await uploadDataUrlImage(croppedBase64, `ads/push/${comercioId}_${Date.now()}/banner`);
       await addDoc(collection(db, 'customAds'), {
         title,
         body,
-        banner: croppedBase64 || '',
+        banner: pushBannerUrl,
         link: `#/comercio/${comercioId}`,
         active: true,
         isPriority: true,
@@ -713,13 +719,14 @@ function openFeaturedSliderModal(comercioId, comercioName) {
       // 2. Activate featured promotion on commerce document
       const endDate = new Date();
       endDate.setDate(endDate.getDate() + 7);
+      const featuredBannerUrl = await uploadDataUrlImage(croppedBase64, `ads/featured/${comercioId}_${Date.now()}/banner`);
       await updateDoc(doc(db, 'comercios', comercioId), {
         promotion: {
           active: true,
           isPaid: true,
           isPriority: true,
           label,
-          banner: croppedBase64 || '',
+          banner: featuredBannerUrl,
           startDate: Timestamp.now(),
           endDate: Timestamp.fromDate(endDate)
         }

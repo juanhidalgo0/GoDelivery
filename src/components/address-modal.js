@@ -1,11 +1,11 @@
 // GoDelivery — Address Modal Component with Google Maps & MapLibre Fallback
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { getMapLibre } from '../utils/map-loader.js';
 import { DEFAULT_MAP_STYLE, getAppMapStyle, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { showModal, closeModal, closeMultipleModals } from './modal.js';
 import { icon } from '../utils/icons.js';
 import { setDeliveryAddress, getState, setState } from '../state.js';
 import { showToast } from './toast.js';
+import { loadGoogleMaps } from '../utils/geo.js';
 
 export function showAddressPrompt(onSuccess, config = {}) {
   const isGeneric = config.mode === 'pick' || config.skipDetails === true;
@@ -24,7 +24,13 @@ export function showAddressPrompt(onSuccess, config = {}) {
   let geocodingDisabledTimeout = null;
   let isManualAddress = false;
   let isPreciseLocation = false;
+  let isUserDraggingMap = false;
   let selectedTag = 'Casa';
+
+  // Preload Google Maps in background immediately on prompt open
+  try {
+    loadGoogleMaps().catch(() => {});
+  } catch(e) {}
 
   const updateSelectedAddress = (newAddress) => {
     if (!newAddress) return;
@@ -42,7 +48,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
     }
   };
 
-  const disableGeocodingTemporarily = (ms = 1200) => {
+  const disableGeocodingTemporarily = (ms = 1500) => {
     geocodingDisabled = true;
     if (geocodingDisabledTimeout) clearTimeout(geocodingDisabledTimeout);
     geocodingDisabledTimeout = setTimeout(() => {
@@ -68,17 +74,20 @@ export function showAddressPrompt(onSuccess, config = {}) {
     }
 
     const targetCenter = selectedCoords || { lat: -35.0815, lng: -57.5147 };
-    disableGeocodingTemporarily(3500);
+    disableGeocodingTemporarily(4500);
 
     if (!googleMap) {
       setTimeout(() => {
         initMap();
       }, 50);
     } else {
-      [60, 200, 450].forEach((delay) => {
+      [50, 150, 300, 500].forEach((delay) => {
         setTimeout(() => {
           try {
             if (googleMap) {
+              if (typeof window !== 'undefined' && window.google?.maps?.event) {
+                window.google.maps.event.trigger(googleMap, 'resize');
+              }
               if (typeof googleMap.panTo === 'function') {
                 googleMap.panTo({ lat: Number(targetCenter.lat), lng: Number(targetCenter.lng) });
                 googleMap.setZoom(17.5);
@@ -385,13 +394,20 @@ export function showAddressPrompt(onSuccess, config = {}) {
     const magCenter = { lat: -35.0815, lng: -57.5147 };
     const initialCenter = selectedCoords ? { lat: Number(selectedCoords.lat), lng: Number(selectedCoords.lng) } : magCenter;
 
+    // Load Google Maps on-demand if not already in memory
+    try {
+      await loadGoogleMaps();
+    } catch (e) {
+      console.warn('[AddressModal] On-demand Google Maps load error, will use MapLibre:', e);
+    }
+
     // A. Native Google Maps SDK (100% updated streets, house numbers & rooftop accuracy)
     let mapInitialized = false;
     if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Map) {
       try {
         googleMap = new window.google.maps.Map(mapContainer, {
           center: initialCenter,
-          zoom: 17,
+          zoom: 17.5,
           disableDefaultUI: true,
           gestureHandling: 'greedy',
           clickableIcons: false,
@@ -403,6 +419,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
         // Pin Lift Animation while dragging
         googleMap.addListener('dragstart', () => {
+          isUserDraggingMap = true;
           const markerBody = document.getElementById('marker-body');
           const markerShadow = document.getElementById('marker-shadow');
           if (markerBody) markerBody.style.transform = 'translateY(-16px) scale(1.08)';
@@ -425,6 +442,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
           const center = googleMap.getCenter();
           if (center) {
             selectedCoords = { lat: center.lat(), lng: center.lng() };
+            // Only reverse-geocode if user explicitly dragged the map
+            if (!isUserDraggingMap) return;
             if (geocodingDisabled) return;
             if (isManualAddress) return;
             reverseGeocode(selectedCoords.lat, selectedCoords.lng);
@@ -439,13 +458,14 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
     // B. Fallback to MapLibre GL
     if (!mapInitialized) {
+      const maplibregl = await getMapLibre();
       const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
 
       googleMap = new MapConstructor({
         container: mapContainer,
         style: OSM_MAP_STYLE,
         center: [initialCenter.lng, initialCenter.lat],
-        zoom: 16.5,
+        zoom: 17,
         attributionControl: false
       });
 
@@ -458,7 +478,10 @@ export function showAddressPrompt(onSuccess, config = {}) {
       });
 
       // Pin Lift Animation while dragging
-      googleMap.on('movestart', () => {
+      googleMap.on('movestart', (e) => {
+        if (e && e.originalEvent) {
+          isUserDraggingMap = true;
+        }
         const markerBody = document.getElementById('marker-body');
         const markerShadow = document.getElementById('marker-shadow');
         if (markerBody) markerBody.style.transform = 'translateY(-16px) scale(1.08)';
@@ -481,6 +504,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const center = googleMap.getCenter();
         selectedCoords = { lat: center.lat, lng: center.lng };
 
+        if (!isUserDraggingMap) return;
         if (geocodingDisabled) return;
         if (isManualAddress) return;
         reverseGeocode(selectedCoords.lat, selectedCoords.lng);
@@ -658,6 +682,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         lastKnownUserPos = myPos;
         isPreciseLocation = true;
+        isUserDraggingMap = true;
+        selectedCoords = myPos;
         if (googleMap) {
           disableGeocodingTemporarily(1500);
           if (typeof googleMap.panTo === 'function') {
@@ -670,6 +696,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
             iconWrap.classList.add('loc-pulse-anim');
             setTimeout(() => iconWrap.classList.remove('loc-pulse-anim'), 400);
           }
+          reverseGeocode(myPos.lat, myPos.lng);
           if (showFeedback) showToast('Ubicación actualizada', 'success');
         }
       },
@@ -948,9 +975,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
       item.onclick = (e) => {
         e.stopPropagation();
         const addr = item.dataset.addr;
-        const lat = parseFloat(item.dataset.lat) || -35.0815;
-        const lng = parseFloat(item.dataset.lng) || -57.5147;
+        const lat = parseFloat(item.dataset.lat);
+        const lng = parseFloat(item.dataset.lng);
         
+        if (isNaN(lat) || isNaN(lng)) return;
+
+        isUserDraggingMap = false;
         selectedCoords = { lat, lng };
         lastGeocodedAddress = addr;
         updateSelectedAddress(addr);
@@ -962,19 +992,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
         if (savedWrapper) savedWrapper.style.display = 'flex';
 
         // Transition to Map view (Slide 2)
-        disableGeocodingTemporarily(2500);
+        disableGeocodingTemporarily(4500);
         showMapView({ lat, lng });
-        if (googleMap) {
-          try {
-            if (typeof googleMap.panTo === 'function') {
-              googleMap.panTo({ lat, lng });
-              googleMap.setZoom(17.5);
-            } else if (typeof googleMap.jumpTo === 'function') {
-              if (typeof googleMap.resize === 'function') googleMap.resize();
-              googleMap.jumpTo({ center: [lng, lat], zoom: 17.5 });
-            }
-          } catch(err) {}
-        }
       };
     });
   };

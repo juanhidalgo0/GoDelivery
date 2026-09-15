@@ -349,6 +349,8 @@ export function addToCart(product, comercioId, comercioName, qty = 1, options = 
   }
   saveCart();
   notify('cart');
+  // Silent prefetch of cart page for 0ms instant transition
+  import('./pages/cart.js').catch(() => {});
 }
 
 export function updateCartQty(cartItemId, comercioId, qty) {

@@ -8,8 +8,15 @@ import { icon, categoryIcon, CATEGORY_ICON_MAP, CATEGORY_PHOSPHOR_MAP } from '..
 import { getState, subscribe } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
+import { createSlug } from '../utils/slug.js';
 
 let isLoadingComercios = true;
+let memoryCachedComercios = null;
+let memoryCachedOffers = null;
+let memoryCachedCats = null;
+let memoryCachedAppOnly = null;
+let memoryCacheTimestamp = 0;
+const MEMORY_CACHE_TTL = 3 * 60 * 1000; // 3 minutes fresh cache in RAM
 
 export async function renderHome(content) {
   if (!content) content = document.getElementById('page-home') || document.getElementById('app-content');
@@ -34,30 +41,40 @@ export async function renderHome(content) {
   let activeCategory = 'Todos';
   let onlyInAppProducts = [];
 
-  // Try loading complete cache from localStorage
-  try {
-    const rawOffers = localStorage.getItem('gd_cached_offers');
-    if (rawOffers) offers = JSON.parse(rawOffers);
+  const isMemoryFresh = memoryCachedComercios && (Date.now() - memoryCacheTimestamp < MEMORY_CACHE_TTL);
 
-    const rawAppOnly = localStorage.getItem('gd_cached_only_in_app');
-    if (rawAppOnly) onlyInAppProducts = JSON.parse(rawAppOnly);
+  if (isMemoryFresh) {
+    comercios = memoryCachedComercios;
+    if (memoryCachedOffers) offers = memoryCachedOffers;
+    if (memoryCachedCats) categories = memoryCachedCats;
+    if (memoryCachedAppOnly) onlyInAppProducts = memoryCachedAppOnly;
+    isLoadingComercios = false;
+  } else {
+    // Try loading complete cache from localStorage
+    try {
+      const rawOffers = localStorage.getItem('gd_cached_offers');
+      if (rawOffers) offers = JSON.parse(rawOffers);
 
-    const rawCats = localStorage.getItem('gd_platform_categories');
-    if (rawCats) {
-      const parsed = JSON.parse(rawCats);
-      if (Array.isArray(parsed)) categories = parsed;
-    }
+      const rawAppOnly = localStorage.getItem('gd_cached_only_in_app');
+      if (rawAppOnly) onlyInAppProducts = JSON.parse(rawAppOnly);
 
-    const rawComercios = localStorage.getItem('gd_cached_comercios');
-    if (rawComercios) {
-      const parsed = JSON.parse(rawComercios);
-      if (parsed && parsed.length > 0) {
-        comercios = parsed;
-        isLoadingComercios = false;
+      const rawCats = localStorage.getItem('gd_platform_categories');
+      if (rawCats) {
+        const parsed = JSON.parse(rawCats);
+        if (Array.isArray(parsed)) categories = parsed;
       }
+
+      const rawComercios = localStorage.getItem('gd_cached_comercios');
+      if (rawComercios) {
+        const parsed = JSON.parse(rawComercios);
+        if (parsed && parsed.length > 0) {
+          comercios = parsed;
+          isLoadingComercios = false;
+        }
+      }
+    } catch (e) {
+      console.warn('Error loading localStorage cache:', e);
     }
-  } catch (e) {
-    console.warn('Error loading localStorage cache:', e);
   }
 
   const currentFilters = { openOnly: false, freeShippingOnly: false, topRatedOnly: false };
@@ -76,7 +93,7 @@ export async function renderHome(content) {
           <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #FF2E55 0%, #C9002B 100%); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; height: 68px; box-shadow: 0 8px 22px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.22); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
             <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 60%); pointer-events: none;"></div>
             <div style="width: 38px; height: 38px; border-radius: 12px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-              <i class="ph-duotone ph-package" style="font-size: 20px;"></i>
+              ${icon('package', 20)}
             </div>
             <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
               <div style="display: flex; align-items: center; gap: 6px;">
@@ -94,7 +111,7 @@ export async function renderHome(content) {
             <a href="#/viajes" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #1E40AF 0%, #1D4ED8 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(30, 64, 175, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
               <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
               <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-                <i class="ph-duotone ph-car-profile" style="font-size: 18px;"></i>
+                ${icon('car', 18)}
               </div>
               <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
                 <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Viajes</h4>
@@ -106,7 +123,7 @@ export async function renderHome(content) {
             <a href="#/marketplace" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(5, 150, 105, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
               <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
               <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-                <i class="ph-duotone ph-storefront" style="font-size: 18px;"></i>
+                ${icon('store', 18)}
               </div>
               <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
                 <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Market</h4>
@@ -122,14 +139,14 @@ export async function renderHome(content) {
             <div style="position: absolute; top: 10px; left: 10px; background: rgba(225, 29, 72, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
               Tus antojos, rápido
             </div>
-            <img src="/images/categories/restaurants.png" alt="Comida" style="object-fit: cover; width: 100%; height: 100%;" />
+            <img src="/images/categories/restaurants.png" alt="Comida" loading="lazy" decoding="async" style="object-fit: cover; width: 100%; height: 100%;" />
             <span class="card-title">Comida</span>
           </a>
           <a href="#/category/GoMarket" id="gomarket-card" class="category-card-large glow-hover spring-hover">
             <div style="position: absolute; top: 10px; left: 10px; background: rgba(13, 148, 136, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
               Tu súper en minutos
             </div>
-            <img src="/images/categories/gomarket.png" alt="GoMarket" style="object-fit: cover; width: 100%; height: 100%;" />
+            <img src="/images/categories/gomarket.png" alt="GoMarket" loading="lazy" decoding="async" style="object-fit: cover; width: 100%; height: 100%;" />
             <span class="card-title">GoMarket</span>
           </a>
         </div>
@@ -259,9 +276,14 @@ export async function renderHome(content) {
 
     // --- Dynamic DOM Listeners Setup ---
     const searchInput = document.getElementById('header-search');
+    let searchDebounceTimer = null;
     if (searchInput) {
       searchInput.addEventListener('input', (e) => {
-        renderComercios(comercios, activeCategory, e.target.value, currentFilters);
+        const val = e.target.value;
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+          renderComercios(comercios, activeCategory, val, currentFilters);
+        }, 120);
       });
     }
 
@@ -391,8 +413,12 @@ export async function renderHome(content) {
     }
   }, 300);
 
+  // Bounded query: avoids reading/listening to the entire national comercios collection
+  // on every home load (was previously unbounded — see docs/plan for follow-up geoquery work).
+  const comerciosQuery = query(collection(db, 'comercios'), limit(150));
+
   // Parallel getDocs fetch as immediate fallback for iOS Safari/Capacitor WebKit
-  getDocs(collection(db, 'comercios')).then((comSnap) => {
+  getDocs(comerciosQuery).then((comSnap) => {
     if (comSnap.docs && comSnap.docs.length > 0) {
       const fetchedComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       if (comercios.length === 0 || isLoadingComercios) {
@@ -407,9 +433,10 @@ export async function renderHome(content) {
     console.warn('[Parallel getDocs comercios warning]', err);
   });
 
-  // Set up live snapshot listener for comercios IMMEDIATELY
+  // Set up live snapshot listener for comercios IMMEDIATELY (optimized without metadata duplication)
+  let lastComerciosSignature = '';
   try {
-    unsubComercios = onSnapshot(collection(db, 'comercios'), { includeMetadataChanges: true }, (comSnap) => {
+    unsubComercios = onSnapshot(comerciosQuery, (comSnap) => {
       clearTimeout(homeSafetyTimer);
       const isFromCache = comSnap.metadata.fromCache;
       const newComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -422,10 +449,19 @@ export async function renderHome(content) {
       isLoadingComercios = false;
 
       if (!isFromCache && comercios.length > 0) {
+        memoryCachedComercios = comercios;
+        memoryCacheTimestamp = Date.now();
         try {
           localStorage.setItem('gd_cached_comercios', JSON.stringify(comercios));
         } catch (e) {}
       }
+
+      // Fast signature check to avoid redundant DOM destruction and reflows if data is unchanged
+      const newSignature = comercios.map(c => `${c.id}:${c.isOpen !== false}:${c.rating || 0}:${c.name || ''}:${c.banner || ''}`).join('|');
+      if (!wasLoading && lastComerciosSignature && lastComerciosSignature === newSignature) {
+        return; // Data has not changed, skip rebuilding the DOM
+      }
+      lastComerciosSignature = newSignature;
 
       // Render or update UI in place
       if (wasLoading) {
@@ -499,9 +535,18 @@ export async function renderHome(content) {
     }
   })();
 
+  const onPullRefresh = () => {
+    memoryCachedComercios = null;
+    memoryCacheTimestamp = 0;
+    lastComerciosSignature = '';
+    doActualHomeRender();
+  };
+  window.addEventListener('app-pull-refresh', onPullRefresh);
+
   return {
     cleanup: () => {
       if (unsubComercios) unsubComercios();
+      window.removeEventListener('app-pull-refresh', onPullRefresh);
     }
   };
 }
@@ -645,7 +690,15 @@ async function checkAndShowWelcomeCouponModal() {
   const couponValue = wData.value || 3000;
 
   // Poll until no blocking modal (location picker, push prompt, beta info, onboarding, app guide) is active in DOM
+  let pollAttempts = 0;
+  const maxPollAttempts = 60; // 60 * 150ms = 9s max
   const checkInterval = setInterval(async () => {
+    pollAttempts++;
+    if (pollAttempts >= maxPollAttempts) {
+      clearInterval(checkInterval);
+      return;
+    }
+
     const isLocationActive = document.getElementById('location-picker-modal') || document.querySelector('.location-modal-container') || document.getElementById('address-modal');
     const isPushActive = document.getElementById('push-permission-lock-screen');
     const isBetaActive = document.getElementById('welcome-beta-modal-overlay');
@@ -1456,8 +1509,8 @@ function renderCategories(categories, active) {
     return `
       <a href="#/category/${cat.name}" class="category-card-small" style="flex: 0 0 106px; height: 122px; border-radius: 22px; text-decoration: none;">
         ${img ? 
-          `<img src="${img}" alt="${cleanName}" />` : 
-          `<div class="card-icon"><i class="ph-duotone ph-${CATEGORY_PHOSPHOR_MAP[cat.name] || 'package'}"></i></div>`
+          `<img src="${img}" alt="${cleanName}" loading="lazy" decoding="async" />` : 
+          `<div class="card-icon">${icon('package', 24)}</div>`
         }
         <span class="card-title">${cleanName}</span>
       </a>
@@ -1657,10 +1710,10 @@ async function renderComercios(comercios, category, search, filters) {
           </div>
 
           <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
-            ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
+            ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" decoding="async" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
             
             <div class="comercio-card-logo-container">
-              ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
+              ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" decoding="async" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
             </div>
 
             <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
@@ -1978,7 +2031,7 @@ async function renderRecurrentOrders(user, container) {
         // Visual feedback / Loading state
         const originalText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = `<i class="ph-duotone ph-spinner animate-spin"></i> Cargando...`;
+        btn.innerHTML = `<span class="spinner-mini" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;border-top-color:currentColor;"></span> Cargando...`;
 
         try {
           const { clearCart, addToCart, setState } = await import('../state.js');
@@ -2230,9 +2283,9 @@ async function renderPopularProductsSlider(comercios, offers = []) {
       return `
         <a href="#/comercio/${p.comercioId}?product=${p.id}" class="random-product-card">
           <div style="position: relative; width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: var(--color-bg-secondary);">
-            <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" />
+            <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" decoding="async" />
             <div style="position: absolute; bottom: 8px; left: 8px; display: flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 8px; box-shadow: var(--shadow-sm); border: 1px solid var(--color-border-light); max-width: 90%;">
-              <img src="${p.comercioLogo}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: contain;" />
+              <img src="${p.comercioLogo}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: contain;" loading="lazy" decoding="async" />
               <span style="font-size: 8px; font-weight: 850; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.comercioName}</span>
             </div>
             ${p.isGoMarket ? `<div style="position: absolute; top: 8px; right: 8px; background: rgba(13, 148, 136, 0.9); backdrop-filter: blur(4px); color: white; padding: 2px 6px; border-radius: 6px; font-size: 8.5px; font-weight: 900; box-shadow: var(--shadow-sm); text-transform: uppercase;">GoMarket</div>` : ''}
@@ -2348,67 +2401,39 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   // Fetch popular products in background (Stale-While-Revalidate)
   setTimeout(async () => {
     try {
-      // 1. Get recent orders to count sales globally across the platform
-      const ordersQ = query(
-        collection(db, 'orders'),
-        orderBy('createdAt', 'desc'),
-        limit(60)
-      );
-      const ordersSnap = await getDocs(ordersQ);
-      
-      const salesMap = new Map();
-      ordersSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.status === 'cancelled') return;
-        const items = data.items || data.productos || [];
-        items.forEach(item => {
-          const name = item.name;
-          const cId = data.comercioId || item.comercioId || (item.product && item.product.comercioId);
-          if (name && cId) {
-            const key = `${cId}_${name.trim()}`;
-            salesMap.set(key, (salesMap.get(key) || 0) + (item.qty || item.quantity || 1));
-          }
-        });
-      });
-
-      // 2. Sort to find top sold products
-      const sortedSales = [...salesMap.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 12);
-
-      // 3. Fetch product details from Firestore for top sold
-      const popularProducts = [];
+      // 1. Get top-selling products platform-wide via the denormalized `salesCount`
+      //    field (incremented server-side in functions/index.js onOrderCreated).
+      //    Replaces the old approach of fetching 60 recent orders and then running
+      //    one query per popular product (up to 12 extra round-trips on every home load).
       const activeShops = comercios.filter(c => c.isActive !== false);
+      const popularProducts = [];
 
-      await Promise.all(sortedSales.map(async ([key, salesCount]) => {
-        const [cId, productName] = key.split('_');
-        const shop = activeShops.find(c => c.id === cId);
-        if (!shop) return;
-        try {
-          const q = query(
-            collection(db, 'comercios', cId, 'products'),
-            where('name', '==', productName)
-          );
-          const pSnap = await getDocs(q);
-          if (!pSnap.empty) {
-            const pDoc = pSnap.docs[0];
-            const pData = pDoc.data();
-            if (pData.isActive !== false) {
-              popularProducts.push({
-                id: pDoc.id,
-                comercioId: cId,
-                comercioName: shop.name,
-                comercioLogo: shop.logo || '/logo.png',
-                isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
-                salesCount,
-                ...pData
-              });
-            }
-          }
-        } catch (e) {
-          console.warn('Error loading popular product details by name:', key, e);
-        }
-      }));
+      try {
+        const popularQ = query(
+          collectionGroup(db, 'products'),
+          orderBy('salesCount', 'desc'),
+          limit(12)
+        );
+        const popularSnap = await getDocs(popularQ);
+        popularSnap.forEach(pDoc => {
+          const pData = pDoc.data();
+          if (pData.isActive === false || !pData.salesCount) return;
+          const cId = pDoc.ref.parent.parent.id;
+          const shop = activeShops.find(c => c.id === cId);
+          if (!shop) return;
+          popularProducts.push({
+            id: pDoc.id,
+            comercioId: cId,
+            comercioName: shop.name,
+            comercioLogo: shop.logo || '/logo.png',
+            isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
+            salesCount: pData.salesCount,
+            ...pData
+          });
+        });
+      } catch (e) {
+        console.warn('Error loading popular products by salesCount (falling back to random selection):', e);
+      }
 
       // 4. Fallback if popular products are empty or fewer than 5 (fill with random products from GoMarket and others)
       if (popularProducts.length < 5 && activeShops.length > 0) {
@@ -2547,8 +2572,9 @@ async function showJoinCommerceModal() {
   const { showModal, closeModal } = await import('../components/modal.js');
   const { showToast } = await import('../components/toast.js');
   const { db } = await import('../firebase.js');
-  const { collection, getDocs, addDoc, query, orderBy } = await import('firebase/firestore');
+  const { collection, getDocs, doc, setDoc, query, orderBy } = await import('firebase/firestore');
   const { openCropper } = await import('../utils/cropper.js');
+  const { uploadDataUrlImage } = await import('../utils/storage-upload.js');
   const user = getState().user;
 
   let platformCategories = [];
@@ -2796,8 +2822,14 @@ async function showJoinCommerceModal() {
     submitBtn.innerText = 'Enviando...';
 
     try {
-      await addDoc(collection(db, 'comercios'), {
+      const newComercioRef = doc(collection(db, 'comercios'));
+      const [logoUrl, bannerUrl] = await Promise.all([
+        uploadDataUrlImage(croppedLogo, `comercios/${newComercioRef.id}/logo`),
+        uploadDataUrlImage(croppedBanner, `comercios/${newComercioRef.id}/banner`)
+      ]);
+      await setDoc(newComercioRef, {
         name,
+        slug: createSlug(name),
         category,
         description,
         deliveryCost: 0,
@@ -2805,8 +2837,8 @@ async function showJoinCommerceModal() {
         phone,
         address,
         coords: comercioCoords,
-        logo: croppedLogo,
-        banner: croppedBanner,
+        logo: logoUrl,
+        banner: bannerUrl,
         ownerId: user.uid,
         isActive: false, // Visibility deactivated by default
         approvedByAdmin: false, // Awaiting admin approval
@@ -3181,7 +3213,7 @@ async function checkAndShowAppOnlyPromo() {
 
           ${product.image ? `
             <div style="width: 100%; height: 160px; border-radius: 18px; overflow: hidden; border: 1px solid var(--color-border-light); background: #f8fafc; position: relative;">
-              <img src="${product.image}" alt="${product.name}" style="width: 100%; height: 100%; object-fit: cover;" />
+              <img src="${product.image}" alt="${product.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
               ${discountPercent > 0 ? `
                 <div style="position: absolute; top: 10px; right: 10px; background: var(--color-primary); color: white; padding: 4px 10px; border-radius: 8px; font-size: 10px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2; text-transform: uppercase;">
                   ${discountPercent}% OFF

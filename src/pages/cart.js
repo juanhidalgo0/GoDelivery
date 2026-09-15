@@ -9,28 +9,76 @@ import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { db, auth } from '../firebase.js';
 import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit, getDocsFromServer } from 'firebase/firestore';
+import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { isRainingInMagdalena } from '../utils/weather.js';
 import { AudioManager } from '../utils/audio-manager.js';
 import { ConfettiCelebrator } from '../utils/confetti.js';
 
 let currentCartStep = 1;
 let isSubmitting = false;
-let selectedPaymentMethod = null;
+let selectedPaymentMethod = 'efectivo';
 let selectedIsScheduled = false;
 let selectedSchedDate = '';
 let selectedSchedTime = '';
+let selectedDeliveryType = 'delivery';
+let isDirectStoreCart = false;
+let currentCartContainer = null;
+
+function getActiveCartContainer() {
+  const hash = window.location.hash || '';
+  const isCartRoute = hash === '#/cart' || hash.startsWith('#/cart?') || hash.includes('/cart');
+
+  if (isCartRoute) {
+    if (currentCartContainer && currentCartContainer.isConnected) {
+      return currentCartContainer;
+    }
+    const overlayContent = document.querySelector('.slide-overlay.active #overlay-render-target') || 
+      document.querySelector('.slide-overlay.active #app-content') || 
+      document.querySelector('.slide-overlay #overlay-render-target') || 
+      document.querySelector('.slide-overlay #app-content') ||
+      document.getElementById('overlay-render-target');
+    if (overlayContent) return overlayContent;
+  }
+  return document.getElementById('page-cart');
+}
 
 function escapeHtmlAttr(str) {
   if (!str) return '';
   return str.replace(/"/g, '&quot;');
 }
 
-export async function renderCart(content) {
-  if (!content) content = document.getElementById('page-cart') || document.getElementById('app-content');
+export async function renderCart(content, isDirectMode = false) {
+  const hash = window.location.hash || '';
+  const isCartRoute = hash === '#/cart' || hash.startsWith('#/cart?') || hash.includes('/cart');
+
+  if (!content) {
+    if (isCartRoute) {
+      content = getActiveCartContainer();
+    } else {
+      content = document.getElementById('page-cart');
+    }
+  }
   if (!content) return;
 
+  // Prevent background renderCart() calls from hijacking the fullscreen direct store overlay
+  if (!isCartRoute && (content.closest('.slide-overlay') || content.id === 'overlay-render-target')) {
+    return;
+  }
+
+  currentCartContainer = content;
+  const overlay = content ? content.closest('.slide-overlay') : null;
+  if (overlay) {
+    overlay.style.overflow = 'hidden';
+  }
+
+  isDirectStoreCart = isDirectMode || (hash.startsWith('#/tienda/') && isCartRoute) || hash.includes('direct=true');
+  if (isDirectStoreCart) {
+    document.body.classList.add('is-direct-store-mode');
+  }
+
   currentCartStep = 1; // Reset to step 1 when page loads
-  selectedPaymentMethod = null; // Reset to null on page load
+  selectedPaymentMethod = selectedPaymentMethod || 'efectivo'; // Default to efectivo
+  selectedDeliveryType = 'delivery';
 
   // Start calculating dynamic fees in background
   calculateAllFees();
@@ -44,7 +92,7 @@ export async function renderCart(content) {
 
   if (!isPreview) {
     try {
-      const oSnap = await getDocs(query(collection(db, 'offers'), where('active', '==', true)));
+      const oSnap = await getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 60000);
       setState({ activeOffers: oSnap.docs.map(d => ({ id: d.id, ...d.data() })) });
     } catch (e) {
       console.error('Error loading offers', e);
@@ -250,23 +298,75 @@ export async function renderCart(content) {
     if (grandTotalEl) {
       grandTotalEl.textContent = allFeesReady ? formatPrice(grandTotal) : '---';
     }
+
+    // Instantly update Checkout button state & styling
+    const checkoutBtn = content.querySelector('#global-checkout-btn');
+    if (checkoutBtn) {
+      const isTakeaway = selectedDeliveryType === 'takeaway';
+      const hasAddress = isTakeaway || Boolean(state.deliveryAddress);
+      const isReady = currentCartStep === 1 
+        ? (isTakeaway || hasAddress)
+        : (isTakeaway ? Boolean(selectedPaymentMethod) : (hasAddress && allFeesReady && selectedPaymentMethod));
+
+      if (isReady) {
+        checkoutBtn.removeAttribute('disabled');
+        checkoutBtn.style.background = (selectedPaymentMethod === 'mercadopago' && currentCartStep === 2) ? '#009ee3' : 'var(--color-primary)';
+        checkoutBtn.style.boxShadow = (selectedPaymentMethod === 'mercadopago' && currentCartStep === 2) ? '0 10px 20px -5px rgba(0, 158, 227, 0.3)' : '0 12px 24px rgba(var(--color-primary-rgb), 0.3)';
+        checkoutBtn.style.opacity = '1';
+        checkoutBtn.style.pointerEvents = 'auto';
+      } else {
+        checkoutBtn.setAttribute('disabled', 'true');
+        checkoutBtn.disabled = true;
+        checkoutBtn.style.background = 'var(--color-text-tertiary)';
+        checkoutBtn.style.boxShadow = 'none';
+        checkoutBtn.style.opacity = '0.6';
+        checkoutBtn.style.pointerEvents = 'none';
+      }
+    }
+
+    // Instantly update Address Bar UI if in delivery mode
+    const addressBar = content.querySelector('#cart-change-address-bar');
+    if (addressBar) {
+      const currentAddress = state.deliveryAddress;
+      const currentNotes = state.addressNotes;
+      addressBar.style.borderColor = currentAddress ? 'var(--color-border-light)' : 'rgba(225,29,72,0.45)';
+      const addrDisplay = addressBar.querySelector('div > div:nth-child(2)');
+      if (addrDisplay) {
+        addrDisplay.innerHTML = `
+          <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Dirección de entrega:</div>
+          <div style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${currentAddress || '<span style="color: var(--color-primary); font-weight: 900;">📍 Toca aquí para ingresar tu dirección</span>'}
+          </div>
+          ${currentNotes ? `<div style="font-size: 11px; color: var(--color-text-secondary); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📝 ${currentNotes}</div>` : ''}
+        `;
+      }
+      const addrBtn = addressBar.querySelector('button');
+      if (addrBtn) {
+        addrBtn.innerHTML = currentAddress ? `${icon('edit', 12)} Cambiar` : `+ Ingresar`;
+      }
+    }
   }
 
   let renderTimeout = null;
   const triggerRender = () => {
     if (renderTimeout) return;
     renderTimeout = requestAnimationFrame(() => {
-      const scrollArea = content.querySelector('.cart-scroll-area');
+      const activeContent = getActiveCartContainer() || content;
+      if (!activeContent) {
+        renderTimeout = null;
+        return;
+      }
+      const scrollArea = activeContent.querySelector('.cart-scroll-area');
       const cart = getState().cart;
       if (scrollArea && currentCartStep === 1 && cart.length > 0) {
         const itemEls = scrollArea.querySelectorAll('.cart-item');
         if (itemEls.length === cart.length) {
-          updateCartDOMInPlace(content);
+          updateCartDOMInPlace(activeContent);
           renderTimeout = null;
           return;
         }
       }
-      renderCartContent(content);
+      renderCartContent(activeContent);
       renderTimeout = null;
     });
   };
@@ -289,15 +389,26 @@ export async function renderCart(content) {
   const unsubFees = subscribe('dynamicDeliveryFees', triggerRender);
   const unsubComerciosData = subscribe('comerciosData', triggerRender);
   const unsubAddress = subscribe('deliveryAddress', async () => {
+    const activeContent = getActiveCartContainer() || content;
+    renderCartContent(activeContent);
     setState({ dynamicDeliveryFees: {}, dynamicDistances: {} });
     await calculateAllFees();
-    triggerRender();
+    renderCartContent(getActiveCartContainer() || content);
+  });
+  const unsubCoords = subscribe('deliveryCoords', async () => {
+    const activeContent = getActiveCartContainer() || content;
+    renderCartContent(activeContent);
+    await calculateAllFees();
+    renderCartContent(getActiveCartContainer() || content);
   });
 
   content.addEventListener('click', handleCartClick);
 
   return {
     cleanup: () => {
+      if (overlay) {
+        overlay.style.overflow = '';
+      }
       content.removeEventListener('click', handleCartClick);
       unsubCart();
       unsubUser();
@@ -311,6 +422,7 @@ export async function renderCart(content) {
       unsubFees();
       unsubComerciosData();
       unsubAddress();
+      unsubCoords();
     }
   };
 }
@@ -416,6 +528,62 @@ export async function calculateAllFees(proactiveCommerceId = null) {
 }
 
 function renderCartContent(content) {
+  if (!getState().user) {
+    if (getState().loading) {
+      content.innerHTML = `
+        <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; font-family: var(--font-body); color: var(--color-text-secondary);">
+          <div style="width: 40px; height: 40px; border: 3px solid var(--color-border-light); border-top-color: var(--color-primary); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <span style="font-size: 13px; font-weight: 600;">Cargando carrito...</span>
+        </div>
+      `;
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="direct-store-auth-gate" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 20px; background: var(--color-bg); font-family: var(--font-body); text-align: center; position: relative;">
+        <div style="width: 88px; height: 88px; border-radius: 28px; background: var(--color-bg-card); box-shadow: 0 16px 36px rgba(0,0,0,0.08); margin-bottom: 20px; display: flex; align-items: center; justify-content: center; color: var(--color-primary); border: 1.5px solid var(--color-border-light);">
+          ${icon('cart', 40)}
+        </div>
+        <div style="background: var(--color-bg-card); border: 1.5px solid var(--color-border-light); border-radius: 24px; padding: 24px 20px; width: 100%; max-width: 360px; box-shadow: 0 20px 40px rgba(0,0,0,0.06); display: flex; flex-direction: column; gap: 16px;">
+          <div style="font-size: 18px; font-weight: 900; color: var(--color-text-primary); letter-spacing: -0.3px;">
+            Iniciá sesión para ver tu carrito
+          </div>
+          <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">
+            Ingresá con tu cuenta para armar tu carrito y confirmar tu pedido.
+          </p>
+          <button id="cart-google-login-btn" style="height: 52px; border-radius: 16px; background: #ffffff; color: #1f2937; border: 1.5px solid #e5e7eb; font-weight: 800; font-size: 14.5px; display: flex; align-items: center; justify-content: center; gap: 12px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.05); transition: all 0.2s;">
+            <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Continuar con Google
+          </button>
+          <button id="cart-apple-login-btn" style="height: 50px; border-radius: 16px; background: #000000; color: #ffffff; border: none; font-weight: 800; font-size: 14.5px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.1); transition: all 0.2s;">
+            <svg width="18" height="22" viewBox="0 0 18 22" fill="white"><path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/></svg>
+            Continuar con Apple
+          </button>
+        </div>
+      </div>
+    `;
+
+    const gBtn = content.querySelector('#cart-google-login-btn');
+    if (gBtn) {
+      gBtn.onclick = async () => {
+        gBtn.disabled = true;
+        gBtn.innerHTML = `${icon('loader', 18, 'animate-spin')} Conectando...`;
+        const { signInWithGoogle } = await import('../auth.js');
+        await signInWithGoogle();
+      };
+    }
+    const aBtn = content.querySelector('#cart-apple-login-btn');
+    if (aBtn) {
+      aBtn.onclick = async () => {
+        aBtn.disabled = true;
+        aBtn.innerHTML = `${icon('loader', 18, 'animate-spin')} Conectando...`;
+        const { signInWithApple } = await import('../auth.js');
+        await signInWithApple();
+      };
+    }
+    return;
+  }
+
   const cart = getState().cart;
   const total = getCartTotal();
   const count = getCartCount();
@@ -439,12 +607,12 @@ function renderCartContent(content) {
           
           <h2 style="font-size:24px; font-weight:900; color:var(--color-text-primary); margin-bottom:12px; letter-spacing:-0.5px;">Tu carrito está vacío</h2>
           <p style="font-size:15px; color:var(--color-text-tertiary); line-height:1.6; margin-bottom:40px; opacity:0.8;">
-            Parece que aún no has agregado nada. ¡Explora los mejores comercios de tu zona y haz tu pedido!
+            ${isDirectStoreCart ? 'Aún no agregaste productos de este comercio. Explorá el menú y hacé tu pedido.' : 'Parece que aún no has agregado nada. ¡Explora los mejores comercios de tu zona y haz tu pedido!'}
           </p>
           
-          <a href="#/" class="btn btn-primary" style="height:56px; padding:0 32px; border-radius:18px; font-weight:900; font-size:14px; text-transform:uppercase; letter-spacing:0.05em; display:inline-flex; align-items:center; gap:12px; box-shadow:0 12px 25px rgba(var(--color-primary-rgb), 0.3); transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1); width:100%;">
-            ${icon('search', 18)} EXPLORAR COMERCIOS
-          </a>
+          <button onclick="${isDirectStoreCart ? 'window.safeGoBack()' : "location.hash='#/'"}" class="btn btn-primary" style="height:56px; padding:0 32px; border-radius:18px; font-weight:900; font-size:14px; text-transform:uppercase; letter-spacing:0.05em; display:inline-flex; align-items:center; justify-content:center; gap:12px; box-shadow:0 12px 25px rgba(var(--color-primary-rgb), 0.3); transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1); width:100%; border:none; cursor:pointer;">
+            ${isDirectStoreCart ? `${icon('arrowLeft', 18)} VOLVER AL CATÁLOGO` : `${icon('search', 18)} EXPLORAR COMERCIOS`}
+          </button>
         </div>
       </div>
       <style>
@@ -489,7 +657,7 @@ function renderCartContent(content) {
         <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em; white-space: nowrap;">Mi Carrito</span>
         
         ${targetComercioId ? `
-          <a href="#/comercio/${targetComercioId}" style="height: 34px; padding: 0 12px; border-radius: 100px; background: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.35); font-size: 11.5px; font-weight: 850; color: white; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; transition: all 0.2s;">
+          <a href="#/${isDirectStoreCart ? 'tienda' : 'comercio'}/${targetComercioId}" style="height: 34px; padding: 0 12px; border-radius: 100px; background: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.35); font-size: 11.5px; font-weight: 850; color: white; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; transition: all 0.2s;">
             ${icon('chevronLeft', 16)} <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Volver a ${targetComercioName}</span>
           </a>
         ` : ''}
@@ -497,9 +665,67 @@ function renderCartContent(content) {
     </div>
   `;
 
+  const currentAddress = getState().deliveryAddress;
+  const currentNotes = getState().addressNotes;
+
+  const deliveryAddressBarHTML = selectedDeliveryType === 'delivery' ? `
+    <!-- Interactive Delivery Address Bar -->
+    <div style="padding: 10px 16px 0 16px;">
+      <div id="cart-change-address-bar" style="background: var(--color-bg-card); border: 1.5px solid ${currentAddress ? 'var(--color-border-light)' : 'rgba(225,29,72,0.45)'}; border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; box-shadow: var(--shadow-xs); transition: all 0.2s;">
+        <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
+          <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            ${icon('mapPin', 16)}
+          </div>
+          <div style="min-width: 0; flex: 1;">
+            <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Dirección de entrega:</div>
+            <div style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${currentAddress || '<span style="color: var(--color-primary); font-weight: 900;">📍 Toca aquí para ingresar tu dirección</span>'}
+            </div>
+            ${currentNotes ? `<div style="font-size: 11px; color: var(--color-text-secondary); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📝 ${currentNotes}</div>` : ''}
+          </div>
+        </div>
+        <button type="button" style="background: var(--color-primary-light); color: var(--color-primary); border: none; font-size: 11.5px; font-weight: 850; padding: 6px 12px; border-radius: 10px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
+          ${currentAddress ? `${icon('edit', 12)} Cambiar` : `+ Ingresar`}
+        </button>
+      </div>
+    </div>
+  ` : `
+    <!-- Take Away Information Bar -->
+    <div style="padding: 10px 16px 0 16px;">
+      <div style="background: rgba(16, 185, 129, 0.08); border: 1.5px solid rgba(16, 185, 129, 0.25); border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; gap: 10px;">
+        <div style="width: 32px; height: 32px; border-radius: 10px; background: #10b981; color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 16px;">
+          🏬
+        </div>
+        <div style="min-width: 0; flex: 1;">
+          <div style="font-size: 10px; font-weight: 800; color: #059669; text-transform: uppercase; letter-spacing: 0.5px;">Retiro en el local</div>
+          <div style="font-size: 12.5px; font-weight: 800; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${targetComercioName || 'Local del comercio'}
+          </div>
+          <div style="font-size: 11px; color: #059669; font-weight: 700;">¡Sin costo de envío!</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const deliveryTypeSelectorHTML = `
+    <!-- Delivery vs Take Away Mode Selector -->
+    <div style="padding: 12px 16px 0 16px;">
+      <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 18px; padding: 4px; display: flex; gap: 6px; box-shadow: var(--shadow-xs);">
+        <button id="cart-mode-delivery-btn" type="button" style="flex: 1; padding: 10px 12px; border-radius: 14px; border: none; font-size: 12.5px; font-weight: 850; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; ${selectedDeliveryType === 'delivery' ? 'background: var(--color-primary); color: white; box-shadow: 0 4px 12px rgba(225,29,72,0.25);' : 'background: transparent; color: var(--color-text-secondary);'}">
+          🛵 Envío a Domicilio
+        </button>
+        <button id="cart-mode-takeaway-btn" type="button" style="flex: 1; padding: 10px 12px; border-radius: 14px; border: none; font-size: 12.5px; font-weight: 850; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; ${selectedDeliveryType === 'takeaway' ? 'background: #10b981; color: white; box-shadow: 0 4px 12px rgba(16,185,129,0.25);' : 'background: transparent; color: var(--color-text-secondary);'}">
+          🏬 Retiro en el Local
+        </button>
+      </div>
+    </div>
+  `;
+
   const stepHeaderOrProducts = currentCartStep === 1 ? `
         <!-- Header Principal -->
         ${deliveryStyleCartHeaderHTML}
+        ${deliveryTypeSelectorHTML}
+        ${deliveryAddressBarHTML}
         <div class="cart-scroll-area">
           
           ${Object.entries(grouped).map(([comercioId, group]) => {
@@ -691,11 +917,22 @@ function renderCartContent(content) {
           const extraStopsFee = (allFeesReady && individualFees.length > 1) ? (individualFees.length - 1) * (getState().deliveryExtraStopFee || 500) : 0;
           const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
           
+          const isTakeaway = selectedDeliveryType === 'takeaway';
+          const hasAddress = isTakeaway || Boolean(getState().deliveryAddress);
+          const isReadyToCalculate = isTakeaway || (hasAddress && allFeesReady);
+          const isStep1Ready = isTakeaway || hasAddress;
+          const isStep2Ready = isTakeaway ? true : (hasAddress && allFeesReady);
+          const isCheckoutBtnEnabled = currentCartStep === 1 ? isStep1Ready : isStep2Ready;
+
           let baseDeliveryFeeCalc = null;
           let nightSurcharge = null;
           let totalDelivery = null;
 
-          if (allFeesReady) {
+          if (isTakeaway) {
+            baseDeliveryFeeCalc = 0;
+            nightSurcharge = 0;
+            totalDelivery = 0;
+          } else if (allFeesReady) {
             baseDeliveryFeeCalc = maxIndividualFee + extraStopsFee + rainSurcharge;
             nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, baseDeliveryFeeCalc);
             totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
@@ -706,7 +943,7 @@ function renderCartContent(content) {
           
           const appliedCoupon = getState().appliedCoupon;
           let couponDiscount = 0;
-          if (appliedCoupon && allFeesReady) {
+          if (appliedCoupon && isReadyToCalculate) {
             const scope = appliedCoupon.scope || 'products';
             const discountType = appliedCoupon.discountType || (appliedCoupon.type === 'free_delivery' ? 'percentage' : 'percentage');
             const couponVal = Number(appliedCoupon.value || 0);
@@ -774,7 +1011,7 @@ function renderCartContent(content) {
             }
           }
 
-          const grandTotal = allFeesReady ? Math.max(totalProducts + totalDelivery + appUsageFee - discount - couponDiscount, 0) : null;
+          const grandTotal = isReadyToCalculate ? Math.max(totalProducts + totalDelivery + appUsageFee - discount - couponDiscount, 0) : null;
 
           return `
             <div class="cart-fixed-footer">
@@ -809,14 +1046,14 @@ function renderCartContent(content) {
                 </div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--color-text-secondary); font-size:12px; align-items:center;">
                   <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
-                    <span>Envío ${isMulti ? '(Múltiple)' : ''}</span>
-                    <button id="show-fee-details" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-right:4px;">${icon('info', 14)}</button>
+                    <span>${isTakeaway ? 'Retiro en el local' : `Envío ${isMulti ? '(Múltiple)' : ''}`}</span>
+                    ${!isTakeaway ? `<button id="show-fee-details" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-right:4px;">${icon('info', 14)}</button>` : ''}
                   </div>
                   <div style="display:flex; align-items:center; gap:6px;">
-                    ${!isMulti && commerceIds[0] && getState().dynamicDistances?.[commerceIds[0]] ? `
+                    ${!isTakeaway && !isMulti && commerceIds[0] && getState().dynamicDistances?.[commerceIds[0]] ? `
                       <span style="font-size:10px; opacity:0.6; font-weight:600;">(${getState().dynamicDistances[commerceIds[0]].toFixed(1)} km)</span>
                     ` : ''}
-                    <span id="cart-summary-delivery" style="color:var(--color-success); font-weight:700;">${allFeesReady ? ((totalDelivery + appUsageFee) > 0 ? `${formatPrice(totalDelivery + appUsageFee)}` : '¡Gratis!') : 'Calculando...'}</span>
+                    <span id="cart-summary-delivery" style="color:var(--color-success); font-weight:700;">${isTakeaway ? '¡Gratis! ($0)' : (allFeesReady ? ((totalDelivery + appUsageFee) > 0 ? `${formatPrice(totalDelivery + appUsageFee)}` : '¡Gratis!') : 'Calculando...')}</span>
                   </div>
                 </div>
                 ${getState().appliedDiscount ? `
@@ -837,13 +1074,13 @@ function renderCartContent(content) {
 
                 <div style="display:flex; flex-direction:column;">
                   <span style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Total a pagar</span>
-                  <span id="cart-summary-grandtotal" style="font-size:24px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.03em;">${allFeesReady ? formatPrice(grandTotal) : '---'}</span>
+                  <span id="cart-summary-grandtotal" style="font-size:24px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.03em;">${isReadyToCalculate ? formatPrice(grandTotal) : '---'}</span>
                 </div>
                 
                 <button class="btn btn-primary checkout-btn" 
                         id="global-checkout-btn"
-                        ${!allFeesReady ? 'disabled' : ''}
-                        style="height:54px; width:180px; border-radius:16px; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:0.02em; display:flex; align-items:center; justify-content:center; gap:var(--space-2); background:${!allFeesReady ? 'var(--color-text-tertiary)' : 'var(--color-primary)'}; box-shadow: ${!allFeesReady ? 'none' : '0 12px 24px rgba(var(--color-primary-rgb), 0.3)'}; border:none; opacity: ${!allFeesReady ? 0.6 : 1}; pointer-events: ${!allFeesReady ? 'none' : 'auto'};">
+                        ${!isCheckoutBtnEnabled ? 'disabled' : ''}
+                        style="height:54px; width:180px; border-radius:16px; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:0.02em; display:flex; align-items:center; justify-content:center; gap:var(--space-2); background:${!isCheckoutBtnEnabled ? 'var(--color-text-tertiary)' : (selectedPaymentMethod === 'mercadopago' && currentCartStep === 2 ? '#009ee3' : 'var(--color-primary)')}; box-shadow: ${!isCheckoutBtnEnabled ? 'none' : (selectedPaymentMethod === 'mercadopago' && currentCartStep === 2 ? '0 10px 20px -5px rgba(0, 158, 227, 0.3)' : '0 12px 24px rgba(var(--color-primary-rgb), 0.3)')}; border:none; opacity: ${!isCheckoutBtnEnabled ? 0.6 : 1}; pointer-events: ${!isCheckoutBtnEnabled ? 'none' : 'auto'};">
                   ${currentCartStep === 1 ? `${icon('arrowRight', 18)} SIGUIENTE` : `${icon('check', 18)} ${isMulti ? 'PEDIDO MÚLTIPLE' : 'CONFIRMAR'}`}
                 </button>
               </div>
@@ -1853,34 +2090,38 @@ async function openCheckoutConfirmationModal() {
     return;
   }
 
-  // Query online drivers in real-time before presenting the modal
-  const hasDelivery = await checkOnlineDrivers();
-  if (!hasDelivery) {
-    isSubmitting = false;
-    const { showModal } = await import('../components/modal.js');
-    const { close: closeAlert } = showModal({
-      title: '',
-      hideHeader: true,
-      height: 'auto',
-      content: `
-        <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
-          <div style="font-size: 44px; margin-bottom: 4px;">🛵</div>
-          <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3; color: var(--color-danger);">Sin repartidores disponibles</h4>
-          <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
-            No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
-          </p>
-          <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
-            ENTENDIDO
-          </button>
-        </div>
-      `
-    });
-    
-    setTimeout(() => {
-      const btn = document.getElementById('no-drivers-close-btn');
-      if (btn) btn.onclick = () => closeAlert();
-    }, 50);
-    return;
+  const isTakeaway = selectedDeliveryType === 'takeaway';
+
+  // Query online drivers in real-time before presenting the modal (only for home delivery)
+  if (!isTakeaway) {
+    const hasDelivery = await checkOnlineDrivers();
+    if (!hasDelivery) {
+      isSubmitting = false;
+      const { showModal } = await import('../components/modal.js');
+      const { close: closeAlert } = showModal({
+        title: '',
+        hideHeader: true,
+        height: 'auto',
+        content: `
+          <div style="padding: 24px 20px; text-align: center; font-family: var(--font-body); display: flex; flex-direction: column; gap: 16px; color: var(--color-text-primary);">
+            <div style="font-size: 44px; margin-bottom: 4px;">🛵</div>
+            <h4 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; line-height: 1.3; color: var(--color-danger);">Sin repartidores disponibles</h4>
+            <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
+              No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
+            </p>
+            <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+              ENTENDIDO
+            </button>
+          </div>
+        `
+      });
+      
+      setTimeout(() => {
+        const btn = document.getElementById('no-drivers-close-btn');
+        if (btn) btn.onclick = () => closeAlert();
+      }, 50);
+      return;
+    }
   }
 
   const state = getState();
@@ -1898,17 +2139,25 @@ async function openCheckoutConfirmationModal() {
   const totalProducts = getCartTotal();
   const dynamicFees = state.dynamicDeliveryFees || {};
   
-  const selectedTip = state.selectedTip || 0;
-  const individualFees = Object.keys(grouped).map(cid => dynamicFees[cid] !== undefined ? dynamicFees[cid] : (state.deliveryCost || state.deliveryMinPrice || 0));
-  const maxIndividualFee = Math.max(...individualFees, 0);
-  const extraStopsFee = (individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
-  const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
-  const baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
-  const nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
-  const driverIncentive = calculateScheduleSurcharge(state.driverIncentiveConfig, baseDeliveryFee);
-  const totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
+  const selectedTip = isTakeaway ? 0 : (state.selectedTip || 0);
+  let baseDeliveryFee = 0;
+  let nightSurcharge = 0;
+  let driverIncentive = 0;
+  let totalDelivery = 0;
+  let appUsageFee = 0;
 
-  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
+  if (!isTakeaway) {
+    const individualFees = Object.keys(grouped).map(cid => dynamicFees[cid] !== undefined ? dynamicFees[cid] : (state.deliveryCost || state.deliveryMinPrice || 0));
+    const maxIndividualFee = Math.max(...individualFees, 0);
+    const extraStopsFee = (individualFees.length > 1) ? (individualFees.length - 1) * (state.deliveryExtraStopFee || 500) : 0;
+    const rainSurcharge = state.isRaining ? (state.deliveryRainSurcharge || 300) : 0;
+    baseDeliveryFee = maxIndividualFee + extraStopsFee + rainSurcharge;
+    nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
+    driverIncentive = calculateScheduleSurcharge(state.driverIncentiveConfig, baseDeliveryFee);
+    totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
+    appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
+  }
+
   const discount = state.appliedDiscount || 0;
 
   const appliedCoupon = state.appliedCoupon;
@@ -2110,60 +2359,80 @@ async function openCheckoutConfirmationModal() {
     
     <div style="text-align: center; flex-shrink: 0;">
       <h2 style="font-family: var(--font-display); font-size: var(--confirm-title-size); font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">
-        ${isMultiOrder ? '¿Confirmar Pedido Múltiple?' : '¿Confirmar Pedido?'}
+        ${isTakeaway ? '¿Confirmar Pedido para Retiro?' : (isMultiOrder ? '¿Confirmar Pedido Múltiple?' : '¿Confirmar Pedido?')}
       </h2>
       <p style="font-size: var(--confirm-subtitle-size); color: var(--color-text-secondary); margin: 0;">
-        Por favor, verifica los detalles antes de continuar
+        ${isTakeaway ? 'Retirarás tu pedido directamente en el local' : 'Por favor, verifica los detalles antes de continuar'}
       </p>
     </div>
 
     <div class="confirm-modal-scrollable-body" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--confirm-gap); padding-right: 4px; margin-bottom: 4px;">
-      <!-- DIRECCIÓN DE ENTREGA (Interactive Address Card) -->
-      <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); transition: all 0.2s; flex-shrink: 0;">
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
-          ${icon('mapPin', 12)} Dirección de entrega
-        </span>
-        <button id="confirm-change-address-btn" style="background: var(--color-primary-light); border: none; color: var(--color-primary); font-size: var(--confirm-btn-font); font-weight: 800; padding: 4px 8px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: all 0.2s;">
-          ${icon('edit', 10)} Cambiar
-        </button>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 2px;">
-        <div id="confirm-address-text" style="font-weight: 800; font-size: var(--confirm-text-size); color: var(--color-text-primary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
-          ${address || '<span style="color: var(--color-danger);">⚠️ Elegir dirección de entrega...</span>'}
-        </div>
-        ${state.addressNotes ? `
-          <div id="confirm-address-notes" style="font-size: var(--confirm-subtitle-size); color: var(--color-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
-            ${icon('info', 10)} ${state.addressNotes}
-          </div>
-        ` : ''}
-      </div>
       
-      <!-- Saved Addresses Quick Selector -->
-      ${(state.savedAddresses && state.savedAddresses.length > 0) ? `
-        <div style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; margin-top: 4px; scrollbar-width: none; -ms-overflow-style: none;">
-          ${state.savedAddresses.map(addr => {
-            const isCurrent = addr.address === address;
-            return `
-              <button class="quick-addr-chip" data-id="${addr.id}" style="flex-shrink: 0; padding: 6px 12px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${isCurrent ? 'var(--color-primary-light)' : 'var(--color-bg)'}; color: ${isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; cursor: pointer; transition: all 0.2s; white-space: nowrap;">
-                ${addr.name}
-              </button>
-            `;
-          }).join('')}
+      ${isTakeaway ? `
+        <!-- TAKE AWAY / RETIRO EN LOCAL CARD -->
+        <div style="background: var(--color-bg-secondary); border: 1.5px solid #10b981; border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); flex-shrink: 0;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: var(--confirm-label-size); font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
+              🏬 Retiro en el local (Take Away)
+            </span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="font-weight: 800; font-size: var(--confirm-text-size); color: var(--color-text-primary); line-height: 1.3;">
+              ${commerceNames}
+            </div>
+            <div style="font-size: var(--confirm-subtitle-size); color: var(--color-text-secondary); font-weight: 500;">
+              Pasás a retirar tu pedido directamente por el local cuando esté listo. ¡Sin costo de envío!
+            </div>
+          </div>
         </div>
-      ` : ''}
-    </div>
+      ` : `
+        <!-- DIRECCIÓN DE ENTREGA (Interactive Address Card) -->
+        <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); transition: all 0.2s; flex-shrink: 0;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
+              ${icon('mapPin', 12)} Dirección de entrega
+            </span>
+            <button id="confirm-change-address-btn" style="background: var(--color-primary-light); border: none; color: var(--color-primary); font-size: var(--confirm-btn-font); font-weight: 800; padding: 4px 8px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: all 0.2s;">
+              ${icon('edit', 10)} Cambiar
+            </button>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <div id="confirm-address-text" style="font-weight: 800; font-size: var(--confirm-text-size); color: var(--color-text-primary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+              ${address || '<span style="color: var(--color-danger);">⚠️ Elegir dirección de entrega...</span>'}
+            </div>
+            ${state.addressNotes ? `
+              <div id="confirm-address-notes" style="font-size: var(--confirm-subtitle-size); color: var(--color-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                ${icon('info', 10)} ${state.addressNotes}
+              </div>
+            ` : ''}
+          </div>
+          
+          <!-- Saved Addresses Quick Selector -->
+          ${(state.savedAddresses && state.savedAddresses.length > 0) ? `
+            <div style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; margin-top: 4px; scrollbar-width: none; -ms-overflow-style: none;">
+              ${state.savedAddresses.map(addr => {
+                const isCurrent = addr.address === address;
+                return `
+                  <button class="quick-addr-chip" data-id="${addr.id}" style="flex-shrink: 0; padding: 6px 12px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${isCurrent ? 'var(--color-primary-light)' : 'var(--color-bg)'}; color: ${isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; cursor: pointer; transition: all 0.2s; white-space: nowrap;">
+                    ${addr.name}
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `}
 
     <!-- PROGRAMACIÓN DE ENTREGA -->
     <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 14px; padding: var(--confirm-card-padding); display: flex; flex-direction: column; gap: var(--confirm-card-gap); flex-shrink: 0;">
       <div style="display: flex; align-items: center; justify-content: space-between;">
         <span style="font-size: var(--confirm-label-size); font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 4px;">
-          📅 ¿Cuándo querés recibirlo?
+          📅 ¿Cuándo querés ${isTakeaway ? 'retirarlo' : 'recibirlo'}?
         </span>
       </div>
       <div style="display: flex; gap: 8px; margin-top: 4px;">
         <button type="button" id="sched-now-btn" style="flex: 1; height: 38px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${selectedIsScheduled ? 'var(--color-border-light)' : 'var(--color-primary)'}; background: ${selectedIsScheduled ? 'var(--color-bg)' : 'var(--color-primary-light)'}; color: ${selectedIsScheduled ? 'var(--color-text-secondary)' : 'var(--color-primary)'}; cursor: pointer; transition: all 0.2s;">
-          Entregar ahora
+          ${isTakeaway ? 'Lo antes posible' : 'Entregar ahora'}
         </button>
         <button type="button" id="sched-later-btn" style="flex: 1; height: 38px; border-radius: 10px; font-size: 11px; font-weight: 800; border: 1.5px solid ${selectedIsScheduled ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${selectedIsScheduled ? 'var(--color-primary-light)' : 'var(--color-bg)'}; color: ${selectedIsScheduled ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; cursor: pointer; transition: all 0.2s;">
           Programar más tarde
@@ -2216,11 +2485,11 @@ async function openCheckoutConfirmationModal() {
 
       <div style="display: flex; justify-content: space-between; font-size: var(--confirm-text-size); color: var(--color-text-secondary); align-items: center;">
         <span style="display: flex; align-items: center; gap: 3px;">
-          Envío
-          <button id="show-fee-details-confirm" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-left:2px;">${icon('info', 12)}</button>
+          ${isTakeaway ? 'Retiro en el local' : 'Envío'}
+          ${!isTakeaway ? `<button id="show-fee-details-confirm" style="background:none; border:none; padding:0; color:var(--color-primary); cursor:pointer; display:flex; align-items:center; opacity:0.8; margin-left:2px;">${icon('info', 12)}</button>` : ''}
         </span>
-        <span style="font-weight: 600; color: var(--color-text-primary); text-align: right;">
-          ${(totalDelivery + appUsageFee) > 0 ? formatPrice(totalDelivery + appUsageFee) : '¡Gratis!'}
+        <span style="font-weight: 700; color: ${isTakeaway ? 'var(--color-success)' : 'var(--color-text-primary)'}; text-align: right;">
+          ${isTakeaway ? '¡Gratis! ($0)' : ((totalDelivery + appUsageFee) > 0 ? formatPrice(totalDelivery + appUsageFee) : '¡Gratis!')}
         </span>
       </div>
 
@@ -2486,28 +2755,30 @@ async function openCheckoutConfirmationModal() {
   // Handle Submit Order
   const submitBtn = modalContent.querySelector('#confirm-submit-btn');
   submitBtn.onclick = async () => {
-    const isStillAvailable = await checkOnlineDrivers();
-    if (!isStillAvailable) {
-      showToast('Sin repartidores disponibles. No es posible confirmar el pedido en este momento.', 'error');
-      close();
-      return;
-    }
-    if (!getState().deliveryAddress) {
-      showToast('Por favor selecciona una dirección de entrega.', 'warning');
-      return;
-    }
-    const finalAddressNotes = getState().addressNotes || '';
-    if (!finalAddressNotes.trim()) {
-      showToast('La referencia de ubicación es obligatoria.', 'warning');
-      close();
-      import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
-        openCheckoutConfirmationModal();
-      }, { skipDetails: true }));
-      return;
+    if (!isTakeaway) {
+      const isStillAvailable = await checkOnlineDrivers();
+      if (!isStillAvailable) {
+        showToast('Sin repartidores disponibles. No es posible confirmar el pedido en este momento.', 'error');
+        close();
+        return;
+      }
+      if (!getState().deliveryAddress) {
+        showToast('Por favor selecciona una dirección de entrega.', 'warning');
+        return;
+      }
+      const finalAddressNotes = getState().addressNotes || '';
+      if (!finalAddressNotes.trim()) {
+        showToast('La referencia de ubicación es obligatoria.', 'warning');
+        close();
+        import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
+          openCheckoutConfirmationModal();
+        }, { skipDetails: true }));
+        return;
+      }
     }
     submitBtn.disabled = true;
     cancelBtn.disabled = true;
-    changeAddressBtn.disabled = true;
+    if (changeAddressBtn) changeAddressBtn.disabled = true;
     const originalText = submitBtn.innerHTML;
     submitBtn.innerHTML = `${icon('loader', 18, 'animate-spin')} PROCESANDO...`;
 
@@ -2517,8 +2788,9 @@ async function openCheckoutConfirmationModal() {
       const idToken = await auth.currentUser.getIdToken();
       
       // Fetch latest coordinates and address from state to ensure no race condition
-      const finalAddress = getState().deliveryAddress;
-      const finalCoords = getState().deliveryCoords;
+      const finalAddress = isTakeaway ? 'Retiro en el local' : (getState().deliveryAddress || 'Retiro en el local');
+      const finalCoords = isTakeaway ? null : (getState().deliveryCoords || null);
+      const finalAddressNotes = isTakeaway ? 'Retiro en el local' : (getState().addressNotes || '');
 
       const allowReplacementEl = modalContent.querySelector('#confirm-allow-replacement');
       const allowReplacement = allowReplacementEl ? allowReplacementEl.checked : true;
@@ -2535,7 +2807,7 @@ async function openCheckoutConfirmationModal() {
           showToast('Por favor selecciona una fecha y hora válidas para programar.', 'warning');
           submitBtn.disabled = false;
           cancelBtn.disabled = false;
-          changeAddressBtn.disabled = false;
+          if (changeAddressBtn) changeAddressBtn.disabled = false;
           submitBtn.innerHTML = originalText;
           return;
         }
@@ -2550,20 +2822,23 @@ async function openCheckoutConfirmationModal() {
         body: JSON.stringify({
           cart: getState().cart,
           address: finalAddress,
-          addressNotes: getState().addressNotes || '',
+          addressNotes: finalAddressNotes,
           deliveryCoords: finalCoords || null,
           paymentMethod,
           redeemedPoints,
-          totalDelivery,
-          tip: selectedTip,
+          totalDelivery: isTakeaway ? 0 : totalDelivery,
+          tip: isTakeaway ? 0 : selectedTip,
           bundleId,
           couponCode: appliedCoupon ? appliedCoupon.code : null,
           allowReplacement,
           isScheduled: selectedIsScheduled,
           scheduledDate: schedDateVal,
           scheduledTime: schedTimeVal,
-          nightSurcharge: nightSurcharge || 0,
-          driverIncentive: driverIncentive || 0
+          nightSurcharge: isTakeaway ? 0 : (nightSurcharge || 0),
+          driverIncentive: isTakeaway ? 0 : (driverIncentive || 0),
+          deliveryType: selectedDeliveryType,
+          source: isDirectStoreCart ? 'catalogo_whatsapp' : 'app',
+          isDirectOrder: isDirectStoreCart
         })
       });
 
@@ -2575,8 +2850,8 @@ async function openCheckoutConfirmationModal() {
       const resData = await response.json();
       const result = resData.orders; // Returns [{ docId, orderId, commerceId, total }]
 
-      // Save last address to Firestore
-      if (auth.currentUser) {
+      // Save last address to Firestore if not takeaway
+      if (auth.currentUser && !isTakeaway) {
         const { doc, updateDoc } = await import('firebase/firestore');
         const { db } = await import('../firebase.js');
         const userRef = doc(db, 'users', auth.currentUser.uid);
@@ -2593,7 +2868,7 @@ async function openCheckoutConfirmationModal() {
         }
       }
 
-      if (finalAddressNotes) {
+      if (finalAddressNotes && !isTakeaway) {
         const { doc, updateDoc } = await import('firebase/firestore');
         const { db } = await import('../firebase.js');
         for (const createdOrder of result) {
@@ -2626,7 +2901,11 @@ async function openCheckoutConfirmationModal() {
       
       // Delay redirection (2000ms) so the user can enjoy the gorgeous confetti rain and success chime
       setTimeout(() => {
-        location.hash = `#/pedido/${result[0].docId}`;
+        if (isDirectStoreCart && result[0]?.commerceId) {
+          location.hash = `#/tienda/${result[0].commerceId}/tracking/${result[0].docId}`;
+        } else {
+          location.hash = `#/pedido/${result[0].docId}`;
+        }
       }, 2000);
 
     } catch (err) {
@@ -2726,6 +3005,45 @@ async function openCheckoutConfirmationModal() {
 }
 
 async function handleCartClick(e) {
+  // Address Bar Clicker in Step 1
+  const changeAddressBar = e.target.closest('#cart-change-address-bar');
+  if (changeAddressBar) {
+    e.stopPropagation();
+    e.preventDefault();
+    import('../components/address-modal.js').then(m => {
+      m.showAddressPrompt(async () => {
+        const activeContent = getActiveCartContainer();
+        renderCartContent(activeContent);
+        await calculateAllFees();
+        renderCartContent(activeContent);
+      });
+    });
+    return;
+  }
+
+  // Delivery vs Takeaway mode switcher
+  const modeDeliveryBtn = e.target.closest('#cart-mode-delivery-btn');
+  if (modeDeliveryBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (selectedDeliveryType !== 'delivery') {
+      selectedDeliveryType = 'delivery';
+      renderCartContent(getActiveCartContainer());
+    }
+    return;
+  }
+
+  const modeTakeawayBtn = e.target.closest('#cart-mode-takeaway-btn');
+  if (modeTakeawayBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (selectedDeliveryType !== 'takeaway') {
+      selectedDeliveryType = 'takeaway';
+      renderCartContent(getActiveCartContainer());
+    }
+    return;
+  }
+
   // Quantity buttons
   const qtyBtn = e.target.closest('.cart-qty-btn');
   if (qtyBtn) {
@@ -2759,7 +3077,7 @@ async function handleCartClick(e) {
     e.stopPropagation();
     e.preventDefault();
     currentCartStep = 1;
-    renderCartContent(document.getElementById('page-cart') || document.getElementById('app-content'));
+    renderCartContent(getActiveCartContainer());
     return;
   }
 
@@ -2778,26 +3096,53 @@ async function handleCartClick(e) {
 
     const address = getState().deliveryAddress;
     const user = getState().user;
+    const isTakeaway = selectedDeliveryType === 'takeaway';
 
+    if (!isTakeaway) {
+      if (!address) {
+        import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
+          currentCartStep = 2;
+          renderCartContent(getActiveCartContainer());
+        }, { skipDetails: true }));
+        return;
+      }
+    }
+
+    // Step 1 -> Advance smoothly to Step 2 (Payment method selection)
+    if (currentCartStep === 1) {
+      currentCartStep = 2;
+      renderCartContent(getActiveCartContainer());
+      return;
+    }
+
+    // Step 2 -> Final Confirmation validations
     if (!user) {
-      showToast('Debes iniciar sesión para hacer un pedido', 'warning');
+      const { showConfirm } = await import('../components/modal.js');
+      showConfirm({
+        title: '👋 Iniciar Sesión',
+        message: 'Para confirmar tu pedido en GoDelivery, inicia sesión con tu cuenta de Google.',
+        confirmText: 'Continuar con Google',
+        cancelText: 'Cancelar',
+        onConfirm: async () => {
+          const { signInWithGoogle } = await import('../auth.js');
+          const u = await signInWithGoogle();
+          if (u) {
+            renderCartContent(getActiveCartContainer());
+          }
+        }
+      });
       return;
     }
 
-    if (!address) {
-      import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
-        checkoutBtn.click();
-      }, { skipDetails: true }));
-      return;
-    }
-
-    const notes = getState().addressNotes;
-    if (!notes || notes.trim() === '') {
-      showToast('La referencia de ubicación es obligatoria.', 'warning');
-      import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
-        checkoutBtn.click();
-      }, { skipDetails: true }));
-      return;
+    if (!isTakeaway) {
+      const notes = getState().addressNotes;
+      if (!notes || notes.trim() === '') {
+        showToast('La referencia de ubicación es obligatoria.', 'warning');
+        import('../components/address-modal.js').then(m => m.showAddressPrompt(() => {
+          checkoutBtn.click();
+        }, { skipDetails: true }));
+        return;
+      }
     }
 
     if (!user.phone || user.phone.trim() === '' || !user.phoneVerified) {
@@ -2818,19 +3163,13 @@ async function handleCartClick(e) {
       return;
     }
 
-    if (currentCartStep === 1) {
-      currentCartStep = 2;
-      renderCartContent(document.getElementById('page-cart') || document.getElementById('app-content'));
-      return;
-    }
-
     const paymentMethod = selectedPaymentMethod;
     
     // Check for online delivery drivers ON CLICK (Very robust)
     isSubmitting = true;
     checkoutBtn.disabled = true;
     const originalHTML = checkoutBtn.innerHTML;
-    checkoutBtn.innerHTML = `${icon('loader', 18, 'animate-spin')} VERIFICANDO...`;
+    checkoutBtn.innerHTML = `${icon('loader', 18, 'animate-spin')} ${isTakeaway ? 'PROCESANDO...' : 'VERIFICANDO...'}`;
 
     try {
       selectedIsScheduled = false;

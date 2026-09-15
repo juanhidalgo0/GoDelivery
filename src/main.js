@@ -7,6 +7,7 @@ import { AudioManager } from './utils/audio-manager.js';
 import { db } from './firebase.js';
 import { icon } from './utils/icons.js';
 import { initScrollAnimations } from './utils/scroll-animations.js';
+import { safeStorage } from './utils/safe-storage.js';
 if (import.meta.env.VITE_FIREBASE_ENV === 'testing') {
   import('./utils/sync-catalog.js');
 }
@@ -15,11 +16,39 @@ if (import.meta.env.VITE_FIREBASE_ENV === 'testing') {
 AudioManager.init();
 
 async function init() {
-  // Delivery Driver instant routing or default Home page
+  // Prune expired storage keys on startup to prevent QuotaExceededError
+  try { safeStorage.pruneExpiredStorageKeys(); } catch(e) {}
+  // Delivery Driver instant routing, Push Notification deep-links, or default Home page
   try {
     localStorage.removeItem('gd_last_hash');
     sessionStorage.setItem('gd_session_active', 'true');
+
+    // 0. Handle direct pathnames from server rewrites immediately (e.g. /tienda/:id or /comercio/:id)
+    if (window.location.pathname && window.location.pathname !== '/' && !window.location.pathname.endsWith('.html')) {
+      const rawPath = window.location.pathname;
+      const curHash = window.location.hash || '';
+      if (!curHash || curHash === '#/' || curHash === '#' || curHash === '') {
+        const targetRoute = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+        window.location.hash = `#${targetRoute}`;
+        try {
+          window.history.replaceState({}, document.title, '/' + window.location.search + window.location.hash);
+        } catch (e) {}
+      }
+    }
     
+    // 1. Handle ?redirect=... query parameter from Service Worker / Push Notifications
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectParam = urlParams.get('redirect');
+    if (redirectParam) {
+      const targetHash = redirectParam.startsWith('/') ? `#${redirectParam}` : `#/${redirectParam}`;
+      if (targetHash.startsWith('#/admin') || targetHash.startsWith('#admin')) {
+        sessionStorage.setItem('gd_temp_client_mode', 'true');
+        document.documentElement.classList.remove('is-delivery-mode');
+        document.body.classList.remove('is-delivery-mode');
+      }
+      window.location.hash = targetHash;
+    }
+
     if (window.location.hash.includes('/seguimiento/wa/')) {
       const match = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
       if (match && match[1]) {
@@ -28,20 +57,30 @@ async function init() {
       }
     }
 
+    const currentHash = window.location.hash || '';
+    const isDirectStore = currentHash.startsWith('#/tienda') || currentHash.startsWith('#/seguimiento/wa');
+    const isAdminRoute = currentHash.startsWith('#/admin') || currentHash.startsWith('#admin');
     const isDriverCached = localStorage.getItem('gd_is_delivery') === 'true' || localStorage.getItem('gd_user_role') === 'delivery';
-    const isTempClient = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+    const isTempClient = sessionStorage.getItem('gd_temp_client_mode') === 'true' || isAdminRoute || isDirectStore;
 
-    if (isDriverCached && !isTempClient) {
+    if (isDirectStore) {
+      sessionStorage.setItem('gd_temp_client_mode', 'true');
+      document.documentElement.classList.remove('is-delivery-mode');
+      document.body.classList.remove('is-delivery-mode');
+      document.documentElement.classList.add('is-direct-store-mode');
+      document.body.classList.add('is-direct-store-mode');
+    } else if (isAdminRoute) {
+      sessionStorage.setItem('gd_temp_client_mode', 'true');
+      document.documentElement.classList.remove('is-delivery-mode');
+      document.body.classList.remove('is-delivery-mode');
+    } else if (isDriverCached && !isTempClient) {
       document.documentElement.classList.add('is-delivery-mode');
       document.body.classList.add('is-delivery-mode');
       if (!window.location.hash || window.location.hash === '#/' || window.location.hash === '#' || window.location.hash === '') {
         window.location.hash = '#/delivery';
       }
     } else {
-      const initialHash = window.location.hash;
-      const isDeepLink = initialHash && (initialHash.includes('/seguimiento/') || initialHash.includes('/comercio/') || initialHash.includes('/product/') || initialHash.includes('/delivery'));
-      
-      if (!isDeepLink) {
+      if (!window.location.hash || window.location.hash === '#' || window.location.hash === '') {
         window.location.hash = '#/';
       }
     }
@@ -102,85 +141,117 @@ async function init() {
     }).catch(err => console.warn('Failed to load Capacitor App plugin:', err));
   }
 
-  // Global updating state to avoid double reloads
+  // Global updating state with anti-looping protection via sessionStorage
   let isAppUpdating = false;
-  function showUpdateSplashAndReload() {
+  async function showUpdateSplashAndReload() {
     window.showUpdateSplashAndReload = showUpdateSplashAndReload;
     if (isAppUpdating) return;
-    isAppUpdating = true;
-    
-    // Inject premium fullscreen update overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'gd-update-overlay';
-    overlay.style.cssText = 'position: fixed; inset: 0; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); z-index: 999999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: Outfit, sans-serif;';
-    overlay.innerHTML = `
-      <img src="/logo-pwa.png" style="width: 85px; height: 85px; border-radius: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); margin-bottom: 22px; animation: updatePulse 1.8s infinite ease-in-out;" />
-      <h3 style="font-size: 20px; font-weight: 900; margin: 0 0 6px 0; letter-spacing: -0.03em;">Actualizando GoDelivery</h3>
-      <p style="font-size: 13.5px; opacity: 0.85; margin: 0 0 24px 0; font-weight: 700;">Instalando la última versión...</p>
-      <div style="width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.25); border-top-color: white; border-radius: 50%; animation: updateSpin 0.8s linear infinite;"></div>
-      <style>
-        @keyframes updatePulse {
-          0%, 100% { transform: scale(1); opacity: 0.95; }
-          50% { transform: scale(1.06); opacity: 1; }
-        }
-        @keyframes updateSpin {
-          to { transform: rotate(360deg); }
-        }
-      </style>
-    `;
-    document.body.appendChild(overlay);
 
-    // Perform cleanup and reload after a short delay for smooth animation
-    setTimeout(async () => {
-      try {
-        if ('serviceWorker' in navigator) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          for (const r of regs) {
-            await r.unregister();
+    // Anti-looping check: max 1 update reload attempt every 15 seconds
+    const lastReload = Number(sessionStorage.getItem('gd_last_update_reload') || 0);
+    if (Date.now() - lastReload < 15000) {
+      console.log('[Version] Update reload already attempted recently, skipping loop.');
+      return;
+    }
+    isAppUpdating = true;
+    sessionStorage.setItem('gd_last_update_reload', String(Date.now()));
+    
+    // Inject premium fullscreen update overlay (with safety auto-remove)
+    if (!document.getElementById('gd-update-overlay')) {
+      const overlay = document.createElement('div');
+      overlay.id = 'gd-update-overlay';
+      overlay.style.cssText = 'position: fixed; inset: 0; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); z-index: 9999999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: Outfit, sans-serif; text-align: center; padding: 24px;';
+      overlay.innerHTML = `
+        <img src="/logo-pwa.png" style="width: 85px; height: 85px; border-radius: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); margin-bottom: 22px; animation: updatePulse 1.8s infinite ease-in-out;" />
+        <h3 style="font-size: 20px; font-weight: 900; margin: 0 0 6px 0; letter-spacing: -0.03em;">Actualizando GoDelivery</h3>
+        <p style="font-size: 13.5px; opacity: 0.85; margin: 0 0 24px 0; font-weight: 700;">Instalando la última versión...</p>
+        <div style="width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.25); border-top-color: white; border-radius: 50%; animation: updateSpin 0.8s linear infinite;"></div>
+        <style>
+          @keyframes updatePulse {
+            0%, 100% { transform: scale(1); opacity: 0.95; }
+            50% { transform: scale(1.06); opacity: 1; }
           }
-        }
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          for (const key of keys) {
+          @keyframes updateSpin {
+            to { transform: rotate(360deg); }
+          }
+        </style>
+      `;
+      document.body.appendChild(overlay);
+
+      // Failsafe auto-remove after 3.5s so user is never permanently stuck
+      setTimeout(() => {
+        document.getElementById('gd-update-overlay')?.remove();
+      }, 3500);
+    }
+
+    // Clean old caches and notify Service Worker
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        for (const key of keys) {
+          if (!key.includes('map-tiles')) {
             await caches.delete(key);
           }
         }
-      } catch (e) {
-        console.warn('Update cleanup failed:', e);
       }
-      const targetUrl = (window.location.origin.includes('localhost') || window.location.origin.includes('capacitor://') || window.location.origin.includes('http://localhost'))
-        ? 'https://godelivery-magdalena.web.app/?v=' + Date.now() + (window.location.hash || '')
-        : window.location.origin + window.location.pathname + '?v=' + Date.now() + (window.location.hash || '');
-      window.location.href = targetUrl;
-    }, 1200);
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          reg.update().catch(() => {});
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Update cleanup failed:', e);
+    }
+
+    // Reload seamlessly preserving current route
+    setTimeout(() => {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('v', String(Date.now()));
+        window.location.replace(url.toString());
+      } catch (e) {
+        window.location.reload();
+      }
+    }, 600);
   }
 
-  const BUNDLE_BUILD_VERSION = "__APP_BUILD_TIME_PLACEHOLDER__";
+  const BUNDLE_BUILD_VERSION = "__APP_BUILD_VERSION_TAG__";
 
   // Force-update check against version.json (Runs on Web, PWA and Native apps to always keep app in sync in real time)
   const checkAppVersion = async () => {
     try {
+      // Trigger SW check in background
+      if (window._swRegistration && typeof window._swRegistration.update === 'function') {
+        window._swRegistration.update().catch(() => {});
+      }
+
+      const ts = Date.now();
       const versionUrl = (window.location.origin.includes('localhost') || window.location.origin.includes('capacitor://') || window.location.origin.includes('http://localhost'))
-        ? 'https://godelivery-magdalena.web.app/version.json?cb=' + Date.now()
-        : window.location.origin + '/version.json?cb=' + Date.now();
-      const vRes = await fetch(versionUrl, { cache: 'no-store' }).catch(() => null);
+        ? 'https://godelivery-magdalena.web.app/version.json?_cb=' + ts
+        : window.location.origin + '/version.json?_cb=' + ts;
+      
+      const vRes = await fetch(versionUrl, {
+        cache: 'no-store'
+      }).catch(() => null);
 
       if (vRes && vRes.ok) {
         const vData = await vRes.json();
         const serverVersion = String(vData?.version || vData?.buildTime || '').trim();
         const runningBuildTime = String(BUNDLE_BUILD_VERSION).trim();
 
-        // Direct check: if server version is different from the running code bundle, reload immediately
-        if (serverVersion && runningBuildTime && runningBuildTime !== '__APP_BUILD_TIME_PLACEHOLDER__' && serverVersion !== runningBuildTime) {
-          // Guard against infinite reload loop if cache served old bundle once
-          if (sessionStorage.getItem('gd_last_reloaded_ver') === serverVersion) {
+        // Direct check: if server version is different from the running code bundle, trigger reload
+        if (serverVersion && runningBuildTime && !runningBuildTime.includes('TAG') && serverVersion !== runningBuildTime) {
+          const lastAttempt = Number(sessionStorage.getItem('gd_last_update_reload') || 0);
+          if (Date.now() - lastAttempt >= 15000) {
+            console.log('[Version] 🚀 New version detected live! Server:', serverVersion, 'Running:', runningBuildTime);
+            localStorage.setItem('gd_app_version', serverVersion);
+            showUpdateSplashAndReload();
             return;
           }
-          console.log('[Version] New version detected live! Server:', serverVersion, 'Running:', runningBuildTime);
-          sessionStorage.setItem('gd_last_reloaded_ver', serverVersion);
-          localStorage.setItem('gd_app_version', serverVersion);
-          showUpdateSplashAndReload();
-          return;
         } else if (serverVersion) {
           localStorage.setItem('gd_app_version', serverVersion);
         }
@@ -191,9 +262,9 @@ async function init() {
   };
   window.checkAppVersion = checkAppVersion;
 
-  // Run version check on startup, on visibility change, on window focus, and periodically every 10s
-  checkAppVersion();
-  setInterval(checkAppVersion, 10000);
+  // Run version check after app has stabilized (3s), on visibility change, and every 60s
+  setTimeout(checkAppVersion, 3000);
+  setInterval(checkAppVersion, 60000);
   window.addEventListener('focus', () => checkAppVersion());
   window.addEventListener('online', () => checkAppVersion());
   document.addEventListener('visibilitychange', () => {
@@ -217,9 +288,10 @@ async function init() {
       navigator.serviceWorker.register('/firebase-messaging-sw.js')
         .then(reg => {
           console.log('GoDelivery: Service Worker registered');
+          window._swRegistration = reg;
           
           // Check for updates every time the app opens
-          reg.update();
+          reg.update().catch(() => {});
 
           // If there's already a waiting worker, skip waiting immediately
           if (reg.waiting) {
@@ -233,8 +305,7 @@ async function init() {
               installingWorker.onstatechange = () => {
                 if (installingWorker.state === 'installed') {
                   if (navigator.serviceWorker.controller) {
-                    // New version available! Force skip waiting
-                    console.log('GoDelivery: New version found. Updating...');
+                    console.log('GoDelivery: New Service Worker version found.');
                     installingWorker.postMessage({ type: 'SKIP_WAITING' });
                   }
                 }
@@ -300,6 +371,10 @@ async function init() {
 
   // Scroll animations
   initScrollAnimations();
+
+  // Native Pull-to-Refresh (Soft SPA reload with haptic feedback)
+  window.handleRoute = handleRoute;
+  import('./utils/pull-to-refresh.js').then(m => m.initPullToRefresh());
 
   // Clear any leftover banners
   import('./components/banner-manager.js').then(m => m.clearAllBanners());
@@ -580,6 +655,13 @@ async function init() {
       const orderId = params ? params[1] : '';
       return import('./pages/order-tracking.js').then(m => m.renderOrderTracking(orderId, c, false, false));
     },
+    '/tienda/:id': (c) => import('./pages/comercio.js').then(m => m.renderComercio(c, true)),
+    '/tienda/:id/cart': (c) => import('./pages/cart.js').then(m => m.renderCart(c, true)),
+    '/tienda/:id/tracking/:orderId': (c) => {
+      const params = window.location.hash.match(/#\/tienda\/([^/]+)\/tracking\/([^?]+)/);
+      const orderId = params ? params[2] : '';
+      return import('./pages/order-tracking.js').then(m => m.renderOrderTracking(orderId, c, false, false, true));
+    },
     '/comercio/:id': (c) => import('./pages/comercio.js').then(m => m.renderComercio(c)),
     '/cart': (c) => import('./pages/cart.js').then(m => m.renderCart(c)),
     '/mis-chats': (c) => import('./pages/mis-chats.js').then(m => m.renderMisChats(c)),
@@ -767,7 +849,12 @@ async function init() {
     '/delivery/finances': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryFinances(c)),
     '/delivery/config': (c) => import('./pages/delivery-panel.js').then(m => m.renderDeliveryConfig(c)),
     '/pedido/:id': (c) => {
-      const { id } = (window.location.hash.match(/#\/pedido\/([^/]+)/) || [])[1] ? { id: window.location.hash.split('/').pop() } : { id: null };
+      // Extract the id straight from the regex capture group — the previous version
+      // re-derived it with hash.split('/').pop(), which also grabs any trailing
+      // "?query=string" (e.g. from a notification link) as part of the "id", producing
+      // an invalid Firestore document reference and crashing this whole screen.
+      const match = window.location.hash.match(/#\/pedido\/([^/?]+)/);
+      const id = match ? decodeURIComponent(match[1]) : null;
       return import('./pages/order-tracking.js').then(m => m.renderOrderTracking(id, c));
     },
     '/marketplace': (c) => import('./pages/marketplace.js').then(m => m.renderMarketplace(c)),
@@ -785,6 +872,19 @@ async function init() {
     '/profile/publications': (c) => import('./pages/marketplace-manage.js').then(m => m.renderMyPublications(c)),
     '/admin/marketplace': (c) => import('./pages/admin/marketplace.js').then(m => m.renderAdminMarketplace(c))
   });
+
+  // Handle direct pathnames from server rewrites (e.g. /tienda/:id or /comercio/:id)
+  if (window.location.pathname && window.location.pathname !== '/' && !window.location.pathname.endsWith('.html')) {
+    const rawPath = window.location.pathname;
+    const currentHash = window.location.hash || '';
+    if (!currentHash || currentHash === '#/' || currentHash === '#') {
+      const targetRoute = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+      window.location.hash = `#${targetRoute}`;
+      try {
+        window.history.replaceState({}, document.title, '/' + window.location.search + window.location.hash);
+      } catch (e) {}
+    }
+  }
 
   // Handle startup redirect query parameter (from PWA push notification clicks)
   const params = new URLSearchParams(window.location.search);
@@ -838,7 +938,7 @@ async function init() {
 
       if (!user) {
         const currentHash = window.location.hash || '';
-        if (currentHash.startsWith('#/seguimiento/wa/')) {
+        if (currentHash.startsWith('#/seguimiento/wa/') || currentHash.startsWith('#/tienda/')) {
           const loginWall = document.getElementById('login-wall');
           if (loginWall) loginWall.remove();
           const header = document.getElementById('app-header');
@@ -1163,10 +1263,12 @@ async function init() {
         import('./components/support-bot.js').then(m => m.initSupportBot()).catch(err => console.warn('Failed to load support bot:', err));
       }
 
+      const isDirectStore = window.location.hash.startsWith('#/tienda') || window.location.hash.startsWith('#/seguimiento/wa');
+
       const header = document.getElementById('app-header');
       const navbar = document.getElementById('app-navbar');
-      if (header) header.style.display = isPreview ? 'none' : 'flex';
-      if (navbar) navbar.style.display = isPreview ? 'none' : 'flex';
+      if (header) header.style.display = (isPreview || isDirectStore) ? 'none' : 'flex';
+      if (navbar) navbar.style.display = (isPreview || isDirectStore) ? 'none' : 'flex';
 
       if (isPreview) {
         document.documentElement.classList.add('preview-mode');
@@ -1197,7 +1299,7 @@ async function init() {
       if (isDriverModeActive) {
         console.log('⚡ Driver Mode Active: Bypassing client home pre-renders, store catalogs, and customer listeners for maximum speed.');
         import('./utils/background-tracking.js').then(m => m.initGlobalTracking()).catch(e => console.warn('Tracking failed', e));
-        if (!window.location.hash.startsWith('#/delivery')) {
+        if (!window.location.hash.startsWith('#/delivery') && !window.location.hash.startsWith('#/tienda')) {
           window.location.hash = '#/delivery';
         }
         handleRoute();
@@ -1205,7 +1307,9 @@ async function init() {
       }
 
       import('./utils/background-tracking.js').then(m => m.initGlobalTracking()).catch(e => console.warn('Tracking failed', e));
-      import('./pages/home.js').then(m => m.renderHome()).catch(e => console.warn('Home pre-render failed', e));
+      if (!isDirectStore) {
+        import('./pages/home.js').then(m => m.renderHome()).catch(e => console.warn('Home pre-render failed', e));
+      }
 
       // Fetch GoMarket Logo for Banner and Auto-Sync new Assets in Firestore (Non-blocking background)
       (async () => {
@@ -1297,13 +1401,11 @@ async function init() {
       import('./pages/cart.js').then(m => m.renderCart());
       import('./pages/profile.js').then(m => m.renderProfile());
 
-      if (isPreview) {
-        routerReady();
-      }
+      routerReady();
 
       // Show Onboarding and Notifications if NOT on the Install Lock Screen
       const runStartupFlow = () => {
-        if (isPreview) return; // Bypass onboarding, push notifications, and address modals in preview mode
+        if (isPreview || isDirectStore) return; // Bypass onboarding, push notifications, and address modals in preview or direct store mode
 
         const triggerReferralModal = () => {
           import('./auth.js').then(m => m.checkAndShowReferralWelcome());
@@ -1640,6 +1742,47 @@ function showUpdateFloatingBanner(storeUrl) {
   }
 }
 
+// Idle Route Pre-caching (Zero-delay navigation for high-traffic pages)
+function scheduleIdlePrefetch() {
+  const prefetchHighTrafficModules = () => {
+    try {
+      if (navigator.connection && (navigator.connection.saveData || navigator.connection.effectiveType === 'slow-2g' || navigator.connection.effectiveType === '2g')) {
+        return;
+      }
+      const modules = [
+        () => import('./pages/comercio.js'),
+        () => import('./pages/cart.js'),
+        () => import('./components/product-modal.js'),
+        () => import('./pages/mis-chats.js'),
+        () => import('./pages/order-tracking.js')
+      ];
+      let i = 0;
+      const runNext = () => {
+        if (i < modules.length) {
+          modules[i++]().catch(() => {});
+          if ('requestIdleCallback' in window) {
+            window.requestIdleCallback(runNext, { timeout: 2000 });
+          } else {
+            setTimeout(runNext, 400);
+          }
+        }
+      };
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(runNext, { timeout: 3000 });
+      } else {
+        setTimeout(runNext, 1200);
+      }
+    } catch(e) {}
+  };
+
+  if (document.readyState === 'complete') {
+    setTimeout(prefetchHighTrafficModules, 1800);
+  } else {
+    window.addEventListener('load', () => setTimeout(prefetchHighTrafficModules, 1800), { once: true });
+  }
+}
+
 // Start
 console.log('🚀 Go Delivery v1.3.4 - Ready');
 init();
+scheduleIdlePrefetch();

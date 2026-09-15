@@ -40,7 +40,9 @@ export const safeStorage = {
         'gd_cache_meta_',
         'gd_comercio_cache_',
         'gd_cached_',
-        'gd_dismissed_'
+        'gd_dismissed_',
+        'gd-cached-fees',
+        'gd-cached-distances'
       ];
 
       const keysToRemove = [];
@@ -55,6 +57,39 @@ export const safeStorage = {
       console.log(`[SafeStorage] Purged ${keysToRemove.length} stale cache keys from localStorage.`);
     } catch (e) {
       console.error('[SafeStorage] Error clearing stale caches:', e);
+    }
+  },
+
+  pruneExpiredStorageKeys(maxAgeMs = 48 * 60 * 60 * 1000) {
+    try {
+      const now = Date.now();
+      const keysToRemove = [];
+
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+
+        if (k.startsWith('gd_cache_meta_')) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const meta = JSON.parse(raw);
+              if (meta && meta.timestamp && (now - meta.timestamp > maxAgeMs)) {
+                keysToRemove.push(k);
+              }
+            }
+          } catch (e) {
+            keysToRemove.push(k);
+          }
+        }
+      }
+
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      if (keysToRemove.length > 0) {
+        console.log(`[SafeStorage] Auto-pruned ${keysToRemove.length} expired cache keys.`);
+      }
+    } catch (e) {
+      console.warn('[SafeStorage] Error during prune:', e);
     }
   }
 };

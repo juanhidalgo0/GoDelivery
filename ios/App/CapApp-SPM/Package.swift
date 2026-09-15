@@ -19,7 +19,8 @@ let package = Package(
         .package(name: "CapacitorPushNotifications", path: "..\..\..\node_modules\@capacitor\push-notifications"),
         .package(name: "CapacitorSplashScreen", path: "..\..\..\node_modules\@capacitor\splash-screen"),
         .package(name: "CapawesomeCapacitorAppUpdate", path: "..\..\..\node_modules\@capawesome\capacitor-app-update"),
-        .package(name: "CapawesomeCapacitorAppleSignIn", path: "..\..\..\node_modules\@capawesome\capacitor-apple-sign-in")
+        .package(name: "CapawesomeCapacitorAppleSignIn", path: "..\..\..\node_modules\@capawesome\capacitor-apple-sign-in"),
+        .package(name: "CapawesomeCapacitorGoogleSignIn", path: "..\..\..\node_modules\@capawesome\capacitor-google-sign-in")
     ],
     targets: [
         .target(
@@ -34,7 +35,8 @@ let package = Package(
                 .product(name: "CapacitorPushNotifications", package: "CapacitorPushNotifications"),
                 .product(name: "CapacitorSplashScreen", package: "CapacitorSplashScreen"),
                 .product(name: "CapawesomeCapacitorAppUpdate", package: "CapawesomeCapacitorAppUpdate"),
-                .product(name: "CapawesomeCapacitorAppleSignIn", package: "CapawesomeCapacitorAppleSignIn")
+                .product(name: "CapawesomeCapacitorAppleSignIn", package: "CapawesomeCapacitorAppleSignIn"),
+                .product(name: "CapawesomeCapacitorGoogleSignIn", package: "CapawesomeCapacitorGoogleSignIn")
             ]
         )
     ]

@@ -8,28 +8,24 @@
   <script>
     (function() {
       try {
-        var currentBuild = '__APP_BUILD_TIME_PLACEHOLDER__';
-        var storedBuild = localStorage.getItem('gd_live_build_ts');
-        if (storedBuild && currentBuild !== '__APP_BUILD_TIME_PLACEHOLDER__' && storedBuild !== currentBuild) {
-          localStorage.setItem('gd_live_build_ts', currentBuild);
-          if ('caches' in window) {
-            caches.keys().then(function(names) {
-              names.forEach(function(n) { caches.delete(n); });
-            });
+        // 0. Handle direct pathnames (e.g. /tienda/:id or /seguimiento/wa/:id) immediately
+        if (window.location.pathname && window.location.pathname !== '/' && !window.location.pathname.endsWith('.html')) {
+          var rawPath = window.location.pathname;
+          var curHash = window.location.hash || '';
+          if (!curHash || curHash === '#/' || curHash === '#' || curHash === '') {
+            var targetRoute = rawPath.startsWith('/') ? rawPath : '/' + rawPath;
+            window.location.hash = '#' + targetRoute;
+            try {
+              window.history.replaceState({}, document.title, '/' + window.location.search + window.location.hash);
+            } catch(e) {}
           }
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-              regs.forEach(function(r) { r.unregister(); });
-            });
-          }
-          window.location.reload(true);
-          return;
-        } else if (currentBuild !== '__APP_BUILD_TIME_PLACEHOLDER__') {
-          localStorage.setItem('gd_live_build_ts', currentBuild);
         }
-      } catch(e) {}
 
-      try {
+        var fullHash = window.location.hash || '';
+        if (fullHash.startsWith('#/tienda') || fullHash.includes('direct=true') || fullHash.startsWith('#/seguimiento/wa')) {
+          document.documentElement.classList.add('is-direct-store-mode');
+        }
+
         var userStr = localStorage.getItem('gd-user') || localStorage.getItem('gd_user');
         var parsedRole = '';
         if (userStr) {
@@ -43,18 +39,64 @@
                              localStorage.getItem('gd_user_role') === 'chofer' ||
                              parsedRole === 'delivery' || 
                              parsedRole === 'chofer';
-        var isTempClient = sessionStorage.getItem('gd_temp_client_mode') === 'true';
+        var isTempClient = sessionStorage.getItem('gd_temp_client_mode') === 'true' || fullHash.startsWith('#/tienda');
         if (isDriverCached && !isTempClient) {
           document.documentElement.classList.add('is-delivery-mode');
           document.documentElement.setAttribute('data-theme', 'dark');
           if (!window.location.hash || window.location.hash === '#/' || window.location.hash === '#' || window.location.hash === '') {
             window.location.hash = '#/delivery';
           }
+          // GPS Warm-up: Request early location in background so it's ready in 0ms when map opens
+          try {
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(function(pos) {
+                if (pos && pos.coords) {
+                  window.lastRiderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                }
+              }, function() {}, { timeout: 4000, enableHighAccuracy: true });
+            }
+          } catch(e) {}
         }
       } catch(e) {}
     })();
   </script>
   <style>
+    html.is-direct-store-mode #app-header,
+    html.is-direct-store-mode #app-navbar,
+    html.is-direct-store-mode #app-slider,
+    html.is-direct-store-mode #page-home,
+    html.is-direct-store-mode .bottom-nav,
+    html.is-direct-store-mode .home-page,
+    html.is-direct-store-mode #active-order-banner-container,
+    html.is-direct-store-mode #global-cart-fab-btn,
+    body.is-direct-store-mode #app-header,
+    body.is-direct-store-mode #app-navbar,
+    body.is-direct-store-mode #app-slider,
+    body.is-direct-store-mode #page-home,
+    body.is-direct-store-mode .bottom-nav,
+    body.is-direct-store-mode .home-page,
+    body.is-direct-store-mode #active-order-banner-container,
+    body.is-direct-store-mode #global-cart-fab-btn {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      height: 0 !important;
+      pointer-events: none !important;
+    }
+    html.is-direct-store-mode .slide-overlay,
+    body.is-direct-store-mode .slide-overlay,
+    html.is-direct-store-mode #app-overlay,
+    body.is-direct-store-mode #app-overlay {
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      width: 100vw !important;
+      height: 100% !important;
+      min-height: 100dvh !important;
+      z-index: 9999999 !important;
+      display: block !important;
+    }
     html.is-delivery-mode .slide-panel:not(#page-delivery),
     html.is-delivery-mode #page-home,
     html.is-delivery-mode #app-header,
@@ -83,6 +125,18 @@
       min-height: 100vh !important;
       min-height: 100dvh !important;
       background: #020617 !important;
+    }
+    @keyframes driverPulseWave {
+      0% { transform: scale(0.6); opacity: 0.8; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    @keyframes driverDotPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 20px #e11d48; }
+      50% { transform: scale(1.1); box-shadow: 0 0 35px #e11d48, 0 0 50px rgba(225,29,72,0.4); }
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
   <script>
@@ -115,17 +169,11 @@
       if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {
         if (!sessionStorage.getItem('gd_chunk_reload')) {
           sessionStorage.setItem('gd_chunk_reload', 'true');
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-              regs.forEach(function(r) { r.unregister(); });
-            });
+          if (window.showUpdateSplashAndReload) {
+            window.showUpdateSplashAndReload();
+          } else {
+            window.location.reload();
           }
-          if ('caches' in window) {
-            caches.keys().then(function(names) {
-              names.forEach(function(n) { caches.delete(n); });
-            });
-          }
-          window.location.reload(true);
         }
       }
     }, true);
@@ -140,17 +188,11 @@
       if (msg.indexOf('dynamically imported module') !== -1 || msg.indexOf('MIME type') !== -1) {
         if (!sessionStorage.getItem('gd_chunk_reload')) {
           sessionStorage.setItem('gd_chunk_reload', 'true');
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-              regs.forEach(function(r) { r.unregister(); });
-            });
+          if (window.showUpdateSplashAndReload) {
+            window.showUpdateSplashAndReload();
+          } else {
+            window.location.reload();
           }
-          if ('caches' in window) {
-            caches.keys().then(function(names) {
-              names.forEach(function(n) { caches.delete(n); });
-            });
-          }
-          window.location.reload(true);
         }
       }
     });
@@ -161,37 +203,6 @@
         window.location.href = '/seguimiento.html?id=' + match[1];
       }
     }
-    (function() {
-      var isNative = !!(window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : (window.Capacitor && window.Capacitor.isNative));
-      if (!isNative && 'fetch' in window) {
-        fetch('/version.json?cb=' + Date.now(), { cache: 'no-store' })
-          .then(function(r) { return r.json(); })
-          .then(function(d) {
-            if (d && d.version) {
-              var v = String(d.version);
-              var cur = localStorage.getItem('gd_app_version');
-              var logoutDone = localStorage.getItem('gd_force_logout_v1.6') === 'true';
-              if (cur && cur !== v) {
-                localStorage.setItem('gd_app_version', v);
-
-                if ('serviceWorker' in navigator) {
-                  navigator.serviceWorker.getRegistrations().then(function(regs) {
-                    regs.forEach(function(r) { r.unregister(); });
-                  });
-                }
-                if ('caches' in window) {
-                  caches.keys().then(function(names) {
-                    names.forEach(function(n) { caches.delete(n); });
-                  });
-                }
-                setTimeout(function() { window.location.reload(true); }, 200);
-              } else {
-                localStorage.setItem('gd_app_version', v);
-              }
-            }
-          }).catch(function() {});
-      }
-    })();
   </script>
   <!-- Prefetch key brand icons for instant load without premature warning -->
   <link rel="prefetch" href="/go-bag.png" />
@@ -660,16 +671,6 @@
   <link rel="stylesheet" href="/src/styles/onboarding.css" />
   <link rel="stylesheet" href="/src/styles/app-guide.css" />
 
-  <!-- Non-blocking Third-Party Scripts & Stylesheets -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
-
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" media="print" onload="this.media='all'" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js" defer></script>
-
-  <!-- Phosphor Icons (Non-Blocking) -->
-  <script src="https://unpkg.com/@phosphor-icons/web" async defer></script>
-
   <script>
     // Bridge for OAuth Redirects (Mercado Pago doesn't like #)
     if (window.location.pathname === '/mp-connect') {
@@ -750,9 +751,12 @@
       </div>
       <div id="page-offers" class="slide-panel"></div>
       <div id="page-commerce" class="slide-panel"></div>
-      <div id="page-delivery" class="slide-panel"></div>
+      <div id="page-delivery" class="slide-panel">
+        <div id="driver-panel-skeleton" style="position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; background: #020617; display: flex; align-items: center; justify-content: center; z-index: 1;">
+          <div style="width: 42px; height: 42px; border: 3.5px solid rgba(225, 29, 72, 0.2); border-top-color: #e11d48; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        </div>
+      </div>
       <div id="page-cart" class="slide-panel"></div>
-      <div id="page-profile" class="slide-panel"></div>
       <div id="page-mis-chats" class="slide-panel"></div>
     </main>
     <div id="app-overlay" class="slide-overlay"></div>
@@ -816,8 +820,6 @@
   <div id="toast-container"></div>
   <!-- Modal container -->
   <div id="modal-container"></div>
-  <!-- Google Maps Places & Geocoding API for Milimetric Address Accuracy -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places&language=es&region=AR" async defer></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 

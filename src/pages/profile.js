@@ -7,6 +7,9 @@ import { formatPrice } from '../utils/format.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { AudioManager } from '../utils/audio-manager.js';
 import { checkIfInstalled, isIOS, showInstallUI } from '../components/install-prompt.js';
+import { getPublicBaseUrl } from '../utils/slug.js';
+import { compressImageFile } from '../utils/image-compressor.js';
+import { uploadDataUrlImage } from '../utils/storage-upload.js';
 
 export async function renderProfile(content) {
   const updateInstallVisibility = () => {
@@ -715,13 +718,14 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           
           const { db } = await import('../firebase.js');
           const { doc, updateDoc } = await import('firebase/firestore');
-          
+
+          const photoUrl = await uploadDataUrlImage(cropped, `avatars/${user.uid}/photo`);
           await updateDoc(doc(db, 'users', user.uid), {
-            photoURL: cropped
+            photoURL: photoUrl
           });
-          
+
           const currentUser = getState().user;
-          setState('user', { ...currentUser, photoURL: cropped });
+          setState('user', { ...currentUser, photoURL: photoUrl });
           
           showToast('Foto de perfil actualizada con éxito', 'success');
         } catch (err) {
@@ -746,7 +750,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     document.getElementById('share-ref-btn')?.addEventListener('click', async () => {
       AudioManager.hapticLight();
       const code = user.referralCode || 'GO-REF-XXXXX';
-      const shareUrl = `${window.location.origin}/?ref=${code}`;
+      const shareUrl = `${getPublicBaseUrl()}/?ref=${code}`;
       const shareData = {
         title: 'GO Delivery — ¡Te regalo un descuento!',
         text: `Registrate en GO Delivery usando mi código ${code} y ganá $500 en GO Points para tu primera compra:`,
@@ -1185,16 +1189,18 @@ async function showDeliveryApplicationModal(user) {
 
       // 2. License Upload (Required)
       let licenciaUrl = '';
-      const licenciaFile = licenciaFileInput.files[0];
-      const licenciaRef = ref(storage, `delivery_applications/${user.uid}/licencia_${Date.now()}_${licenciaFile.name}`);
+      const rawLicenciaFile = licenciaFileInput.files[0];
+      const licenciaFile = await compressImageFile(rawLicenciaFile, 1200, 1200, 0.8);
+      const licenciaRef = ref(storage, `delivery_applications/${user.uid}/licencia_${Date.now()}_${licenciaFile.name || 'licencia.webp'}`);
       uploadPromises.push(uploadBytes(licenciaRef, licenciaFile).then(async (snap) => {
         licenciaUrl = await getDownloadURL(snap.ref);
       }));
 
       // 3. Insurance Upload (Required)
       let seguroUrl = '';
-      const seguroFile = seguroFileInput.files[0];
-      const seguroRef = ref(storage, `delivery_applications/${user.uid}/seguro_${Date.now()}_${seguroFile.name}`);
+      const rawSeguroFile = seguroFileInput.files[0];
+      const seguroFile = await compressImageFile(rawSeguroFile, 1200, 1200, 0.8);
+      const seguroRef = ref(storage, `delivery_applications/${user.uid}/seguro_${Date.now()}_${seguroFile.name || 'seguro.webp'}`);
       uploadPromises.push(uploadBytes(seguroRef, seguroFile).then(async (snap) => {
         seguroUrl = await getDownloadURL(snap.ref);
       }));

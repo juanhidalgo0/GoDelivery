@@ -9,7 +9,7 @@ if (fs.existsSync(swPath)) {
   try {
     let content = fs.readFileSync(swPath, 'utf8');
     content = content.replace(
-      /const CACHE_NAME = ['"`]godelivery-v[\d\.]+['"`]/g,
+      /const CACHE_NAME = ['"`]godelivery-v[^'"`]+['"`]/g,
       `const CACHE_NAME = 'godelivery-v${timestamp}'`
     );
     fs.writeFileSync(swPath, content, 'utf8');
@@ -25,8 +25,8 @@ if (fs.existsSync(mainSwPath)) {
   try {
     let content = fs.readFileSync(mainSwPath, 'utf8');
     content = content.replace(
-      /const CACHE_NAME = ['"`]godelivery-v[\d\.]+['"`][^;]*/,
-      `const CACHE_NAME = 'godelivery-v${timestamp}';`
+      /const CACHE_NAME = ['"`]godelivery-v[^'"`]+['"`]/g,
+      `const CACHE_NAME = 'godelivery-v${timestamp}'`
     );
     fs.writeFileSync(mainSwPath, content, 'utf8');
     console.log(`[Post-Build] Updated sw.js Cache Name to godelivery-v${timestamp}`);
@@ -43,8 +43,16 @@ if (fs.existsSync(assetsDir)) {
     if (file.endsWith('.js')) {
       const filePath = path.join(assetsDir, file);
       let content = fs.readFileSync(filePath, 'utf8');
+      let modified = false;
+      if (content.includes('__APP_BUILD_VERSION_TAG__')) {
+        content = content.replaceAll('__APP_BUILD_VERSION_TAG__', String(timestamp));
+        modified = true;
+      }
       if (content.includes('__APP_BUILD_TIME_PLACEHOLDER__')) {
         content = content.replaceAll('__APP_BUILD_TIME_PLACEHOLDER__', String(timestamp));
+        modified = true;
+      }
+      if (modified) {
         fs.writeFileSync(filePath, content, 'utf8');
         console.log(`[Post-Build] Injected build timestamp ${timestamp} into ${file}`);
       }
@@ -54,7 +62,7 @@ if (fs.existsSync(assetsDir)) {
 
 // 4. Write version.json metadata file to dist and public
 try {
-  const versionData = JSON.stringify({ version: timestamp });
+  const versionData = JSON.stringify({ version: timestamp, buildTime: timestamp });
   fs.writeFileSync(path.join(process.cwd(), 'dist', 'version.json'), versionData, 'utf8');
   fs.writeFileSync(path.join(process.cwd(), 'public', 'version.json'), versionData, 'utf8');
   console.log(`[Post-Build] Wrote version.json with version ${timestamp}`);
@@ -77,10 +85,10 @@ if (fs.existsSync(distIndexPath)) {
   }
 }
 
-// 6. Ensure MapLibre Worker files are in dist/assets and dist/
+// 6. Ensure MapLibre Worker files and CSS are in dist/assets and dist/
 try {
   const maplibreDist = path.join(process.cwd(), 'node_modules', 'maplibre-gl', 'dist');
-  const filesToCopy = ['maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs'];
+  const filesToCopy = ['maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs', 'maplibre-gl.css'];
   for (const f of filesToCopy) {
     const src = path.join(maplibreDist, f);
     if (fs.existsSync(src)) {
@@ -88,7 +96,7 @@ try {
       fs.copyFileSync(src, path.join(process.cwd(), 'dist', f));
     }
   }
-  console.log('[Post-Build] Copied MapLibre worker files to dist/assets');
+  console.log('[Post-Build] Copied MapLibre worker and css files to dist/assets');
 } catch (err) {
   console.error('[Post-Build] Error copying MapLibre worker files:', err);
 }

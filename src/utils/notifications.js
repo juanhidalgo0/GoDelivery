@@ -96,48 +96,42 @@ export async function initPushNotifications() {
           });
         } catch(e) { console.warn('Action types registration error:', e); }
 
-        await PushNotifications.register();
-      } else {
-        console.warn('[Push] Push permission denied by user. Proceeding without native push notifications.');
-        return;
-      }
-      
-      if (!listenersAttached) {
-        listenersAttached = true;
-        
-        PushNotifications.addListener('registration', async (token) => {
-          console.log('[Push] Native token registration success:', token.value);
-          localStorage.setItem('gd_last_fcm_token', token.value);
-          localStorage.setItem('gd_fcm_registration_status', 'success');
-          localStorage.removeItem('gd_fcm_error');
-          // Forcing re-upload of admin/driver tokens on every boot/registration to repair missing profiles
-          try {
-            const currentPlatform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'web';
-            await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
-              token: token.value,
-              lastSession: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              platform: `${currentPlatform}-native`
-            }, { merge: true });
-            
-            // Mirror token to user doc root to ensure fallback paths can query it
-            await setDoc(doc(db, 'users', user.uid), {
-              lastFcmToken: token.value,
-              lastFcmTokenUpdatedAt: serverTimestamp()
-            }, { merge: true });
-          } catch(err) {
-            console.error('Error saving push token to database:', err);
-          }
-        });
+        if (!listenersAttached) {
+          listenersAttached = true;
+          
+          PushNotifications.addListener('registration', async (token) => {
+            console.log('[Push] Native token registration success:', token.value);
+            localStorage.setItem('gd_last_fcm_token', token.value);
+            localStorage.setItem('gd_fcm_registration_status', 'success');
+            localStorage.removeItem('gd_fcm_error');
+            // Forcing re-upload of admin/driver tokens on every boot/registration to repair missing profiles
+            try {
+              const currentPlatform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'web';
+              await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
+                token: token.value,
+                lastSession: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                platform: `${currentPlatform}-native`
+              }, { merge: true });
+              
+              // Mirror token to user doc root to ensure fallback paths can query it
+              await setDoc(doc(db, 'users', user.uid), {
+                lastFcmToken: token.value,
+                lastFcmTokenUpdatedAt: serverTimestamp()
+              }, { merge: true });
+            } catch(err) {
+              console.error('Error saving push token to database:', err);
+            }
+          });
 
-        PushNotifications.addListener('registrationError', (error) => {
-          console.error('[Push] Native registration error:', error);
-          localStorage.setItem('gd_fcm_registration_status', 'error');
-          localStorage.setItem('gd_fcm_error', JSON.stringify(error) || String(error));
-        });
+          PushNotifications.addListener('registrationError', (error) => {
+            console.error('[Push] Native registration error:', error);
+            localStorage.setItem('gd_fcm_registration_status', 'error');
+            localStorage.setItem('gd_fcm_error', JSON.stringify(error) || String(error));
+          });
 
-        PushNotifications.addListener('pushNotificationReceived', async (notification) => {
-          console.log('[Push] Native push received in foreground:', notification);
+          PushNotifications.addListener('pushNotificationReceived', async (notification) => {
+            console.log('[Push] Native push received in foreground:', notification);
           const { title, body } = notification;
           const isOnDelivery = window.location.hash.startsWith('#/delivery');
           const isAdminAlert = (title && title.includes('[SOPORTE')) || 
@@ -238,6 +232,13 @@ export async function initPushNotifications() {
               delete window._processedTakeOrderId;
               
               const finalHash = targetHash.startsWith('/') ? `#${targetHash}` : (targetHash.startsWith('#') ? targetHash : `#/${targetHash}`);
+              if (finalHash.startsWith('#/admin') || finalHash.startsWith('#admin')) {
+                try {
+                  sessionStorage.setItem('gd_temp_client_mode', 'true');
+                } catch (e) {}
+                document.documentElement.classList.remove('is-delivery-mode');
+                document.body.classList.remove('is-delivery-mode');
+              }
               if (window.location.hash === finalHash) {
                 // Force event even if hash didn't change
                 window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -254,10 +255,16 @@ export async function initPushNotifications() {
           }
         });
       }
-      
-      initialized = true;
+
+      await PushNotifications.register();
+    } else {
+      console.warn('[Push] Push permission denied by user. Proceeding without native push notifications.');
       return;
     }
+    
+    initialized = true;
+    return;
+  }
 
     const messaging = await getMessagingInstance();
     if (!messaging) {
@@ -501,25 +508,22 @@ export async function requestAndSaveFcmToken(userParam = null) {
       return null;
     }
 
-    let swRegistration;
-    try {
-      swRegistration = await navigator.serviceWorker.ready;
-      if (!swRegistration) {
-        swRegistration = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+    let swRegistration = null;
+    if ('serviceWorker' in navigator) {
+      try {
+        swRegistration = await navigator.serviceWorker.getRegistration();
+        if (!swRegistration) {
+          swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        }
+        await navigator.serviceWorker.ready;
+      } catch (swErr) {
+        console.warn('[Push] Service Worker ready check/registration failed:', swErr);
       }
-    } catch (swErr) {
-      console.warn('[Push] Service Worker ready check failed:', swErr);
-      return null;
-    }
-
-    if (!swRegistration) {
-      console.warn('[Push] No active Service Worker registration found for Web Push');
-      return null;
     }
 
     const token = await getToken(messaging, {
       vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: swRegistration
+      serviceWorkerRegistration: swRegistration || undefined
     });
 
     if (token) {

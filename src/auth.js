@@ -55,25 +55,20 @@ export async function signInWithGoogle() {
     if (isNativeApp) {
       console.log('[Auth] Attempting Native Google Sign-In...');
       try {
-        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-        
+        const { GoogleSignIn } = await import('@capawesome/capacitor-google-sign-in');
+
+        // Must be the WEB client ID on every platform (including iOS) per this plugin's docs —
+        // unlike the old codetrix-studio plugin, there's no separate iOS client ID here.
         const SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
-        const IOS_CLIENT_ID = '848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3.apps.googleusercontent.com';
-        const isIos = (window.Capacitor?.getPlatform ? window.Capacitor.getPlatform() === 'ios' : false) || (/iPad|iPhone|iPod/.test(navigator.userAgent));
-        
+
         try {
-          await GoogleAuth.initialize({
-            clientId: isIos ? IOS_CLIENT_ID : SERVER_CLIENT_ID,
-            serverClientId: SERVER_CLIENT_ID,
-            scopes: ['profile', 'email'],
-            grantOfflineAccess: false
-          });
+          await GoogleSignIn.initialize({ clientId: SERVER_CLIENT_ID });
         } catch (initErr) {
-          console.warn('[Auth] GoogleAuth.initialize notice:', initErr);
+          console.warn('[Auth] GoogleSignIn.initialize notice:', initErr);
         }
-        
-        const googleUser = await GoogleAuth.signIn();
-        const idToken = googleUser.authentication?.idToken || googleUser.idToken;
+
+        const googleUser = await GoogleSignIn.signIn();
+        const idToken = googleUser.idToken;
         if (!idToken) throw new Error('No se obtuvo el token de autenticación de Google');
 
         const credential = GoogleAuthProvider.credential(idToken);
@@ -84,7 +79,7 @@ export async function signInWithGoogle() {
         return user;
       } catch (nativeErr) {
         console.warn('[Auth] Native Google Sign-In notice/error:', nativeErr);
-        if (nativeErr.code === '12501' || nativeErr.message?.toLowerCase().includes('cancel') || nativeErr.message?.toLowerCase().includes('dismissed')) {
+        if (nativeErr.code === 'SIGN_IN_CANCELED' || nativeErr.message?.toLowerCase().includes('cancel') || nativeErr.message?.toLowerCase().includes('dismissed')) {
           showToast('Inicio de sesión cancelado', 'info');
           return null;
         }
@@ -245,9 +240,9 @@ export async function signOut() {
     try {
       const isNativeApp = (window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web');
       if (isNativeApp) {
-        import('@codetrix-studio/capacitor-google-auth').then(m => {
-          m.GoogleAuth.signOut().catch(e => console.warn('Native Google Auth signOut failed:', e));
-        }).catch(err => console.warn('Failed to import native GoogleAuth:', err));
+        import('@capawesome/capacitor-google-sign-in').then(m => {
+          m.GoogleSignIn.signOut().catch(e => console.warn('Native Google Auth signOut failed:', e));
+        }).catch(err => console.warn('Failed to import native GoogleSignIn:', err));
       }
     } catch (e) {
       console.warn('Native Google Auth sign out failed:', e);

@@ -1,14 +1,15 @@
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { getMapLibre } from '../utils/map-loader.js';
 import { db } from '../firebase.js';
-import { doc, onSnapshot, runTransaction, serverTimestamp, increment, collection, query, where, getDocs } from 'firebase/firestore';
+
+let maplibregl = null;
+import { doc, onSnapshot, runTransaction, serverTimestamp, increment, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
 import { showConfirm, closeModal, showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { getState } from '../state.js';
 import { openChat } from '../components/chat.js';
-import { getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
+import { GOOGLE_MAPS_STYLE, getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -71,6 +72,51 @@ let routeLineGlow = null;
 let currentETA = '--';
 let isFirstFit = true;
 let isDetailsExpanded = false;
+let riderMoveAnimFrame = null;
+const RIDER_ANIM_DURATION_MS = 1200;
+
+function easeOutCubicTracking(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+// Smoothly tweens the rider marker to a new position instead of teleporting it,
+// so it reads as continuous motion along the route rather than jumping between pings.
+function animateRiderMarkerTo(targetPos) {
+  if (!riderMarker) return;
+
+  if (riderMoveAnimFrame) {
+    cancelAnimationFrame(riderMoveAnimFrame);
+    riderMoveAnimFrame = null;
+  }
+
+  const startLngLat = riderMarker.getLngLat();
+  const startPos = { lat: startLngLat.lat, lng: startLngLat.lng };
+
+  if (Math.abs(startPos.lat - targetPos.lat) < 1e-7 && Math.abs(startPos.lng - targetPos.lng) < 1e-7) {
+    riderMarker.setLngLat([targetPos.lng, targetPos.lat]);
+    return;
+  }
+
+  const startTime = performance.now();
+
+  const step = (now) => {
+    const elapsed = now - startTime;
+    const progress = Math.min(1, elapsed / RIDER_ANIM_DURATION_MS);
+    const eased = easeOutCubicTracking(progress);
+
+    const lat = startPos.lat + (targetPos.lat - startPos.lat) * eased;
+    const lng = startPos.lng + (targetPos.lng - startPos.lng) * eased;
+    riderMarker.setLngLat([lng, lat]);
+
+    if (progress < 1) {
+      riderMoveAnimFrame = requestAnimationFrame(step);
+    } else {
+      riderMoveAnimFrame = null;
+    }
+  };
+
+  riderMoveAnimFrame = requestAnimationFrame(step);
+}
 
 // Safe coordinate parsing to handle plain objects, firestore GeoPoints, and string coords
 const parseCoords = (c) => {
@@ -87,7 +133,7 @@ const parseCoords = (c) => {
   return null;
 };
 
-export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false) {
+export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false, isDirectMode = false) {
   // Reset all module-level map references to prevent DOM pollution when modal is opened/closed
   liveMap = null;
   riderMarker = null;
@@ -103,12 +149,29 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   lastRouteStartCoords = null;
   lastRouteEndCoords = null;
 
+  const isDirectStore = isDirectMode || window.location.hash.startsWith('#/tienda/') || document.body.classList.contains('is-direct-store-mode');
+
   if (window.currentTrackingUnsub) {
     try { window.currentTrackingUnsub(); } catch(e) {}
     window.currentTrackingUnsub = null;
   }
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
+
+  // A malformed/missing orderId (e.g. a link with a stray "?..." suffix that ended up
+  // baked into the id) used to reach doc(db, 'orders', orderId) below and throw
+  // synchronously — that crashed this whole screen with the generic app error page
+  // instead of a message the person could actually act on.
+  if (!orderId || typeof orderId !== 'string' || orderId.trim() === '') {
+    content.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:24px; text-align:center;">
+        <h3 style="font-family:var(--font-display); font-size:18px; font-weight:800; margin-bottom:8px;">No pudimos abrir este pedido</h3>
+        <p style="color:var(--color-text-secondary); font-size:14px; margin-bottom:24px; max-width:300px;">El enlace del pedido parece estar incompleto o vencido.</p>
+        <button onclick="window.safeGoBack ? window.safeGoBack('#/profile/orders') : (window.location.hash = '#/profile/orders')" style="background:var(--color-primary); color:white; border:none; padding:12px 24px; border-radius:12px; font-weight:700; cursor:pointer;">Volver a mis pedidos</button>
+      </div>
+    `;
+    return;
+  }
 
   isFirstFit = true;
   isDetailsExpanded = false;
@@ -119,40 +182,45 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       <div class="tracking-v5-nav">
         ${inModal ? `
           <button id="v5-modal-back-btn" class="v5-back-btn" style="pointer-events:auto; border:1px solid var(--color-border); cursor:pointer;">${icon('chevronLeft', 24)}</button>
+        ` : (isDirectStore ? `
+          <button id="v5-direct-back-btn" class="v5-back-btn" style="cursor:pointer; border:none; background:rgba(255,255,255,0.92);">${icon('chevronLeft', 24)}</button>
         ` : `
           <button onclick="window.safeGoBack ? window.safeGoBack('#/profile/orders') : (window.location.hash = '#/profile/orders')" class="v5-back-btn" style="cursor:pointer; border:none; background:rgba(255,255,255,0.92);">${icon('chevronLeft', 24)}</button>
-        `}
+        `)}
         <div id="v5-header-driver-card" style="flex:1; margin-left:10px; pointer-events:auto; min-width:0;"></div>
       </div>
       
       <div style="position:absolute; top:calc(82px + env(safe-area-inset-top, 0px)); right:16px; z-index:100; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div id="v5-driver-map-tip-badge" style="background:#10b981; color:white; font-size:12.5px; font-weight:900; padding:10px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.25); white-space:nowrap; box-shadow:0 4px 14px rgba(16,185,129,0.35); display:none; align-items:center; gap:6px; font-family:system-ui, -apple-system, sans-serif;">
-            💵 Propina: <span id="v5-driver-map-tip-value">$0</span>
-          </div>
-          <div style="display:flex; flex-direction:column; background:rgba(255,255,255,0.92); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-radius:14px; border:1.5px solid rgba(255,255,255,0.8); box-shadow:0 8px 25px rgba(0,0,0,0.12); overflow:hidden;">
-            <button type="button" id="tracking-zoom-in-btn" style="width:44px; height:40px; background:transparent; border:none; border-bottom:1px solid rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Acercar">
-              ${icon('plus', 18)}
-            </button>
-            <button type="button" id="tracking-zoom-out-btn" style="width:44px; height:40px; background:transparent; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Alejar">
-              ${icon('minus', 18)}
-            </button>
-          </div>
-          <button id="recenter-map-btn" class="v5-recenter-btn-premium" title="Centrar Recorrido" style="position:static; flex-shrink:0; margin:0;">
-            <div class="v5-recenter-icon-wrapper">
-              ${icon('navigationArrow', 22)}
-            </div>
+        <div id="v5-driver-map-tip-badge" style="background:#10b981; color:white; font-size:12.5px; font-weight:900; padding:10px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.25); white-space:nowrap; box-shadow:0 4px 14px rgba(16,185,129,0.35); display:none; align-items:center; gap:6px; font-family:system-ui, -apple-system, sans-serif;">
+          💵 Propina: <span id="v5-driver-map-tip-value">$0</span>
+        </div>
+        
+        <!-- Zoom In / Out Group (Above) -->
+        <div style="display:flex; flex-direction:column; background:rgba(255,255,255,0.92); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-radius:16px; border:1.5px solid rgba(255,255,255,0.8); box-shadow:0 8px 25px rgba(0,0,0,0.12); overflow:hidden;">
+          <button type="button" id="tracking-zoom-in-btn" style="width:44px; height:40px; background:transparent; border:none; border-bottom:1px solid rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Acercar">
+            ${icon('plus', 18)}
+          </button>
+          <button type="button" id="tracking-zoom-out-btn" style="width:44px; height:40px; background:transparent; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--color-text-primary, #0f172a); transition:background 0.15s ease;" title="Alejar">
+            ${icon('minus', 18)}
           </button>
         </div>
+
+        <!-- Recenter / Mi Ubicación Button (Below) -->
+        <button id="recenter-map-btn" class="v5-recenter-btn-premium" title="Centrar mi ubicación / Recorrido" style="position:static; width:44px; height:44px; border-radius:16px; flex-shrink:0; margin:0;">
+          <div class="v5-recenter-icon-wrapper">
+            ${icon('navigationArrow', 20)}
+          </div>
+        </button>
+
         ${isDriverViewOverride ? `
           <!-- Support Button -->
-          <button id="v5-support-btn" class="v5-recenter-btn-premium" title="Soporte" style="position:static; flex-shrink:0; color:#ef4444; background:var(--color-surface); margin-top:2px;">
+          <button id="v5-support-btn" class="v5-recenter-btn-premium" title="Soporte" style="position:static; width:44px; height:44px; border-radius:16px; flex-shrink:0; color:#ef4444; background:var(--color-surface); margin:0;">
             <div class="v5-recenter-icon-wrapper">
               ${icon('helpCircle', 20)}
             </div>
           </button>
           <!-- WhatsApp Button -->
-          <button id="v5-whatsapp-btn" class="v5-recenter-btn-premium" title="WhatsApp" style="position:static; flex-shrink:0; color:#25d366; background:var(--color-surface); margin-top:2px;">
+          <button id="v5-whatsapp-btn" class="v5-recenter-btn-premium" title="WhatsApp" style="position:static; width:44px; height:44px; border-radius:16px; flex-shrink:0; color:#25d366; background:var(--color-surface); margin:0;">
             <div class="v5-recenter-icon-wrapper">
               ${icon('whatsapp', 20)}
             </div>
@@ -573,10 +641,70 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     </style>
   `;
 
-  const unsub = onSnapshot(doc(db, 'orders', orderId), (snapshot) => {
-    if (!snapshot.exists()) return;
+  let orderDocRef;
+  try {
+    orderDocRef = doc(db, 'orders', orderId);
+  } catch (refErr) {
+    // Belt-and-suspenders: even with the orderId validation above, an invalid
+    // Firestore reference here used to throw synchronously and crash the whole
+    // screen. Fail into this screen instead of the app-wide error page.
+    console.error('[OrderTracking] Invalid order reference:', refErr);
+    content.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:24px; text-align:center;">
+        <h3 style="font-family:var(--font-display); font-size:18px; font-weight:800; margin-bottom:8px;">No pudimos abrir este pedido</h3>
+        <p style="color:var(--color-text-secondary); font-size:14px; margin-bottom:24px; max-width:300px;">El enlace del pedido parece estar incompleto o vencido.</p>
+        <button onclick="window.safeGoBack ? window.safeGoBack('#/profile/orders') : (window.location.hash = '#/profile/orders')" style="background:var(--color-primary); color:white; border:none; padding:12px 24px; border-radius:12px; font-weight:700; cursor:pointer;">Volver a mis pedidos</button>
+      </div>
+    `;
+    return;
+  }
+
+  const unsub = onSnapshot(orderDocRef, (snapshot) => {
+    if (!snapshot.exists()) {
+      if (liveMap) {
+        try { liveMap.remove(); } catch(e) {}
+        liveMap = null;
+      }
+      content.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:24px; text-align:center; background:var(--color-bg); min-height:80vh;">
+          <div style="font-size:48px; margin-bottom:12px;">❌</div>
+          <h2 style="font-size:20px; font-weight:900; margin-bottom:8px; color:var(--color-text-primary);">Pedido no encontrado o eliminado</h2>
+          <p style="font-size:14px; color:var(--color-text-secondary); max-width:320px; line-height:1.5; margin-bottom:24px;">Este pedido fue cancelado o eliminado del sistema.</p>
+          <button onclick="window.location.hash = '#/'" class="btn btn-primary" style="height:48px; border-radius:14px; font-weight:900; padding:0 24px;">Volver al Inicio</button>
+        </div>
+      `;
+      return;
+    }
     const order = { id: snapshot.id, ...snapshot.data() };
     
+    const rawStatus = (order.status || '').toString().toLowerCase();
+    const isCancelled = rawStatus === 'cancelled' || rawStatus === 'cancelled_by_admin' || rawStatus === 'cancelled_by_user';
+    if (isCancelled) {
+      if (liveMap) {
+        try { liveMap.remove(); } catch(e) {}
+        liveMap = null;
+      }
+      const shortId = order.orderId || order.id.slice(0,6);
+      const reason = order.cancelReason || order.cancellationReason || '';
+      content.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:24px; text-align:center; background:var(--color-bg); min-height:80vh;">
+          <div style="font-size:52px; margin-bottom:16px;">❌</div>
+          <h2 style="font-size:22px; font-weight:900; margin-bottom:8px; color:#ef4444;">Pedido #${shortId} Cancelado</h2>
+          <p style="font-size:14px; color:var(--color-text-secondary); max-width:320px; line-height:1.5; margin-bottom:12px;">
+            Tu pedido fue cancelado en el sistema.
+            ${reason ? `<br><br><strong>Motivo:</strong> <em>${reason}</em>` : ''}
+          </p>
+          <div style="display:flex; flex-direction:column; gap:10px; width:100%; max-width:280px; margin-top:16px;">
+            <button onclick="window.location.hash = '#/'" class="btn btn-primary" style="height:48px; border-radius:14px; font-weight:900;">Hacer Nuevo Pedido</button>
+            <a href="https://wa.me/5492212025603?text=Hola%2C%20tengo%20una%20consulta%20sobre%20mi%20pedido%20%23${shortId}" target="_blank" class="btn btn-ghost" style="height:44px; border-radius:14px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; text-decoration:none;">
+              💬 Hablar con Soporte
+            </a>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     // Dynamically retrieve real commerce logo and name from Firestore if needed
     if (order.comercioId && !order.isFavor && !order.isTrip) {
       if (!window.commerceCache) window.commerceCache = {};
@@ -639,7 +767,6 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       return;
     }
 
-    const rawStatus = (order.status || '').toString().toLowerCase();
     const isCompleted = rawStatus === 'completed' || rawStatus === 'entregado';
     if (isCompleted) {
       if (inModal) {
@@ -866,6 +993,10 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   return {
     cleanup: () => {
       unsub();
+      if (riderMoveAnimFrame) {
+        cancelAnimationFrame(riderMoveAnimFrame);
+        riderMoveAnimFrame = null;
+      }
       if (liveMap) {
         try {
           if (riderMarker) riderMarker.remove();
@@ -1100,7 +1231,9 @@ function updateUI(order, isDriverViewOverride = false) {
     }
   }
 
-  // Title translation logic for Trips and GoFavors
+  const isTakeaway = order.deliveryType === 'takeaway' || order.deliveryType === 'retiro';
+
+  // Title translation logic for Trips, GoFavors, Takeaway, and Home Delivery
   let titleText = '';
   if (order.isTrip) {
     titleText = isCompleted ? '¡Viaje Finalizado!' :
@@ -1114,6 +1247,13 @@ function updateUI(order, isDriverViewOverride = false) {
                 order.isAtDoor ? (isDriverView ? '¡Estás en la puerta!' : '¡El repartidor está en la puerta!') :
                 isDelivering ? '' : 
                 (order.driverId ? '' : '');
+  } else if (isTakeaway) {
+    titleText = isCompleted ? '¡Pedido Retirado!' : 
+                isCancelled ? 'Pedido Cancelado' : 
+                normalizedStatus === 'ready' ? '¡Listo para retirar!' : 
+                (normalizedStatus === 'preparing' || normalizedStatus === 'confirmed') ? 'Preparando tu pedido' : 
+                'Esperando confirmación';
+  } else {
     const hasCommerce = !order.isTrip && !order.isFavor && (order.comercioId || order.comercioName);
     titleText = isCompleted ? '¡Pedido Finalizado!' : 
                 isCancelled ? 'Pedido Cancelado' : 
@@ -1126,7 +1266,27 @@ function updateUI(order, isDriverViewOverride = false) {
 
   let subtitleHtml = '';
   const hasCommerce = !order.isTrip && !order.isFavor && (order.comercioId || order.comercioName);
-  if (order.isAtDoor && !isCompleted && !isCancelled) {
+  if (isTakeaway) {
+    if (normalizedStatus === 'ready') {
+      subtitleHtml = `
+        <p class="v5-status-subtitle" style="font-size: 13px; color: #10b981; margin: 6px 0 0 0; font-weight: 700; line-height: 1.4;">
+          Ya podés pasar a retirar tu pedido por el local de ${order.comercioRealName || order.comercioName || 'el comercio'}.
+        </p>
+      `;
+    } else if (normalizedStatus === 'confirmed' || normalizedStatus === 'preparing') {
+      subtitleHtml = `
+        <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
+          El comercio aceptó tu pedido y se encuentra preparándolo. Te avisaremos cuando esté listo.
+        </p>
+      `;
+    } else if (normalizedStatus === 'pending') {
+      subtitleHtml = `
+        <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
+          Esperando que el comercio acepte tu pedido.
+        </p>
+      `;
+    }
+  } else if (order.isAtDoor && !isCompleted && !isCancelled) {
     if (isDriverView) {
       titleText = '';
       subtitleHtml = '';
@@ -1166,6 +1326,21 @@ function updateUI(order, isDriverViewOverride = false) {
       `;
     }
   }
+
+  const isDirectStore = window.location.hash.startsWith('#/tienda/') || document.body.classList.contains('is-direct-store-mode');
+
+  const viralBannerHTML = (isCompleted && isDirectStore) ? `
+    <div style="background: linear-gradient(135deg, rgba(225,29,72,0.08), rgba(244,63,94,0.03)); border: 1.5px solid rgba(225,29,72,0.25); border-radius: 20px; padding: 18px 16px; margin-top: 14px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+      <span style="font-size: 30px;">🛵</span>
+      <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; color: var(--color-text-primary); margin: 0;">¿Querés pedir en otros locales de Magdalena?</h4>
+      <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; max-width: 280px;">
+        Descubrí decenas de comercios, ofertas exclusivas y delivery rápido en GoDelivery.
+      </p>
+      <button id="v5-viral-discovery-btn" style="background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 13px; padding: 12px 22px; border-radius: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(225,29,72,0.35); transition: transform 0.2s;">
+        <span>Descubrí GoDelivery</span> 🚀
+      </button>
+    </div>
+  ` : '';
 
   container.innerHTML = `
     ${getStatusBannerHTML(order, normalizedStatus, isDriverView)}
@@ -1232,6 +1407,45 @@ function updateUI(order, isDriverViewOverride = false) {
             <span class="v5-step-pulse"></span>
           </div>
           <span class="v5-step-label">Llegaste</span>
+        </div>
+      </div>
+    ` : (isTakeaway ? `
+      <!-- Stepper Retiro en el Local (Take Away) -->
+      <div class="v5-stepper-container">
+        <div class="v5-stepper-line">
+          <div class="v5-stepper-line-fill" style="width: ${getTakeawayStepperLinePercent(normalizedStatus)}%;"></div>
+        </div>
+        
+        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 0)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 13)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Recibido</span>
+        </div>
+
+        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 1)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 13)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Preparando</span>
+        </div>
+
+        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 2)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 13)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Listo para retirar</span>
+        </div>
+
+        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 3)}">
+          <div class="v5-step-circle">
+            <span class="v5-step-icon">${icon('check', 13)}</span>
+            <span class="v5-step-pulse"></span>
+          </div>
+          <span class="v5-step-label">Entregado</span>
         </div>
       </div>
     ` : `
@@ -1314,7 +1528,7 @@ function updateUI(order, isDriverViewOverride = false) {
           </div>
         `}
       </div>
-    `}
+    `)}
 
     ${order.isTrip ? `
       <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
@@ -1334,12 +1548,21 @@ function updateUI(order, isDriverViewOverride = false) {
       </div>
     ` : ''}
 
-
+    ${isTakeaway ? `
+      <!-- Card Retiro en el Local -->
+      <div style="background:var(--color-surface); border:1.5px solid #10b981; border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(16,185,129,0.08); width:100%; box-sizing:border-box;">
+        <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+          <span style="font-size:10px; font-weight:800; color:#10b981; text-transform:uppercase; margin-bottom:2px;">🏬 Retiro por el Local</span>
+          <span style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${order.comercioRealName || order.comercioName || 'Comercio'}</span>
+          <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; margin-top:2px;">¡Sin costo de envío! ($0)</span>
+        </div>
+      </div>
+    ` : ''}
 
     ${(() => {
       const isCommerceOrder = !order.isFavor && !order.isTrip;
       const isEncomiendaOrder = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
-      const showCode = !isDriverView && !order.isTrip && !isEncomiendaOrder && !!order.verificationCode && (
+      const showCode = !isDriverView && !order.isTrip && !isTakeaway && !isEncomiendaOrder && !!order.verificationCode && (
         isCommerceOrder ? order.status === 'delivering' : !['delivered', 'cancelled', 'completed'].includes(order.status)
       );
       return showCode ? `
@@ -1347,7 +1570,7 @@ function updateUI(order, isDriverViewOverride = false) {
       ` : '';
     })()}
 
-    ${(!isDriverView && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
+    ${(!isDriverView && !isTakeaway && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
       <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
       <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
         <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
@@ -1452,7 +1675,35 @@ function updateUI(order, isDriverViewOverride = false) {
         </div>
       ` : ''}
     </div>
+
+    ${viralBannerHTML}
   `;
+
+  const directBackBtn = document.getElementById('v5-direct-back-btn');
+  if (directBackBtn) {
+    directBackBtn.onclick = () => {
+      const cId = order.comercioId || window.lastOrderData?.comercioId || '';
+      if (cId) {
+        window.location.hash = `#/tienda/${cId}`;
+      } else {
+        window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/');
+      }
+    };
+  }
+
+  const viralBtn = document.getElementById('v5-viral-discovery-btn');
+  if (viralBtn) {
+    viralBtn.onclick = () => {
+      document.body.classList.remove('is-direct-store-mode');
+      const bNav = document.getElementById('bottom-nav');
+      const gHead = document.getElementById('global-header');
+      const slider = document.getElementById('app-slider');
+      if (bNav) bNav.style.display = '';
+      if (gHead) gHead.style.display = '';
+      if (slider) slider.style.display = '';
+      window.location.hash = '#/';
+    };
+  }
 
   document.getElementById('v5-copy-alias-btn')?.addEventListener('click', () => {
     if (order.driverAlias) {
@@ -1614,6 +1865,7 @@ function ensureTrackingRouteLayers() {
       }
     });
   }
+  // Ambient Soft Glow
   if (!liveMap.getLayer('tracking-route-glow')) {
     liveMap.addLayer({
       id: 'tracking-route-glow',
@@ -1622,12 +1874,29 @@ function ensureTrackingRouteLayers() {
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
         'line-color': '#e11d48',
-        'line-width': 10,
-        'line-opacity': 0.4,
-        'line-blur': 2
+        'line-width': 16,
+        'line-opacity': 0.22,
+        'line-blur': 4
       }
     });
   }
+
+  // Crisp High-Contrast Casing
+  if (!liveMap.getLayer('tracking-route-casing')) {
+    liveMap.addLayer({
+      id: 'tracking-route-casing',
+      type: 'line',
+      source: 'tracking-route-source',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': 8.5,
+        'line-opacity': 0.95
+      }
+    });
+  }
+
+  // Core High-Definition Path Line
   if (!liveMap.getLayer('tracking-route-line')) {
     liveMap.addLayer({
       id: 'tracking-route-line',
@@ -1635,20 +1904,24 @@ function ensureTrackingRouteLayers() {
       source: 'tracking-route-source',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
-        'line-color': '#ff2d55',
-        'line-width': 5,
-        'line-opacity': 0.95
+        'line-color': '#e11d48',
+        'line-width': 5.5,
+        'line-opacity': 1.0
       }
     });
   }
 }
 
-function updateMap(order) {
+async function updateMap(order) {
   const container = document.getElementById('live-tracking-map');
   if (!container) return;
 
   const isFinalized = order.status === 'completed' || order.status === 'cancelled';
   if (isFinalized) {
+    if (riderMoveAnimFrame) {
+      cancelAnimationFrame(riderMoveAnimFrame);
+      riderMoveAnimFrame = null;
+    }
     if (liveMap) {
       try {
         if (riderMarker) riderMarker.remove();
@@ -1676,29 +1949,41 @@ function updateMap(order) {
   const destPos = isTrip ? (rawStatus === 'delivering' || rawStatus === 'en camino' ? dropoffPos : pickupPos) : dropoffPos;
 
   if (!liveMap) {
+    if (!maplibregl) {
+      maplibregl = await getMapLibre();
+    }
     const magCenterLngLat = [-57.5147, -35.0815];
     const initialCenter = destPos ? [destPos.lng, destPos.lat] : (riderPos ? [riderPos.lng, riderPos.lat] : magCenterLngLat);
 
     const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
+    const activeMapStyle = GOOGLE_MAPS_STYLE;
 
     liveMap = new MapConstructor({
       container,
-      style: OSM_MAP_STYLE,
+      style: activeMapStyle,
       center: initialCenter,
       zoom: 16,
-      attributionControl: false
+      pitch: 0,
+      maxPitch: 0,
+      bearing: 0,
+      dragRotate: false,
+      touchPitch: false,
+      pitchWithRotate: false,
+      attributionControl: false,
+      antialias: true
     });
 
     liveMap.on('error', () => {
       try {
-        if (liveMap && liveMap.getStyle() !== OSM_MAP_STYLE) {
-          liveMap.setStyle(OSM_MAP_STYLE);
+        if (liveMap && liveMap.getStyle() !== activeMapStyle) {
+          liveMap.setStyle(activeMapStyle);
         }
       } catch(e) {}
     });
 
     liveMap.on('load', () => {
       try { liveMap.resize(); } catch(e) {}
+      ensureTrackingRouteLayers();
     });
 
     setTimeout(() => { try { if (liveMap) liveMap.resize(); } catch(e) {} }, 100);
@@ -1711,12 +1996,13 @@ function updateMap(order) {
       const el = document.createElement('div');
       el.className = 'v5-marker-shadow';
       el.innerHTML = `
-        <div style="display:flex; flex-direction:column; align-items:center;">
-          <div style="background:#111111; width:44px; height:44px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:2.5px solid white; box-shadow:0 8px 20px rgba(0,0,0,0.5);">
-            <div style="transform:rotate(45deg); color:white; display:flex;">${icon('home', 20)}</div>
+        <div style="display:flex; flex-direction:column; align-items:center; position:relative;">
+          <div style="background:linear-gradient(135deg, #1e293b 0%, #0f172a 100%); width:46px; height:46px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid #ffffff; box-shadow:0 12px 28px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.15);">
+            <div style="transform:rotate(45deg); color:#ffffff; display:flex;">${icon('home', 20)}</div>
           </div>
+          <div style="width:12px; height:4px; background:rgba(15,23,42,0.35); border-radius:50%; margin-top:2px; filter:blur(1px);"></div>
         </div>`;
-      homeMarker = new maplibregl.Marker({ element: el, offset: [0, -22] })
+      homeMarker = new maplibregl.Marker({ element: el, offset: [0, -24] })
         .setLngLat([destPos.lng, destPos.lat])
         .addTo(liveMap);
     } else {
@@ -1730,12 +2016,13 @@ function updateMap(order) {
       const el = document.createElement('div');
       el.className = 'v5-marker-shadow';
       el.innerHTML = `
-        <div style="display:flex; flex-direction:column; align-items:center;">
-          <div style="background:#0284c7; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2.5px solid white; box-shadow:0 6px 15px rgba(2,132,199,0.5); font-size:18px;">
-            🏬
+        <div style="display:flex; flex-direction:column; align-items:center; position:relative;">
+          <div style="background:linear-gradient(135deg, #0284c7 0%, #0369a1 100%); width:44px; height:44px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; border:3px solid #ffffff; box-shadow:0 12px 28px rgba(2,132,199,0.35);">
+            <div style="transform:rotate(45deg); font-size:18px; display:flex;">🏬</div>
           </div>
+          <div style="width:12px; height:4px; background:rgba(2,132,199,0.35); border-radius:50%; margin-top:2px; filter:blur(1px);"></div>
         </div>`;
-      pickupMarker = new maplibregl.Marker({ element: el, offset: [0, -20] })
+      pickupMarker = new maplibregl.Marker({ element: el, offset: [0, -22] })
         .setLngLat([pickupPos.lng, pickupPos.lat])
         .addTo(liveMap);
     } else {
@@ -1743,8 +2030,19 @@ function updateMap(order) {
     }
   }
 
+  // Snap Rider Marker directly onto the route lineString if available
+  let effectiveRiderPos = riderPos;
+  let snappedBearing = null;
+  if (riderPos && currentRouteCoordinates && currentRouteCoordinates.length >= 2) {
+    const snap = snapPointToLineString(riderPos, currentRouteCoordinates, 350);
+    if (snap.isSnapped) {
+      effectiveRiderPos = snap.snappedPoint;
+      snappedBearing = snap.bearing;
+    }
+  }
+
   // Rider Marker
-  if (riderPos) {
+  if (effectiveRiderPos) {
     if (!riderMarker) {
       const el = document.createElement('div');
       el.className = 'v5-marker-shadow';
@@ -1759,19 +2057,26 @@ function updateMap(order) {
           </div>
         </div>`;
       riderMarker = new maplibregl.Marker({ element: el })
-        .setLngLat([riderPos.lng, riderPos.lat])
+        .setLngLat([effectiveRiderPos.lng, effectiveRiderPos.lat])
         .addTo(liveMap);
-      riderMarker.lastPos = riderPos;
-      riderMarker.angle = 0;
+      riderMarker.lastPos = effectiveRiderPos;
+      riderMarker.angle = snappedBearing !== null ? snappedBearing : 0;
+      if (snappedBearing !== null) {
+        const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
+        if (avatar) avatar.style.transform = `rotate(${snappedBearing}deg)`;
+      }
     } else {
-      if (riderMarker.lastPos && (riderMarker.lastPos.lat !== riderPos.lat || riderMarker.lastPos.lng !== riderPos.lng)) {
+      let bearing = snappedBearing;
+      if (bearing === null && riderMarker.lastPos && (riderMarker.lastPos.lat !== effectiveRiderPos.lat || riderMarker.lastPos.lng !== effectiveRiderPos.lng)) {
         const lat1 = riderMarker.lastPos.lat * Math.PI / 180;
-        const lat2 = riderPos.lat * Math.PI / 180;
-        const dLon = (riderPos.lng - riderMarker.lastPos.lng) * Math.PI / 180;
+        const lat2 = effectiveRiderPos.lat * Math.PI / 180;
+        const dLon = (effectiveRiderPos.lng - riderMarker.lastPos.lng) * Math.PI / 180;
         const y = Math.sin(dLon) * Math.cos(lat2);
         const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-        let bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+      }
 
+      if (bearing !== null) {
         let delta = bearing - (riderMarker.angle % 360);
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
@@ -1782,8 +2087,8 @@ function updateMap(order) {
           avatar.style.transform = `rotate(${riderMarker.angle}deg)`;
         }
       }
-      riderMarker.lastPos = riderPos;
-      riderMarker.setLngLat([riderPos.lng, riderPos.lat]);
+      riderMarker.lastPos = effectiveRiderPos;
+      animateRiderMarkerTo(effectiveRiderPos);
     }
   }
 
@@ -1848,6 +2153,7 @@ function getTripStepperLinePercent(order) {
 let lastRouteFetchTime = 0;
 let lastRouteStartCoords = null;
 let lastRouteEndCoords = null;
+let currentRouteCoordinates = null;
 
 function getHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
@@ -1862,6 +2168,51 @@ function getHaversineDistance(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c;
+}
+
+function snapPointToLineString(point, coordinates, maxThresholdMeters = 350) {
+  if (!coordinates || !Array.isArray(coordinates) || coordinates.length < 2) {
+    return { snappedPoint: point, bearing: 0, distance: 0, isSnapped: false };
+  }
+  let minDistance = Infinity;
+  let closestPoint = { lng: point.lng, lat: point.lat };
+  let closestSegmentBearing = 0;
+
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const p1 = { lng: coordinates[i][0], lat: coordinates[i][1] };
+    const p2 = { lng: coordinates[i + 1][0], lat: coordinates[i + 1][1] };
+
+    const dx = p2.lng - p1.lng;
+    const dy = p2.lat - p1.lat;
+    const lenSq = dx * dx + dy * dy;
+
+    let t = 0;
+    if (lenSq > 0) {
+      t = ((point.lng - p1.lng) * dx + (point.lat - p1.lat) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+    }
+
+    const projLng = p1.lng + t * dx;
+    const projLat = p1.lat + t * dy;
+    const dist = getHaversineDistance(point.lat, point.lng, projLat, projLng);
+
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestPoint = { lng: projLng, lat: projLat };
+      
+      const lat1 = p1.lat * Math.PI / 180;
+      const lat2 = p2.lat * Math.PI / 180;
+      const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+      const y = Math.sin(dLon) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      closestSegmentBearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+  }
+
+  if (minDistance <= maxThresholdMeters) {
+    return { snappedPoint: closestPoint, bearing: closestSegmentBearing, distance: minDistance, isSnapped: true };
+  }
+  return { snappedPoint: point, bearing: 0, distance: minDistance, isSnapped: false };
 }
 
 async function updateRoute(start, end) {
@@ -1906,6 +2257,7 @@ async function updateRoute(start, end) {
     const data = await res.json();
     if (data.routes?.[0] && liveMap) {
       let coords = data.routes[0].geometry.coordinates;
+      currentRouteCoordinates = coords;
       
       ensureTrackingRouteLayers();
       const src = liveMap.getSource('tracking-route-source');
@@ -1919,6 +2271,19 @@ async function updateRoute(start, end) {
         });
       }
 
+      // Snap rider marker immediately onto newly received route geometry
+      if (riderMarker && start) {
+        const snap = snapPointToLineString(start, coords, 350);
+        if (snap.isSnapped) {
+          riderMarker.setLngLat([snap.snappedPoint.lng, snap.snappedPoint.lat]);
+          riderMarker.lastPos = snap.snappedPoint;
+          const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
+          if (avatar && snap.bearing !== null) {
+            avatar.style.transform = `rotate(${snap.bearing}deg)`;
+          }
+        }
+      }
+
       const durationSec = data.routes[0].duration;
       const minutes = Math.ceil(durationSec / 60) + 1;
       currentETA = minutes;
@@ -1929,6 +2294,8 @@ async function updateRoute(start, end) {
     }
   } catch (err) { console.warn('Route/ETA error', err); }
 }
+
+const commercePrepTimeCache = new Map();
 
 /**
  * Calculates the full predictive ETA in minutes.
@@ -1948,92 +2315,100 @@ async function calculatePredictiveETA(order) {
   let pickupDelay = isFavor ? 3 : 5; // default pickup delay fallback
 
   if (order.comercioId && !isFavor) {
-    try {
-      const q = query(
-        collection(db, 'orders'),
-        where('comercioId', '==', order.comercioId)
-      );
-      const snap = await getDocs(q);
-      
-      const pastOrders = [];
-      snap.forEach(docSnap => {
-        const d = docSnap.data();
-        if (d.status && ['ready', 'delivering', 'completed'].includes(d.status) && d.confirmedAt && d.readyAt) {
-          pastOrders.push({
-            confirmedAt: d.confirmedAt.toDate ? d.confirmedAt.toDate() : new Date(d.confirmedAt),
-            readyAt: d.readyAt.toDate ? d.readyAt.toDate() : new Date(d.readyAt),
-            pickedUpAt: d.pickedUpAt || null,
-            items: d.items || [],
-            createdAt: d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt || 0)
-          });
-        }
-      });
-      
-      // Sort by creation date descending (recent first)
-      pastOrders.sort((a, b) => b.createdAt - a.createdAt);
-      
-      const validPrepDurations = [];
-      const similarPrepDurations = [];
-      const validPickupDelays = [];
-      const currentItemCount = (order.items || []).reduce((sum, i) => sum + (i.qty || 1), 0);
-      
-      pastOrders.forEach(p => {
-        const durationMin = (p.readyAt - p.confirmedAt) / 60000;
-        // Keep valid preparations between 1 and 120 minutes to filter out test/manual anomaly actions
-        if (durationMin >= 1 && durationMin <= 120) {
-          validPrepDurations.push(durationMin);
-          
-          const histItemCount = (p.items || []).reduce((sum, i) => sum + (i.qty || 1), 0);
-          if (Math.abs(histItemCount - currentItemCount) <= 1) {
-            similarPrepDurations.push(durationMin);
-          }
-        }
-
-        // Calculate actual pickup delay if timestamps are available
-        if (p.readyAt && p.pickedUpAt) {
-          const pickedUpTime = p.pickedUpAt.toDate ? p.pickedUpAt.toDate() : new Date(p.pickedUpAt);
-          const delayMin = (pickedUpTime - p.readyAt) / 60000;
-          if (delayMin >= 0 && delayMin <= 60) {
-            validPickupDelays.push(delayMin);
-          }
-        }
-      });
-      
-      // Select the best preparation time estimate based on sample size
-      if (similarPrepDurations.length >= 3) {
-        const sum = similarPrepDurations.reduce((acc, val) => acc + val, 0);
-        prepTime = Math.ceil(sum / similarPrepDurations.length);
-      } else if (validPrepDurations.length > 0) {
-        const recentSubset = validPrepDurations.slice(0, 10);
-        const sum = recentSubset.reduce((acc, val) => acc + val, 0);
-        const generalAvg = sum / recentSubset.length;
+    const cached = commercePrepTimeCache.get(order.comercioId);
+    if (cached && (Date.now() - cached.timestamp < 300000)) {
+      prepTime = cached.prepTime;
+      pickupDelay = cached.pickupDelay;
+    } else {
+      try {
+        const q = query(
+          collection(db, 'orders'),
+          where('comercioId', '==', order.comercioId),
+          limit(25)
+        );
+        const snap = await getDocs(q);
         
-        if (similarPrepDurations.length > 0) {
-          const simSum = similarPrepDurations.reduce((acc, val) => acc + val, 0);
-          const simAvg = simSum / similarPrepDurations.length;
-          const weight = similarPrepDurations.length === 2 ? 0.7 : 0.4;
-          prepTime = Math.ceil((simAvg * weight) + (generalAvg * (1 - weight)));
+        const pastOrders = [];
+        snap.forEach(docSnap => {
+          const d = docSnap.data();
+          if (d.status && ['ready', 'delivering', 'completed'].includes(d.status) && d.confirmedAt && d.readyAt) {
+            pastOrders.push({
+              confirmedAt: d.confirmedAt.toDate ? d.confirmedAt.toDate() : new Date(d.confirmedAt),
+              readyAt: d.readyAt.toDate ? d.readyAt.toDate() : new Date(d.readyAt),
+              pickedUpAt: d.pickedUpAt || null,
+              items: d.items || [],
+              createdAt: d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt || 0)
+            });
+          }
+        });
+        
+        // Sort by creation date descending (recent first)
+        pastOrders.sort((a, b) => b.createdAt - a.createdAt);
+        
+        const validPrepDurations = [];
+        const similarPrepDurations = [];
+        const validPickupDelays = [];
+        const currentItemCount = (order.items || []).reduce((sum, i) => sum + (i.qty || 1), 0);
+        
+        pastOrders.forEach(p => {
+          const durationMin = (p.readyAt - p.confirmedAt) / 60000;
+          // Keep valid preparations between 1 and 120 minutes to filter out test/manual anomaly actions
+          if (durationMin >= 1 && durationMin <= 120) {
+            validPrepDurations.push(durationMin);
+            
+            const histItemCount = (p.items || []).reduce((sum, i) => sum + (i.qty || 1), 0);
+            if (Math.abs(histItemCount - currentItemCount) <= 1) {
+              similarPrepDurations.push(durationMin);
+            }
+          }
+
+          // Calculate actual pickup delay if timestamps are available
+          if (p.readyAt && p.pickedUpAt) {
+            const pickedUpTime = p.pickedUpAt.toDate ? p.pickedUpAt.toDate() : new Date(p.pickedUpAt);
+            const delayMin = (pickedUpTime - p.readyAt) / 60000;
+            if (delayMin >= 0 && delayMin <= 60) {
+              validPickupDelays.push(delayMin);
+            }
+          }
+        });
+        
+        // Select the best preparation time estimate based on sample size
+        if (similarPrepDurations.length >= 3) {
+          const sum = similarPrepDurations.reduce((acc, val) => acc + val, 0);
+          prepTime = Math.ceil(sum / similarPrepDurations.length);
+        } else if (validPrepDurations.length > 0) {
+          const recentSubset = validPrepDurations.slice(0, 10);
+          const sum = recentSubset.reduce((acc, val) => acc + val, 0);
+          const generalAvg = sum / recentSubset.length;
+          
+          if (similarPrepDurations.length > 0) {
+            const simSum = similarPrepDurations.reduce((acc, val) => acc + val, 0);
+            const simAvg = simSum / similarPrepDurations.length;
+            const weight = similarPrepDurations.length === 2 ? 0.7 : 0.4;
+            prepTime = Math.ceil((simAvg * weight) + (generalAvg * (1 - weight)));
+          } else {
+            prepTime = Math.ceil(generalAvg);
+          }
         } else {
-          prepTime = Math.ceil(generalAvg);
+          prepTime = 15 + (currentItemCount * 2);
         }
-      } else {
+        
+        // Select the best rider pickup delay estimate
+        if (validPickupDelays.length > 0) {
+          const recentDelays = validPickupDelays.slice(0, 10);
+          const sum = recentDelays.reduce((acc, val) => acc + val, 0);
+          pickupDelay = Math.ceil(sum / recentDelays.length);
+        }
+        
+        // Impose reasonable constraints
+        prepTime = Math.max(5, Math.min(90, prepTime));
+        pickupDelay = Math.max(3, Math.min(20, pickupDelay));
+        commercePrepTimeCache.set(order.comercioId, { prepTime, pickupDelay, timestamp: Date.now() });
+      } catch (err) {
+        console.warn('[ETA] Error calculating dynamic prep/pickup times, using fallback:', err);
+        const currentItemCount = (order.items || []).reduce((sum, i) => sum + (i.qty || 1), 0);
         prepTime = 15 + (currentItemCount * 2);
       }
-      
-      // Select the best rider pickup delay estimate
-      if (validPickupDelays.length > 0) {
-        const recentDelays = validPickupDelays.slice(0, 10);
-        const sum = recentDelays.reduce((acc, val) => acc + val, 0);
-        pickupDelay = Math.ceil(sum / recentDelays.length);
-      }
-      
-      // Impose reasonable constraints
-      prepTime = Math.max(5, Math.min(90, prepTime));
-      pickupDelay = Math.max(3, Math.min(20, pickupDelay));
-    } catch (err) {
-      console.warn('[ETA] Error calculating dynamic prep/pickup times, using fallback:', err);
-      const currentItemCount = (order.items || []).reduce((sum, i) => sum + (i.qty || 1), 0);
-      prepTime = 15 + (currentItemCount * 2);
     }
   }
 
@@ -2162,10 +2537,24 @@ function getStepperLinePercent(status, isFavor = false, order = null) {
     }
     return val;
   } else {
-    // 5 steps -> 4 intervals (0%, 25%, 50%, 75%, 100%)
     const commerceLineMap = { 'pending': 0, 'confirmed': 25, 'preparing': 50, 'ready': 75, 'delivering': 100, 'completed': 100 };
     return commerceLineMap[status] ?? 0;
   }
+}
+
+function getTakeawayStepClass(status, index) {
+  // Takeaway steps: 0: Recibido, 1: Preparando, 2: Listo para retirar, 3: Entregado
+  const takeawayMap = { 'pending': 0, 'confirmed': 1, 'preparing': 1, 'ready': 2, 'delivering': 2, 'completed': 3 };
+  const curr = takeawayMap[status] ?? 0;
+  if (curr > index) return 'completed';
+  if (curr === index) return 'active';
+  return 'inactive';
+}
+
+function getTakeawayStepperLinePercent(status) {
+  // 4 steps -> 3 intervals (0%, 33.3%, 66.6%, 100%)
+  const takeawayLineMap = { 'pending': 0, 'confirmed': 33.3, 'preparing': 33.3, 'ready': 66.6, 'delivering': 66.6, 'completed': 100 };
+  return takeawayLineMap[status] ?? 0;
 }
 
 function getDarkStyles() {
@@ -2510,9 +2899,12 @@ window.openPriceBreakdownModal = function(order) {
   const tip = Number(o.tip || 0) || 0;
   const baseShippingFee = Math.max(0, rawShippingFee - rainSurcharge - tip);
   const serviceFee = Number(o.appUsageFee || o.serviceFee || o.platformFee || 0) || 0;
-  const discount = Number(o.discount || o.discountAmount || o.couponDiscount || 0) || 0;
+  const couponDiscount = Number(o.couponDiscount || 0);
+  const pointsDiscount = Number(o.discountAmount || 0);
+  const genericDiscount = (!couponDiscount && !pointsDiscount) ? Number(o.discount || 0) : 0;
+  const totalDiscount = couponDiscount + pointsDiscount + genericDiscount;
 
-  const calculatedTotal = itemsCost + baseShippingFee + purchaseFee + extraStopsFee + rainSurcharge + serviceFee + tip - discount;
+  const calculatedTotal = itemsCost + baseShippingFee + purchaseFee + extraStopsFee + rainSurcharge + serviceFee + tip - totalDiscount;
   const totalVal = (o.totalAmount || o.total) ? Number(o.totalAmount || o.total) : calculatedTotal;
   
   const container = document.getElementById('price-breakdown-modal-container');
@@ -2590,10 +2982,24 @@ window.openPriceBreakdownModal = function(order) {
           </div>
         ` : ''}
 
-        ${discount > 0 ? `
+        ${couponDiscount > 0 ? `
           <div style="display:flex; justify-content:space-between; color:#10b981;">
-            <span>Descuento / Cupón:</span>
-            <span style="font-weight:900;">-$${Math.round(discount).toLocaleString('es-AR')}</span>
+            <span>Cupón de Descuento ${o.couponCode ? `(${o.couponCode})` : ''}:</span>
+            <span style="font-weight:900;">-$${Math.round(couponDiscount).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+
+        ${pointsDiscount > 0 ? `
+          <div style="display:flex; justify-content:space-between; color:#10b981;">
+            <span>Descuento GoPoints:</span>
+            <span style="font-weight:900;">-$${Math.round(pointsDiscount).toLocaleString('es-AR')}</span>
+          </div>
+        ` : ''}
+
+        ${genericDiscount > 0 ? `
+          <div style="display:flex; justify-content:space-between; color:#10b981;">
+            <span>Descuento aplicado:</span>
+            <span style="font-weight:900;">-$${Math.round(genericDiscount).toLocaleString('es-AR')}</span>
           </div>
         ` : ''}
 

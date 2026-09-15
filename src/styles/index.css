@@ -16,6 +16,8 @@ html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior-y: contain;
 }
 
 body {
@@ -29,11 +31,16 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+  overscroll-behavior-y: contain;
 }
 
 a {
   text-decoration: none;
   color: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 ul,
@@ -45,15 +52,30 @@ img {
   max-width: 100%;
   height: auto;
   display: block;
+  content-visibility: auto;
 }
 
-button {
+button,
+[role="button"],
+.btn,
+.nav-item,
+.tab-pill,
+.category-card-small,
+.comercio-card,
+.card-product,
+.quick-card,
+.action-btn,
+.chip {
   cursor: pointer;
   border: none;
   background: none;
   font-family: inherit;
   font-size: inherit;
   color: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 input,
@@ -64,6 +86,42 @@ select {
   border: none;
   outline: none;
   background: none;
+  touch-action: manipulation;
+}
+
+/* ── Hardware Acceleration & 60-120 FPS Promotion ── */
+.slide-panel,
+.slide-overlay,
+.modal-container,
+.modal-container-v2,
+.bottom-sheet,
+.bottom-sheet-content,
+.active-order-banner,
+.toast,
+.main-slider {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Long-list Containment Optimization (Huge FPS boost in scroll) ── */
+.content-auto,
+.comercio-card,
+.product-card,
+.product-row,
+.order-card,
+.history-item,
+.category-card-small,
+.notification-item,
+.notification-card,
+.marketplace-product-card,
+.marketplace-card,
+.chat-conversation-item,
+.offer-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 /* --- Design Tokens --- */

@@ -8,9 +8,9 @@
     "dev:testing": "vite --mode testing",
     "build": "node ./node_modules/vite/bin/vite.js build && node post-build.js",
     "build:testing": "node ./node_modules/vite/bin/vite.js build --mode testing && node post-build.js",
-    "preview": "vite preview",
-    "deploy": "firebase deploy",
-    "deploy:testing": "firebase deploy --project testing"
+    "deploy": "npm run build && firebase deploy --only hosting:app",
+    "deploy:all": "npm run build && firebase deploy",
+    "deploy:testing": "npm run build:testing && firebase deploy --project testing"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
@@ -29,7 +29,7 @@
     "@capacitor/splash-screen": "^8.0.1",
     "@capawesome/capacitor-app-update": "^8.0.3",
     "@capawesome/capacitor-apple-sign-in": "^0.1.2",
-    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@capawesome/capacitor-google-sign-in": "^0.1.4",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "firebase": "^12.12.1",
     "jimp": "^1.6.1",

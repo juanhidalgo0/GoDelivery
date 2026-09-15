@@ -6,7 +6,7 @@ const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
 
-setGlobalOptions({ maxInstances: 1, memory: "256Mi", region: "us-central1" });
+setGlobalOptions({ maxInstances: 20, memory: "512Mi", region: "us-central1" });
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -325,14 +325,14 @@ async function getUserTokens(userId) {
     const tokensSnap = await db.collection("users").doc(userId).collection("fcmTokens").get();
     let tokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
 
-    if (tokens.length === 0) {
-      const userSnap = await db.collection("users").doc(userId).get();
-      if (userSnap.exists && userSnap.data().lastFcmToken) {
-        tokens.push(userSnap.data().lastFcmToken);
-      }
+    const userSnap = await db.collection("users").doc(userId).get();
+    if (userSnap.exists) {
+      const uData = userSnap.data();
+      if (uData.lastFcmToken) tokens.push(uData.lastFcmToken);
+      if (Array.isArray(uData.fcmTokens)) tokens = tokens.concat(uData.fcmTokens);
     }
 
-    return [...new Set(tokens)].slice(-10);
+    return [...new Set(tokens)].filter(Boolean).slice(-10);
   } catch (err) {
     logger.warn(`Error getting tokens for user ${userId}:`, err);
     return [];
@@ -342,7 +342,51 @@ async function getUserTokens(userId) {
 /**
  * Helper: Send push notification to a list of tokens
  */
-async function sendPush(tokens, notification, data = {}) {
+// FCM requires every value in the `data` payload to be a plain string —
+// a stray number/boolean/object from any caller silently kills the ENTIRE
+// multicast send (not just that field), so every push type stops working
+// until this is coerced defensively here.
+function sanitizeFcmData(obj) {
+  const out = {};
+  for (const [key, value] of Object.entries(obj || {})) {
+    if (value === null || value === undefined) continue;
+    out[key] = typeof value === 'string' ? value : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+  }
+  return out;
+}
+
+// Error codes that mean the token is permanently dead — safe to delete.
+const DEAD_TOKEN_ERROR_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+  'messaging/invalid-argument'
+]);
+
+// Removes a dead FCM token from Firestore so future sends stop wasting
+// quota/time retrying it. Only called when we know which user owns the
+// token (single-recipient sends) — safe no-op path otherwise.
+async function pruneDeadToken(ownerUid, token) {
+  if (!ownerUid || !token) return;
+  try {
+    await db.collection("users").doc(ownerUid).collection("fcmTokens").doc(token).delete();
+    const userRef = db.collection("users").doc(ownerUid);
+    const userSnap = await userRef.get();
+    if (userSnap.exists) {
+      const uData = userSnap.data();
+      const updates = {};
+      if (uData.lastFcmToken === token) updates.lastFcmToken = admin.firestore.FieldValue.delete();
+      if (Array.isArray(uData.fcmTokens) && uData.fcmTokens.includes(token)) {
+        updates.fcmTokens = admin.firestore.FieldValue.arrayRemove(token);
+      }
+      if (Object.keys(updates).length > 0) await userRef.update(updates);
+    }
+    logger.info(`[sendPush] Pruned dead token for user ${ownerUid}`);
+  } catch (err) {
+    logger.warn(`[sendPush] Failed to prune dead token for user ${ownerUid}:`, err);
+  }
+}
+
+async function sendPush(tokens, notification, data = {}, ownerUid = null) {
   if (!tokens || tokens.length === 0) return;
 
   // Split tokens into chunks of 500 (FCM sendEachForMulticast limit)
@@ -374,7 +418,7 @@ async function sendPush(tokens, notification, data = {}) {
         body: displayBody,
         image: notification.image || ""
       },
-      data: {
+      data: sanitizeFcmData({
         ...data,
         title: displayTitle,
         body: displayBody,
@@ -382,7 +426,7 @@ async function sendPush(tokens, notification, data = {}) {
         badge: "/badge-icon.png",
         image: notification.image || "",
         url: targetUrl
-      },
+      }),
       android: {
         priority: "high",
         ttl: 3600000,
@@ -400,7 +444,8 @@ async function sendPush(tokens, notification, data = {}) {
       apns: {
         headers: {
           "apns-priority": "10",
-          "apns-push-type": "alert"
+          "apns-push-type": "alert",
+          "apns-topic": "com.godelivery.magdalena"
         },
         payload: {
           aps: {
@@ -409,8 +454,11 @@ async function sendPush(tokens, notification, data = {}) {
               body: displayBody
             },
             sound: "default",
-            badge: 1
-          }
+            badge: 1,
+            "content-available": 1
+          },
+          url: targetUrl,
+          ...data
         }
       },
       webpush: {
@@ -418,7 +466,7 @@ async function sendPush(tokens, notification, data = {}) {
           Urgency: "high"
         },
         notification: {
-          title: "Go Delivery",
+          title: displayTitle,
           body: displayBody,
           icon: "https://godelivery-magdalena.web.app/logo-pwa.png",
           badge: "https://godelivery-magdalena.web.app/badge-icon.png",
@@ -452,6 +500,16 @@ async function sendPush(tokens, notification, data = {}) {
       totalSuccess += response.successCount;
       totalFailure += response.failureCount;
       logger.info(`[sendPush] Multicast result: ${response.successCount} success, ${response.failureCount} failed for target ${displayTitle}`);
+
+      response.responses.forEach((r, i) => {
+        if (!r.success) {
+          const token = chunk[i];
+          logger.warn(`[sendPush] Token failed (${token.slice(0, 12)}...): ${r.error?.code} - ${r.error?.message}`);
+          if (ownerUid && DEAD_TOKEN_ERROR_CODES.has(r.error?.code)) {
+            pruneDeadToken(ownerUid, token);
+          }
+        }
+      });
     } catch (err) {
       logger.error("Error sending chunk of push notifications:", err);
     }
@@ -484,35 +542,48 @@ async function getOnlineDeliveryTokens() {
 }
 
 /**
+ * Helper: Get all admin and support user documents
+ */
+async function getAllAdminDocs() {
+  try {
+    const [byRoleAdmin, byFlagAdmin, byRoleSuper, byRoleSupport, byFlagSupport] = await Promise.all([
+      db.collection("users").where("role", "==", "admin").get(),
+      db.collection("users").where("isAdmin", "==", true).get(),
+      db.collection("users").where("role", "==", "superadmin").get(),
+      db.collection("users").where("role", "==", "soporte").get(),
+      db.collection("users").where("isSupport", "==", true).get()
+    ]);
+    const seenIds = new Set();
+    const allDocs = [];
+    for (const snap of [byRoleAdmin, byFlagAdmin, byRoleSuper, byRoleSupport, byFlagSupport]) {
+      for (const d of snap.docs) {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          allDocs.push(d);
+        }
+      }
+    }
+    return allDocs;
+  } catch (err) {
+    logger.error("Error getting all admin docs:", err);
+    return [];
+  }
+}
+
+/**
  * Helper: Get all admin tokens
  */
 async function getAdminTokens() {
   try {
-    // Query both role:'admin' AND isAdmin:true to cover all admin variants
-    const [byRoleSnap, byFlagSnap] = await Promise.all([
-      db.collection("users").where("role", "==", "admin").get(),
-      db.collection("users").where("isAdmin", "==", true).get()
-    ]);
-    const seenIds = new Set();
-    const allAdminDocs = [];
-    for (const snap of [byRoleSnap, byFlagSnap]) {
-      for (const d of snap.docs) {
-        if (!seenIds.has(d.id)) {
-          seenIds.add(d.id);
-          allAdminDocs.push(d);
-        }
-      }
-    }
+    const allAdminDocs = await getAllAdminDocs();
     let tokens = [];
     for (const doc of allAdminDocs) {
       const userTokens = await getUserTokens(doc.id);
       tokens = tokens.concat(userTokens);
-      // Fallback: If fcmTokens subcollection is empty, check root document mirrored token
-      if (userTokens.length === 0) {
-        const uData = doc.data();
-        if (uData && uData.lastFcmToken) {
-          tokens.push(uData.lastFcmToken);
-        }
+      const uData = doc.data();
+      if (uData) {
+        if (uData.lastFcmToken) tokens.push(uData.lastFcmToken);
+        if (Array.isArray(uData.fcmTokens)) tokens = tokens.concat(uData.fcmTokens);
       }
     }
     return [...new Set(tokens)].filter(Boolean);
@@ -531,6 +602,12 @@ async function serverSideDispatch(orderId, order) {
   try {
     // Auto-cancellation disabled completely per user directive.
     // Orders must ONLY be cancelled manually.
+
+    // Guard: Takeaway orders should NEVER be dispatched to delivery drivers
+    if (order.deliveryType === 'takeaway' || order.deliveryType === 'retiro') {
+      logger.info(`[ServerDispatch] Order ${orderId} is Takeaway / Retiro en el local. Skipping driver dispatch.`);
+      return;
+    }
 
     // Guard: Regular commerce orders must ONLY be dispatched when they are 'ready'
     if (!order.isFavor && !order.isTrip && order.status !== 'ready') {
@@ -776,7 +853,7 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
   try {
     // 0. Notify ALL admins of ANY new order
     try {
-      const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+      const allAdminDocs = await getAllAdminDocs();
       let orderTypeLabel = 'Pedido general';
       if (order.isFavor) {
         const favorTypes = {
@@ -792,24 +869,7 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
         orderTypeLabel = `Compra en ${order.comercioName || 'Tienda'} 🏪`;
       }
 
-      const targetDriverUid = order.queueTargetDriverId || order.driverId;
-      let adminTokens = await getAdminTokens();
-      if (targetDriverUid) {
-        try {
-          const driverDoc = await db.collection("users").doc(targetDriverUid).get();
-          if (driverDoc.exists) {
-            const dData = driverDoc.data();
-            const driverTokens = [
-              ...(Array.isArray(dData.fcmTokens) ? dData.fcmTokens : []),
-              dData.lastFcmToken
-            ].filter(Boolean);
-            const driverTokenSet = new Set(driverTokens);
-            adminTokens = adminTokens.filter(t => !driverTokenSet.has(t));
-          }
-        } catch (e) {
-          logger.warn("Could not filter target driver tokens from admin alert:", e);
-        }
-      }
+      const adminTokens = await getAdminTokens();
 
       if (adminTokens.length > 0) {
         await sendPush(adminTokens, {
@@ -824,7 +884,7 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
         });
       }
 
-      for (const adminDoc of adminsSnap.docs) {
+      for (const adminDoc of allAdminDocs) {
         await db.collection("users").doc(adminDoc.id).collection("notifications").add({
           title: `🚨 [SOPORTE] Nuevo Pedido #${orderNum}`,
           body: `Se ha registrado una nueva orden de tipo: ${orderTypeLabel}`,
@@ -875,6 +935,25 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
         }
       }
+    }
+
+    // 3. Denormalize per-product sales count so the home "más pedidos" section
+    //    can read a single sorted query instead of one query per product.
+    if (Array.isArray(order.items) && order.items.length > 0 && order.comercioId) {
+      const results = await Promise.allSettled(
+        order.items
+          .filter(item => item.productId)
+          .map(item =>
+            db.collection("comercios").doc(order.comercioId)
+              .collection("products").doc(item.productId)
+              .update({ salesCount: admin.firestore.FieldValue.increment(item.qty || 1) })
+          )
+      );
+      results.forEach((r, idx) => {
+        if (r.status === "rejected") {
+          logger.error(`Error incrementing salesCount for item ${idx} in order ${orderId}:`, r.reason);
+        }
+      });
     }
   } catch (err) {
     logger.error("Error in onOrderCreated:", err);
@@ -1146,7 +1225,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             sound: "cash.mp3",
             channelId: "auto_accept_alerts",
             click_action: 'FLUTTER_NOTIFICATION_CLICK'
-          });
+          }, driverId);
 
           // Create notification document in Firestore for the driver
           await db.collection("users").doc(driverId).collection("notifications").add({
@@ -1183,7 +1262,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                 sound: "cash.mp3",
                 channelId: "exclusive_offers",
                 click_action: 'FLUTTER_NOTIFICATION_CLICK'
-              });
+              }, driverId);
               logger.info(`[onOrderUpdated] Sent FCM exclusive offer push to driver ${driverId}`);
             }
 
@@ -1841,26 +1920,30 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
   }
 
   const uid = decodedToken.uid;
-  const { cart, address, addressNotes, deliveryCoords, paymentMethod, redeemedPoints, totalDelivery, bundleId, tip, couponCode, allowReplacement, isScheduled, scheduledDate, scheduledTime } = req.body;
+  const { cart, address, addressNotes, deliveryCoords, paymentMethod, redeemedPoints, totalDelivery, bundleId, tip, couponCode, allowReplacement, isScheduled, scheduledDate, scheduledTime, deliveryType, source, isDirectOrder, guestName, guestPhone } = req.body;
 
   if (!cart || !Array.isArray(cart) || cart.length === 0) {
     return res.status(400).json({ error: "El carrito está vacío" });
   }
 
+  const isTakeaway = deliveryType === 'takeaway' || deliveryType === 'retiro';
+
   try {
-    // Verify online delivery drivers availability
-    const onlineDriversSnap = await db.collection("users")
-      .where("isOnline", "==", true)
-      .get();
+    // Verify online delivery drivers availability (only required for home delivery)
+    if (!isTakeaway) {
+      const onlineDriversSnap = await db.collection("users")
+        .where("isOnline", "==", true)
+        .get();
 
-    const hasOnlineDriver = onlineDriversSnap.docs.some(doc => {
-      const d = doc.data();
-      const role = (d.role || "").toLowerCase();
-      return d.isDelivery === true || d.isDelivery === "true" || ["delivery", "driver", "repartidor", "chofer"].includes(role);
-    });
+      const hasOnlineDriver = onlineDriversSnap.docs.some(doc => {
+        const d = doc.data();
+        const role = (d.role || "").toLowerCase();
+        return d.isDelivery === true || d.isDelivery === "true" || ["delivery", "driver", "repartidor", "chofer"].includes(role);
+      });
 
-    if (!hasOnlineDriver) {
-      return res.status(400).json({ error: "No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona." });
+      if (!hasOnlineDriver) {
+        return res.status(400).json({ error: "No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona." });
+      }
     }
 
     // Fetch active offers for the cart's commerce IDs (done before transaction to prevent Firestore errors)
@@ -2083,22 +2166,30 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
       }
 
       let calculatedDeliveryFee = 0;
-      if (individualFees.length > 0) {
-        const maxIndividualFee = Math.max(...individualFees);
-        calculatedDeliveryFee = maxIndividualFee + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
-      } else {
-        calculatedDeliveryFee = minPriceVal + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
-      }
-      const activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, calculatedDeliveryFee);
-      const activeDriverIncentive = calculateScheduleSurcharge(globalSettings.driverIncentiveConfig, calculatedDeliveryFee);
+      let activeNightSurcharge = 0;
+      let activeDriverIncentive = 0;
+      let driverTip = 0;
+      let totalCalculatedDelivery = 0;
+      let finalDeliveryCost = 0;
 
-      const driverTip = Number(tip || 0);
-      const totalCalculatedDelivery = calculatedDeliveryFee + driverTip + activeNightSurcharge;
+      if (!isTakeaway) {
+        if (individualFees.length > 0) {
+          const maxIndividualFee = Math.max(...individualFees);
+          calculatedDeliveryFee = maxIndividualFee + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
+        } else {
+          calculatedDeliveryFee = minPriceVal + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
+        }
+        activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, calculatedDeliveryFee);
+        activeDriverIncentive = calculateScheduleSurcharge(globalSettings.driverIncentiveConfig, calculatedDeliveryFee);
 
-      let finalDeliveryCost = Number(totalDelivery || 0);
-      if (finalDeliveryCost < 0.9 * totalCalculatedDelivery) {
-        logger.warn(`Shipping fee tampering detected! Client sent totalDelivery: ${finalDeliveryCost}, calculated: ${totalCalculatedDelivery}. Overwriting.`);
-        finalDeliveryCost = totalCalculatedDelivery;
+        driverTip = Number(tip || 0);
+        totalCalculatedDelivery = calculatedDeliveryFee + driverTip + activeNightSurcharge;
+
+        finalDeliveryCost = Number(totalDelivery || 0);
+        if (finalDeliveryCost < 0.9 * totalCalculatedDelivery) {
+          logger.warn(`Shipping fee tampering detected! Client sent totalDelivery: ${finalDeliveryCost}, calculated: ${totalCalculatedDelivery}. Overwriting.`);
+          finalDeliveryCost = totalCalculatedDelivery;
+        }
       }
       // --------------------------------------
 
@@ -2245,10 +2336,12 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
             return {
               comercioId: cId,
               comercioName: g.comercioName,
+              productId: pSnap.id,
               name: pData.name,
               price: finalUnitPrice,
               qty: item.qty,
-              options: item.options || []
+              options: item.options || [],
+              notes: item.notes || ''
             };
           }),
           subtotal: subProductsTotal,
@@ -2266,6 +2359,11 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
           couponAbsorbedBy: couponData ? (couponData.absorbedBy || 'platform') : null,
           total: subTotal,
           commissionAmount: subCommission,
+          deliveryType: isTakeaway ? 'takeaway' : 'delivery',
+          source: source || (isDirectOrder ? 'catalogo_whatsapp' : 'app'),
+          isDirectOrder: isDirectOrder === true || source === 'catalogo_whatsapp' || source === 'direct_store',
+          guestName: guestName || null,
+          guestPhone: guestPhone || null,
           status: 'pending',
           paymentMethod,
           paymentStatus: 'pending',
@@ -2274,6 +2372,19 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
 
         transaction.set(orderRef, orderData);
         createdOrders.push({ docId: orderRef.id, orderId: lastId, commerceId: cId, total: subTotal });
+
+        // Update direct catalog stats on commerce document
+        if (orderData.isDirectOrder) {
+          try {
+            const commerceDocRef = db.collection("comercios").doc(cId);
+            transaction.update(commerceDocRef, {
+              directOrdersCount: admin.firestore.FieldValue.increment(1),
+              directSalesTotal: admin.firestore.FieldValue.increment(subTotal)
+            });
+          } catch (statErr) {
+            logger.warn("Could not increment direct stats for commerce:", statErr);
+          }
+        }
 
         // Combination tracking updates
         const itemProductIds = g.items.map(item => item.product.id);
@@ -2545,9 +2656,12 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
         if (secureCouponDiscount > subtotalVal) secureCouponDiscount = subtotalVal;
       }
 
-      const finalCouponDiscount = Number(couponDiscount || 0);
+      let finalCouponDiscount = Number(couponDiscount || 0);
       if (couponData && Math.abs(finalCouponDiscount - secureCouponDiscount) > 10) {
         logger.warn(`GoFavor Coupon discount tampering detected! Client: ${finalCouponDiscount}, calculated: ${secureCouponDiscount}. Overwriting.`);
+        finalCouponDiscount = secureCouponDiscount;
+      } else if (!couponData) {
+        finalCouponDiscount = 0;
       }
 
       const rawTotal = subtotalVal + finalAppUsageFee + Number(extraStopsFee || 0) + Number(tip || 0) - finalCouponDiscount;
@@ -3599,65 +3713,100 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
  * Trigger: Support chat written → Notify Admins of new tickets and bug reports
  */
 exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async (event) => {
-  const data = event.data.after.data();
+  const data = event.data.after ? event.data.after.data() : null;
   const previousData = event.data.before ? event.data.before.data() : null;
 
   if (!data) return;
 
-  const ticketId = data.ticketId;
-  const userName = data.userName || "Usuario";
-  const lastMessageText = data.lastMessageText || "";
+  const ticketId = data.ticketId || data.orderId || event.params.userId;
+  const userName = data.userName || data.clientName || "Usuario";
+  const lastMessageText = data.lastMessageText || (data.messages && data.messages.length > 0 ? (data.messages[data.messages.length - 1].text || "Mensaje") : "Mensaje");
   const unreadByAdmin = data.unreadByAdmin === true;
   const unreadByUser = data.unreadByUser === true;
 
-  // 1. Notify Admin on new message from user
-  const isNewlyUnread = unreadByAdmin && (!previousData || previousData.unreadByAdmin !== true);
+  const prevMsgCount = (previousData && Array.isArray(previousData.messages)) ? previousData.messages.length : 0;
+  const currMsgCount = (Array.isArray(data.messages)) ? data.messages.length : 0;
+  const lastMsg = (Array.isArray(data.messages) && data.messages.length > 0) ? data.messages[data.messages.length - 1] : null;
+  const lastMsgIsFromUser = !lastMsg || (lastMsg.sender !== "admin" && lastMsg.sender !== "support" && lastMsg.sender !== "system");
 
-  if (isNewlyUnread && ticketId) {
+  // 1. Notify Admin on new message from user/client
+  const isNewlyUnread = (unreadByAdmin && (!previousData || previousData.unreadByAdmin !== true)) ||
+                        (unreadByAdmin && currMsgCount > prevMsgCount && lastMsgIsFromUser);
+
+  if (isNewlyUnread) {
     try {
+      const adminDocs = await getAllAdminDocs();
       const adminTokens = await getAdminTokens();
+      
+      const title = `Soporte: Mensaje de ${userName}`;
+      const body = lastMessageText.length > 120 ? lastMessageText.substring(0, 117) + "..." : lastMessageText;
+      const url = `/#/admin/support-chats?userId=${event.params.userId}`;
+
+      // Push notifications to admin devices
       if (adminTokens.length > 0) {
-        logger.info(`Sending new support ticket push notification for ${ticketId} to ${adminTokens.length} admins.`);
-        
-        let title = `Soporte: Nuevo Ticket ${ticketId}`;
-await sendPush(adminTokens, {
+        logger.info(`Sending support ticket push notification to ${adminTokens.length} admins.`);
+        await sendPush(adminTokens, {
           title: title,
-          body: `${userName}: ${lastMessageText}`
+          body: body
         }, {
-          url: `/#/admin/support-chats?userId=${event.params.userId}`, // Redirect admin to their support chats page
+          url: url,
           type: "new_support_ticket",
-          ticketId: ticketId
+          ticketId: String(ticketId || "")
         });
       }
+
+      // In-app notifications for all admins
+      const notifPromises = adminDocs.map(adminDoc => {
+        return db.collection("users").doc(adminDoc.id).collection("notifications").add({
+          title: title,
+          body: body,
+          type: "support_message",
+          url: url,
+          ticketId: String(ticketId || ""),
+          userId: event.params.userId,
+          status: "unread",
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        }).catch(e => logger.warn(`Could not add in-app notif for admin ${adminDoc.id}:`, e));
+      });
+      await Promise.all(notifPromises);
     } catch (err) {
-      logger.error(`Error sending push for support chat of user ${event.params.userId}:`, err);
+      logger.error(`Error sending push/in-app notif for support chat of user ${event.params.userId}:`, err);
     }
   }
 
   // 2. Notify User on response from admin
-  const isNewlyUnreadByUser = unreadByUser && (!previousData || previousData.unreadByUser !== true);
+  const isNewlyUnreadByUser = (unreadByUser && (!previousData || previousData.unreadByUser !== true)) ||
+                              (unreadByUser && currMsgCount > prevMsgCount && !lastMsgIsFromUser);
 
   if (isNewlyUnreadByUser) {
     try {
-      const targetTokens = [];
       const targetUserId = data.userId || event.params.userId;
-      const tSnap = await db.collection("users").doc(targetUserId).collection("fcmTokens").get();
-      tSnap.docs.forEach(d => {
-        if (d.data().token) {
-          targetTokens.push(d.data().token);
-        }
-      });
+      const targetTokens = await getUserTokens(targetUserId);
+
+      const title = "Soporte Técnico GO! Delivery";
+      const body = lastMessageText || "Tienes una nueva respuesta del administrador.";
+      const url = "/#/mis-chats";
 
       if (targetTokens.length > 0) {
-        logger.info(`Sending support chat response push notification to user ${event.params.userId}.`);
+        logger.info(`Sending support chat response push notification to user ${targetUserId}.`);
         await sendPush(targetTokens, {
-          title: "Soporte Técnico GO! Delivery",
-          body: lastMessageText || "Tienes un nuevo mensaje del administrador."
+          title: title,
+          body: body
         }, {
-          url: "/#/mis-chats", // Redirect user to their support chats page
+          url: url,
           type: "support_message"
         });
       }
+
+      // In-app notification for the user
+      await db.collection("users").doc(targetUserId).collection("notifications").add({
+        title: title,
+        body: body,
+        type: "support_message",
+        url: url,
+        status: "unread",
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      }).catch(e => logger.warn(`Could not add in-app notif for user ${targetUserId}:`, e));
     } catch (err) {
       logger.error(`Error sending push response to user ${event.params.userId}:`, err);
     }
@@ -3835,5 +3984,99 @@ exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event)
     logger.error("[DriverDisconnect] Error:", err);
     return null;
   }
+});
+
+// ═══════════════════════════════════════════════════
+// MANGO POS — SAAS BILLING (accounts + subscriptions)
+// Fully isolated from the GoDelivery functions above: its own Firestore
+// collection (ventra_accounts) and its own Mercado Pago secret, so nothing
+// here can ever touch GoDelivery's real payment processing.
+// ═══════════════════════════════════════════════════
+const { defineSecret } = require("firebase-functions/params");
+const { PreApproval } = require("mercadopago");
+const VENTRA_MP_ACCESS_TOKEN = defineSecret("VENTRA_MP_ACCESS_TOKEN");
+
+const VENTRA_PLANS = {
+  caja: { name: "Mango Caja", amount: 14900 },
+  full: { name: "Mango Full", amount: 24900 },
+  tienda: { name: "Mango Tienda", amount: 9900 },
+};
+
+// Called from the landing page once the user is signed in with Google and
+// picks a plan. Creates (or updates) their account doc and a Mercado Pago
+// recurring subscription (PreApproval), returning the checkout URL to
+// redirect the browser to.
+exports.createVentraSubscription = onRequest({ cors: true, secrets: [VENTRA_MP_ACCESS_TOKEN] }, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  const { uid, email, plan } = req.body || {};
+  const planInfo = VENTRA_PLANS[plan];
+  if (!uid || !email || !planInfo) {
+    return res.status(400).json({ error: "Faltan datos (uid, email, plan válido)" });
+  }
+
+  try {
+    const client = new MercadoPagoConfig({ accessToken: VENTRA_MP_ACCESS_TOKEN.value() });
+    const preapproval = new PreApproval(client);
+    const response = await preapproval.create({
+      body: {
+        reason: `Suscripción ${planInfo.name} — Mango POS`,
+        external_reference: uid,
+        payer_email: email,
+        back_url: "https://mangoapp.online/cuenta.html",
+        auto_recurring: {
+          frequency: 1,
+          frequency_type: "months",
+          transaction_amount: planInfo.amount,
+          currency_id: "ARS",
+        },
+        status: "pending",
+      },
+    });
+
+    await db.collection("ventra_accounts").doc(uid).set({
+      email,
+      plan,
+      planName: planInfo.name,
+      status: "pending_payment",
+      mpPreapprovalId: response.id,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.status(200).json({ initPoint: response.init_point });
+  } catch (err) {
+    logger.error("Mango: error creating subscription:", err);
+    res.status(500).json({ error: "No se pudo iniciar la suscripción" });
+  }
+});
+
+// Mercado Pago calls this whenever a Mango subscription's status changes
+// (authorized, paused, cancelled...). We look up the real status via the API
+// (never trust the webhook payload directly) and mirror it onto the account.
+exports.ventraMercadopagoWebhook = onRequest({ secrets: [VENTRA_MP_ACCESS_TOKEN] }, async (req, res) => {
+  const { query, body } = req;
+  const type = query.type || (body && body.type);
+  const preapprovalId = query["data.id"] || (body && body.data && body.data.id);
+
+  if (type === "subscription_preapproval" && preapprovalId) {
+    try {
+      const client = new MercadoPagoConfig({ accessToken: VENTRA_MP_ACCESS_TOKEN.value() });
+      const preapproval = new PreApproval(client);
+      const sub = await preapproval.get({ id: preapprovalId });
+
+      const uid = sub.external_reference;
+      if (uid) {
+        await db.collection("ventra_accounts").doc(uid).set({
+          status: sub.status === "authorized" ? "active" : sub.status,
+          mpPreapprovalId: preapprovalId,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        logger.info(`Mango: account ${uid} subscription status -> ${sub.status}`);
+      }
+    } catch (err) {
+      logger.error("Mango: webhook processing error:", err);
+    }
+  }
+
+  res.status(200).send("OK");
 });
 

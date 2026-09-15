@@ -255,22 +255,22 @@ async function handleLocationUpdate(pos) {
   
   const isMoving = speedKmh > 2.5 || distMoved > 5.0;
 
-  // Dynamic interval based on movement and trip urgency
+  // Dynamic interval based on movement and trip urgency (Battery & Network Saver)
   let timeThreshold = 3500; // 3.5s while in active transit
   let distanceThreshold = 4.0; // 4 meters
 
   if (!hasActiveTrips) {
     // Idle driver waiting for orders: aggressive battery saving
-    timeThreshold = isMoving ? 8000 : 25000; // 8s if cruising, 25s if parked
-    distanceThreshold = 12.0;
+    timeThreshold = isMoving ? 10000 : 35000; // 10s if cruising, 35s if parked
+    distanceThreshold = 15.0;
   } else if (!isMoving) {
-    // Stopped at traffic light or waiting inside restaurant
-    timeThreshold = 16000; // 16s heartbeat while stationary
-    distanceThreshold = 4.0;
+    // Stopped at traffic light or waiting inside restaurant for pickup
+    timeThreshold = 30000; // 30s heartbeat while stationary (saves ~50% battery)
+    distanceThreshold = 5.0;
   } else if (minDist > 3000) {
-    // Cruising far from target
-    timeThreshold = 4500;
-    distanceThreshold = 7.0;
+    // Cruising far from target (>3km)
+    timeThreshold = 5000;
+    distanceThreshold = 8.0;
   }
 
   let shouldUpdate = false;
@@ -281,10 +281,10 @@ async function handleLocationUpdate(pos) {
   } else {
     if (distMoved >= distanceThreshold && timeElapsed >= timeThreshold) {
       shouldUpdate = true;
-    } else if (distMoved >= 20.0) {
+    } else if (distMoved >= 25.0) {
       // Significant position change
       shouldUpdate = true;
-    } else if (timeElapsed >= (hasActiveTrips ? 18000 : 35000)) {
+    } else if (timeElapsed >= (hasActiveTrips ? (isMoving ? 12000 : 32000) : 45000)) {
       // Periodic heartbeat even when stationary
       shouldUpdate = true;
     }

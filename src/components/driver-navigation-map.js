@@ -1,13 +1,7 @@
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { getMapLibre } from '../utils/map-loader.js';
 import { NavigationVoice } from '../utils/navigation-voice.js';
 
-try {
-  if (typeof maplibregl.setWorkerUrl === 'function') {
-    maplibregl.setWorkerUrl('https://cdn.jsdelivr.net/npm/maplibre-gl@6.6.0/dist/maplibre-gl-worker.mjs');
-  }
-} catch(e) {}
-
+let maplibregl = null;
 let driverMap = null;
 let driverMarker = null;
 let pickupMarker = null;
@@ -46,10 +40,10 @@ export function add3dBuildingsLayer(map, isDark = true) {
 }
 
 // Ensure default is always OLED Dark on fresh session
-if (typeof localStorage !== 'undefined' && localStorage.getItem('gd_driver_theme_v9') !== 'true') {
+if (typeof localStorage !== 'undefined' && localStorage.getItem('gd_driver_theme_v11') !== 'true') {
   localStorage.setItem('gd_driver_theme_mode', 'dark');
   localStorage.setItem('gd_driver_theme', 'dark');
-  localStorage.setItem('gd_driver_theme_v9', 'true');
+  localStorage.setItem('gd_driver_theme_v11', 'true');
 }
 
 export function getDriverMapTheme() {
@@ -98,7 +92,7 @@ export async function setDriverMapTheme(theme, isManual = true) {
   if (driverMap) {
     try {
       const activeStyle = newTheme === 'light' ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
-      driverMap.setStyle(activeStyle);
+      driverMap.setStyle(activeStyle, { diff: false });
       driverMap.once('style.load', () => {
         add3dBuildingsLayer(driverMap, newTheme === 'dark');
         renderRouteHud();
@@ -476,15 +470,22 @@ export async function initDriverNavigationMap(container) {
   const initialStyle = currentTheme === 'light' ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
 
   try {
+    if (!maplibregl) {
+      maplibregl = await getMapLibre();
+    }
     const MapLibreMap = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
     if (!MapLibreMap) {
       throw new Error('MapLibre Map constructor not found');
     }
 
+    const initialCenter = (window.lastRiderPos && window.lastRiderPos.lng && window.lastRiderPos.lat)
+      ? [window.lastRiderPos.lng, window.lastRiderPos.lat]
+      : magdalenaCenter;
+
     driverMap = new MapLibreMap({
       container: targetContainer,
       style: initialStyle,
-      center: magdalenaCenter,
+      center: initialCenter,
       zoom: 15.5,
       pitch: 45,
       bearing: 0,
@@ -556,6 +557,22 @@ export async function initDriverNavigationMap(container) {
     setTimeout(() => { try { if (driverMap) driverMap.resize(); } catch(e) {} }, 150);
     setTimeout(() => { try { if (driverMap) driverMap.resize(); } catch(e) {} }, 600);
     setTimeout(() => { try { if (driverMap) driverMap.resize(); } catch(e) {} }, 1500);
+
+    // Auto-resize on app resume from background (e.g. returning from WhatsApp or locking screen)
+    if (!window._driverMapResumeBound) {
+      window._driverMapResumeBound = true;
+      const handleAppResume = () => {
+        if (driverMap && typeof driverMap.resize === 'function') {
+          setTimeout(() => {
+            try { driverMap.resize(); } catch(e) {}
+          }, 120);
+        }
+      };
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') handleAppResume();
+      });
+      window.addEventListener('focus', handleAppResume);
+    }
 
     // Listen to real-time driver GPS updates from background-tracking
     if (!window._driverLocationTickBound) {
@@ -686,12 +703,12 @@ export async function initDriverNavigationMap(container) {
         border-color: #22c55e !important;
       }
 
-      /* High-Definition Contrast Inversion for Dark Mode */
+      /* Native OLED Vector Map Styling */
       .driver-dark-mode #driver-fullscreen-map .maplibregl-canvas,
       .driver-dark-mode #driver-fullscreen-map canvas,
       #driver-fullscreen-map.driver-dark-mode .maplibregl-canvas,
       #driver-fullscreen-map.driver-dark-mode canvas {
-        filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.15) !important;
+        filter: none !important;
       }
       .driver-light-mode #driver-fullscreen-map .maplibregl-canvas,
       .driver-light-mode #driver-fullscreen-map canvas,
@@ -700,7 +717,7 @@ export async function initDriverNavigationMap(container) {
         filter: none !important;
       }
       .driver-dark-mode #driver-fullscreen-map {
-        background-color: #0d1117 !important;
+        background-color: #04070d !important;
       }
       .driver-light-mode #driver-fullscreen-map {
         background-color: #f8fafc !important;
@@ -1526,6 +1543,14 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
 
   // Clear idle demand hotspots when entering active navigation
   renderDemandHotspots(false);
+
+  // Instant 0ms optimistic route line so driver never waits on network latency
+  const directCoords = [[driverLng, driverLat], targetLngLat];
+  activeRoutePathCoords = directCoords;
+  updateWebGlSource(directCoords);
+  const directHeading = calculateBearing(driverLat, driverLng, targetLngLat[1], targetLngLat[0]);
+  updateDriverMapLocation(effectiveDriver, directHeading);
+  setMap3DPerspective(true, directHeading, effectiveDriver);
 
   // Fetch guaranteed street route (OSRM + Mirror + Magdalena Street Grid)
   try {

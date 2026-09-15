@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ventra</title>
+<link rel="icon" type="image/svg+xml" href="/mango-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600;700&display=swap');
+
+  :root{
+    --brand:#0E6E52;
+    --brand-2:#17925F;
+    --brand-deep:#08362A;
+    --brand-hover:#0B5A43;
+    --brand-tint:#E3F3EC;
+    --brand-tint-2:#CDEEE0;
+    --leaf:#4F7A33;
+    --leaf-dark:#3B5D25;
+    --leaf-tint:#EEF4E3;
+    --ink:#231409;
+    --ink-2:#7C6C58;
+    --bg:#FFFCF6;
+    --bg-alt:#FFF3E1;
+    --surface:#FFFFFF;
+    --border:#F1E4CF;
+    --success:#1E8F5E;
+    --success-bg:#EAF7EF;
+    --shadow:0 2px 10px rgba(35,20,9,0.06);
+    --shadow-md:0 14px 36px -14px rgba(35,20,9,0.24);
+    --radius-card:20px;
+    --radius-btn:12px;
+    --grad-mango:linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+    --grad-ripe:linear-gradient(160deg, var(--brand-deep) 0%, var(--brand) 55%, var(--brand-2) 100%);
+  }
+  /* Ventra is a light-only brand page by design — always warm paper white,
+     regardless of the visitor's system theme (no dark-mode variant, on purpose). */
+
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:'Inter', system-ui, -apple-system, sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+    position:relative;
+  }
+  /* subtle paper grain, purely decorative — keeps the page from reading as a flat template */
+  body::before{
+    content:''; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.5; mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.02 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  main, nav, header, footer, section{ position:relative; z-index:1; }
+  ::selection{ background:var(--brand-tint-2); color:var(--ink); }
+  h1,h2,h3{ font-family:'Bricolage Grotesque', system-ui, sans-serif; text-wrap:balance; letter-spacing:-0.01em; margin:0; }
+  p{ margin:0; }
+  a{ color:inherit; text-decoration:none; }
+  button{ font-family:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+  :focus-visible{ outline:2px solid var(--brand); outline-offset:2px; }
+
+  .shell{ max-width:1140px; margin:0 auto; padding:0 24px; }
+  .eyebrow{ font-size:12.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--brand); display:inline-flex; align-items:center; gap:7px; }
+  .eyebrow::before{ content:''; width:14px; height:2px; border-radius:2px; background:var(--brand); }
+
+  /* reveal-on-scroll */
+  .reveal{ opacity:0; transform:translateY(16px); transition:opacity .6s ease, transform .6s ease; }
+  .reveal.in-view{ opacity:1; transform:none; }
+  @media (prefers-reduced-motion:reduce){ .reveal{ opacity:1; transform:none; transition:none; } }
+
+  /* ---------- Logo mark ---------- */
+  .mark{ width:32px; height:32px; border-radius:10px; background:var(--grad-mango); flex:none; display:flex; align-items:center; justify-content:center; box-shadow:inset 0 -2px 4px rgba(0,0,0,.12); }
+  .mark svg{ width:19px; height:19px; }
+
+  /* ---------- Nav ---------- */
+  nav.top{
+    position:sticky; top:0; z-index:40; background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--border);
+  }
+  nav.top .shell{ display:flex; align-items:center; justify-content:space-between; padding-top:14px; padding-bottom:14px; }
+  .brand{ display:flex; align-items:center; gap:10px; font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:1.2rem; }
+  .nav-links{ display:flex; gap:30px; font-size:14.5px; font-weight:500; color:var(--ink-2); }
+  .nav-links a{ position:relative; }
+  .nav-links a::after{ content:''; position:absolute; left:0; right:0; bottom:-4px; height:2px; background:var(--brand); transform:scaleX(0); transition:transform .15s ease; }
+  .nav-links a:hover{ color:var(--ink); }
+  .nav-links a:hover::after{ transform:scaleX(1); }
+  @media (max-width:760px){ .nav-links{ display:none; } }
+  .nav-ctas{ display:flex; align-items:center; gap:8px; }
+  .auth-area{ display:flex; align-items:center; }
+  .auth-btn{ display:flex; align-items:center; gap:7px; padding:8px 14px; border-radius:999px; border:1.5px solid var(--border); background:transparent; font-size:13.5px; font-weight:600; color:var(--ink); cursor:pointer; font-family:inherit; }
+  .auth-btn:hover{ border-color:var(--brand); color:var(--brand); }
+  .auth-user{ display:flex; align-items:center; gap:8px; font-size:13.5px; }
+  .auth-user img{ width:26px; height:26px; border-radius:50%; }
+  .auth-user button{ background:none; border:none; color:var(--ink-2); font-size:12.5px; cursor:pointer; text-decoration:underline; font-family:inherit; }
+  .auth-user button:hover{ color:var(--brand); }
+  @media (max-width:760px){ .auth-user span.auth-name{ display:none; } }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 24px; border-radius:var(--radius-btn); font-weight:700; font-size:14.5px;
+    transition:transform .12s ease, opacity .12s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+    border:none; cursor:pointer; font-family:inherit;
+  }
+  .btn:disabled{ opacity:.6; cursor:default; }
+  .btn:active{ transform:scale(0.98); opacity:.9; }
+  .btn-primary{ background:var(--grad-mango); color:#fff; box-shadow:0 8px 20px -8px rgba(14,110,82,.55); }
+  .btn-primary:hover{ box-shadow:0 10px 24px -8px rgba(14,110,82,.7); transform:translateY(-1px); }
+  .btn-outline{ background:transparent; border:1.5px solid var(--border); color:var(--ink); }
+  .btn-outline:hover{ border-color:var(--brand); color:var(--brand); }
+  .btn-dark{ background:var(--ink); color:var(--bg); }
+  .btn-dark:hover{ opacity:.85; }
+  .btn-sm{ padding:9px 16px; font-size:13.5px; }
+  .btn-block{ width:100%; }
+
+  /* ---------- Hero ---------- */
+  .hero{ padding:64px 0 0; overflow:clip; }
+  .hero-grid{ display:grid; grid-template-columns:1.05fr 0.95fr; gap:56px; align-items:center; position:relative; }
+  @media (max-width:920px){ .hero-grid{ grid-template-columns:1fr; gap:40px; } }
+
+  .hero-blob{
+    position:absolute; z-index:0; top:-160px; right:-160px; width:620px; height:620px; border-radius:50%;
+    background:var(--grad-ripe); opacity:.16; filter:blur(10px);
+  }
+  @media (max-width:920px){ .hero-blob{ width:420px; height:420px; top:-120px; right:-140px; } }
+
+  h1.headline{ font-size:clamp(2.3rem, 4.6vw, 3.5rem); font-weight:800; line-height:1.1; margin:16px 0 24px; }
+  h1.headline .rule{
+    color:var(--brand); position:relative; display:inline; padding-bottom:6px;
+    background-repeat:repeat-x; background-position:0 96%; background-size:52px 12px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 12'%3E%3Cpath d='M1 8c6-8 13-8 19-1s13 7 19 0' stroke='%230E6E52' stroke-width='4.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+  p.sub{ font-size:1.12rem; color:var(--ink-2); max-width:46ch; margin-bottom:30px; }
+  .hero-ctas{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; align-items:center; }
+  .hero-note{ font-size:13px; color:var(--ink-2); display:flex; align-items:center; gap:8px; }
+  .hero-note .dot{ width:6px; height:6px; border-radius:50%; background:var(--success); flex:none; }
+
+  .stamp{
+    display:inline-flex; align-items:center; gap:6px; font-family:'Caveat',cursive; font-weight:700; font-size:1.05rem;
+    color:var(--leaf-dark); border:2px dashed var(--leaf); border-radius:999px; padding:5px 16px 7px;
+    transform:rotate(-3deg); background:var(--leaf-tint); white-space:nowrap;
+  }
+
+  .ticket-wrap{ position:relative; display:flex; justify-content:center; padding:10px; z-index:1; }
+  .ticket{
+    width:288px; background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    padding:24px 22px 18px; box-shadow:var(--shadow-md); transform:rotate(-3deg); font-family:'Inter',sans-serif;
+    position:relative; z-index:2; animation:float 6s ease-in-out infinite;
+  }
+  @keyframes float{ 0%,100%{ transform:rotate(-3deg) translateY(0); } 50%{ transform:rotate(-2deg) translateY(-8px); } }
+  @media (prefers-reduced-motion:reduce){ .ticket{ animation:none; } }
+  .ticket-head{ text-align:center; margin-bottom:12px; display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .ticket-head .mk{ width:26px; height:26px; border-radius:8px; }
+  .ticket-head .store{ font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:14px; }
+  .ticket-head .addr{ font-size:10.5px; color:var(--ink-2); }
+  .ticket-rule{ border-top:1.5px dashed var(--border); margin:10px 0; }
+  .ticket-line{ display:flex; justify-content:space-between; font-size:11.5px; padding:3.5px 0; gap:8px; }
+  .ticket-line .amt{ font-variant-numeric:tabular-nums; color:var(--ink-2); white-space:nowrap; }
+  .ticket-total{ display:flex; justify-content:space-between; font-weight:800; font-size:15px; margin-top:8px; }
+  .ticket-total .amt{ color:var(--brand); font-variant-numeric:tabular-nums; }
+  .ticket-foot{ text-align:center; font-size:9.5px; color:var(--ink-2); margin-top:12px; letter-spacing:.04em; }
+
+  .order-chip{
+    position:absolute; z-index:3; right:-8px; bottom:34px; background:var(--ink); color:var(--bg); border:1px solid var(--ink);
+    border-radius:12px; padding:10px 13px; box-shadow:var(--shadow-md); display:flex; align-items:center; gap:9px;
+    transform:rotate(3deg); font-size:11.5px; font-weight:700;
+  }
+  .order-chip .ping{ width:8px; height:8px; border-radius:50%; background:var(--brand-2); flex:none; box-shadow:0 0 0 3px rgba(255,176,32,.25); }
+  @media (max-width:920px){ .order-chip{ right:8%; } }
+
+  /* ---------- Ticker (replaces plain "trust logos" strip) ---------- */
+  .ticker-band{ border-top:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--ink); overflow:hidden; margin-top:44px; }
+  .ticker-inner{ display:flex; align-items:center; }
+  .ticker-label{
+    flex:none; display:flex; align-items:center; gap:8px; padding:14px 20px; background:var(--ink);
+    color:#fff; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
+    border-right:1px solid rgba(255,255,255,.14); white-space:nowrap; z-index:2;
+  }
+  .ticker-label svg{ color:var(--brand-2); }
+  .ticker-viewport{ overflow:hidden; flex:1; -webkit-mask-image:linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); mask-image:linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
+  .ticker-track{ display:flex; width:max-content; gap:34px; padding:14px 0; animation:tick 26s linear infinite; }
+  .ticker-band:hover .ticker-track{ animation-play-state:paused; }
+  @keyframes tick{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+  @media (prefers-reduced-motion:reduce){ .ticker-track{ animation:none; } }
+  .ticker-item{ color:#fff; font-size:13px; font-weight:600; white-space:nowrap; display:flex; align-items:center; gap:9px; }
+  .ticker-item b{ color:var(--brand-2); font-variant-numeric:tabular-nums; }
+  .ticker-item .sep{ color:rgba(255,255,255,.3); }
+  @media (max-width:600px){ .ticker-label{ display:none; } }
+
+  /* ---------- Section shell ---------- */
+  section{ padding:76px 0; }
+  section.alt{ background:var(--bg-alt); }
+  .sec-head{ max-width:54ch; margin-bottom:40px; }
+  .sec-head h2{ font-size:clamp(1.7rem,2.7vw,2.2rem); font-weight:800; margin-top:10px; }
+  .sec-head p{ color:var(--ink-2); margin-top:12px; font-size:1.03rem; }
+
+  /* ---------- Features ---------- */
+  .feat-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  @media (max-width:860px){ .feat-grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:600px){ .feat-grid{ grid-template-columns:1fr; } }
+  .feat{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-card); padding:26px 22px 24px;
+    box-shadow:var(--shadow); position:relative; overflow:hidden; transition:transform .18s ease, box-shadow .18s ease;
+  }
+  .feat::before{ content:''; position:absolute; top:0; left:0; right:0; height:4px; background:var(--accent, var(--brand)); }
+  .feat:hover{ transform:translateY(-4px); box-shadow:var(--shadow-md); }
+  .feat .num{ position:absolute; top:16px; right:18px; font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:.78rem; color:var(--border); }
+  .feat .ico{
+    width:42px; height:42px; border-radius:50%; background:var(--accent, var(--brand)); color:#fff;
+    display:flex; align-items:center; justify-content:center; margin-bottom:18px;
+  }
+  .feat h3{ font-size:1.02rem; font-weight:700; margin-bottom:7px; }
+  .feat p{ font-size:.92rem; color:var(--ink-2); }
+
+  /* ---------- Sync strip ---------- */
+  .sync{
+    display:grid; grid-template-columns:1fr 1fr; border-radius:24px; overflow:hidden; box-shadow:var(--shadow-md);
+  }
+  @media (max-width:760px){ .sync{ grid-template-columns:1fr; } }
+  .sync-side{ padding:36px 32px; display:flex; flex-direction:column; gap:8px; align-items:flex-start; justify-content:center; }
+  .sync-side.a{ background:var(--grad-ripe); color:#fff; }
+  .sync-side.b{ background:var(--surface); }
+  .sync-side .tag{ font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:3px 10px; border-radius:7px; }
+  .sync-side.a .tag{ background:rgba(255,255,255,.2); color:#fff; }
+  .sync-side.b .tag{ background:var(--leaf-tint); color:var(--leaf-dark); }
+  .sync-side h3{ font-size:1.12rem; font-weight:700; }
+  .sync-side.a p{ color:rgba(255,255,255,.85); font-size:.9rem; max-width:34ch; }
+  .sync-side.b p{ color:var(--ink-2); font-size:.9rem; max-width:34ch; }
+  .sync-arrow{
+    display:flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:50%;
+    background:var(--bg); border:1px solid var(--border); color:var(--ink-2); font-size:18px; flex:none; margin-top:8px;
+  }
+  .sync-integrations{ display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+  .integ-chip{ font-size:11px; font-weight:600; padding:4px 10px; border-radius:999px; background:var(--bg-alt); border:1px solid var(--border); color:var(--ink-2); }
+
+  /* ---------- Pricing (styled like hand-tagged price cards) ---------- */
+  .toggle{ display:inline-flex; align-items:center; gap:4px; background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:4px; margin-bottom:56px; }
+  .toggle button{ padding:8px 18px; border-radius:999px; font-size:13.5px; font-weight:700; color:var(--ink-2); transition:background-color .15s ease, color .15s ease; }
+  .toggle button.active{ background:var(--grad-mango); color:#fff; }
+  .toggle .save{ font-size:11px; font-weight:700; color:var(--success); margin-left:6px; }
+
+  .plans{ display:grid; grid-template-columns:repeat(3,1fr); gap:26px 20px; align-items:stretch; }
+  @media (max-width:900px){ .plans{ grid-template-columns:1fr; max-width:400px; margin:0 auto; gap:34px; } }
+
+  .plan{
+    background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:34px 26px 28px;
+    display:flex; flex-direction:column; box-shadow:var(--shadow); position:relative;
+    transition:transform .18s ease, box-shadow .18s ease;
+  }
+  .plan::before{
+    content:''; position:absolute; left:50%; top:-11px; width:20px; height:20px; border-radius:50%;
+    background:var(--bg); border:2px solid var(--border); transform:translateX(-50%);
+  }
+  .plan::after{
+    content:''; position:absolute; left:50%; top:-9px; width:8px; height:8px; border-radius:50%;
+    background:var(--ink); opacity:.25; transform:translateX(-50%);
+  }
+  .plan:nth-child(1){ transform:rotate(-1.4deg); }
+  .plan:nth-child(3){ transform:rotate(1.4deg); }
+  .plan:hover{ transform:rotate(0deg) translateY(-4px); box-shadow:var(--shadow-md); }
+  .plan.featured{ border-color:var(--brand); box-shadow:var(--shadow-md); transform:rotate(0deg) scale(1.035); z-index:1; }
+  .plan.featured:hover{ transform:rotate(0deg) scale(1.035) translateY(-4px); }
+  @media (max-width:900px){ .plan, .plan.featured{ transform:none !important; } }
+  .plan .badge{ position:absolute; top:-13px; left:26px; background:var(--grad-mango); color:#fff; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:5px 12px; border-radius:999px; }
+  .plan .pname{ font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:1.28rem; margin-bottom:4px; margin-top:6px; }
+  .plan .pfor{ font-size:.86rem; color:var(--ink-2); margin-bottom:22px; min-height:34px; }
+  .plan .price{ display:flex; align-items:baseline; gap:6px; margin-bottom:2px; }
+  .plan .price .amt{ font-family:'Bricolage Grotesque',sans-serif; font-size:2.2rem; font-weight:800; font-variant-numeric:tabular-nums; }
+  .plan .price .per{ font-size:.85rem; color:var(--ink-2); }
+  .plan .price-note{ font-size:12px; color:var(--ink-2); margin-bottom:24px; }
+  .plan ul{ list-style:none; padding:0; margin:0 0 26px; display:flex; flex-direction:column; gap:12px; flex:1; }
+  .plan li{ display:flex; gap:9px; font-size:.9rem; align-items:flex-start; }
+  .plan li svg{ flex:none; margin-top:2px; color:var(--success); }
+  .plan li.off{ color:var(--ink-2); }
+  .plan li.off svg{ color:var(--ink-2); opacity:.5; }
+
+  /* ---------- FAQ ---------- */
+  .faq{ display:grid; gap:12px; }
+  .faq-item{ background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--brand); border-radius:14px; padding:20px 22px; }
+  .faq-item summary{ cursor:pointer; font-weight:700; font-size:.98rem; list-style:none; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .faq-item summary::-webkit-details-marker{ display:none; }
+  .faq-item summary .plus{ flex:none; font-size:20px; color:var(--brand); transition:transform .2s ease; }
+  .faq-item[open] summary .plus{ transform:rotate(45deg); }
+  .faq-item p{ margin-top:12px; color:var(--ink-2); font-size:.92rem; max-width:62ch; }
+
+  /* ---------- CTA band ---------- */
+  .band{
+    background:var(--grad-ripe); color:#fff; border-radius:28px; padding:60px 40px; text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:16px; position:relative; overflow:hidden;
+  }
+  .band::after{
+    content:''; position:absolute; inset:0; opacity:.5; mix-blend-mode:overlay; pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .band > *{ position:relative; z-index:1; }
+  .band .eyebrow{ color:#fff; }
+  .band .eyebrow::before{ background:#fff; }
+  .band h2{ font-size:clamp(1.6rem,3vw,2.1rem); max-width:22ch; }
+  .band p{ color:rgba(255,255,255,.85); max-width:46ch; }
+
+  /* ---------- Footer ---------- */
+  footer{ padding:40px 0 56px; border-top:1px solid var(--border); margin-top:20px; }
+  .foot-row{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+  .foot-note{ font-size:13px; color:var(--ink-2); }
+
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; animation:none !important; } }
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="shell">
+    <div class="brand">
+      <span class="mark"><img src="/ventra-logo.png" alt="Ventra" style="width:100%;height:100%;object-fit:cover;border-radius:inherit"/></span>
+      Ventra
+    </div>
+    <div class="nav-links">
+      <a href="#funciones">Funciones</a>
+      <a href="#conexion">Integraciones</a>
+      <a href="#planes">Planes</a>
+      <a href="#preguntas">Preguntas</a>
+    </div>
+    <div class="nav-ctas">
+      <div id="authArea" class="auth-area"></div>
+      <a href="https://app.mangoapp.online" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Probar demo</a>
+      <a href="#planes" class="btn btn-primary btn-sm">Ver planes</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="shell hero-grid">
+    <div class="hero-blob" aria-hidden="true"></div>
+    <div>
+      <span class="eyebrow">Caja registradora + tienda online</span>
+      <h1 class="headline">La forma más fácil de <span class="rule">cobrar y vender</span>, en el mostrador y online.</h1>
+      <p class="sub">Ventra es el sistema de ventas para comercios argentinos: caja, stock, promos y tienda online sincronizados, sin instalar nada — abrís el navegador y ya estás vendiendo.</p>
+      <div class="hero-ctas">
+        <a href="https://app.mangoapp.online" target="_blank" rel="noopener" class="btn btn-primary">Probar demo gratis</a>
+        <a href="#planes" class="btn btn-outline">Ver planes</a>
+      </div>
+      <div class="hero-ctas" style="margin-bottom:0;">
+        <span class="stamp">🇦🇷 hecho para el kiosco de barrio</span>
+      </div>
+      <div class="hero-note" style="margin-top:16px;"><span class="dot"></span>Sin tarjeta, sin instalar nada — entrás directo con datos de ejemplo</div>
+    </div>
+
+    <div class="ticket-wrap">
+      <div class="ticket">
+        <div class="ticket-head">
+          <div class="mk" style="background:var(--grad-mango)"></div>
+          <div class="store">ALMACÉN DON JOSÉ</div>
+          <div class="addr">Ticket de venta · Caja 1</div>
+        </div>
+        <div class="ticket-rule"></div>
+        <div class="ticket-line"><span class="name">Coca-Cola 2L</span><span class="amt">$3.200</span></div>
+        <div class="ticket-line"><span class="name">Pan lactal</span><span class="amt">$2.850</span></div>
+        <div class="ticket-line"><span class="name">Yerba mate 1kg</span><span class="amt">$5.100</span></div>
+        <div class="ticket-line"><span class="name">Alfajor x3</span><span class="amt">$1.950</span></div>
+        <div class="ticket-rule"></div>
+        <div class="ticket-total"><span>Total</span><span class="amt">$13.100</span></div>
+        <div class="ticket-foot">MERCADO PAGO · 09:41</div>
+      </div>
+      <div class="order-chip"><span class="ping"></span>Pedido online recibido</div>
+    </div>
+  </div>
+
+  <div class="ticker-band">
+    <div class="ticker-inner">
+      <div class="ticker-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21c-4-4-7-7.5-7-11a7 7 0 0 1 14 0c0 3.5-3 7-7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>Ya lo usan en</div>
+      <div class="ticker-viewport">
+        <div class="ticker-track">
+          <span class="ticker-item">Magdalena <span class="sep">·</span> almacenes y kioscos</span>
+          <span class="ticker-item">Coca-Cola 2L <b>$3.200</b></span>
+          <span class="ticker-item">Ferreterías <span class="sep">·</span> y expandiéndose</span>
+          <span class="ticker-item">Yerba mate 1kg <b>$5.100</b></span>
+          <span class="ticker-item">Pan lactal <b>$2.850</b></span>
+          <span class="ticker-item">Nuevas ciudades cada mes</span>
+          <span class="ticker-item">Magdalena <span class="sep">·</span> almacenes y kioscos</span>
+          <span class="ticker-item">Coca-Cola 2L <b>$3.200</b></span>
+          <span class="ticker-item">Ferreterías <span class="sep">·</span> y expandiéndose</span>
+          <span class="ticker-item">Yerba mate 1kg <b>$5.100</b></span>
+          <span class="ticker-item">Pan lactal <b>$2.850</b></span>
+          <span class="ticker-item">Nuevas ciudades cada mes</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="funciones">
+  <div class="shell">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Funciones</span>
+      <h2>Todo lo que hace falta para atender el mostrador</h2>
+      <p>Sin curva de aprendizaje: es tan simple como abrir una pestaña del navegador y empezar a cobrar.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat reveal" style="--accent:var(--brand)">
+        <span class="num">01</span>
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div>
+        <h3>Caja y arqueo</h3>
+        <p>Apertura y cierre de turno, arqueo de caja, reporte Z diario con diferencias por método de pago.</p>
+      </div>
+      <div class="feat reveal" style="--accent:var(--leaf)">
+        <span class="num">02</span>
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h4l2 12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2l1-8H7"/><circle cx="9" cy="21" r="1"/><circle cx="18" cy="21" r="1"/></svg></div>
+        <h3>Stock y código de barras</h3>
+        <p>Control de inventario, alertas de stock mínimo, kits y presentaciones (unidad, kg, pack).</p>
+      </div>
+      <div class="feat reveal" style="--accent:var(--ink)">
+        <span class="num">03</span>
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6M16 2h6v6M10 14 22 2"/></svg></div>
+        <h3>Promos y combos</h3>
+        <p>2x1, combos a precio fijo, descuentos por porcentaje — con tope de stock o de fecha si querés.</p>
+      </div>
+      <div class="feat reveal" style="--accent:var(--leaf)">
+        <span class="num">04</span>
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <h3>Cuenta corriente</h3>
+        <p>Clientes fiado con límite de crédito, historial de pagos y retiros autorizados.</p>
+      </div>
+      <div class="feat reveal" style="--accent:var(--brand)">
+        <span class="num">05</span>
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h3>Multi-terminal</h3>
+        <p>Varias cajas trabajando en simultáneo, cada una con su usuario, rol y permisos.</p>
+      </div>
+      <div class="feat reveal" style="--accent:var(--ink)">
+        <span class="num">06</span>
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M7 15l4-6 4 3 4-7"/></svg></div>
+        <h3>Reportes</h3>
+        <p>Ventas por período, productos más vendidos, historial de precios y auditoría de cambios.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="conexion">
+  <div class="shell">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Integraciones</span>
+      <h2>Tu mostrador y tu tienda online, con el mismo stock</h2>
+      <p>Ventra se sincroniza con plataformas de venta online — hoy con GoDelivery, y sumando más a medida que llegamos a nuevas ciudades.</p>
+    </div>
+    <div class="sync reveal">
+      <div class="sync-side a">
+        <span class="tag">Ventra</span>
+        <h3>Vendés en el mostrador</h3>
+        <p>Cada venta descuenta stock al instante y actualiza el precio si cambió.</p>
+      </div>
+      <div class="sync-side b">
+        <span class="tag">Tu tienda online</span>
+        <h3>Aparece a la venta al instante</h3>
+        <p>Y cuando entra un pedido online, se descuenta el stock del mostrador automáticamente.</p>
+        <div class="sync-integrations">
+          <span class="integ-chip">GoDelivery</span>
+          <span class="integ-chip">Próximamente: más plataformas</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="planes">
+  <div class="shell">
+    <div class="sec-head reveal" style="max-width:60ch">
+      <span class="eyebrow">Planes</span>
+      <h2>Elegí cómo querés vender</h2>
+      <p>Empezá solo con la caja, sumá la tienda online cuando quieras, o arrancá directo por la tienda si todavía no tenés POS.</p>
+    </div>
+
+    <div class="toggle reveal" role="tablist" aria-label="Frecuencia de pago">
+      <button type="button" class="active" data-period="monthly">Mensual</button>
+      <button type="button" data-period="annual">Anual <span class="save">2 meses gratis</span></button>
+    </div>
+
+    <div class="plans reveal">
+      <div class="plan">
+        <div class="pname">Ventra Caja</div>
+        <div class="pfor">Para el mostrador: caja, stock y reportes, sin tienda online.</div>
+        <div class="price"><span class="amt" data-monthly="$14.900" data-annual="$12.400">$14.900</span><span class="per">/ mes</span></div>
+        <div class="price-note" data-monthly-note="Facturado mes a mes" data-annual-note="Facturado anual · $148.800/año">Facturado mes a mes</div>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Caja, arqueo y reporte Z</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Stock, código de barras y kits</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Promos, combos y cuenta corriente</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>1 terminal incluida</li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Tienda online</li>
+        </ul>
+        <button type="button" class="btn btn-outline btn-block plan-btn" data-plan="caja">Elegir Ventra Caja</button>
+      </div>
+
+      <div class="plan featured">
+        <span class="badge">Más elegido</span>
+        <div class="pname">Ventra Full</div>
+        <div class="pfor">Todo Ventra Caja + tienda online sincronizada en vivo.</div>
+        <div class="price"><span class="amt" data-monthly="$24.900" data-annual="$20.750">$24.900</span><span class="per">/ mes</span></div>
+        <div class="price-note" data-monthly-note="Facturado mes a mes" data-annual-note="Facturado anual · $249.000/año">Facturado mes a mes</div>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Todo lo de Ventra Caja</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Tienda online sincronizada</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Stock y precios en vivo</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Panel de pedidos y estadísticas</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Hasta 3 terminales</li>
+        </ul>
+        <button type="button" class="btn btn-primary btn-block plan-btn" data-plan="full">Elegir Ventra Full</button>
+      </div>
+
+      <div class="plan">
+        <div class="pname">Ventra Tienda</div>
+        <div class="pfor">Para vender online sin instalar una caja registradora.</div>
+        <div class="price"><span class="amt" data-monthly="$9.900" data-annual="$8.250">$9.900</span><span class="per">/ mes</span></div>
+        <div class="price-note" data-monthly-note="Facturado mes a mes" data-annual-note="Facturado anual · $99.000/año">Facturado mes a mes</div>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Tienda online</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Catálogo con fotos y categorías</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Recepción de pedidos en el momento</li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Caja registradora / arqueo</li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Control de stock avanzado</li>
+        </ul>
+        <button type="button" class="btn btn-outline btn-block plan-btn" data-plan="tienda">Elegir Ventra Tienda</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="preguntas">
+  <div class="shell">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Preguntas frecuentes</span>
+      <h2>Antes de que preguntes</h2>
+    </div>
+    <div class="faq reveal">
+      <details class="faq-item" open>
+        <summary>¿Necesito instalar algo?<span class="plus">+</span></summary>
+        <p>No. Ventra corre en el navegador. Si preferís tenerlo instalado en la PC de la caja para trabajar sin depender de internet, también existe esa versión de escritorio.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Funciona en cualquier ciudad?<span class="plus">+</span></summary>
+        <p>Sí. Ventra no está atado a ninguna ciudad — el sistema de ventas funciona en cualquier lado. La sincronización con tienda online depende de qué plataformas estén disponibles en tu zona.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Funciona sin conexión a internet?<span class="plus">+</span></summary>
+        <p>La versión de escritorio sigue vendiendo aunque se corte internet, y sincroniza apenas vuelve la conexión. La versión web necesita internet para operar.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Puedo cambiar de plan más adelante?<span class="plus">+</span></summary>
+        <p>Sí, en cualquier momento. Si empezás con Ventra Caja o Ventra Tienda y después querés el combo, pasás a Ventra Full sin perder tu historial de ventas ni tu catálogo.</p>
+      </details>
+      <details class="faq-item">
+        <summary>¿Qué pasa con lo que cargo en la demo?<span class="plus">+</span></summary>
+        <p>La demo tiene productos y ventas de ejemplo para que pruebes todo libremente — se reinicia sola cada pocas horas, así que no la uses para datos reales. Cuando contratás un plan, arrancás con tu catálogo propio, vacío y privado.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="contacto">
+  <div class="shell">
+    <div class="band reveal">
+      <span class="eyebrow">Empezá hoy</span>
+      <h2>Armamos tu caja online en el día</h2>
+      <p>Contanos qué plan te sirve y te ayudamos a migrar tu catálogo desde el primer día.</p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+        <a href="https://app.mangoapp.online" target="_blank" rel="noopener" class="btn btn-dark">Probar demo gratis</a>
+        <a href="#" class="btn btn-outline" style="border-color:rgba(255,255,255,.5); color:#fff;">Hablar por WhatsApp</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="shell foot-row">
+    <div class="brand" style="font-size:1.05rem">
+      <span class="mark" style="width:26px;height:26px;"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12.3" cy="13.4" rx="6.6" ry="8.6" transform="rotate(-24 12.3 13.4)" fill="#fff"/><path d="M11 4.6c-.6-1.6.2-2.9 1.7-3.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+      Ventra
+    </div>
+    <div class="foot-note">El punto de venta para comercios argentinos</div>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var buttons = document.querySelectorAll('.toggle button');
+    var amounts = document.querySelectorAll('.plan .amt');
+    var notes = document.querySelectorAll('.price-note');
+
+    buttons.forEach(function(btn){
+      btn.addEventListener('click', function(){
+        buttons.forEach(function(b){ b.classList.remove('active'); });
+        btn.classList.add('active');
+        var period = btn.getAttribute('data-period');
+        amounts.forEach(function(el){
+          el.textContent = el.getAttribute('data-' + period) || el.textContent;
+        });
+        notes.forEach(function(el){
+          el.textContent = el.getAttribute('data-' + period + '-note') || el.textContent;
+        });
+      });
+    });
+  })();
+
+  (function(){
+    if (!('IntersectionObserver' in window)) return;
+    var els = document.querySelectorAll('.reveal');
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in-view');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    els.forEach(function(el){ io.observe(el); });
+  })();
+</script>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+  // Ventra accounts: Google sign-in + subscription checkout. Reuses the same
+  // Firebase project as the GoDelivery integration (public client config,
+  // safe to expose) but writes only to its own "ventra_accounts" collection.
+  (function(){
+    firebase.initializeApp({
+      apiKey: "AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",
+      authDomain: "godelivery-magdalena.firebaseapp.com",
+      projectId: "godelivery-magdalena",
+      storageBucket: "godelivery-magdalena.firebasestorage.app",
+      messagingSenderId: "848164656125",
+      appId: "1:848164656125:web:eef2314205f5d8f887ff94"
+    });
+
+    var auth = firebase.auth();
+    var db = firebase.firestore();
+    var authArea = document.getElementById('authArea');
+    var pendingPlan = null;
+    var CREATE_SUBSCRIPTION_URL = "https://us-central1-godelivery-magdalena.cloudfunctions.net/createVentraSubscription";
+
+    function renderAuthArea(user){
+      if (!user) {
+        authArea.innerHTML = '<button type="button" class="auth-btn" id="signInBtn">' +
+          '<svg width="15" height="15" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.9 5.1 29.7 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.9 5.1 29.7 3 24 3 16.3 3 9.7 7.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 45c5.6 0 10.7-2.1 14.5-5.6l-6.7-5.6C29.7 35.5 27 36 24 36c-5.3 0-9.7-3.3-11.3-8l-6.6 5.1C9.6 40.6 16.2 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.3 5.8l6.7 5.6C41.1 36.5 45 30.8 45 24c0-1.4-.1-2.7-.4-3.5z"/></svg>' +
+          'Iniciar sesión</button>';
+        document.getElementById('signInBtn').addEventListener('click', function(){ signIn(); });
+        return;
+      }
+      authArea.innerHTML = '<div class="auth-user">' +
+        '<img src="' + user.photoURL + '" alt="">' +
+        '<span class="auth-name">' + (user.displayName || user.email).split(' ')[0] + '</span>' +
+        '<button type="button" id="signOutBtn">Salir</button></div>';
+      document.getElementById('signOutBtn').addEventListener('click', function(){ auth.signOut(); });
+    }
+
+    function signIn(){
+      var provider = new firebase.auth.GoogleAuthProvider();
+      return auth.signInWithPopup(provider).catch(function(err){
+        console.error('Ventra auth error:', err);
+        alert('No se pudo iniciar sesión con Google. Probá de nuevo.');
+      });
+    }
+
+    function startCheckout(user, plan){
+      var btn = document.querySelector('.plan-btn[data-plan="' + plan + '"]');
+      var originalText = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Redirigiendo a Mercado Pago…'; }
+
+      fetch(CREATE_SUBSCRIPTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: user.uid, email: user.email, plan: plan })
+      })
+        .then(function(res){ return res.json().then(function(data){ return { ok: res.ok, data: data }; }); })
+        .then(function(result){
+          if (!result.ok || !result.data.initPoint) throw new Error(result.data.error || 'Error desconocido');
+          window.location.href = result.data.initPoint;
+        })
+        .catch(function(err){
+          console.error('Ventra checkout error:', err);
+          alert('No se pudo iniciar la suscripción. Probá de nuevo en un momento.');
+          if (btn) { btn.disabled = false; btn.textContent = originalText; }
+        });
+    }
+
+    document.querySelectorAll('.plan-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var plan = btn.getAttribute('data-plan');
+        var user = auth.currentUser;
+        if (user) {
+          startCheckout(user, plan);
+        } else {
+          pendingPlan = plan;
+          signIn();
+        }
+      });
+    });
+
+    auth.onAuthStateChanged(function(user){
+      renderAuthArea(user);
+      if (user && pendingPlan) {
+        var plan = pendingPlan;
+        pendingPlan = null;
+        startCheckout(user, plan);
+      }
+    });
+  })();
+</script>
+</body></html>

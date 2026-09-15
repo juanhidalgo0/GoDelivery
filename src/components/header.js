@@ -36,7 +36,7 @@ export function renderHeader() {
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
-  const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/category');
+  const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores');
   const slider = document.getElementById('app-slider');
 
   // When opening fullscreen overlays like Profile, do not alter home header/slider layout to prevent glitches underneath

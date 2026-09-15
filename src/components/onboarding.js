@@ -65,30 +65,22 @@ export async function showOnboarding(onComplete) {
     });
   }
 
-  // Check Notification Permission (Only mandatory on native Play Store / App Store apps)
-  const isNativeApp = window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web';
-  if (isNativeApp && 'Notification' in window && Notification.permission !== 'granted') {
+  // Check Notification Permission for all platforms (including iOS PWA & Web)
+  if ('Notification' in window && Notification.permission !== 'granted') {
     screens.push({
       id: 'notifications',
       image: '/onboarding_delivery_illustration.png',
-      title: 'Notificaciones Obligatorias',
-      text: 'Recibe avisos en tiempo real del estado de tus pedidos y chat. Activar las notificaciones es obligatorio para comprar.',
+      title: 'Notificaciones en Tiempo Real',
+      text: 'Recibí avisos en tiempo real del estado de tus pedidos, repartidores en camino y mensajes de chat.',
       btnText: 'Activar ahora',
       action: async () => {
         try {
-          // Llamar inmediatamente para preservar el User Gesture Token
-          const res = await Notification.requestPermission();
-          if (res === 'granted') {
-            return true;
-          } else {
-            const { showToast } = await import('./toast.js');
-            showToast('Para usar GoDelivery es obligatorio activar las notificaciones. Habilítalas en la configuración de tu navegador.', 'warning');
-            return false;
-          }
+          const { requestWebPushPermission } = await import('../utils/notifications.js');
+          await requestWebPushPermission();
+          return true;
         } catch (e) {
-          const { showToast } = await import('./toast.js');
-          showToast('No se pudieron activar las notificaciones. Habilítalas en la configuración.', 'warning');
-          return false;
+          console.warn('[Onboarding] Notification request error:', e);
+          return true;
         }
       }
     });

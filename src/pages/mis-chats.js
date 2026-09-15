@@ -92,11 +92,16 @@ export async function renderMisChats(content) {
         <div style="text-align: center; padding: 60px 20px; color: var(--color-text-tertiary); flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
           <div style="font-size: 44px; margin-bottom: 16px;">🔒</div>
           <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 800; color: var(--color-text-secondary);">Iniciá sesión</h3>
-          <p style="margin: 0; font-size: 13px; font-weight: 500;">Iniciá sesión para poder ver tu historial de chats.</p>
         </div>
       </div>
     `;
-    return;
+    const unsub = subscribe('user', (newUser) => {
+      if (newUser) {
+        unsub();
+        renderMisChats(content);
+      }
+    });
+    return { cleanup: unsub };
   }
 
   content.innerHTML = `

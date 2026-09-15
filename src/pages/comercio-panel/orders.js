@@ -118,10 +118,15 @@ export async function renderComercioOrders(manualId = null) {
                 </div>
               </div>
 
-              <!-- Hamburger Menu Button -->
-              <button id="header-menu-btn" style="position: relative; z-index: 2; width: 40px; height: 40px; border-radius: 12px; border: none; background: rgba(255,255,255,0.15); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                ${icon('menu', 22)}
-              </button>
+              <!-- Quick Action & Hamburger Menu -->
+              <div style="display: flex; align-items: center; gap: 8px; position: relative; z-index: 2;">
+                <button id="quick-call-cadete-btn" style="background: rgba(255,255,255,0.22); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; border: 1.5px solid rgba(255,255,255,0.4); border-radius: 12px; font-size: 11.5px; font-weight: 800; padding: 7px 12px; display: flex; align-items: center; gap: 5px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.22)'">
+                  🛵 Pedir Cadete
+                </button>
+                <button id="header-menu-btn" style="width: 40px; height: 40px; border-radius: 12px; border: none; background: rgba(255,255,255,0.15); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                  ${icon('menu', 22)}
+                </button>
+              </div>
             </div>
           </div>
         `;
@@ -130,6 +135,30 @@ export async function renderComercioOrders(manualId = null) {
         const bodyContainer = document.getElementById('commerce-drawer-body-container');
         if (bodyContainer) {
           bodyContainer.innerHTML = `
+            <!-- 1-Touch Cadete al Local (Highlight Purple) -->
+            <button class="commerce-drawer-item" id="drawer-call-cadete-btn" style="background: rgba(139, 92, 246, 0.12); border: 1.5px solid rgba(139, 92, 246, 0.3); border-radius: 14px; margin-bottom: 8px;">
+              <div class="drawer-item-icon-wrap" style="background: #8b5cf6; color: white;">
+                🛵
+              </div>
+              <div style="flex:1; display:flex; flex-direction:column; text-align:left;">
+                <span style="font-weight:900; color:#8b5cf6;">Pedir Cadete al Local</span>
+                <span style="font-size:10px; color:var(--color-text-secondary); font-weight:600;">1 toque · Sin cargar direcciones</span>
+              </div>
+              <span style="color:#8b5cf6; display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </button>
+
+            <!-- Direct WhatsApp Catalog & QR Drawer Item -->
+            <button class="commerce-drawer-item" id="drawer-whatsapp-catalog-btn">
+              <div class="drawer-item-icon-wrap" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">
+                ${icon('whatsapp', 18)}
+              </div>
+              <div style="flex:1; display:flex; flex-direction:column; text-align:left;">
+                <span style="font-weight:700; color:#10b981;">Catálogo WhatsApp / QR</span>
+                <span style="font-size:10px; color:var(--color-text-tertiary);">Link directo y código QR</span>
+              </div>
+              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
+            </button>
+
             <!-- Manual Order (Emerald) -->
             <button class="commerce-drawer-item" id="drawer-manual-btn">
               <div class="drawer-item-icon-wrap" style="background: rgba(16, 185, 129, 0.09); color: #10b981;">
@@ -224,7 +253,23 @@ export async function renderComercioOrders(manualId = null) {
         document.getElementById('commerce-drawer-backdrop')?.addEventListener('click', closeDrawer);
         document.getElementById('commerce-drawer-close-btn')?.addEventListener('click', closeDrawer);
 
+        // Bind Cadete Action
+        const handleCallCadete = () => {
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          closeDrawer();
+          dispatchCommerceCadeteOrder(comercioId, comData);
+        };
+        document.getElementById('quick-call-cadete-btn')?.addEventListener('click', handleCallCadete);
+        document.getElementById('drawer-call-cadete-btn')?.addEventListener('click', handleCallCadete);
+
         // Bind items
+        document.getElementById('drawer-whatsapp-catalog-btn')?.addEventListener('click', async () => {
+          closeDrawer();
+          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
+          const { openWhatsAppCatalogModal } = await import('../../components/whatsapp-catalog-modal.js');
+          openWhatsAppCatalogModal(comercioId, comData);
+        });
+
         document.getElementById('drawer-manual-btn')?.addEventListener('click', () => {
           closeDrawer();
           import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
@@ -515,13 +560,84 @@ function renderFilteredOrders(orders, filter, comercioId, isHistory) {
   updateAllUnreadBadges(filtered);
 }
 
+async function dispatchCommerceCadeteOrder(comercioId, comData) {
+  showConfirm({
+    title: '🛵 Solicitar Cadete al Local',
+    message: `¿Deseás llamar a un cadete de GoDelivery a <strong>${comData?.name || 'tu local'}</strong>?<br><br><span style="font-size:12px; color:var(--color-text-secondary);">El repartidor se acercará a retirar tus paquetes y registrará la cantidad de envíos directamente en mostrador con tus comandas/tickets físicos.</span>`,
+    confirmText: '🛵 Sí, Llamar Cadete',
+    cancelText: 'Cancelar',
+    onConfirm: async () => {
+      try {
+        const s = getState();
+        const baseShipping = Math.max(s.deliveryMinPrice || 2000, s.deliveryCost || 1800, s.deliveryBasePrice || 1400);
+        const shortId = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        await addDoc(collection(db, 'orders'), {
+          orderId: shortId,
+          source: 'commerce_panel',
+          status: 'pending',
+          isFavor: true,
+          isCommerceCadeteria: true,
+          orderType: 'cadeteria',
+          favorType: 'cadeteria',
+          comercioId: comercioId,
+          comercioName: comData?.name || 'Comercio',
+          comercioAddress: comData?.address || 'Local del Comercio',
+          pickupAddress: comData?.address || comData?.name || 'Local del Comercio',
+          dropoffAddress: 'Entregas en Magdalena (según comandas en local)',
+          deliveryAddress: 'Entregas en Magdalena (según comandas en local)',
+          userName: comData?.name || 'Comercio',
+          userPhone: comData?.phone || comData?.whatsapp || '',
+          userId: comData?.ownerId || '',
+          details: `🛵 Cadetería On-Demand para ${comData?.name || 'Comercio'}.\nEl repartidor coordinará la cantidad de paquetes con tus tickets al retirar.`,
+          stopsCount: 1,
+          deliveryCost: baseShipping,
+          total: baseShipping,
+          driverEarnings: baseShipping,
+          paymentMethod: 'efectivo',
+          noCodeRequired: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        
+        import('../../utils/audio-manager.js').then(m => m.AudioManager.playPop());
+        showToast('🛵 ¡Cadete solicitado! Ya está sonando en el radar de repartidores.', 'success');
+      } catch (err) {
+        console.error('Error solicitando cadete:', err);
+        showToast('Error al solicitar cadete: ' + err.message, 'danger');
+      }
+    }
+  });
+}
+
 function renderOrderCard(o, isHistory = false) {
-  const statusLabel = o.isScheduled ? 'Programado' : getStatusLabel(o.status);
+  const isTakeaway = o.deliveryType === 'takeaway' || o.deliveryType === 'retiro';
+  const isDirect = o.source === 'catalogo_whatsapp' || o.isDirectOrder === true;
+  const isCadeteria = o.isCommerceCadeteria || o.orderType === 'cadeteria' || o.favorType === 'cadeteria';
+  const statusLabel = isCadeteria ? (o.status === 'pending' ? 'Buscando cadete' : (o.status === 'accepted' ? 'Cadete yendo al local' : (o.status === 'delivering' ? 'En reparto' : getStatusLabel(o.status)))) : (o.isScheduled ? 'Programado' : getStatusLabel(o.status));
   const formatH = (ts) => ts ? ts.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---';
+
+  const cadeteriaBadge = isCadeteria ? `
+    <div style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
+      🛵 Cadetería (${o.stopsCount || 1} Envío${(o.stopsCount || 1) > 1 ? 's' : ''})
+    </div>
+  ` : '';
 
   const scheduledBadge = o.isScheduled ? `
     <div class="scheduled-badge-violet" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
       📅 Programado: ${o.scheduledTime}
+    </div>
+  ` : '';
+
+  const takeawayBadge = isTakeaway ? `
+    <div style="background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
+      🛍️ Retiro en Local
+    </div>
+  ` : '';
+
+  const directBadge = isDirect ? `
+    <div style="background: rgba(37, 211, 102, 0.12); color: #16a34a; border: 1px solid rgba(37, 211, 102, 0.25); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
+      ${icon('whatsapp', 10)} Catálogo WhatsApp
     </div>
   ` : '';
 
@@ -538,26 +654,31 @@ function renderOrderCard(o, isHistory = false) {
     `;
   }
 
-  const cardClass = o.isScheduled ? 'scheduled' : o.status;
+  const cardClass = isCadeteria ? 'cadeteria-card' : (o.isScheduled ? 'scheduled' : o.status);
 
   return `
     <div class="order-card-pro simplified-card ${cardClass}" data-id="${o.id}">
-      <div class="card-side-indicator"></div>
+      <div class="card-side-indicator" style="${isCadeteria ? 'background: #8b5cf6;' : ''}"></div>
       <div class="card-main-content">
         <div class="card-top-row">
-          <span class="order-id-red">#${o.orderId || '---'}</span>
+          <span class="order-id-red" style="${isCadeteria ? 'color: #8b5cf6;' : ''}">#${o.orderId || '---'}</span>
           <span class="order-time-grey">${formatDate(o.createdAt?.toDate())}</span>
-          <div class="card-status-badge">${statusLabel}</div>
+          <div class="card-status-badge" style="${isCadeteria ? 'background: rgba(139, 92, 246, 0.12); color: #8b5cf6;' : ''}">${statusLabel}</div>
         </div>
         <div class="simplified-card-body">
           <div class="customer-info-minimal">
-            <strong>${o.userName || 'Cliente'}</strong>
+            <strong>${isCadeteria ? '🛵 Cadetería On-Demand' : (o.userName || 'Cliente')}</strong>
             <span class="order-exact-time">${icon('clock', 10)} ${formatH(o.createdAt)}</span>
-            ${scheduledBadge}
+            <div style="display:flex; flex-wrap:wrap; gap:4px;">
+              ${cadeteriaBadge}
+              ${scheduledBadge}
+              ${takeawayBadge}
+              ${directBadge}
+            </div>
             ${timerHtml}
           </div>
           <div class="card-right-section">
-            <div class="price-main">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</div>
+            <div class="price-main">${formatPrice(isCadeteria ? (o.total || o.deliveryCost || 2000) : (o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0)))}</div>
             <div class="expand-indicator">${icon('chevronDown', 14)}</div>
           </div>
         </div>
@@ -621,6 +742,8 @@ function showOrderDetailModal(initialOrder) {
   }
 
   const renderContent = (o) => {
+    const isTakeaway = o.deliveryType === 'takeaway' || o.deliveryType === 'retiro';
+    const isDirect = o.source === 'catalogo_whatsapp' || o.isDirectOrder === true;
     const formatH = (ts) => ts ? ts.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---';
     const isHistory = o.status === 'completed' || o.status === 'cancelled';
     const unreadCount = getUnreadCount(o.id, 'client-commerce');
@@ -632,7 +755,7 @@ function showOrderDetailModal(initialOrder) {
       <div class="modal-internal-header">
         <div class="header-top-row">
           <div class="header-title-group">
-            <div class="order-label">Pedido</div>
+            <div class="order-label">Pedido ${isTakeaway ? '• Retiro en Local' : ''}</div>
             <h2 class="order-number">#${o.orderId || '---'}</h2>
           </div>
           <div class="header-actions">
@@ -657,6 +780,11 @@ function showOrderDetailModal(initialOrder) {
               <div class="customer-text-premium">
                 <strong>${o.userName || 'Cliente'}</strong>
                 <div class="customer-id-premium">ID: ${shortUserId}</div>
+                ${isDirect ? `
+                  <div style="font-size:10.5px; font-weight:800; color:#16a34a; margin-top:2px; display:flex; align-items:center; gap:4px;">
+                    ${icon('whatsapp', 12)} Pedido vía Catálogo WhatsApp
+                  </div>
+                ` : ''}
               </div>
               ${!isHistory ? `
               <button class="chat-btn-mini chat-order-btn" data-id="${o.id}" data-client="${o.userName}" data-num="${o.orderId}" ${o.isManual && !o.driverId ? 'style="opacity:0.5; cursor:not-allowed;" disabled' : ''}>
@@ -721,12 +849,18 @@ function showOrderDetailModal(initialOrder) {
               </div>
 
               <div class="detail-section">
-                <div class="section-title-premium">Entrega</div>
-                <div class="detail-address-box-premium">
-                  <div class="address-icon-wrap">${icon('mapPin', 20)}</div>
+                <div class="section-title-premium">Entrega / Retiro</div>
+                <div class="detail-address-box-premium" style="${isTakeaway ? 'background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.2);' : ''}">
+                  <div class="address-icon-wrap" style="${isTakeaway ? 'background: rgba(16, 185, 129, 0.15); color: #059669;' : ''}">
+                    ${isTakeaway ? icon('shoppingBag', 20) : icon('mapPin', 20)}
+                  </div>
                   <div class="address-text-content">
-                    <span class="address-label">Dirección destino</span>
-                    <span class="address-text">${o.deliveryAddress || o.address || 'Retiro en local'}</span>
+                    <span class="address-label" style="${isTakeaway ? 'color:#059669; font-weight:800;' : ''}">
+                      ${isTakeaway ? 'Modalidad: Retiro en Local' : 'Dirección destino'}
+                    </span>
+                    <span class="address-text">
+                      ${isTakeaway ? 'El cliente retira el pedido directamente en el local.' : (o.deliveryAddress || o.address || 'Sin dirección')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -738,15 +872,26 @@ function showOrderDetailModal(initialOrder) {
       <div class="detail-footer-dock-premium">
         <div class="price-summary-card-premium">
           <div class="collapsible-summary-rows" id="order-collapsible-summary-rows" style="display: none;"></div>
-          <div class="summary-row total-row"><span>Total Productos (A Cobrar)</span><span class="total-amount">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</span></div>
+          <div class="summary-row total-row">
+            <span>Total Productos (A Cobrar)</span>
+            <span class="total-amount">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</span>
+          </div>
+          ${isTakeaway ? `
+            <div style="font-size:10.5px; color:#059669; font-weight:700; text-align:right; margin-top:2px;">
+              🛍️ Retiro en local ($0 costo de envío)
+            </div>
+          ` : ''}
         </div>
 
         ${!isHistory ? `
         <div class="detail-actions-section-premium">
-          <button class="btn-action-premium outline live-tracking-map-btn" style="background:rgba(59,130,246,0.1); color:#3b82f6; border:1.5px solid rgba(59,130,246,0.3); font-weight:900; margin-bottom:6px; display:flex; align-items:center; justify-content:center; gap:8px;">
-            ${icon('navigationArrow', 18)} Ver Seguimiento en Tiempo Real (GPS)
-          </button>
-          ${o.status === 'ready' ? `
+          ${!isTakeaway ? `
+            <button class="btn-action-premium outline live-tracking-map-btn" style="background:rgba(59,130,246,0.1); color:#3b82f6; border:1.5px solid rgba(59,130,246,0.3); font-weight:900; margin-bottom:6px; display:flex; align-items:center; justify-content:center; gap:8px;">
+              ${icon('navigationArrow', 18)} Ver Seguimiento en Tiempo Real (GPS)
+            </button>
+          ` : ''}
+          
+          ${o.status === 'ready' && !isTakeaway ? `
             <div style="margin-bottom:12px; padding:12px; border-radius:14px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); font-size:12.5px; font-weight:700; width:100%; text-align:left;">
               <span style="color:var(--color-text-tertiary); text-transform:uppercase; font-size:9.5px; display:block; margin-bottom:4px; font-weight:800;">Estado de asignación:</span>
               <div style="display:flex; justify-content:space-between; align-items:center; color:var(--color-text-primary);">
@@ -754,13 +899,20 @@ function showOrderDetailModal(initialOrder) {
                   ${o.driverName ? `🏍️ Asignado a: <strong>${o.driverName}</strong>` : (o.queueTargetDriverName ? `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong>` : `🔍 Buscando repartidor...`)}
                 </span>
                 ${(!o.driverName && o.queueOfferedAt) ? `
-                  <span style="color:var(--color-warning); font-size:12px;" class="modal-queue-timer" data-expiry="${(o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000}">
-                    ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 30000 - (Date.now() + (getState().serverTimeOffset || 0))) / 1000))}s
+                  <span style="color:var(--color-warning); font-size:12px;" class="modal-queue-timer" data-expiry="${(o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 60000}">
+                    ${Math.max(0, Math.floor(((o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) + 60000 - (Date.now() + (getState().serverTimeOffset || 0))) / 1000))}s
                   </span>
                 ` : ''}
               </div>
             </div>
           ` : ''}
+
+          ${o.status === 'ready' && isTakeaway ? `
+            <div style="margin-bottom:12px; padding:12px; border-radius:14px; background:rgba(16, 185, 129, 0.08); border:1px solid rgba(16, 185, 129, 0.2); font-size:12.5px; font-weight:700; width:100%; text-align:center; color:#059669;">
+              🛍️ Retiro en Local — Pedido empaquetado y listo para que el cliente lo retire
+            </div>
+          ` : ''}
+
           ${o.status === 'pending' ? `
             <button class="btn-action-premium confirm confirm-order-btn" data-id="${o.id}">${icon('check', 18)} Confirmar Pedido</button>
             <div class="action-grid-2">
@@ -774,9 +926,15 @@ function showOrderDetailModal(initialOrder) {
               <button class="btn-action-premium reject cancel-confirmed-btn" data-id="${o.id}">${icon('close', 16)} Cancelar</button>
             </div>
           ` : o.status === 'ready' ? `
-            <div style="display:flex; align-items:center; gap:8px; justify-content:center; padding:16px; border-radius:16px; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); color:#0d9488; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:0.02em; width:100%;">
-              ${icon('bike', 18)} Esperando retiro del repartidor
-            </div>
+            ${isTakeaway ? `
+              <button class="btn-action-premium confirm complete-order-btn" data-id="${o.id}" style="background:#059669;">
+                ${icon('checkCircle', 18)} Marcar como Entregado al Cliente
+              </button>
+            ` : `
+              <div style="display:flex; align-items:center; gap:8px; justify-content:center; padding:16px; border-radius:16px; background:rgba(13,148,136,0.08); border:1px solid rgba(13,148,136,0.2); color:#0d9488; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:0.02em; width:100%;">
+                ${icon('bike', 18)} Esperando retiro del repartidor
+              </div>
+            `}
           ` : o.status === 'delivering' ? `
             <button class="btn-action-premium confirm complete-order-btn" data-id="${o.id}">${icon('checkCircle', 18)} Marcar Entregado</button>
           ` : ''}
@@ -1280,13 +1438,22 @@ function showModifyOrderModal(order) {
         b.disabled = true;
         b.innerHTML = icon('loader', 16, 'animate-spin') + ' Guardando...';
 
-        const appFee = order.appUsageFee || 0;
-        const discount = order.discountAmount || 0;
-        const nT = nS + (order.deliveryCost || 0) + appFee - discount;
+        const appFee = Number(order.appUsageFee || order.serviceFee || 0);
+        const pointsDiscount = Number(order.discountAmount || order.discount || 0);
+        const couponDiscount = Number(order.couponDiscount || 0);
+        const tip = Number(order.tip || order.tipAmount || 0);
+        const rainSurcharge = Number(order.rainSurcharge || 0);
+        const nightSurcharge = Number(order.nightSurcharge || 0);
+        const totalDiscounts = pointsDiscount + couponDiscount;
+
+        const nT = Math.max(0, nS + (order.deliveryCost || 0) + appFee + tip + rainSurcharge + nightSurcharge - totalDiscounts);
         await updateDoc(doc(db, 'orders', order.id), { 
           items: nI, 
           subtotal: nS, 
           total: nT, 
+          totalAmount: nT,
+          couponDiscount: couponDiscount,
+          discountAmount: pointsDiscount,
           modifiedAt: serverTimestamp(), 
           isModified: true,
           isFixedPrice: customMode,

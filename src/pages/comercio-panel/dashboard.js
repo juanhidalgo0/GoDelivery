@@ -5,9 +5,11 @@ import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
 import { isAdmin } from '../../auth.js';
+import { showToast } from '../../components/toast.js';
 import { renderPendingCommissionStickyFooter } from '../../components/pending-commission-footer.js';
+import { openWhatsAppCatalogModal } from '../../components/whatsapp-catalog-modal.js';
+import { getStoreUrl } from '../../utils/slug.js';
 
-let notificationSound = new Audio('/assets/sounds/notification.mp3');
 let ordersUnsub = null;
 let lastOrderCount = null;
 
@@ -62,6 +64,9 @@ export async function renderComercioDashboard() {
           <div class="stat-card skeleton" style="height:80px; border-radius:16px;"></div>
         </div>
 
+        <!-- WhatsApp Catalog & Direct Store Promo Card -->
+        <div id="dashboard-catalog-share-container"></div>
+
         <!-- Sales Trend SVG Chart -->
         <div id="dashboard-sales-chart-container">
           <div class="skeleton" style="height:180px; border-radius:20px;"></div>
@@ -99,6 +104,15 @@ export async function renderComercioDashboard() {
         </div>
 
         <div style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px;">
+          <!-- Direct WhatsApp Catalog Drawer Item -->
+          <button id="drawer-whatsapp-catalog-btn" class="drawer-nav-item" style="border:none; width:100%; text-align:left; cursor:pointer; font-family:inherit;">
+            <div class="drawer-nav-icon" style="background:rgba(16, 185, 129, 0.12); color:#10b981;">${icon('whatsapp', 18)}</div>
+            <div class="drawer-nav-text">
+              <span class="drawer-nav-title" style="color:#10b981;">Catálogo WhatsApp / QR</span>
+              <span class="drawer-nav-desc">Compartir link directo y QR</span>
+            </div>
+          </button>
+
           <a href="#/mi-comercio/${comercioId}/products" class="drawer-nav-item">
             <div class="drawer-nav-icon" style="background:rgba(225,29,72,0.1); color:var(--color-primary);">${icon('package', 18)}</div>
             <div class="drawer-nav-text">
@@ -273,6 +287,11 @@ export async function renderComercioDashboard() {
   document.getElementById('close-dashboard-sidebar-btn')?.addEventListener('click', closeDrawer);
   drawerOverlay?.addEventListener('click', closeDrawer);
 
+  document.getElementById('drawer-whatsapp-catalog-btn')?.addEventListener('click', () => {
+    closeDrawer();
+    openWhatsAppCatalogModal(comercioId, commerceData);
+  });
+
   renderPendingCommissionStickyFooter(comercioId, document.querySelector('.panel-page'));
 
   let commerceData = null;
@@ -310,11 +329,14 @@ export async function renderComercioDashboard() {
   attemptOptimizedQuery();
 
   const unlockAudio = () => {
-    notificationSound.play().then(() => {
-      notificationSound.pause();
-      notificationSound.currentTime = 0;
-      document.removeEventListener('click', unlockAudio);
-    }).catch(() => {});
+    try {
+      const sound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      sound.play().then(() => {
+        sound.pause();
+        sound.currentTime = 0;
+        document.removeEventListener('click', unlockAudio);
+      }).catch(() => {});
+    } catch (e) {}
   };
   document.addEventListener('click', unlockAudio);
 
@@ -331,6 +353,14 @@ export async function renderComercioDashboard() {
         sidebarImg.src = logo;
         sidebarImg.style.display = 'block';
         sidebarPlaceholder.style.display = 'none';
+      }
+
+      // Re-trigger catalog card render with fresh commerce data
+      if (q) {
+        getDocs(q).then(snap => {
+          const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          updateDashboardData(orders, comercioId, commerceData);
+        }).catch(() => {});
       }
     }
   });
@@ -389,6 +419,110 @@ function updateDashboardData(orders, comercioId, commerceData) {
         <div style="font-size:19px; font-weight:900; color:#78350f; font-family:var(--font-display);">${rating} <span style="font-size:12px; color:#d97706;">★</span></div>
       </div>
     `;
+  }
+
+  // Render WhatsApp Catalog & Direct Store Promo Card
+  const catalogShareContainer = document.getElementById('dashboard-catalog-share-container');
+  if (catalogShareContainer) {
+    const directOrders = completedOrders.filter(o => o.source === 'catalogo_whatsapp' || o.isDirectOrder === true);
+    const directOrdersTotal = directOrders.reduce((sum, o) => sum + (o.subtotal || o.total || 0), 0);
+    const takeawayOrders = completedOrders.filter(o => o.deliveryType === 'takeaway' || o.deliveryType === 'retiro');
+    const catalogUrl = getStoreUrl(commerceData || comercioId);
+
+    catalogShareContainer.innerHTML = `
+      <div style="background:linear-gradient(135deg, #064e3b 0%, #065f46 60%, #047857 100%); border-radius:20px; padding:16px 18px; color:white; box-shadow:0 6px 20px rgba(6,78,59,0.25); position:relative; overflow:hidden;">
+        <!-- Background decorative rings -->
+        <div style="position:absolute; top:-30px; right:-30px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,0.06); pointer-events:none;"></div>
+        <div style="position:absolute; bottom:-40px; left:-20px; width:100px; height:100px; border-radius:50%; background:rgba(255,255,255,0.04); pointer-events:none;"></div>
+
+        <div style="position:relative; z-index:2; display:flex; flex-direction:column; gap:12px;">
+          <!-- Card Header -->
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.25); display:flex; align-items:center; justify-content:center; color:#34d399; flex-shrink:0;">
+                ${icon('whatsapp', 20)}
+              </div>
+              <div>
+                <h3 style="margin:0; font-family:var(--font-display); font-size:14.5px; font-weight:900; color:white; line-height:1.2;">Tu Catálogo Online & WhatsApp</h3>
+                <span style="font-size:10.5px; color:rgba(255,255,255,0.8); font-weight:600;">Modo tienda exclusiva sin competencia</span>
+              </div>
+            </div>
+            <button id="dash-qr-modal-trigger-btn" style="background:white; color:#065f46; border:none; padding:6px 12px; border-radius:10px; font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:5px; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+              ${icon('grid', 13)} Ver QR
+            </button>
+          </div>
+
+          <!-- URL box with 1-click copy -->
+          <div style="display:flex; align-items:center; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:6px 8px 6px 12px; gap:8px;">
+            <span style="flex:1; font-family:monospace; font-size:11px; color:#a7f3d0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" id="dash-catalog-url-display">
+              ${catalogUrl}
+            </span>
+            <button id="dash-copy-catalog-btn" style="background:#10b981; color:white; border:none; border-radius:8px; padding:6px 10px; font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; flex-shrink:0; transition:all 0.2s;">
+              ${icon('copy', 13)} Copiar
+            </button>
+          </div>
+
+          <!-- Action buttons row -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <button id="dash-share-wsp-btn" style="background:#25d366; color:white; border:none; border-radius:12px; padding:9px 12px; font-size:11.5px; font-weight:850; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 3px 10px rgba(37,211,102,0.3);">
+              ${icon('whatsapp', 16)} Enviar por WhatsApp
+            </button>
+            <button id="dash-open-catalog-tab-btn" style="background:rgba(255,255,255,0.12); color:white; border:1px solid rgba(255,255,255,0.2); border-radius:12px; padding:9px 12px; font-size:11.5px; font-weight:850; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+              ${icon('externalLink', 15)} Probar Vista
+            </button>
+          </div>
+
+          <!-- Metrics summary -->
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:2px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.12);">
+            <div style="display:flex; flex-direction:column; gap:1px;">
+              <span style="font-size:9.5px; color:rgba(255,255,255,0.7); font-weight:700; text-transform:uppercase;">Pedidos Directos</span>
+              <span style="font-size:14px; font-weight:900; color:white; font-family:var(--font-display);">${directOrders.length}</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:1px;">
+              <span style="font-size:9.5px; color:rgba(255,255,255,0.7); font-weight:700; text-transform:uppercase;">Ventas WhatsApp</span>
+              <span style="font-size:14px; font-weight:900; color:#6ee7b7; font-family:var(--font-display);">$${directOrdersTotal.toLocaleString('es-AR')}</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:1px;">
+              <span style="font-size:9.5px; color:rgba(255,255,255,0.7); font-weight:700; text-transform:uppercase;">Retiros en Local</span>
+              <span style="font-size:14px; font-weight:900; color:#fde047; font-family:var(--font-display);">${takeawayOrders.length}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Wire clicks inside the promo card
+    document.getElementById('dash-qr-modal-trigger-btn')?.addEventListener('click', () => {
+      openWhatsAppCatalogModal(comercioId, commerceData);
+    });
+
+    document.getElementById('dash-copy-catalog-btn')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(catalogUrl).then(() => {
+        showToast('¡Link del catálogo copiado!', 'success');
+        const btn = document.getElementById('dash-copy-catalog-btn');
+        if (btn) {
+          btn.innerHTML = `${icon('check', 13)} ¡Copiado!`;
+          btn.style.background = '#059669';
+          setTimeout(() => {
+            btn.innerHTML = `${icon('copy', 13)} Copiar`;
+            btn.style.background = '#10b981';
+          }, 2000);
+        }
+      }).catch(() => {
+        showToast('No se pudo copiar el link', 'error');
+      });
+    });
+
+    document.getElementById('dash-share-wsp-btn')?.addEventListener('click', () => {
+      const name = commerceData?.name || 'nuestro local';
+      const msg = `¡Hola! 👋 Te paso el link para ver la carta y pedir directo en ${name}:\n\n${catalogUrl}\n\n¡Hacé tu pedido online y te lo llevamos o lo pasás a buscar!`;
+      const wspUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(wspUrl, '_blank');
+    });
+
+    document.getElementById('dash-open-catalog-tab-btn')?.addEventListener('click', () => {
+      window.open(catalogUrl, '_blank');
+    });
   }
 
   // Render SVG Trend Chart

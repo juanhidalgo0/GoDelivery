@@ -106,22 +106,35 @@ self.addEventListener('push', (event) => {
           options.image = imageUrl;
         }
         
-        console.log('[SW] Displaying premium background/driver heads-up notification:', options);
-        await self.registration.showNotification(title, options);
+        console.log('[SW] Displaying background push notification:', options);
+        try {
+          await self.registration.showNotification(title, options);
+        } catch (showErr) {
+          console.warn('[SW] Standard showNotification failed, attempting iOS/WebKit compliant fallback:', showErr);
+          try {
+            await self.registration.showNotification(title, {
+              body: body,
+              icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
+              badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
+              data: {
+                url: isDriverAlert ? 'https://godelivery-magdalena.web.app/#/repartidor' : targetUrl
+              }
+            });
+          } catch (iosErr) {
+            console.error('[SW] iOS fallback showNotification failed:', iosErr);
+          }
+        }
       } else {
         console.log('[SW] Suppressing native notification since PWA is in foreground.');
       }
     } catch (err) {
       console.error('[SW] Error custom parsing/rendering push:', err);
-      // Fallback: ALWAYS show a notification to satisfy browser requirements and prevent silent swallows on locked screens
       try {
         console.log('[SW] Displaying fallback notification due to parsing error');
         await self.registration.showNotification("Go Delivery", {
           body: "Tenés novedades en tu pedido. Entrá a la app para ver los detalles.",
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
           badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
-          vibrate: [300, 100, 300],
-          requireInteraction: true,
           data: { url: 'https://godelivery-magdalena.web.app/#/' }
         });
       } catch (innerErr) {
@@ -143,7 +156,7 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // PWA: Cache Configuration (Bump version to force update)
-const CACHE_NAME = 'godelivery-v1.5.3';
+const CACHE_NAME = 'godelivery-v__BUILD_TIMESTAMP__';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -170,10 +183,12 @@ const ASSETS_TO_CACHE = [
 
 // Install: Pre-cache App Shell
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing v1.4.17 (Fresh PWA safe deep links)...');
+  console.log('[SW] Installing new version...');
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return cache.addAll(ASSETS_TO_CACHE).catch((err) => {
+        console.warn('[SW] Pre-cache non-fatal warning:', err);
+      });
     })
   );
   self.skipWaiting();
@@ -245,13 +260,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // STRATEGY: Network-First for index.html, JS, CSS, assets, and version.json (ensure latest version)
+  // STRATEGY 1: Network-First for index.html, root navigation, and version.json (guarantees new releases are detected)
   if (
     url.pathname === '/' || 
     url.pathname.endsWith('index.html') ||
-    url.pathname.endsWith('.js') ||
-    url.pathname.endsWith('.css') ||
-    url.pathname.startsWith('/assets/') ||
     url.pathname.includes('version.json')
   ) {
     event.respondWith(
@@ -268,7 +280,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // STRATEGY: Stale-While-Revalidate for images and static media
+  // STRATEGY 2: Cache-First for Vite hashed bundles (/assets/*.js, /assets/*.css, fonts) -> 0ms instant disk load
+  if (
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.endsWith('.woff2') ||
+    url.pathname.endsWith('.woff') ||
+    url.pathname.endsWith('.ttf')
+  ) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        try {
+          const networkResponse = await fetch(request);
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone());
+          }
+          return networkResponse;
+        } catch (err) {
+          return cached;
+        }
+      })
+    );
+    return;
+  }
+
+  // STRATEGY 3: Stale-While-Revalidate for images, icons, and static media
   event.respondWith(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.match(request).then((cachedResponse) => {

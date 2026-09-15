@@ -917,7 +917,13 @@ body.is-delivery-mode {
   overscroll-behavior: none !important;
   overscroll-behavior-x: none !important;
   overscroll-behavior-y: none !important;
-  touch-action: none !important;
+  /* NOTE: deliberately no touch-action here. `position:fixed` + `overflow:hidden`
+     already stop the background page from bouncing/scrolling behind the fixed
+     driver map. touch-action:none on html/body used to also be set here, but
+     native WebViews (WKWebView/Android WebView) don't reliably let a descendant
+     re-enable panning with its own touch-action once an ancestor forces `none`
+     — it ends up blocking scroll everywhere inside delivery mode (Ganancias,
+     historial de sesiones, etc.), not just the intended background bounce. */
   position: fixed !important;
   width: 100vw !important;
   height: 100vh !important;
@@ -939,6 +945,61 @@ html.is-delivery-mode:not(.driver-light-mode) {
 body.is-delivery-mode.driver-light-mode,
 html.is-delivery-mode.driver-light-mode {
   background: #f8fafc !important;
+}
+
+/* Driver panel design tokens — theme follows the panel's own "Tema Visual y Mapa"
+   toggle (driver-light-mode class), independent of the app's global light/dark mode.
+   Covers the highest-frequency isLight ? 'x' : 'y' ternaries repeated across
+   delivery-panel.js and its submodules; one-off badge/status colors intentionally
+   stay inline since they aren't actually reused. */
+body.is-delivery-mode:not(.driver-light-mode) {
+  --driver-text-primary: #ffffff;
+  --driver-text-primary-soft: #f8fafc;
+  --driver-text-secondary: #94a3b8;
+  --driver-text-secondary-b: #94a3b8;
+  --driver-text-secondary-inverted: #64748b;
+  --driver-text-label: #cbd5e1;
+  --driver-text-tertiary: #cbd5e1;
+  --driver-accent-text: #fb7185;
+  --driver-success-text: #4ade80;
+  --driver-bg-panel: #090d16;
+  --driver-bg-panel-b: #1e293b;
+  --driver-bg-elevated: #0f172a;
+  --driver-fill-subtle: rgba(255, 255, 255, 0.08);
+  --driver-fill-subtle-b: rgba(255, 255, 255, 0.06);
+  --driver-fill-faint: rgba(255, 255, 255, 0.04);
+  --driver-fill-faint-b: rgba(255, 255, 255, 0.03);
+  --driver-border: rgba(255, 255, 255, 0.08);
+  --driver-border-b: rgba(255, 255, 255, 0.1);
+  --driver-border-c: rgba(255, 255, 255, 0.12);
+  --driver-border-soft: rgba(255, 255, 255, 0.1);
+  --driver-border-strong: rgba(255, 255, 255, 0.15);
+  --driver-hairline: rgba(255, 255, 255, 0.06);
+}
+
+body.is-delivery-mode.driver-light-mode {
+  --driver-text-primary: #0f172a;
+  --driver-text-primary-soft: #0f172a;
+  --driver-text-secondary: #64748b;
+  --driver-text-secondary-b: #475569;
+  --driver-text-secondary-inverted: #94a3b8;
+  --driver-text-label: #475569;
+  --driver-text-tertiary: #334155;
+  --driver-accent-text: #e11d48;
+  --driver-success-text: #166534;
+  --driver-bg-panel: #ffffff;
+  --driver-bg-panel-b: #ffffff;
+  --driver-bg-elevated: #ffffff;
+  --driver-fill-subtle: #f1f5f9;
+  --driver-fill-subtle-b: #f1f5f9;
+  --driver-fill-faint: #f8fafc;
+  --driver-fill-faint-b: #f8fafc;
+  --driver-border: #e2e8f0;
+  --driver-border-b: #e2e8f0;
+  --driver-border-c: #cbd5e1;
+  --driver-border-soft: #cbd5e1;
+  --driver-border-strong: #cbd5e1;
+  --driver-hairline: rgba(0, 0, 0, 0.05);
 }
 
 body.is-delivery-mode #app,
@@ -1173,7 +1234,8 @@ body.is-delivery-mode.driver-light-mode #driver-recenter-compass-btn {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
 }
 
-body.is-delivery-mode.driver-light-mode #driver-map-controls-group > div {
+body.is-delivery-mode.driver-light-mode #driver-map-controls-group > div,
+body.is-delivery-mode.driver-light-mode #driver-zoom-controls-wrapper {
   background: #ffffff !important;
   border: 1.5px solid #e2e8f0 !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
@@ -1186,6 +1248,38 @@ body.is-delivery-mode.driver-light-mode #driver-zoom-out-btn {
 
 body.is-delivery-mode.driver-light-mode #driver-zoom-in-btn {
   border-bottom: 1px solid #f1f5f9 !important;
+}
+
+/* 2.1 Recenter GPS FAB & Map Controls Group in Dark Mode */
+body.is-delivery-mode.driver-dark-mode #driver-recenter-fab-btn,
+body.is-delivery-mode.driver-dark-mode #driver-recenter-compass-btn,
+body.is-delivery-mode:not(.driver-light-mode) #driver-recenter-fab-btn,
+body.is-delivery-mode:not(.driver-light-mode) #driver-recenter-compass-btn {
+  background: rgba(15, 23, 42, 0.94) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.18) !important;
+  color: #38bdf8 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+}
+
+body.is-delivery-mode.driver-dark-mode #driver-map-controls-group > div,
+body.is-delivery-mode.driver-dark-mode #driver-zoom-controls-wrapper,
+body.is-delivery-mode:not(.driver-light-mode) #driver-map-controls-group > div,
+body.is-delivery-mode:not(.driver-light-mode) #driver-zoom-controls-wrapper {
+  background: rgba(15, 23, 42, 0.94) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.18) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+}
+
+body.is-delivery-mode.driver-dark-mode #driver-zoom-in-btn,
+body.is-delivery-mode.driver-dark-mode #driver-zoom-out-btn,
+body.is-delivery-mode:not(.driver-light-mode) #driver-zoom-in-btn,
+body.is-delivery-mode:not(.driver-light-mode) #driver-zoom-out-btn {
+  color: #ffffff !important;
+}
+
+body.is-delivery-mode.driver-dark-mode #driver-zoom-in-btn,
+body.is-delivery-mode:not(.driver-light-mode) #driver-zoom-in-btn {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 /* 3. Floating Instruction Pill */

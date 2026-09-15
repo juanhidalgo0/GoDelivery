@@ -30,3 +30,10 @@ Apple/
 # WhatsApp Baileys Auth Session
 auth_info_baileys/
 
+# Secrets — never commit
+github-recovery-codes.txt
+whatsapp-bot/.env
+whatsapp-bot/serviceAccountKey.json
+*.env
+serviceAccountKey.json
+

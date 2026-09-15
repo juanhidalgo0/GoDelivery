@@ -199,6 +199,20 @@ export async function renderNotifications(content) {
     ${getNotificationStyles()}
     <div class="notifications-page page-enter">
       <div class="notifications-container-premium">
+        ${(typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted') ? `
+          <div id="notif-permission-banner" style="background: linear-gradient(135deg, rgba(225, 29, 72, 0.08), rgba(225, 29, 72, 0.02)); border: 1.5px solid rgba(225, 29, 72, 0.2); border-radius: 18px; padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+              <span style="font-size: 22px;">🔔</span>
+              <div>
+                <div style="font-size: 13px; font-weight: 850; color: var(--color-text-primary);">Notificaciones desactivadas</div>
+                <div style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600;">Activá los avisos para enterarte cuando tu pedido esté en camino.</div>
+              </div>
+            </div>
+            <button id="enable-notifs-btn" style="background: var(--color-primary); color: white; border: none; padding: 8px 14px; border-radius: 12px; font-size: 12px; font-weight: 900; cursor: pointer; flex-shrink: 0; box-shadow: 0 4px 12px rgba(225, 29, 72, 0.25);">
+              Activar
+            </button>
+          </div>
+        ` : ''}
         <div class="notif-header-section-v6">
           <h2 class="notif-header-title-v6">Historial</h2>
           <button id="notif-clear-all-btn" class="notif-clear-btn-v6" style="display: none;">
@@ -216,6 +230,20 @@ export async function renderNotifications(content) {
 
   startListener();
   renderItems();
+
+  const enableBtn = document.getElementById('enable-notifs-btn');
+  if (enableBtn) {
+    enableBtn.onclick = async () => {
+      const { requestWebPushPermission } = await import('../utils/notifications.js');
+      const perm = await requestWebPushPermission();
+      if (perm === 'granted') {
+        showToast('¡Notificaciones activadas con éxito!', 'success');
+        document.getElementById('notif-permission-banner')?.remove();
+      } else {
+        showToast('No se pudieron activar las notificaciones. Verificá los permisos de tu navegador.', 'warning');
+      }
+    };
+  }
 
   const unsubNotif = subscribe('notifications', () => renderItems());
   const unsubUser = subscribe('user', () => {

@@ -1,5 +1,5 @@
 // GoDelivery — Comercio Detail Page
-import { db } from '../firebase.js';
+import { db, auth } from '../firebase.js';
 import { doc, getDoc, collection, getDocs, query, orderBy, where, limit, startAfter } from 'firebase/firestore';
 import { getRouteParams } from '../router.js';
 import { addToCart, getCartCount, subscribe, getState, isProductFavorite, setState } from '../state.js';
@@ -11,60 +11,122 @@ import { getFooterHTML } from '../components/footer.js';
 import { renderNavbar, updateGlobalCartFAB } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { openProductModal } from '../components/product-modal.js';
+import { createSlug, getStoreUrl } from '../utils/slug.js';
 
 let currentComercio = null;
+let currentActiveOrder = null;
 const memoryCommerceCache = new Map();
 
-export async function renderComercio(content) {
-  if (!content) content = document.getElementById('app-content');
+export async function renderComercio(content, isDirectMode = false) {
+  if (!content) {
+    content = document.getElementById('overlay-render-target') || document.getElementById('app-content');
+  }
   const params = getRouteParams();
-  const comercioId = params.id;
+  let comercioId = params.id;
+  if (!comercioId) {
+    const rawHash = window.location.hash.split('?')[0];
+    const cleanHash = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
+    const parts = cleanHash.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      comercioId = parts[1];
+    }
+  }
+
+  const isDirect = isDirectMode || window.location.hash.startsWith('#/tienda/') || window.location.hash.includes('direct=true') || document.body.classList.contains('is-direct-store-mode') || document.documentElement.classList.contains('is-direct-store-mode');
+  if (isDirect) {
+    document.documentElement.classList.add('is-direct-store-mode');
+    document.body.classList.add('is-direct-store-mode');
+  }
 
   if (!comercioId) {
     content.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('alertTriangle', 40)}</div><div class="empty-state-title">Comercio no encontrado</div></div>`;
     return;
   }
 
-  // Resolve actual commerce ID (allowing matching by name/subdomain or fallback to cache)
+  // Resolve actual commerce ID (allowing matching by slug, ID, subdomain, or name)
   let comercio = null;
-  try {
-    const cachedComerciosRaw = localStorage.getItem('gd_cached_comercios');
-    if (cachedComerciosRaw) {
-      const list = JSON.parse(cachedComerciosRaw);
-      comercio = list.find(c => c.id === comercioId || (c.name && c.name.toLowerCase().includes(comercioId.toLowerCase())) || (c.subdomain && c.subdomain.toLowerCase() === comercioId.toLowerCase()));
-    }
-  } catch (e) {
-    console.warn('Error matching commerce from cache:', e);
+  const cleanTarget = decodeURIComponent(comercioId || '').toLowerCase().trim();
+
+  // 1. Check in-memory fast cache
+  if (memoryCommerceCache.has(comercioId)) {
+    comercio = memoryCommerceCache.get(comercioId)?.comercio || null;
+  }
+  if (!comercio && memoryCommerceCache.has(cleanTarget)) {
+    comercio = memoryCommerceCache.get(cleanTarget)?.comercio || null;
   }
 
-  // Fallback to Firestore fetch if not found in local cache
+  // 2. Check localStorage global comercios cache
   if (!comercio) {
     try {
-      const { doc, getDoc, collection, getDocs, query, limit } = await import('firebase/firestore');
+      const cachedComerciosRaw = localStorage.getItem('gd_cached_comercios');
+      if (cachedComerciosRaw) {
+        const list = JSON.parse(cachedComerciosRaw);
+        comercio = list.find(c => 
+          c.id === comercioId || 
+          (c.slug && c.slug.toLowerCase() === cleanTarget) ||
+          (c.subdomain && c.subdomain.toLowerCase() === cleanTarget) ||
+          (c.name && (c.name.toLowerCase() === cleanTarget || createSlug(c.name) === cleanTarget))
+        );
+      }
+    } catch (e) {
+      console.warn('Error matching commerce from cache:', e);
+    }
+  }
+
+  // 3. Check individual store cache or dedicated slug cache
+  if (!comercio) {
+    try {
+      const singleCached = localStorage.getItem(`gd_comercio_cache_${comercioId}`) || localStorage.getItem(`gd_comercio_slug_${cleanTarget}`);
+      if (singleCached) {
+        const parsed = JSON.parse(singleCached);
+        if (parsed?.data?.comercio || parsed?.comercio) {
+          comercio = parsed.data?.comercio || parsed.comercio;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 4. Parallel Firestore lookup (Fast 1-trip resolution)
+  if (!comercio) {
+    try {
       const docRef = doc(db, 'comercios', comercioId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
+      const slugQuery = query(collection(db, 'comercios'), where('slug', '==', cleanTarget), limit(1));
+      
+      const [snap, slugSnap] = await Promise.all([
+        getDoc(docRef).catch(() => null),
+        getDocs(slugQuery).catch(() => null)
+      ]);
+
+      if (snap && snap.exists()) {
         comercio = { id: snap.id, ...snap.data() };
+      } else if (slugSnap && !slugSnap.empty) {
+        const matchedDoc = slugSnap.docs[0];
+        comercio = { id: matchedDoc.id, ...matchedDoc.data() };
       } else {
-        const q = query(collection(db, 'comercios'), limit(5));
-        const allComSnap = await getDocs(q);
+        // Fallback: match by slug / name in all comercios
+        const allComSnap = await getDocs(collection(db, 'comercios'));
         if (!allComSnap.empty) {
-          let matchedDoc = allComSnap.docs.find(d => {
-            const name = (d.data().name || '').toLowerCase();
-            const sub = (d.data().subdomain || '').toLowerCase();
-            const target = comercioId.toLowerCase();
-            return name.includes(target) || target.includes(name) || sub === target;
+          const matchedDoc = allComSnap.docs.find(d => {
+            const data = d.data();
+            const name = (data.name || '').toLowerCase();
+            const slug = (data.slug || createSlug(data.name || '')).toLowerCase();
+            const sub = (data.subdomain || '').toLowerCase();
+            return d.id === comercioId || slug === cleanTarget || name === cleanTarget || sub === cleanTarget || name.includes(cleanTarget);
           });
-          if (!matchedDoc) {
-            matchedDoc = allComSnap.docs[0];
+          if (matchedDoc) {
+            comercio = { id: matchedDoc.id, ...matchedDoc.data() };
           }
-          comercio = { id: matchedDoc.id, ...matchedDoc.data() };
-          console.log(`[Preview Fallback] Resolved commerce '${comercioId}' to '${comercio.id}'`);
         }
       }
     } catch (err) {
       console.error('Error resolving commerce document:', err);
     }
+  }
+
+  if (comercio) {
+    try {
+      localStorage.setItem(`gd_comercio_slug_${cleanTarget}`, JSON.stringify({ comercio }));
+    } catch (e) {}
   }
 
   if (!comercio) {
@@ -77,6 +139,7 @@ export async function renderComercio(content) {
   try {
     localStorage.setItem('gd_last_visited_comercio', JSON.stringify({ id: comercio.id, name: comercio.name || 'Comercio' }));
   } catch (e) {}
+
   let unsubComercios = null;
 
   try {
@@ -139,6 +202,34 @@ export async function renderComercio(content) {
     console.warn('Error setting up real-time listener for commerce details:', err);
   }
 
+  let unsubActiveOrders = null;
+  const currentUser = getState().user;
+  if (currentUser) {
+    try {
+      const { collection, query, where, onSnapshot } = await import('firebase/firestore');
+      const qOrders = query(
+        collection(db, 'orders'),
+        where('userId', '==', currentUser.uid),
+        where('status', 'in', ['pending', 'confirmed', 'ready', 'delivering'])
+      );
+      unsubActiveOrders = onSnapshot(qOrders, (snap) => {
+        const activeOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (new Date(a.createdAt || 0).getTime());
+            const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (new Date(b.createdAt || 0).getTime());
+            return timeB - timeA;
+          });
+        
+        const relevantOrder = activeOrders.find(o => o.comercioId === resolvedComercioId) || activeOrders[0] || null;
+        updateComercioActiveOrderUI(relevantOrder, resolvedComercioId, isDirectMode);
+      }, (err) => {
+        console.warn('Active order listener error in comercio:', err);
+      });
+    } catch (e) {
+      console.warn('Error setting up active order listener:', e);
+    }
+  }
+
   // Proactive fee calculation
   import('./cart.js').then(m => m.calculateAllFees && m.calculateAllFees(resolvedComercioId));
 
@@ -172,7 +263,7 @@ export async function renderComercio(content) {
     const { categories, products, activeOffers } = cachedData;
     setState('activeOffers', activeOffers);
     setState('currentProducts', products);
-    renderPage(comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory);
+    renderPage(content, comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory, isDirect);
     
     // Trigger deep-link product modal if parameter exists in URL
     try {
@@ -225,57 +316,95 @@ export async function renderComercio(content) {
   }
 
   try {
-    const [catsSnap, offersSnap] = await Promise.all([
+    let catsSnap = null;
+    let offersSnap = null;
+    let initialProdSnap = null;
+
+    const [catsRes, offersRes, prodsRes] = await Promise.allSettled([
       getDocsOptimized(
         query(collection(db, 'comercios', resolvedComercioId, 'categories'), orderBy('order')),
         `comercio_categories_${resolvedComercioId}`,
-        15 * 60 * 1000 // 15 minutes TTL
+        15 * 60 * 1000
       ),
       getDocsOptimized(
         query(collection(db, 'offers'), where('comercioId', '==', resolvedComercioId), where('active', '==', true)),
         `comercio_offers_${resolvedComercioId}`,
-        5 * 60 * 1000 // 5 minutes TTL
+        5 * 60 * 1000
+      ),
+      getDocsOptimized(
+        query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(100)),
+        `comercio_products_${resolvedComercioId}_cat_all`,
+        15 * 60 * 1000
       )
     ]);
 
-    const categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false);
-    const activeOffers = offersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    let products = [];
+    catsSnap = catsRes.status === 'fulfilled' ? catsRes.value : null;
+    offersSnap = offersRes.status === 'fulfilled' ? offersRes.value : null;
+    initialProdSnap = prodsRes.status === 'fulfilled' ? prodsRes.value : null;
+
+    if (!catsSnap || !catsSnap.docs) {
+      try {
+        catsSnap = await getDocs(collection(db, 'comercios', resolvedComercioId, 'categories'));
+      } catch (e) {
+        catsSnap = { docs: [] };
+      }
+    }
+
+    if (!offersSnap || !offersSnap.docs) {
+      offersSnap = { docs: [] };
+    }
+
+    if (!initialProdSnap || !initialProdSnap.docs) {
+      try {
+        initialProdSnap = await getDocs(collection(db, 'comercios', resolvedComercioId, 'products'));
+      } catch (e) {
+        initialProdSnap = { docs: [] };
+      }
+    }
+
+    const categories = (catsSnap.docs || []).map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false);
+    const activeOffers = (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+    let products = (initialProdSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
 
     // Helper to load products for a specific category dynamically
     const loadCategoryProducts = async (catId) => {
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
       if (catId === 'all') {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(20));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(100));
       } else if (catId === 'discounts') {
         const productIds = [];
         activeOffers.forEach(o => {
           if (o.productIds) productIds.push(...o.productIds);
         });
         if (productIds.length > 0) {
-          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', productIds.slice(0, 20)));
+          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', productIds.slice(0, 30)));
         } else {
           return [];
         }
       } else if (catId === 'favorites') {
         const favoriteIds = getState().favorites || [];
         if (favoriteIds.length > 0) {
-          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', favoriteIds.slice(0, 20)));
+          q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('__name__', 'in', favoriteIds.slice(0, 30)));
         } else {
           return [];
         }
       } else {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('categoryId', '==', catId), limit(20));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('categoryId', '==', catId), limit(100));
       }
 
-      const prodsSnap = await getDocsOptimized(q, cacheKey, 15 * 60 * 1000);
-      return prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      try {
+        const prodsSnap = await getDocsOptimized(q, cacheKey, 15 * 60 * 1000);
+        return (prodsSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+      } catch (err) {
+        try {
+          const directSnap = await getDocs(q);
+          return (directSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+          return [];
+        }
+      }
     };
-
-    // Load initial products for current active category (which is activeCategory, typically 'all')
-    const initialProducts = await loadCategoryProducts(activeCategory);
-    products = initialProducts;
 
     // Store in memory & localStorage for next instant load
     const cachePayload = { comercio, categories, products, activeOffers };
@@ -315,7 +444,7 @@ export async function renderComercio(content) {
     }
 
     if (shouldRender) {
-      renderPage(comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory);
+      renderPage(content, comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory, isDirect);
     }
 
     // Deep link product modal trigger
@@ -357,13 +486,14 @@ export async function renderComercio(content) {
     };
 
     // Category filter handler
-    document.getElementById('comercio-categories')?.addEventListener('click', async (e) => {
+    const catContainer = content.querySelector('#comercio-categories') || document.getElementById('comercio-categories');
+    catContainer?.addEventListener('click', async (e) => {
       const pill = e.target.closest('.tab-pill');
       if (!pill) return;
       activeCategory = pill.dataset.catId;
       activeSubCategory = 'all'; // Reset subcategory when main category changes
 
-      document.querySelectorAll('#comercio-categories .tab-pill').forEach(p => p.classList.remove('active'));
+      (content.querySelectorAll('#comercio-categories .tab-pill') || document.querySelectorAll('#comercio-categories .tab-pill')).forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
 
       // Smoothly scroll the pill to the left position (like "Todos")
@@ -374,8 +504,8 @@ export async function renderComercio(content) {
 
       // Update subcategories container dynamically
       const subCats = categories.filter(c => c.parentCategoryId === activeCategory);
-      const subContainer = document.getElementById('comercio-subcategories-container');
-      const subGrid = document.getElementById('comercio-subcategories');
+      const subContainer = content.querySelector('#comercio-subcategories-container') || document.getElementById('comercio-subcategories-container');
+      const subGrid = content.querySelector('#comercio-subcategories') || document.getElementById('comercio-subcategories');
       if (subContainer && subGrid) {
         if (subCats.length > 0) {
           subContainer.style.display = 'block';
@@ -391,7 +521,7 @@ export async function renderComercio(content) {
         }
       }
 
-      const grid = document.getElementById('comercio-products');
+      const grid = content.querySelector('#comercio-products') || document.getElementById('comercio-products');
       const hasLoadedCategory = (catId) => {
         if (catId === 'all') return true;
         if (catId === 'discounts') return products.some(p => activeOffers.some(o => o.productIds && o.productIds.includes(p.id)));
@@ -445,12 +575,12 @@ export async function renderComercio(content) {
     });
 
     // Subcategory filter handler (delegated click event)
-    document.getElementById('app-content')?.addEventListener('click', async (e) => {
+    content.addEventListener('click', async (e) => {
       const subPill = e.target.closest('.sub-tab-pill');
       if (!subPill) return;
       activeSubCategory = subPill.dataset.subcatId;
 
-      document.querySelectorAll('.sub-tab-pill').forEach(p => p.classList.remove('active'));
+      content.querySelectorAll('.sub-tab-pill').forEach(p => p.classList.remove('active'));
       subPill.classList.add('active');
       
       // Smoothly scroll the sub-pill to the left position
@@ -459,7 +589,7 @@ export async function renderComercio(content) {
         container.scrollTo({ left: subPill.offsetLeft, behavior: 'smooth' });
       }
       
-      document.querySelectorAll('.sub-tab-pill').forEach(p => {
+      content.querySelectorAll('.sub-tab-pill').forEach(p => {
         const isActive = p.dataset.subcatId === activeSubCategory;
         p.style.borderColor = isActive ? 'var(--color-primary)' : 'var(--color-border-light)';
         p.style.background = isActive ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)';
@@ -475,7 +605,7 @@ export async function renderComercio(content) {
     });
 
     // Brand filter handler
-    document.getElementById('app-content')?.addEventListener('change', (e) => {
+    content.addEventListener('change', (e) => {
       if (e.target.id === 'comercio-brand-select') {
         activeBrand = e.target.value;
         const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
@@ -485,7 +615,8 @@ export async function renderComercio(content) {
     });
 
     // Sort filter handler
-    document.getElementById('comercio-sort-select')?.addEventListener('change', (e) => {
+    const sortSelect = content.querySelector('#comercio-sort-select') || document.getElementById('comercio-sort-select');
+    sortSelect?.addEventListener('change', (e) => {
       activeSort = e.target.value;
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
       smoothScrollToProductsTop();
@@ -493,28 +624,33 @@ export async function renderComercio(content) {
     });
 
     // Search input handler
-    document.getElementById('comercio-product-search')?.addEventListener('input', (e) => {
+    let comercioSearchDebounceTimer = null;
+    const searchInput = content.querySelector('#comercio-product-search') || document.getElementById('comercio-product-search');
+    searchInput?.addEventListener('input', (e) => {
       activeSearch = e.target.value.trim().toLowerCase();
-      const clearBtn = document.getElementById('clear-search-btn');
+      const clearBtn = content.querySelector('#clear-search-btn') || document.getElementById('clear-search-btn');
       if (clearBtn) {
         clearBtn.style.display = activeSearch ? 'flex' : 'none';
       }
-      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
-      renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
+      if (comercioSearchDebounceTimer) clearTimeout(comercioSearchDebounceTimer);
+      comercioSearchDebounceTimer = setTimeout(() => {
+        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+        renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
+      }, 120);
     });
 
-    document.getElementById('clear-search-btn')?.addEventListener('click', () => {
-      const input = document.getElementById('comercio-product-search');
+    const clearSearchBtn = content.querySelector('#clear-search-btn') || document.getElementById('clear-search-btn');
+    clearSearchBtn?.addEventListener('click', () => {
+      const input = content.querySelector('#comercio-product-search') || document.getElementById('comercio-product-search');
       if (input) input.value = '';
       activeSearch = '';
-      const clearBtn = document.getElementById('clear-search-btn');
-      if (clearBtn) clearBtn.style.display = 'none';
+      if (clearSearchBtn) clearSearchBtn.style.display = 'none';
       const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
     // Product interaction handler (Delegated to container)
-    const productsContainer = document.getElementById('comercio-products');
+    const productsContainer = content.querySelector('#comercio-products') || document.getElementById('comercio-products');
     if (productsContainer) {
       productsContainer.onclick = (e) => {
         const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
@@ -585,7 +721,11 @@ export async function renderComercio(content) {
           }, 1500);
 
           renderNavbar();
-          updateGlobalCartFAB();
+          if (isDirect) {
+            updateDirectCartBar(resolvedComercioId);
+          } else {
+            updateGlobalCartFAB();
+          }
           return;
         }
 
@@ -596,17 +736,269 @@ export async function renderComercio(content) {
 
   } catch (e) {
     console.error('Error loading comercio:', e);
-    content.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('alertTriangle', 40)}</div><div class="empty-state-title">Error al cargar</div></div>`;
+    content.innerHTML = `
+      <div class="empty-state" style="padding: 40px 20px; text-align: center;">
+        <div class="empty-state-icon" style="margin-bottom: 12px;">${icon('alertTriangle', 40)}</div>
+        <div class="empty-state-title" style="font-size: 18px; font-weight: 800; margin-bottom: 8px;">No se pudo cargar el catálogo</div>
+        <p style="color: var(--color-text-secondary); font-size: 13px; max-width: 280px; margin: 0 auto 20px;">Hubo una interrupción al conectar con la tienda. Tocá el botón para reintentar.</p>
+        <button class="btn btn-primary" onclick="window.location.reload()" style="padding: 10px 24px; border-radius: 12px; font-weight: 800;">Reintentar</button>
+      </div>
+    `;
   }
 
-  // Cart FAB subscription
-  const unsub = subscribe('cart', () => updateGlobalCartFAB());
+  // Cart subscription (Direct bar or global FAB)
+  const unsub = subscribe('cart', () => {
+    if (isDirect) {
+      updateDirectCartBar(resolvedComercioId);
+    } else {
+      updateGlobalCartFAB();
+    }
+  });
+
   return {
     cleanup: () => {
       unsub();
       if (unsubComercios) unsubComercios();
+      if (unsubActiveOrders) unsubActiveOrders();
+      if (window._comercioScrollHandler) {
+        window.removeEventListener('scroll', window._comercioScrollHandler, { capture: true });
+      }
+      const bar = document.getElementById('direct-store-cart-bar');
+      if (bar) bar.remove();
+      const topBanner = document.getElementById('comercio-active-order-card');
+      if (topBanner) topBanner.remove();
+      const navOrderBtn = document.getElementById('comercio-nav-live-order-btn');
+      if (navOrderBtn) navOrderBtn.remove();
     }
   };
+}
+
+export function updateComercioActiveOrderUI(order, comercioId, isDirect) {
+  currentActiveOrder = order;
+  
+  // 1. Top Active Order Banner inside .comercio-info
+  const infoContainer = document.querySelector('.comercio-info');
+  let topBanner = document.getElementById('comercio-active-order-card');
+  
+  if (order && !['completed', 'cancelled', 'delivered'].includes(order.status)) {
+    let color1 = '#10b981', color2 = '#059669', statusIcon = '🛵', statusText = '¡Pedido en camino a tu domicilio!', textColor = '#059669';
+    switch (order.status) {
+      case 'pending':
+        color1 = '#f59e0b'; color2 = '#d97706'; statusIcon = '⏳'; statusText = 'Esperando confirmación del comercio'; textColor = '#d97706';
+        break;
+      case 'confirmed':
+        color1 = '#0284c7'; color2 = '#0369a1'; statusIcon = '👨‍🍳'; statusText = 'Comercio preparando tu pedido'; textColor = '#0369a1';
+        break;
+      case 'ready':
+        color1 = '#7c3aed'; color2 = '#5b21b6'; statusIcon = '📦'; statusText = '¡Pedido listo para retiro/envío!'; textColor = '#5b21b6';
+        break;
+      case 'delivering':
+        color1 = '#10b981'; color2 = '#059669'; statusIcon = '🛵'; statusText = '¡Pedido en camino a tu domicilio!'; textColor = '#059669';
+        break;
+    }
+
+    if (!topBanner && infoContainer) {
+      topBanner = document.createElement('div');
+      topBanner.id = 'comercio-active-order-card';
+      infoContainer.appendChild(topBanner);
+    }
+
+    if (topBanner) {
+      topBanner.style.cssText = `
+        margin-top: 14px;
+        background: linear-gradient(135deg, ${color1} 0%, ${color2} 100%);
+        border-radius: 20px;
+        padding: 16px 18px;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.18);
+        cursor: pointer;
+        border: 1.5px solid rgba(255,255,255,0.25);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      `;
+      topBanner.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+          <div style="width: 44px; height: 44px; border-radius: 14px; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">
+            ${statusIcon}
+          </div>
+          <div style="min-width: 0;">
+            <div style="font-size: 10.5px; font-weight: 850; text-transform: uppercase; letter-spacing: 0.6px; opacity: 0.95;">
+              🟢 Pedido en Curso #${order.orderId || order.id.slice(0, 6)}
+            </div>
+            <div style="font-size: 14px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">
+              ${statusText} ${order.verificationCode ? `• Cód: ${order.verificationCode}` : ''}
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 5px; background: white; color: ${textColor}; padding: 8px 14px; border-radius: 12px; font-weight: 900; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); flex-shrink: 0; margin-left: 8px;">
+          <span>SEGUIR</span> 📍
+        </div>
+      `;
+      topBanner.onclick = () => {
+        window.location.hash = `#/pedido/${order.id}`;
+      };
+    }
+
+    // 2. Top Sticky Navbar live tracking button
+    const navbar = document.getElementById('comercio-navbar');
+    if (navbar) {
+      let navOrderBtn = document.getElementById('comercio-nav-live-order-btn');
+      if (!navOrderBtn) {
+        navOrderBtn = document.createElement('button');
+        navOrderBtn.id = 'comercio-nav-live-order-btn';
+        navbar.appendChild(navOrderBtn);
+      }
+      navOrderBtn.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: linear-gradient(135deg, ${color1} 0%, ${color2} 100%);
+        color: white;
+        border: none;
+        padding: 7px 13px;
+        border-radius: 100px;
+        font-size: 11px;
+        font-weight: 850;
+        cursor: pointer;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+        flex-shrink: 0;
+        z-index: 10;
+        margin-left: 6px;
+      `;
+      navOrderBtn.innerHTML = `<span>📍</span> <span>Seguir Pedido</span>`;
+      navOrderBtn.onclick = () => {
+        window.location.hash = `#/pedido/${order.id}`;
+      };
+    }
+  } else {
+    if (topBanner) topBanner.remove();
+    const navOrderBtn = document.getElementById('comercio-nav-live-order-btn');
+    if (navOrderBtn) navOrderBtn.remove();
+  }
+
+  // 3. Update bottom floating bar in direct mode
+  if (isDirect) {
+    updateDirectCartBar(comercioId, order);
+  }
+}
+
+function updateDirectCartBar(comercioId, activeOrder = currentActiveOrder) {
+  let bar = document.getElementById('direct-store-cart-bar');
+  const cart = getState().cart || [];
+  const storeItems = cart.filter(item => item.comercioId === comercioId);
+
+  if (storeItems.length > 0) {
+    const totalCount = storeItems.reduce((s, i) => s + i.qty, 0);
+    const totalPrice = storeItems.reduce((s, item) => {
+      const base = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      return s + (base * item.qty);
+    }, 0);
+
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'direct-store-cart-bar';
+      document.body.appendChild(bar);
+    } else if (bar.parentElement !== document.body) {
+      document.body.appendChild(bar);
+    }
+
+    bar.style.cssText = `
+      position: fixed !important;
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+      left: 16px !important;
+      right: 16px !important;
+      z-index: 99999999 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
+      color: white !important;
+      padding: 14px 20px !important;
+      border-radius: 20px !important;
+      box-shadow: 0 10px 30px rgba(225, 29, 72, 0.45), 0 2px 8px rgba(0,0,0,0.15) !important;
+      cursor: pointer !important;
+      font-family: var(--font-body, system-ui) !important;
+      box-sizing: border-box !important;
+      transform: translateZ(0) !important;
+      pointer-events: auto !important;
+    `;
+
+    bar.innerHTML = `
+      <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+        <div style="background: rgba(255,255,255,0.22); width: 40px; height: 40px; border-radius: 12px; display:flex; align-items:center; justify-content:center; font-size: 20px; flex-shrink:0;">🛍️</div>
+        <div style="min-width:0;">
+          <div id="direct-cart-bar-items" style="font-size: 11px; font-weight: 800; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">${totalCount} ${totalCount === 1 ? 'PRODUCTO' : 'PRODUCTOS'}</div>
+          <div id="direct-cart-bar-total" style="font-size: 17px; font-weight: 900; font-family: var(--font-display, inherit);">$${formatPrice(totalPrice).replace('$', '')}</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; font-weight: 900; font-size: 13.5px; background: rgba(255,255,255,0.22); padding: 9px 16px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); flex-shrink:0;">
+        Ver Mi Pedido ${icon('chevronRight', 16)}
+      </div>
+    `;
+
+    bar.onclick = () => {
+      const storeSlug = currentComercio?.slug || comercioId;
+      location.hash = `#/tienda/${storeSlug}/cart`;
+    };
+  } else if (activeOrder && !['completed', 'cancelled', 'delivered'].includes(activeOrder.status)) {
+    let color1 = '#10b981', color2 = '#059669', statusIcon = '🛵', statusText = '¡Pedido en camino!';
+    switch (activeOrder.status) {
+      case 'pending': color1 = '#f59e0b'; color2 = '#d97706'; statusIcon = '⏳'; statusText = 'Buscando repartidor'; break;
+      case 'confirmed': color1 = '#0284c7'; color2 = '#0369a1'; statusIcon = '👨‍🍳'; statusText = 'Preparando pedido'; break;
+      case 'ready': color1 = '#7c3aed'; color2 = '#5b21b6'; statusIcon = '📦'; statusText = '¡Pedido listo!'; break;
+      case 'delivering': color1 = '#10b981'; color2 = '#059669'; statusIcon = '🛵'; statusText = '¡Pedido en camino!'; break;
+    }
+
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'direct-store-cart-bar';
+      document.body.appendChild(bar);
+    } else if (bar.parentElement !== document.body) {
+      document.body.appendChild(bar);
+    }
+
+    bar.style.cssText = `
+      position: fixed !important;
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+      left: 16px !important;
+      right: 16px !important;
+      z-index: 99999999 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      background: linear-gradient(135deg, ${color1} 0%, ${color2} 100%) !important;
+      color: white !important;
+      padding: 14px 20px !important;
+      border-radius: 20px !important;
+      box-shadow: 0 10px 30px rgba(0,0,0, 0.35), 0 2px 8px rgba(0,0,0,0.15) !important;
+      cursor: pointer !important;
+      font-family: var(--font-body, system-ui) !important;
+      box-sizing: border-box !important;
+      transform: translateZ(0) !important;
+      pointer-events: auto !important;
+    `;
+
+    bar.innerHTML = `
+      <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+        <div style="background: rgba(255,255,255,0.22); width: 40px; height: 40px; border-radius: 12px; display:flex; align-items:center; justify-content:center; font-size: 20px; flex-shrink:0;">${statusIcon}</div>
+        <div style="min-width:0;">
+          <div style="font-size: 11px; font-weight: 800; opacity: 0.95; text-transform: uppercase; letter-spacing: 0.5px;">PEDIDO #${activeOrder.orderId || activeOrder.id.slice(0,6)}</div>
+          <div style="font-size: 15px; font-weight: 900; font-family: var(--font-display, inherit); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${statusText}</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; font-weight: 900; font-size: 13px; background: white; color: ${color2}; padding: 9px 16px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); flex-shrink:0;">
+        Seguir en Vivo 📍
+      </div>
+    `;
+
+    bar.onclick = () => {
+      window.location.hash = `#/pedido/${activeOrder.id}`;
+    };
+  } else if (bar) {
+    bar.remove();
+  }
 }
 
 function getProductBrand(p) {
@@ -672,31 +1064,47 @@ function updateBrandDropdown(products, categoryId, activeSubCategory, categories
   return targetBrand;
 }
 
-function renderPage(comercio, categories, products, activeCategory, activeOffers = [], activeSort = 'default', activeBrand = 'all', activeSubCategory = 'all') {
-  const content = document.getElementById('app-content');
+function renderPage(targetContent, comercio, categories, products, activeCategory, activeOffers = [], activeSort = 'default', activeBrand = 'all', activeSubCategory = 'all', isDirect = false) {
+  const content = targetContent || document.getElementById('overlay-render-target') || document.getElementById('app-content');
+  if (!content) return;
 
   const hasDiscounts = activeOffers.length > 0;
 
   // Render subcategories if any exist for the active category
   const subCats = categories.filter(c => c.parentCategoryId === activeCategory);
 
+  const cleanPhone = (comercio.whatsapp || comercio.phone || '').replace(/\D/g, '');
+
   content.innerHTML = `
-    <div class="comercio-page">
+    <div class="comercio-page" style="${isDirect ? 'padding-bottom: 120px;' : ''}">
       <!-- Minimal Sticky Navbar -->
-      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; padding: calc(env(safe-area-inset-top, 0px)) 16px 0 16px; box-sizing: border-box; transition: background 0.3s, box-shadow 0.3s; background: transparent;">
-        <button class="comercio-header-back" id="comercio-nav-back" style="position: relative; top: 0; left: 0; margin: 0; z-index: 10; border: none; background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: background 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: #000;">${icon('back', 20)}</button>
-        <div id="comercio-nav-title" style="display: flex; align-items: center; gap: 10px; margin-left: 14px; opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(4px); overflow: hidden; flex: 1; height: 36px;">
-          ${comercio.logo 
-            ? `<img src="${comercio.logo}" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--color-surface); flex-shrink: 0;" />`
-            : `<div style="width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary-light); color: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1.5px solid var(--color-surface);">${icon('store', 14)}</div>`
-          }
-          <div style="font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); font-weight: 700; line-height: normal; transform: translateY(-1px);">${comercio.name}</div>
+      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top, 0px)) 16px 0 16px; box-sizing: border-box; transition: background 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; background: transparent; border-bottom: 1px solid transparent;">
+        <div style="display: flex; align-items: center; min-width: 0; flex: 1;">
+          ${isDirect ? `
+            <div id="comercio-direct-badge" style="background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-radius: 100px; padding: 6px 12px; font-size: 11.5px; font-weight: 850; color: var(--color-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(225,29,72,0.15); flex-shrink: 0; transition: opacity 0.2s ease, transform 0.2s ease;">
+              <span>🛍️</span> Tienda Oficial
+            </div>
+          ` : `
+            <button class="comercio-header-back" id="comercio-nav-back" style="position: relative; top: 0; left: 0; margin: 0; z-index: 10; border: none; background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 6px rgba(0,0,0,0.1); color: var(--color-text);">${icon('back', 20)}</button>
+          `}
+          <div id="comercio-nav-title" style="display: flex; align-items: center; gap: 10px; margin-left: ${isDirect ? '10px' : '14px'}; opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease; transform: translateY(4px); overflow: hidden; flex: 1; height: 36px;">
+            ${comercio.logo 
+              ? `<img src="${comercio.logo}" alt="" loading="lazy" decoding="async" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--color-border-light); flex-shrink: 0;" />`
+              : `<div style="width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary-light); color: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1.5px solid var(--color-border-light);">${icon('store', 14)}</div>`
+            }
+            <div style="font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); font-weight: 800; line-height: normal;">${comercio.name}</div>
+          </div>
         </div>
+        ${(cleanPhone) ? `
+          <a href="https://wa.me/${cleanPhone}?text=${encodeURIComponent(`¡Hola ${comercio.name}! Te escribo desde tu catálogo online.`)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; background: #25D366; color: white; padding: 7px 14px; border-radius: 100px; font-size: 11.5px; font-weight: 850; text-decoration: none; box-shadow: 0 3px 10px rgba(37,211,102,0.35); flex-shrink: 0; z-index: 10; margin-left: 8px;">
+            ${icon('messageCircle', 14)} <span>WhatsApp</span>
+          </a>
+        ` : ''}
       </div>
 
       <!-- Banner Layer -->
       <div class="comercio-header" style="position: relative; height: 50vw; max-height: 250px; margin-top: calc(-56px - env(safe-area-inset-top, 0px)); overflow: hidden;">
-        ${comercio.banner ? `<img id="comercio-banner-img" src="${comercio.banner}" alt="${comercio.name}" style="width: 100%; height: 100%; object-fit: cover; will-change: transform;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
+        ${comercio.banner ? `<img id="comercio-banner-img" src="${comercio.banner}" alt="${comercio.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover; will-change: transform;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
         <div class="comercio-header-overlay" style="position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%);"></div>
       </div>
     
@@ -718,7 +1126,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
           
           <div style="display: flex; align-items: center; gap: 16px;">
             ${comercio.logo
-              ? `<img src="${comercio.logo}" alt="" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: white;" />`
+              ? `<img src="${comercio.logo}" alt="" loading="lazy" decoding="async" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: white;" />`
               : `<div style="width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--color-surface); margin-top: -48px; display:flex;align-items:center;justify-content:center;background:var(--color-primary-light); box-shadow: 0 4px 12px rgba(0,0,0,0.1);">${icon('store', 28)}</div>`
             }
             <div style="display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-top: 8px;">
@@ -753,9 +1161,9 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
       </div>
 
       <div class="comercio-products" style="min-height: 100vh; padding-top: 16px;">
-        <div id="comercio-sticky-filters" style="position: sticky; top: 56px; z-index: 90; background: var(--color-bg); padding-top: 8px; padding-bottom: 8px;">
+        <div id="comercio-sticky-filters" style="position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 90; background: var(--color-bg); padding-top: 8px; padding-bottom: 8px;">
         <!-- Search bar -->
-        <div class="comercio-search-container scroll-reveal reveal-fade-up reveal-delay-1" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); margin-top: 12px;">
+        <div class="comercio-search-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); margin-top: 12px;">
           <div style="position:relative; width: 100%; display:flex; align-items:center; background:var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius:16px; padding:0 16px; height:46px; box-shadow:var(--shadow-xs); transition: all 0.2s;">
             <span style="color:var(--color-text-tertiary); display:flex; align-items:center; justify-content:center; margin-right:10px;">${icon('search', 18)}</span>
             <input type="text" id="comercio-product-search" placeholder="Buscar productos..." style="flex:1; border:none; background:transparent; font-size:13px; font-weight:700; color:var(--color-text); outline:none;" />
@@ -763,7 +1171,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
           </div>
         </div>
 
-        <div class="tab-pills scroll-reveal reveal-fade-up reveal-delay-2" id="comercio-categories" style="margin-bottom:var(--space-3); padding-left: var(--space-4); padding-right: var(--space-4); position: relative;">
+        <div class="tab-pills" id="comercio-categories" style="margin-bottom:var(--space-3); padding-left: var(--space-4); padding-right: var(--space-4); position: relative;">
           <button class="tab-pill ${activeCategory === 'all' ? 'active' : ''}" data-cat-id="all">Todos</button>
           <button class="tab-pill ${activeCategory === 'favorites' ? 'active' : ''}" data-cat-id="favorites" style="display:inline-flex; align-items:center; gap:6px;">
             <span style="display:inline-flex; align-items:center; transform:translateY(0.5px);">${icon('heart', 12, 'fav-active')}</span> Favoritos
@@ -777,7 +1185,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
         </div>
 
         <!-- Subcategories container -->
-        <div id="comercio-subcategories-container" class="scroll-reveal reveal-fade-up reveal-delay-2" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: ${subCats.length > 0 ? 'block' : 'none'};">
+        <div id="comercio-subcategories-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: ${subCats.length > 0 ? 'block' : 'none'};">
           <div class="tab-pills sub-tab-pills" id="comercio-subcategories" style="display: flex; gap: var(--space-2); overflow-x: auto; padding: 4px 0 var(--space-2) 0; border-bottom: none; position: relative;">
             <button class="sub-tab-pill ${activeSubCategory === 'all' ? 'active' : ''}" data-subcat-id="all" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid ${activeSubCategory === 'all' ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${activeSubCategory === 'all' ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color: ${activeSubCategory === 'all' ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">Ver Todo</button>
             ${subCats.map(sub => `
@@ -786,7 +1194,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
           </div>
         </div>
 
-        <div class="comercio-sort-container scroll-reveal reveal-fade-up reveal-delay-3" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: flex; flex-direction: row; gap: 8px; border-bottom: 1px solid var(--color-border-light); padding-bottom: 12px;">
+        <div class="comercio-sort-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: flex; flex-direction: row; gap: 8px; border-bottom: 1px solid var(--color-border-light); padding-bottom: 12px;">
           <div style="flex: 1; display: flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 10px; padding-left: 8px; box-shadow: var(--shadow-xs); overflow: hidden;">
             <span style="color: var(--color-text-tertiary); display: flex; align-items: center; flex-shrink: 0;">${icon('sliders', 14)}</span>
             <select id="comercio-sort-select" style="flex: 1; border: none; background: transparent; color: var(--color-text); padding: 8px 6px; font-size: 11.5px; font-weight: 700; outline: none; cursor: pointer; width: 100%; text-overflow: ellipsis;">
@@ -820,14 +1228,20 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
         </div>
       </div>
 
-      ${getFooterHTML()}
+      ${isDirect ? '' : getFooterHTML()}
     </div>
   `;
 
   const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
   const isPausedNow = comercio.isPaused === true;
   renderProducts(products, activeCategory, activeOffers, activeSort, '', comercio.id, isOpen, activeBrand, activeSubCategory, categories, isPausedNow);
-  updateGlobalCartFAB();
+  
+  updateComercioActiveOrderUI(currentActiveOrder, comercio.id, isDirect);
+  if (isDirect) {
+    updateDirectCartBar(comercio.id, currentActiveOrder);
+  } else {
+    updateGlobalCartFAB();
+  }
 
   // Bind rating button click
   document.getElementById('rate-comercio-btn')?.addEventListener('click', () => {
@@ -838,6 +1252,7 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
   const navbar = document.getElementById('comercio-navbar');
   const navTitle = document.getElementById('comercio-nav-title');
   const navBack = document.getElementById('comercio-nav-back');
+  const directBadge = document.getElementById('comercio-direct-badge');
   const bannerImg = document.getElementById('comercio-banner-img');
 
   if (navBack) {
@@ -865,45 +1280,69 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
     }
 
     window._comercioScrollHandler = (e) => {
-      if (!window.location.hash.startsWith('#/comercio/')) return;
-      const target = e.target;
-      const isPanel = target.classList && (target.classList.contains('slide-panel') || target.classList.contains('slide-overlay'));
-      const isDocument = target === document || target === window;
-      if (!isPanel && !isDocument) return;
-
-      let scrollTop = isPanel ? target.scrollTop : (window.scrollY || document.documentElement.scrollTop);
+      if (!window.location.hash.startsWith('#/comercio/') && !window.location.hash.startsWith('#/tienda/')) return;
+      
+      const overlay = document.querySelector('.slide-overlay.active') || document.getElementById('app-overlay') || document.querySelector('.slide-panel.active');
+      let scrollTop = 0;
+      if (overlay && overlay.scrollTop > 0) {
+        scrollTop = overlay.scrollTop;
+      } else if (e?.target && e.target.scrollTop > 0) {
+        scrollTop = e.target.scrollTop;
+      } else {
+        scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      }
       
       // Parallax effect on banner image
       if (bannerImg && scrollTop < 300) {
-        bannerImg.style.transform = `translateY(${scrollTop * 0.4}px)`;
+        bannerImg.style.transform = `translateY(${scrollTop * 0.35}px)`;
       }
 
-      // Navbar fade in
-      if (scrollTop > 100) {
-        navbar.style.background = 'var(--color-primary)';
-        navbar.style.boxShadow = '0 6px 20px rgba(225, 29, 72, 0.2)';
+      // Navbar fade in / solid surface on scroll
+      if (scrollTop > 45) {
+        navbar.style.background = 'var(--color-surface)';
+        navbar.style.backdropFilter = 'blur(16px)';
+        navbar.style.webkitBackdropFilter = 'blur(16px)';
+        navbar.style.borderBottom = '1px solid var(--color-border-light)';
+        navbar.style.boxShadow = '0 2px 12px rgba(0, 0, 0, 0.06)';
+
         if (navTitle) {
           navTitle.style.opacity = '1';
           navTitle.style.transform = 'translateY(0)';
-          const textEl = navTitle.querySelector('div');
-          if (textEl) textEl.style.color = '#ffffff';
         }
+
+        if (directBadge) {
+          directBadge.style.opacity = '0';
+          directBadge.style.transform = 'scale(0.85)';
+          directBadge.style.display = 'none';
+        }
+
         if (navBack) {
-          navBack.style.background = 'rgba(255, 255, 255, 0.2)';
+          navBack.style.background = 'var(--color-bg-secondary)';
           navBack.style.boxShadow = 'none';
-          navBack.style.color = '#ffffff';
+          navBack.style.color = 'var(--color-text)';
         }
       } else {
         navbar.style.background = 'transparent';
+        navbar.style.backdropFilter = 'none';
+        navbar.style.webkitBackdropFilter = 'none';
+        navbar.style.borderBottom = '1px solid transparent';
         navbar.style.boxShadow = 'none';
+
         if (navTitle) {
           navTitle.style.opacity = '0';
           navTitle.style.transform = 'translateY(4px)';
         }
+
+        if (directBadge) {
+          directBadge.style.display = 'inline-flex';
+          directBadge.style.opacity = '1';
+          directBadge.style.transform = 'scale(1)';
+        }
+
         if (navBack) {
-          navBack.style.background = 'rgba(255, 255, 255, 0.8)';
-          navBack.style.boxShadow = '0 2px 5px rgba(0,0,0,0.1)';
-          navBack.style.color = '#000000';
+          navBack.style.background = 'rgba(255, 255, 255, 0.85)';
+          navBack.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.1)';
+          navBack.style.color = 'var(--color-text)';
         }
       }
     };
@@ -912,6 +1351,17 @@ function renderPage(comercio, categories, products, activeCategory, activeOffers
     // Trigger once to set initial state
     window._comercioScrollHandler({ target: document });
   }
+
+  return {
+    cleanup: () => {
+      if (window._comercioScrollHandler) {
+        window.removeEventListener('scroll', window._comercioScrollHandler, { capture: true });
+      }
+      if (unsubComercios) {
+        unsubComercios();
+      }
+    }
+  };
 }
 
 async function openRatingModal(comercio) {
@@ -1168,7 +1618,7 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
   }
 
   allFilteredProducts = filtered;
-  displayedCount = 20;
+  displayedCount = 100;
 
   const renderBatch = (startIndex, count) => {
     const batch = allFilteredProducts.slice(startIndex, startIndex + count);
@@ -1199,7 +1649,7 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
       const isUnavailable = p.isAvailable === false || isOutOfStock;
 
       return `
-        <div class="product-card card-interactive scroll-reveal reveal-fade-up reveal-delay-${Math.min(i + 1, 5)} ${isUnavailable ? 'product-unavailable' : ''}" 
+        <div class="product-card card-interactive ${isUnavailable ? 'product-unavailable' : ''}" 
              data-product-id="${p.id}"
              style="position:relative; display:flex; justify-content:space-between; gap:16px; padding:16px; background:var(--color-surface); border-radius:20px; border:1px solid var(--color-border-light); box-shadow:var(--shadow-xs); transition:all 0.2s ease;">
           
@@ -1226,7 +1676,7 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
     
           <!-- Right side: Image & Floating Button -->
           <div style="position:relative; width:110px; height:110px; flex-shrink:0;">
-            <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width:100%; height:100%; border-radius:14px; object-fit:cover; border:1px solid var(--color-border-light); background:white;" loading="lazy" />
+            <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width:100%; height:100%; border-radius:14px; object-fit:cover; border:1px solid var(--color-border-light); background:white;" loading="lazy" decoding="async" />
             
             ${offer ? `
               <div style="position:absolute; top:6px; left:6px; background:var(--color-primary); color:white; font-size:9px; font-weight:900; padding:3px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.02em; box-shadow:0 3px 8px rgba(225,29,72,0.35); z-index:10; border: 1px solid rgba(255,255,255,0.15); font-family:var(--font-display);">${offer.type === 'percentage' ? `${offer.value}% OFF` : '2x1'}</div>

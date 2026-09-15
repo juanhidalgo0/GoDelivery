@@ -17,13 +17,15 @@ let infiniteObserver = null;
 let pageLoadTime = 0;
 let renderScheduled = false;
 
-function scheduleRenderOrdersList() {
+function scheduleRenderOrdersList(delay = 16) {
   if (renderScheduled) return;
   renderScheduled = true;
-  requestAnimationFrame(() => {
-    renderScheduled = false;
-    renderOrdersList();
-  });
+  setTimeout(() => {
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      renderOrdersList();
+    });
+  }, delay);
 }
 
 async function getOrFetchUserProfile(userId) {
@@ -68,7 +70,7 @@ async function getOrFetchUserProfile(userId) {
         displayName: data.displayName || 'Usuario'
       };
       userCache[userId] = profile;
-      scheduleRenderOrdersList();
+      scheduleRenderOrdersList(80);
       return profile;
     }
   } catch (e) {
@@ -96,7 +98,7 @@ async function getOrFetchCommerceLogo(comercioId) {
       const data = comSnap.data();
       const logo = data.logo || data.image || null;
       commerceLogoCache[comercioId] = logo;
-      scheduleRenderOrdersList();
+      scheduleRenderOrdersList(80);
       return logo;
     }
   } catch (e) {
@@ -408,6 +410,13 @@ export async function renderAdminOrders() {
   } catch (err) {
     console.error('Error auto-opening order detail:', err);
   }
+
+  return {
+    cleanup: () => {
+      if (ordersUnsubscribe) { ordersUnsubscribe(); ordersUnsubscribe = null; }
+      if (supportUnsubscribe) { supportUnsubscribe(); supportUnsubscribe = null; }
+    }
+  };
 }
 
 let currentSegment = 'app';
@@ -912,15 +921,15 @@ function renderFilteredOrders(container, filtered) {
 
     const clientProfile = userCache[o.userId];
     if (clientProfile === undefined && o.userId) {
-      getOrFetchUserProfile(o.userId).then(() => renderOrdersList());
+      getOrFetchUserProfile(o.userId);
     }
     const driverProfile = userCache[o.driverId];
     if (driverProfile === undefined && o.driverId) {
-      getOrFetchUserProfile(o.driverId).then(() => renderOrdersList());
+      getOrFetchUserProfile(o.driverId);
     }
 
-    const clientPhoto = clientProfile?.photo || null;
-    const driverPhoto = driverProfile?.photo || null;
+    const clientPhoto = clientProfile?.photo || o.userPhoto || o.clientPhoto || null;
+    const driverPhoto = driverProfile?.photo || o.driverPhoto || null;
     const driverDlId = o.driverDlId || driverProfile?.displayId || '---';
 
     let serviceLabel = 'Comercio';
@@ -1053,10 +1062,11 @@ function renderFilteredOrders(container, filtered) {
                     const nowMs = Date.now() + (getState().serverTimeOffset || 0);
                     const offeredAtMs = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : nowMs;
                     const elapsedSec = Math.floor((nowMs - offeredAtMs) / 1000);
-                    const remainingSec = Math.max(0, 30 - elapsedSec);
+                    const remainingSec = Math.max(0, 60 - elapsedSec);
                     return `⏳ Ofrecido a: <strong>${o.queueTargetDriverName}</strong> <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 6px; border-radius:6px; font-weight:900; margin-left:4px;">${remainingSec}s</span>`;
                   }
                   if (o.status === 'confirmed' || o.status === 'preparing') return `🍳 En preparación`;
+                  if (o.isFavor || o.isTrip) return `🔍 Buscando repartidor en tiempo real...`;
                   if (o.status === 'pending') return `🏪 Esperando confirmación del local`;
                   return `🔍 Buscando repartidor en tiempo real...`;
                 })()}
@@ -1118,7 +1128,7 @@ function renderFilteredOrders(container, filtered) {
         const offeredAt = parseInt(t.dataset.offeredAt, 10);
         if (!offeredAt) return;
         const elapsedSec = Math.floor((now - offeredAt) / 1000);
-        const remainingSec = Math.max(0, 30 - elapsedSec);
+        const remainingSec = Math.max(0, 60 - elapsedSec);
         t.textContent = `${remainingSec}s`;
       });
     }, 1000);
@@ -1458,7 +1468,7 @@ window.showOrderDetail = async (idOrObject) => {
                   const nowMs = Date.now() + (getState().serverTimeOffset || 0);
                   const offeredAtMs = o.queueOfferedAt ? (o.queueOfferedAt.toMillis ? o.queueOfferedAt.toMillis() : new Date(o.queueOfferedAt).getTime()) : nowMs;
                   const elapsedSec = Math.floor((nowMs - offeredAtMs) / 1000);
-                  const remainingSec = Math.max(0, 30 - elapsedSec);
+                  const remainingSec = Math.max(0, 60 - elapsedSec);
                   return `⏳ Ofrecido: ${o.queueTargetDriverName} <span class="admin-offer-timer" data-offered-at="${offeredAtMs}" style="background:rgba(245,158,11,0.2); color:#b45309; padding:1px 6px; border-radius:6px; font-weight:900; margin-left:4px;">${remainingSec}s</span>`;
                 })() : 'Sin asignar')}
              </div>

@@ -1218,7 +1218,7 @@ export async function showCompraForm(targetContainer = null) {
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
+  modalEl.style.cssText = 'padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 10px)); background: var(--color-bg); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; overflow: hidden; height: 100%; width: 100%; flex: 1; min-height: 0; position: relative;';
   modalEl.innerHTML = `
      <!-- Step Indicator -->
     <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-shrink:0; margin-bottom: 2px;">
@@ -1228,11 +1228,11 @@ export async function showCompraForm(targetContainer = null) {
     </div>
 
     <!-- Steps wrapper: position:relative container -->
-    <div id="compra-steps-wrapper" style="position:relative; flex:1; display:flex; flex-direction:column; overflow:hidden; min-height:0; width:100%;">
+    <div id="compra-steps-wrapper" style="position:relative; flex:1; min-height:0; width:100%; overflow:hidden; display:flex; flex-direction:column;">
       <div id="compra-steps-slides-container" style="display:flex; width:200%; height:100%; transition:transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); will-change:transform;">
 
         <!-- ── Paso 1: Comercios, Productos y Destino de Entrega ──────────────── -->
-        <div id="compra-step-1-container" style="display:flex; flex-direction:column; height:100%; width:50%; box-sizing:border-box; overflow-y:auto; -webkit-overflow-scrolling:touch; gap:10px; flex-shrink:0; padding-bottom:28px; scrollbar-width:none;">
+        <div id="compra-step-1-container" style="display:flex; flex-direction:column; height:100%; width:50%; box-sizing:border-box; overflow-y:auto; -webkit-overflow-scrolling:touch; gap:10px; flex-shrink:0; padding:2px 2px 20px 2px; scrollbar-width:none;">
           <!-- Preset Banner Premium Maxikiosco Paulos -->
           <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); border: 1.5px solid rgba(192, 132, 252, 0.35); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: 0 10px 28px rgba(76, 29, 149, 0.4); position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
             <div style="position: absolute; top: -30%; right: -15%; width: 140px; height: 140px; background: radial-gradient(circle, rgba(236, 72, 153, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
@@ -1295,7 +1295,7 @@ export async function showCompraForm(targetContainer = null) {
         </div>
 
         <!-- ── Paso 2: Pago + Costo ────────────────────────────────────────── -->
-        <div id="compra-step-2-container" style="display:flex; flex-direction:column; gap:12px; width:50%; box-sizing:border-box; overflow-y:auto; flex-shrink:0; height:100%;">
+        <div id="compra-step-2-container" style="display:flex; flex-direction:column; gap:12px; width:50%; box-sizing:border-box; overflow-y:auto; -webkit-overflow-scrolling:touch; flex-shrink:0; height:100%; padding:2px 2px 20px 2px;">
 
           <div style="display:flex; flex-direction:column; gap:6px;">
             <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
@@ -1336,12 +1336,13 @@ export async function showCompraForm(targetContainer = null) {
 
         </div>
       </div>
+    </div>
 
-      <!-- Hidden submit trigger targeted by footer mainBtn delegate -->
-      <button id="confirm-buy-btn" style="display:none;"></button>
+    <!-- Hidden submit trigger targeted by footer mainBtn delegate -->
+    <button id="confirm-buy-btn" style="display:none;"></button>
 
-    <!-- ── Footer fijo: botón volver + botón acción principal ────────────── -->
-    <div style="display:flex; gap:8px; flex-shrink:0;">
+    <!-- ── Footer fijo: botón volver + botón acción principal (Siempre visible) ────────────── -->
+    <div style="display:flex; gap:8px; flex-shrink:0; padding-top:10px; border-top:1px solid var(--color-border-light); background:var(--color-bg); z-index:10; margin-top:auto;">
       <button type="button" id="compra-back-btn" style="height:48px; width:48px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text-primary); border:1.5px solid var(--color-border-light); font-weight:900; cursor:pointer; display:none; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.2s;">
         ${icon('chevronLeft',18)}
       </button>
@@ -1691,9 +1692,16 @@ export async function showCompraForm(targetContainer = null) {
   };
 
   const renderSubforms = () => {
+    // 1. Preserve existing inputs and textareas before clearing
+    const existingNames = Array.from(subformsContainer.querySelectorAll('.store-name-input')).map(input => input.value);
+    const existingDetails = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea')).map(textarea => textarea.value);
+
     subformsContainer.innerHTML = '';
     for (let i = 0; i < stopsCount; i++) {
       const pl = placeholders[i] || placeholders[0];
+      const prevName = existingNames[i] !== undefined ? existingNames[i] : '';
+      const prevDetails = existingDetails[i] !== undefined ? existingDetails[i] : '';
+
       const stopDiv = document.createElement('div');
       stopDiv.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:14px; background:var(--color-surface); border-radius:18px; border:1.5px solid var(--color-border-light); box-shadow:0 4px 14px rgba(0,0,0,0.02); transition:all 0.2s;';
       stopDiv.innerHTML = `
@@ -1701,8 +1709,8 @@ export async function showCompraForm(targetContainer = null) {
           <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; font-size:10px; font-weight:950; display:flex; align-items:center; justify-content:center;">${i + 1}</div>
           <span style="font-size:11px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
         </div>
-        <input type="text" class="store-name-input" placeholder="${pl.name}" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
-        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:60px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:8px 12px; background:var(--color-bg-secondary); font-size:12.5px; font-weight:600; resize:none; outline:none; color:var(--color-text-primary); font-family:inherit; transition:all 0.2s;" required></textarea>
+        <input type="text" class="store-name-input" value="${prevName.replace(/"/g, '&quot;')}" placeholder="${pl.name}" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
+        <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:60px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:8px 12px; background:var(--color-bg-secondary); font-size:12.5px; font-weight:600; resize:none; outline:none; color:var(--color-text-primary); font-family:inherit; transition:all 0.2s;" required>${prevDetails}</textarea>
       `;
       subformsContainer.appendChild(stopDiv);
 
@@ -3313,8 +3321,8 @@ export function openMandadosWizard(initialServiceType = null) {
             <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: env(safe-area-inset-bottom, 10px);"></div>
           </div>
          <!-- Slide 2: Form Container -->
-         <div id="wizard-slide-form" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow-y: auto; background: var(--color-bg);">
-            <div id="wizard-form-target" style="height:100%; width:100%; display:flex; flex-direction:column;"></div>
+         <div id="wizard-slide-form" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; position: relative; background: var(--color-bg); display: flex; flex-direction: column;">
+            <div id="wizard-form-target" style="height: 100%; width: 100%; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; position: relative;"></div>
          </div>
       </div>
     </div>

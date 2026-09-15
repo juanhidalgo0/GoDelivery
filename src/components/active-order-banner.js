@@ -261,7 +261,7 @@ function updateOrderFAB(order, config) {
       position: fixed; right: 20px;
       padding: 10px 22px; border-radius: 24px;
       display: flex; align-items: center; gap: 14px;
-      color: white; cursor: pointer; z-index: 1400;
+      color: white; cursor: pointer; z-index: 100000002;
       box-shadow: 0 20px 40px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.3);
       transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
       transform: scale(0) translateY(40px); opacity: 0;

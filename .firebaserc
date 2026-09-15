@@ -12,6 +12,15 @@
         ],
         "licencias": [
           "godelivery-licencias"
+        ],
+        "portal": [
+          "go-portal-pos"
+        ],
+        "mango": [
+          "usemango"
+        ],
+        "ventra-tienda": [
+          "ventra-tienda"
         ]
       }
     },

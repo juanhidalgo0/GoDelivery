@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, getCountFromServer, query, where } from 'firebase/firestore';
 import { isAdmin, isSuperAdmin } from '../../auth.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
@@ -47,6 +47,18 @@ export async function renderAdminDashboard() {
                 <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Monitoreo en vivo de pedidos App y WhatsApp</div>
               </div>
               <div style="color:var(--color-primary); flex-shrink:0;">${icon('chevronRight', 20)}</div>
+            </a>
+
+            <a href="#/admin/whatsapp-bot" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(37,211,102,0.08), rgba(18,140,126,0.08)); border:1.5px solid rgba(37,211,102,0.3); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:14px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 14px rgba(37,211,102,0.08);">
+              <div style="width:44px; height:44px; border-radius:14px; background:linear-gradient(135deg,#25D366,#128C7E); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: 0 4px 12px rgba(37,211,102,0.25);">${icon('whatsapp', 22, '', '#FFF')}</div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight:900; font-size:16px; color:#128C7E; letter-spacing:-0.01em; display:flex; align-items:center; gap:8px;">
+                  <span>Bot de WhatsApp 24/7</span>
+                  <span style="font-size:9.5px; font-weight:900; color:#128C7E; background:rgba(37,211,102,0.15); padding:2px 8px; border-radius:100px;">AUTO</span>
+                </div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Mandados, pedidos y atención humana</div>
+              </div>
+              <div style="color:#25D366; flex-shrink:0;">${icon('chevronRight', 20)}</div>
             </a>
 
             <a href="#/admin/metrics" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(126, 34, 206, 0.08)); border:1px solid rgba(168, 85, 247, 0.3); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.05); position: relative; overflow: hidden;">
@@ -188,45 +200,35 @@ export async function renderAdminDashboard() {
     </style>
   `;
 
-  // Load stats
+  // Instant lightweight parallel load of stats & alerts
   try {
-    const usersSnap = await getDocs(collection(db, 'users'));
+    const [
+      usersCountSnap,
+      pendingDeliverySnap,
+      pendingComerciosSnap,
+      pendingJobsSnap
+    ] = await Promise.all([
+      getCountFromServer(collection(db, 'users')).catch(() => ({ data: () => ({ count: 0 }) })),
+      getDocs(query(collection(db, 'users'), where('deliveryStatus', '==', 'pending'))).catch(() => ({ docs: [] })),
+      getDocs(query(collection(db, 'comercios'), where('approvedByAdmin', '==', false))).catch(() => ({ docs: [] })),
+      getDocs(query(collection(db, 'job_applications'), where('status', '==', 'pending'))).catch(() => ({ docs: [] }))
+    ]);
 
-    const usersCount = usersSnap.size;
+    const usersCount = usersCountSnap.data().count;
     const countBadge = document.getElementById('admin-users-count-badge');
     const usersDesc = document.getElementById('admin-users-card-desc');
     
-    if (countBadge) {
+    if (countBadge && usersCount > 0) {
       countBadge.textContent = `${usersCount}`;
       countBadge.style.display = 'inline-block';
     }
-    if (usersDesc) {
+    if (usersDesc && usersCount > 0) {
       usersDesc.textContent = `Roles, verificación y ${usersCount} registrados`;
     }
 
-    const pendingRequests = usersSnap.docs.filter(d => d.data().deliveryStatus === 'pending');
-    
-    // Fetch pending comercios
-    const comSnap = await getDocs(collection(db, 'comercios'));
-    const pendingComercios = comSnap.docs.filter(d => d.data().approvedByAdmin === false);
-    const pendingComCount = pendingComercios.length;
-    
-    const pendingComBadge = document.getElementById('admin-pending-comercios-badge');
-    if (pendingComBadge && pendingComCount > 0) {
-      pendingComBadge.textContent = `${pendingComCount}`;
-      pendingComBadge.style.display = 'inline-block';
-    }
-
-    // Fetch pending job applications
-    const jobSnap = await getDocs(collection(db, 'job_applications'));
-    const pendingJobs = jobSnap.docs.filter(d => d.data().status === 'pending');
-    const pendingJobCount = pendingJobs.length;
-
-    const pendingJobBadge = document.getElementById('admin-pending-jobs-badge');
-    if (pendingJobBadge && pendingJobCount > 0) {
-      pendingJobBadge.textContent = `${pendingJobCount}`;
-      pendingJobBadge.style.display = 'inline-block';
-    }
+    const pendingRequests = pendingDeliverySnap.docs || [];
+    const pendingComCount = (pendingComerciosSnap.docs || []).length;
+    const pendingJobCount = (pendingJobsSnap.docs || []).length;
 
     const alertArea = document.getElementById('pending-requests-alert');
     if (alertArea) {

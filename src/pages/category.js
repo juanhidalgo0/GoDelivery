@@ -46,10 +46,16 @@ export async function renderCategoryPage(categoryName, content) {
 
   // Premium Header (Red)
   content.innerHTML = `
-    <div class="category-page page-enter" style="display:flex; flex-direction:column; height: 100%; background: var(--color-bg); overflow: hidden;">
-      
+    <div class="category-page" style="display:flex; flex-direction:column; min-height: 100%; background: var(--color-bg); opacity: 1;">
+
+      <!-- Red Brand Title Bar (respects the phone's status bar / notch) -->
+      <div style="display:flex; align-items:center; gap:10px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; background: var(--color-primary); z-index: 10; position: sticky; top: 0;">
+        <button id="category-back-btn" aria-label="Volver" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; flex-shrink:0; border:none; background:rgba(255,255,255,0.18); border-radius:12px; color:white; cursor:pointer;">${icon('chevronLeft', 22)}</button>
+        <h2 style="margin:0; font-family:var(--font-display); font-size:19px; font-weight:900; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${categoryName}</h2>
+      </div>
+
       <!-- Search Bar & Filters (Now in Content) -->
-      <div style="padding: 16px 20px 8px 20px; background: var(--color-bg); z-index: 10; position: relative; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--color-border-light);">
+      <div style="padding: 16px 20px 8px 20px; background: var(--color-bg); z-index: 9; position: sticky; top: calc(72px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--color-border-light);">
          <div style="position: relative;">
            <input type="text" id="category-search" placeholder="Buscar en ${categoryName}..." style="width: 100%; height: 48px; border-radius: 14px; border: 1px solid var(--color-border); background: var(--color-surface); padding: 0 44px; color: var(--color-text); font-size: 14px; font-weight: 600; outline: none; transition: all 0.3s; box-shadow: var(--shadow-sm);">
            <div style="position: absolute; left: 14px; top: 14px; color: var(--color-text-tertiary);">${icon('search', 18)}</div>
@@ -70,7 +76,7 @@ export async function renderCategoryPage(categoryName, content) {
       </div>
 
       <!-- Commerces/Products Grid List -->
-      <div class="comercios-grid" style="flex:1; overflow-y:auto; padding: 20px; -webkit-overflow-scrolling: touch; display: grid; gap: 18px; margin-top: 0;" id="category-comercios-grid">
+      <div class="comercios-grid" style="padding: 20px; display: grid; gap: 18px; margin-top: 0;" id="category-comercios-grid">
         <div class="empty-state" style="padding-top: 40px; grid-column: 1/-1;">Cargando comercios de ${categoryName}...</div>
       </div>
     </div>
@@ -256,10 +262,10 @@ export async function renderCategoryPage(categoryName, content) {
               </div>
 
               <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
-                ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
+                ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" decoding="async" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
                 
                 <div class="comercio-card-logo-container">
-                  ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
+                  ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" decoding="async" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
                 </div>
 
                 <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
@@ -353,10 +359,10 @@ export async function renderCategoryPage(categoryName, content) {
                 </div>
 
                 <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
-                  ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
+                  ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" decoding="async" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
                   
                   <div class="comercio-card-logo-container">
-                    ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
+                    ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" decoding="async" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
                   </div>
 
                   <!-- Status Badge on top-left -->
@@ -459,7 +465,7 @@ export async function renderCategoryPage(categoryName, content) {
           
                 <!-- Right side: Image -->
                 <div style="position:relative; width:90px; height:90px; flex-shrink:0;">
-                  <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width:100%; height:100%; border-radius:14px; object-fit:cover; border:1px solid var(--color-border-light); background:white;" loading="lazy" />
+                  <img src="${p.image || '/logo.png'}" alt="${p.name}" style="width:100%; height:100%; border-radius:14px; object-fit:cover; border:1px solid var(--color-border-light); background:white;" loading="lazy" decoding="async" />
                 </div>
               </a>
             `;
@@ -487,6 +493,17 @@ export async function renderCategoryPage(categoryName, content) {
     }
 
     // Bind event handlers
+    const backBtn = document.getElementById('category-back-btn');
+    if (backBtn) {
+      backBtn.onclick = (e) => {
+        e.preventDefault();
+        if (window.history.length > 1) {
+          window.history.back();
+        } else {
+          window.location.hash = '#/';
+        }
+      };
+    }
     const filterOpenBtn = document.getElementById('filter-btn-open');
     const filterShippingBtn = document.getElementById('filter-btn-shipping');
     const filterRatingBtn = document.getElementById('filter-btn-rating');
@@ -552,8 +569,12 @@ export async function renderCategoryPage(categoryName, content) {
     }
 
     if (searchInput) {
+      let categorySearchTimer = null;
       searchInput.oninput = () => {
-        triggerFilterAndRender();
+        if (categorySearchTimer) clearTimeout(categorySearchTimer);
+        categorySearchTimer = setTimeout(() => {
+          triggerFilterAndRender();
+        }, 120);
       };
     }
 

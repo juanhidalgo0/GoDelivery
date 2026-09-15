@@ -4,13 +4,22 @@ let isUnlocked = true;
 let audioCtx = null;
 const audioCache = new Map();
 
-// Helper to get or create the Web Audio API context
+// Helper to get or create the Web Audio API context safely
 function getAudioContext() {
+  if (typeof window === 'undefined') return null;
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    try {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtxClass) {
+        audioCtx = new AudioCtxClass();
+      }
+    } catch(e) {
+      console.warn('[AudioManager] Failed to create AudioContext:', e);
+      return null;
+    }
   }
   if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
+    audioCtx.resume().catch(() => {});
   }
   return audioCtx;
 }
@@ -276,12 +285,36 @@ export const AudioManager = {
     }
   },
 
+  /**
+   * Loud POS kitchen buzzer for incoming merchant orders
+   */
+  playKitchenAlarmBuzzer() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      [0, 0.14, 0.28].forEach((offset) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(880, now + offset);
+        gain.gain.setValueAtTime(0.001, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.14, now + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.09);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.09);
+      });
+    } catch (e) {}
+  },
+
   startSynthLoop(url) {
     if (synthLoops.has(url)) return;
-    this.playSynthNotification();
+    this.playKitchenAlarmBuzzer();
     const intervalId = setInterval(() => {
-      this.playSynthNotification();
-    }, 1500);
+      this.playKitchenAlarmBuzzer();
+    }, 1800);
     synthLoops.set(url, intervalId);
   },
 

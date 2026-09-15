@@ -9,7 +9,22 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
-    chunkSizeWarningLimit: 2000,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/firebase')) {
+            return 'firebase-vendor';
+          }
+          if (id.includes('node_modules/maplibre-gl')) {
+            return 'maplibre-vendor';
+          }
+          if (id.includes('node_modules/@capacitor')) {
+            return 'capacitor-vendor';
+          }
+        },
+      },
+    },
   },
 });
 

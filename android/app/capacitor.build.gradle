@@ -17,7 +17,7 @@ dependencies {
     implementation project(':capacitor-splash-screen')
     implementation project(':capawesome-capacitor-app-update')
     implementation project(':capawesome-capacitor-apple-sign-in')
-    implementation project(':codetrix-studio-capacitor-google-auth')
+    implementation project(':capawesome-capacitor-google-sign-in')
 
 }
 

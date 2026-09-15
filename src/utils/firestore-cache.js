@@ -1,4 +1,4 @@
-import { getDocsFromServer, getDocsFromCache } from 'firebase/firestore';
+import { getDocs, getDocsFromServer, getDocsFromCache } from 'firebase/firestore';
 import { safeStorage } from './safe-storage.js';
 
 /**
@@ -33,33 +33,26 @@ export async function getDocsOptimized(queryRef, cacheKey, ttlMs = 5 * 60 * 1000
     try {
       const cachedSnap = await getDocsFromCache(queryRef);
       if (!cachedSnap.empty) {
-        console.log(`[FirestoreCache] Loaded '${cacheKey}' from CACHE (fresh). size: ${cachedSnap.size}`);
         return cachedSnap;
       }
     } catch (err) {
-      console.warn(`[FirestoreCache] Failed to load '${cacheKey}' from cache, falling back to server:`, err);
+      // Cache miss or expired, proceed to fetch
     }
   }
 
-  // 2. Load from server (either because cache is stale, missing, or getDocsFromCache returned empty)
+  // 2. Fetch using standard getDocs (supports online & smart persistence)
   try {
-    const serverSnap = await getDocsFromServer(queryRef);
-    console.log(`[FirestoreCache] Loaded '${cacheKey}' from SERVER. size: ${serverSnap.size}`);
-    
-    // Save metadata timestamp to localStorage to mark cache as fresh
+    const snap = await getDocs(queryRef);
     safeStorage.setItem(cacheMetaKey, JSON.stringify({ timestamp: now }));
-    return serverSnap;
-  } catch (serverErr) {
-    console.warn(`[FirestoreCache] Server query failed for '${cacheKey}'. Checking offline cache fallback:`, serverErr);
-    
-    // 3. Offline fallback: if server is unreachable, try to load whatever is in the cache (even if stale)
+    return snap;
+  } catch (err) {
+    console.warn(`[FirestoreCache] Query failed for '${cacheKey}'. Checking fallback:`, err);
     try {
       const cachedSnap = await getDocsFromCache(queryRef);
-      console.log(`[FirestoreCache] Offline fallback successful for '${cacheKey}' from CACHE. size: ${cachedSnap.size}`);
       return cachedSnap;
     } catch (cacheErr) {
-      // Re-throw original server error if cache is also broken/empty
-      throw serverErr;
+      // Return empty fallback snapshot instead of crashing the page
+      return { empty: true, docs: [], size: 0, forEach: () => {} };
     }
   }
 }

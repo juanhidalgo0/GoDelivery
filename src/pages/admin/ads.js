@@ -7,6 +7,7 @@ import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
 import { formatPrice } from '../../utils/format.js';
 import { openCropper } from '../../utils/cropper.js';
+import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 
 export async function renderAdminAds() {
   const content = document.getElementById('app-content');
@@ -340,7 +341,8 @@ function openAdEditor(ad) {
     const startDate = document.getElementById('promo-start').value;
     const endDate = document.getElementById('promo-end').value;
     const bannerVal = document.getElementById('promo-banner').value;
-    const banner = bannerVal === '(Imagen recortada)' ? croppedBase64 : (bannerVal || croppedBase64);
+    const pendingBanner = bannerVal === '(Imagen recortada)' ? croppedBase64 : (bannerVal || croppedBase64);
+    const banner = await uploadDataUrlImage(pendingBanner, `ads/comercios/${ad.id}/banner`);
 
     const newPromotion = {
       active: isActive,
@@ -647,13 +649,15 @@ function openCustomAdEditor(ad = null) {
     const startDate = document.getElementById('custom-start').value;
     const endDate = document.getElementById('custom-end').value;
 
+    const bannerUrl = await uploadDataUrlImage(croppedBase64, `ads/custom/${ad?.id || Date.now()}/banner`);
+
     const adData = {
       active: isActive,
       isPriority,
       title,
       label,
       link,
-      banner: croppedBase64,
+      banner: bannerUrl,
       startDate: startDate ? Timestamp.fromDate(new Date(startDate + 'T00:00:00')) : null,
       endDate: endDate ? Timestamp.fromDate(new Date(endDate + 'T23:59:59')) : null,
       updatedAt: Timestamp.now()
@@ -1172,6 +1176,12 @@ function openMandadoBannerEditor(banner = null) {
             status = 'completed';
           }
 
+          const bannerId = isEdit ? banner.id : Date.now();
+          const [imageUrl, logoUrl] = await Promise.all([
+            uploadDataUrlImage(croppedBase64, `ads/banners_mandados/${bannerId}/image`),
+            uploadDataUrlImage(logoBase64, `ads/banners_mandados/${bannerId}/logo`)
+          ]);
+
           const bannerData = {
             name,
             title,
@@ -1184,8 +1194,8 @@ function openMandadoBannerEditor(banner = null) {
             discountLimitPerDay: hasDiscount ? discountLimitPerDay : 0,
             hasPremiumGlow,
             hasPriorityDelivery,
-            imageUrl: croppedBase64,
-            logoUrl: logoBase64,
+            imageUrl,
+            logoUrl,
             startDate: Timestamp.fromDate(startDate),
             endDate: Timestamp.fromDate(endDate),
             status,

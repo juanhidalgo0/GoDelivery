@@ -10,6 +10,9 @@
     {
       "target": "app",
       "public": "dist",
+      "predeploy": [
+        "npm run build"
+      ],
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -22,7 +25,32 @@
           "type": 301
         },
         {
+          "source": "/appstore",
+          "destination": "https://apps.apple.com/app/go-delivery/id6790820954",
+          "type": 301
+        },
+        {
+          "source": "/apple",
+          "destination": "https://apps.apple.com/app/go-delivery/id6790820954",
+          "type": 301
+        },
+        {
           "source": "/android",
+          "destination": "https://play.google.com/store/apps/details?id=com.godelivery.magdalena",
+          "type": 301
+        },
+        {
+          "source": "/playstore",
+          "destination": "https://play.google.com/store/apps/details?id=com.godelivery.magdalena",
+          "type": 301
+        },
+        {
+          "source": "/play",
+          "destination": "https://play.google.com/store/apps/details?id=com.godelivery.magdalena",
+          "type": 301
+        },
+        {
+          "source": "/googleplay",
           "destination": "https://play.google.com/store/apps/details?id=com.godelivery.magdalena",
           "type": 301
         }
@@ -94,7 +122,15 @@
           "headers": [
             {
               "key": "Cache-Control",
-              "value": "no-cache, no-store, must-revalidate"
+              "value": "no-cache, no-store, must-revalidate, max-age=0"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Expires",
+              "value": "0"
             },
             {
               "key": "Access-Control-Allow-Origin",
@@ -107,7 +143,15 @@
           "headers": [
             {
               "key": "Cache-Control",
-              "value": "no-cache, no-store, must-revalidate"
+              "value": "no-cache, no-store, must-revalidate, max-age=0"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Expires",
+              "value": "0"
             }
           ]
         },
@@ -116,7 +160,32 @@
           "headers": [
             {
               "key": "Cache-Control",
-              "value": "no-cache, no-store, must-revalidate"
+              "value": "no-cache, no-store, must-revalidate, max-age=0"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Expires",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate, max-age=0"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Expires",
+              "value": "0"
             }
           ]
         },
@@ -125,7 +194,15 @@
           "headers": [
             {
               "key": "Cache-Control",
-              "value": "no-cache, no-store, must-revalidate"
+              "value": "no-cache, no-store, must-revalidate, max-age=0"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Expires",
+              "value": "0"
             }
           ]
         }
@@ -138,6 +215,39 @@
         "firebase.json",
         "**/.*",
         "**/node_modules/**"
+      ]
+    },
+    {
+      "target": "portal",
+      "public": "mango-landing",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    },
+    {
+      "target": "mango",
+      "public": "mango-landing",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    },
+    {
+      "target": "ventra-tienda",
+      "public": "ventra-tienda",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
       ]
     }
   ],

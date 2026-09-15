@@ -26,11 +26,53 @@ export async function getDistance(lat1, lon1, lat2, lon2) {
   return getQuickDistance(lat1, lon1, lat2, lon2);
 }
 
+let googleMapsLoaderPromise = null;
+
+/**
+ * Dynamically loads Google Maps JavaScript API on demand (saves ~250kB on initial page load).
+ */
+export async function loadGoogleMaps() {
+  if (typeof window === 'undefined') return null;
+  if (window.google && window.google.maps) {
+    return window.google.maps;
+  }
+  if (googleMapsLoaderPromise) {
+    return googleMapsLoaderPromise;
+  }
+
+  googleMapsLoaderPromise = new Promise((resolve, reject) => {
+    const existingScript = document.getElementById('google-maps-script');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(window.google?.maps));
+      existingScript.addEventListener('error', (err) => {
+        googleMapsLoaderPromise = null;
+        reject(err);
+      });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'google-maps-script';
+    script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyDFaOVxf6QfK03rRTVfIH84HLc5Qujzrew&libraries=places&language=es&region=AR';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      resolve(window.google?.maps);
+    };
+    script.onerror = (err) => {
+      googleMapsLoaderPromise = null;
+      reject(err);
+    };
+    document.head.appendChild(script);
+  });
+
+  return googleMapsLoaderPromise;
+}
+
 const geocodeCache = new Map();
 
 /**
- * Geocodes an address string to { lat, lng } using OpenStreetMap Nominatim
- * Note: Nominatim has usage limits. For production, consider Google Maps or Mapbox.
+ * Geocodes an address string to { lat, lng } using Google Maps (on-demand) with Nominatim fallback.
  */
 export async function geocodeAddress(address) {
   if (!address) return null;
@@ -42,9 +84,10 @@ export async function geocodeAddress(address) {
       query += `, Magdalena, Buenos Aires, Argentina`;
     }
 
-    // 1. Google Maps Geocoder
-    if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Geocoder) {
-      try {
+    // 1. Google Maps Geocoder (loaded on-demand)
+    try {
+      await loadGoogleMaps();
+      if (window.google && window.google.maps && window.google.maps.Geocoder) {
         const geocoder = new window.google.maps.Geocoder();
         const result = await new Promise((resolve, reject) => {
           geocoder.geocode({ address: query }, (results, status) => {
@@ -61,9 +104,9 @@ export async function geocodeAddress(address) {
         });
         geocodeCache.set(address, result);
         return result;
-      } catch (gErr) {
-        console.warn('Google Geocoding note, using fallback:', gErr);
       }
+    } catch (gErr) {
+      console.warn('Google Geocoding note, using fallback:', gErr);
     }
 
     // 2. OpenStreetMap Nominatim Fallback
@@ -128,50 +171,6 @@ export function calculateDynamicFee(distanceKm) {
   return Math.ceil(total / 10) * 10;
 }
 
-const MAGDALENA_STREETS = [
-  { name: 'José María Miguens', keys: ['miguens', 'jose maria miguens', 'josé maría miguens', 'jose miguens', 'mig', 'miguen'], lat: -35.08475, lng: -57.51599, dir: 'nw-se' },
-  { name: 'Presidente Juan D. Perón', keys: ['peron', 'juan d peron', 'presidente peron', 'presidente juan d. peron', 'presidente juan d peron', 'jd peron'], lat: -35.0815, lng: -57.5147, dir: 'nw-se' },
-  { name: 'Doctor Patricio Brenan', keys: ['brenan', 'patricio brenan', 'dr brenan', 'bre', 'doctor brenan'], lat: -35.0805, lng: -57.5140, dir: 'nw-se' },
-  { name: 'Bernardino Rivadavia', keys: ['rivadavia', 'bernardino rivadavia', 'riva', 'riv'], lat: -35.0813, lng: -57.5111, dir: 'nw-se' },
-  { name: 'Doctor Pedro Goenaga', keys: ['goenaga', 'goen', 'goe', 'pedro goenaga', 'dr goenaga'], lat: -35.0787, lng: -57.5178, dir: 'sw-ne' },
-  { name: 'San Martín', keys: ['san martin', 'san martín', 'san mart', 'av san martin'], lat: -35.0803, lng: -57.5115, dir: 'sw-ne' },
-  { name: 'Chacabuco', keys: ['chacabuco', 'chaca', 'chac'], lat: -35.0780, lng: -57.5188, dir: 'sw-ne' },
-  { name: '25 de Mayo', keys: ['25 de mayo', '25 de may', 'veinticinco de mayo', '25 mayo'], lat: -35.0792, lng: -57.5123, dir: 'nw-se' },
-  { name: 'Mariano Moreno', keys: ['moreno', 'mariano moreno', 'mor'], lat: -35.0740, lng: -57.5155, dir: 'sw-ne' },
-  { name: 'Juan Lavalle', keys: ['lavalle', 'juan lavalle', 'lav'], lat: -35.0815, lng: -57.5209, dir: 'sw-ne' },
-  { name: 'Ituzaingó', keys: ['ituzaingo', 'ituzaingó', 'itu'], lat: -35.0780, lng: -57.5035, dir: 'sw-ne' },
-  { name: 'Coronel Pintos', keys: ['pintos', 'coronel pintos', 'pinto', 'pin'], lat: -35.0800, lng: -57.5110, dir: 'sw-ne' },
-  { name: 'Manuel Rebufo', keys: ['rebufo', 'manuel rebufo', 'rebu'], lat: -35.0790, lng: -57.5125, dir: 'sw-ne' },
-  { name: 'Viamonte', keys: ['viamonte', 'viam', 'via'], lat: -35.0682, lng: -57.5164, dir: 'sw-ne' },
-  { name: 'Manuel Belgrano', keys: ['belgrano', 'manuel belgrano', 'belg'], lat: -35.0748, lng: -57.5055, dir: 'sw-ne' },
-  { name: 'Caseros', keys: ['caseros', 'case', 'cas'], lat: -35.0855, lng: -57.5140, dir: 'sw-ne' },
-  { name: 'Hipólito Yrigoyen', keys: ['yrigoyen', 'hipolito yrigoyen', 'hipólito yrigoyen', 'yri', 'irigoyen'], lat: -35.0785, lng: -57.5166, dir: 'nw-se' },
-  { name: 'Adolfo Alsina', keys: ['alsina', 'adolfo alsina', 'als'], lat: -35.0860, lng: -57.5125, dir: 'sw-ne' },
-  { name: 'Bartolomé Mitre', keys: ['mitre', 'bartolome mitre', 'bartolomé mitre'], lat: -35.0822, lng: -57.5105, dir: 'nw-se' },
-  { name: 'Julio A. Roca', keys: ['roca', 'julio a roca', 'julio roca'], lat: -35.0865, lng: -57.5155, dir: 'sw-ne' },
-  { name: 'Cornelio Saavedra', keys: ['saavedra', 'cornelio saavedra', 'saav'], lat: -35.0870, lng: -57.5135, dir: 'sw-ne' },
-  { name: 'Juan José Castelli', keys: ['castelli', 'juan jose castelli', 'cast'], lat: -35.0875, lng: -57.5120, dir: 'sw-ne' },
-  { name: 'General Paz', keys: ['general paz', 'gral paz', 'paz'], lat: -35.0880, lng: -57.5110, dir: 'sw-ne' },
-  { name: 'Leandro N. Alem', keys: ['alem', 'leandro alem', 'leandro n alem'], lat: -35.0885, lng: -57.5130, dir: 'nw-se' },
-  { name: 'Espora', keys: ['espora', 'comandante espora'], lat: -35.0890, lng: -57.5145, dir: 'nw-se' },
-  { name: 'Garibaldi', keys: ['garibaldi'], lat: -35.0895, lng: -57.5160, dir: 'nw-se' },
-  { name: 'Guido Spano', keys: ['guido spano', 'spano'], lat: -35.0900, lng: -57.5170, dir: 'nw-se' },
-  { name: 'Riobamba', keys: ['riobamba', 'riob'], lat: -35.0770, lng: -57.5150, dir: 'sw-ne' },
-  { name: 'Suipacha', keys: ['suipacha', 'suip'], lat: -35.0760, lng: -57.5140, dir: 'sw-ne' },
-  { name: 'Maipú', keys: ['maipu', 'maipú'], lat: -35.0750, lng: -57.5130, dir: 'sw-ne' },
-  { name: 'Salta', keys: ['salta'], lat: -35.0740, lng: -57.5120, dir: 'sw-ne' },
-  { name: 'Jujuy', keys: ['jujuy'], lat: -35.0730, lng: -57.5110, dir: 'sw-ne' },
-  { name: 'Tucumán', keys: ['tucuman', 'tucumán'], lat: -35.0720, lng: -57.5100, dir: 'sw-ne' },
-  { name: 'Barrio Eva Perón', keys: ['eva peron', 'barrio eva', 'eva'], lat: -35.0667, lng: -57.5378, dir: 'nw-se' },
-  { name: 'Barrio San José', keys: ['san jose', 'barrio san jose', 'san jose'], lat: -35.0744, lng: -57.5255, dir: 'nw-se' },
-  { name: 'Barrio 22 de Mayo', keys: ['22 de mayo', 'barrio 22 de mayo'], lat: -35.0710, lng: -57.5300, dir: 'nw-se' },
-  { name: 'Barrio Obrero', keys: ['barrio obrero', 'obrero'], lat: -35.0880, lng: -57.5200, dir: 'nw-se' },
-  { name: 'Empalme Magdalena', keys: ['empalme', 'empalme magdalena'], lat: -35.0933, lng: -57.5410, dir: 'nw-se' },
-  { name: 'Atalaya', keys: ['atalaya', 'balneario atalaya'], lat: -35.0225, lng: -57.5369, dir: 'nw-se' },
-  { name: 'General Mansilla (Bavio)', keys: ['bavio', 'general mansilla', 'mansilla'], lat: -35.0761, lng: -57.7536, dir: 'nw-se' },
-  { name: 'Hipólito Vieytes', keys: ['vieytes', 'hipolito vieytes', 'hipólito vieytes'], lat: -35.2815, lng: -57.5758, dir: 'nw-se' }
-];
-
 const ALLOWED_LOCAL_ZONES = [
   'magdalena',
   'atalaya',
@@ -208,145 +207,173 @@ export async function searchAddressSuggestions(term) {
   
   const rawInput = term.trim();
 
-  // 1. Google Places Autocomplete strictly scoped to Magdalena
-  if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.places && window.google.maps.places.AutocompleteService) {
+  // 1. Preload Google Maps API if available
+  try {
+    await loadGoogleMaps();
+  } catch (e) {
+    console.warn('[searchAddressSuggestions] Google Maps load note:', e);
+  }
+
+  const results = [];
+  const seenKeys = new Set();
+
+  const addResult = (res) => {
+    if (!res || !res.lat || !res.lng || !res.address) return;
+    const key = `${Number(res.lat).toFixed(4)},${Number(res.lng).toFixed(4)}`;
+    const nameKey = res.address.toLowerCase().trim();
+    if (!seenKeys.has(key) && !seenKeys.has(nameKey)) {
+      seenKeys.add(key);
+      seenKeys.add(nameKey);
+      results.push(res);
+    }
+  };
+
+  // 2. Google Maps Geocoder & Places Autocomplete (Rooftop & Parcel precision)
+  if (typeof window !== 'undefined' && window.google && window.google.maps) {
     try {
-      const service = new window.google.maps.places.AutocompleteService();
       const magBounds = new window.google.maps.LatLngBounds(
         new window.google.maps.LatLng(-35.35, -57.85),
         new window.google.maps.LatLng(-34.95, -57.20)
       );
 
-      const queryWithZone = rawInput.toLowerCase().includes('magdalena') ? rawInput : `${rawInput}, Magdalena`;
-
-      const predictions = await new Promise((resolve) => {
-        service.getPlacePredictions({
-          input: queryWithZone,
-          locationBias: magBounds,
-          componentRestrictions: { country: 'ar' }
-        }, (preds, status) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && preds && preds.length > 0) {
-            resolve(preds);
-          } else {
-            service.getPlacePredictions({
-              input: rawInput,
-              locationBias: magBounds,
-              componentRestrictions: { country: 'ar' }
-            }, (fbPreds, fbStatus) => {
-              if (fbStatus === window.google.maps.places.PlacesServiceStatus.OK && fbPreds) {
-                resolve(fbPreds);
-              } else {
-                resolve([]);
-              }
-            });
-          }
-        });
-      });
-
-      const filteredPredictions = (predictions || []).filter(pred => isLocalAddress(pred.description));
-
-      if (filteredPredictions && filteredPredictions.length > 0) {
+      // A. Direct Geocoder query (High accuracy for street + number like "Miguens 1340" or "San Martin 500")
+      if (window.google.maps.Geocoder) {
         const geocoder = new window.google.maps.Geocoder();
-        const results = await Promise.all(filteredPredictions.slice(0, 5).map(async (pred) => {
-          try {
-            const geoRes = await new Promise((res, rej) => {
-              geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
-                if (s === 'OK' && r && r[0]) {
-                  res(r[0]);
+        let geocodeQuery = rawInput;
+        if (!geocodeQuery.toLowerCase().includes('magdalena') && !geocodeQuery.toLowerCase().includes('atalaya') && !geocodeQuery.toLowerCase().includes('bavio')) {
+          geocodeQuery += ', Magdalena';
+        }
+        geocodeQuery += ', Buenos Aires, Argentina';
+
+        try {
+          const geoData = await new Promise((resolve) => {
+            geocoder.geocode({
+              address: geocodeQuery,
+              componentRestrictions: { country: 'AR' },
+              bounds: magBounds
+            }, (res, status) => {
+              if (status === 'OK' && res && res.length > 0) resolve(res);
+              else resolve([]);
+            });
+          });
+
+          for (const item of geoData) {
+            if (isLocalAddress(item.formatted_address)) {
+              let street = '';
+              let number = '';
+              let neighborhood = '';
+              let city = 'Magdalena';
+              (item.address_components || []).forEach(comp => {
+                if (comp.types.includes('route')) street = comp.long_name;
+                if (comp.types.includes('street_number')) number = comp.long_name;
+                if (comp.types.includes('sublocality') || comp.types.includes('neighborhood')) neighborhood = comp.long_name;
+                if (comp.types.includes('locality')) city = comp.long_name;
+              });
+
+              let display = `${street} ${number}`.trim();
+              if (!display) display = item.formatted_address.split(',')[0];
+              if (city && !display.toLowerCase().includes(city.toLowerCase())) display += `, ${city}`;
+
+              addResult({
+                lat: item.geometry.location.lat(),
+                lng: item.geometry.location.lng(),
+                address: display,
+                displayName: item.formatted_address
+              });
+            }
+          }
+        } catch(gErr) {
+          console.warn('[searchAddressSuggestions] Direct geocoder error:', gErr);
+        }
+      }
+
+      // B. Places Autocomplete Service (Autocomplete street names as user types)
+      if (window.google.maps.places && window.google.maps.places.AutocompleteService) {
+        const service = new window.google.maps.places.AutocompleteService();
+        const queryWithZone = rawInput.toLowerCase().includes('magdalena') ? rawInput : `${rawInput}, Magdalena`;
+
+        const predictions = await new Promise((resolve) => {
+          service.getPlacePredictions({
+            input: queryWithZone,
+            locationBias: magBounds,
+            componentRestrictions: { country: 'ar' }
+          }, (preds, status) => {
+            if (status === window.google.maps.places.PlacesServiceStatus.OK && preds && preds.length > 0) {
+              resolve(preds);
+            } else {
+              service.getPlacePredictions({
+                input: rawInput,
+                locationBias: magBounds,
+                componentRestrictions: { country: 'ar' }
+              }, (fbPreds, fbStatus) => {
+                if (fbStatus === window.google.maps.places.PlacesServiceStatus.OK && fbPreds) {
+                  resolve(fbPreds);
                 } else {
-                  rej(new Error(s));
+                  resolve([]);
                 }
               });
-            });
-            return {
-              lat: geoRes.geometry.location.lat(),
-              lng: geoRes.geometry.location.lng(),
-              address: pred.structured_formatting ? pred.structured_formatting.main_text : pred.description.split(',')[0],
-              displayName: pred.description
-            };
-          } catch(e) {
-            return null;
-          }
-        }));
-        const valid = results.filter(Boolean);
-        if (valid.length > 0) return valid;
+            }
+          });
+        });
+
+        const filteredPredictions = (predictions || []).filter(pred => isLocalAddress(pred.description));
+
+        if (filteredPredictions.length > 0 && window.google.maps.Geocoder) {
+          const geocoder = new window.google.maps.Geocoder();
+          await Promise.all(filteredPredictions.slice(0, 5).map(async (pred) => {
+            try {
+              const geoRes = await new Promise((res, rej) => {
+                geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
+                  if (s === 'OK' && r && r[0]) res(r[0]);
+                  else rej(new Error(s));
+                });
+              });
+              if (geoRes) {
+                let street = '';
+                let number = '';
+                (geoRes.address_components || []).forEach(comp => {
+                  if (comp.types.includes('route')) street = comp.long_name;
+                  if (comp.types.includes('street_number')) number = comp.long_name;
+                });
+                let display = `${street} ${number}`.trim();
+                if (!display) display = pred.structured_formatting ? pred.structured_formatting.main_text : pred.description.split(',')[0];
+                if (!display.toLowerCase().includes('magdalena')) display += ', Magdalena';
+
+                addResult({
+                  lat: geoRes.geometry.location.lat(),
+                  lng: geoRes.geometry.location.lng(),
+                  address: display,
+                  displayName: pred.description
+                });
+              }
+            } catch(e) {}
+          }));
+        }
+      }
+
+      if (results.length > 0) {
+        return results.slice(0, 6);
       }
     } catch(gErr) {
       console.warn('Google Places suggestion error, using local fallback:', gErr);
     }
   }
-  
-  const normalizedTerm = rawInput.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  
-  // Extract any numbers typed by the user (e.g., "mig 1250" -> number = 1250, cleanTerm = "mig")
-  const numberMatch = rawInput.match(/\b\d{1,5}\b/);
-  const houseNumber = numberMatch ? numberMatch[0] : '';
-  const numVal = houseNumber ? parseInt(houseNumber, 10) : 0;
-  const textWithoutNumber = normalizedTerm.replace(/\b\d{1,5}\b/g, '').replace(/,/g, ' ').trim();
 
-  const localMatches = [];
-  
-  // 1. Check local Magdalena street dictionary with block calculation
-  for (const item of MAGDALENA_STREETS) {
-    const isMatch = item.keys.some(k => {
-      if (textWithoutNumber.length >= 2 && k.includes(textWithoutNumber)) return true;
-      if (k.length >= 2 && textWithoutNumber.includes(k)) return true;
-      return false;
-    });
-
-    if (isMatch) {
-      let finalLat = item.lat;
-      let finalLng = item.lng;
-
-      if (numVal > 0) {
-        const offset = (numVal - 500) / 100;
-        if (item.dir === 'nw-se') {
-          finalLat += offset * 0.00065;
-          finalLng += offset * 0.00075;
-        } else {
-          finalLat += offset * 0.00075;
-          finalLng -= offset * 0.00065;
-        }
-      }
-
-      if (houseNumber) {
-        localMatches.push({
-          lat: Number(finalLat.toFixed(6)),
-          lng: Number(finalLng.toFixed(6)),
-          address: `${item.name} ${houseNumber}, Magdalena`,
-          displayName: `${item.name} ${houseNumber}, Magdalena, Buenos Aires, Argentina`
-        });
-      } else {
-        localMatches.push({
-          lat: Number(item.lat.toFixed(6)),
-          lng: Number(item.lng.toFixed(6)),
-          address: `${item.name}, Magdalena`,
-          displayName: `${item.name}, Magdalena, Buenos Aires, Argentina`
-        });
-      }
-    }
-  }
-
-  // If local dictionary returned matches, return them immediately (0 ms response)
-  if (localMatches.length > 0) {
-    return localMatches.slice(0, 6);
-  }
-
-  // Bounded OpenStreetMap Nominatim search for Magdalena region (-57.85,-34.95,-57.20,-35.40)
+  // 3. OpenStreetMap Nominatim Fallback (Bounded to Magdalena region -57.85,-34.95,-57.20,-35.40)
   try {
-    let searchQuery = term.trim();
+    let searchQuery = rawInput;
     if (!searchQuery.toLowerCase().includes('magdalena')) {
       searchQuery += `, Magdalena, Buenos Aires, Argentina`;
     }
     const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&viewbox=-57.85,-34.95,-57.20,-35.40&bounded=1&addressdetails=1&limit=5&accept-language=es`;
     const response = await fetch(nominatimUrl, {
-      headers: { 'Accept-Language': 'es' }
+      headers: { 'Accept-Language': 'es', 'User-Agent': 'GoDelivery/1.0' }
     });
     const data = await response.json();
     
-    const mapped = (data || [])
+    (data || [])
       .filter(item => isLocalAddress(item.display_name))
-      .map(item => {
+      .forEach(item => {
         const a = item.address || {};
         const street = a.road || a.pedestrian || a.suburb || '';
         const number = a.house_number || '';
@@ -357,18 +384,18 @@ export async function searchAddressSuggestions(term) {
         if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
         if (city && !display.includes(city)) display += `, ${city}`;
         
-        return {
+        addResult({
           lat: parseFloat(item.lat),
           lng: parseFloat(item.lon),
           address: display || item.display_name.split(',')[0],
           displayName: item.display_name
-        };
+        });
       });
       
-    return [...localMatches, ...mapped].slice(0, 6);
+    return results.slice(0, 6);
   } catch (err) {
     console.error('Error querying Nominatim suggestions:', err);
-    return localMatches;
+    return results.slice(0, 6);
   }
 }
 
@@ -389,5 +416,6 @@ export async function geocodePlaceId(placeId) {
   } catch(e) {}
   return null;
 }
+
 
 

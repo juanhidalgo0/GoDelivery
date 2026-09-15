@@ -247,7 +247,9 @@
 /* When header/navbar are hidden (panel pages), overlay fills full viewport */
 #app-header:empty+#active-order-banner-container+#app-slider+.slide-overlay.active,
 .slide-overlay.panel-fullscreen,
-body.header-hidden .slide-overlay {
+body.header-hidden .slide-overlay,
+body.is-direct-store-mode .slide-overlay,
+html.is-direct-store-mode .slide-overlay {
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
@@ -259,6 +261,29 @@ body.header-hidden .slide-overlay {
   will-change: transform;
   transform: translate3d(0, 0, 0);
   background: var(--color-bg);
+}
+
+html.is-direct-store-mode #app-header,
+html.is-direct-store-mode #app-navbar,
+html.is-direct-store-mode #app-slider,
+html.is-direct-store-mode #page-home,
+html.is-direct-store-mode .bottom-nav,
+html.is-direct-store-mode .home-page,
+html.is-direct-store-mode #active-order-banner-container,
+html.is-direct-store-mode #global-cart-fab-btn,
+body.is-direct-store-mode #app-header,
+body.is-direct-store-mode #app-navbar,
+body.is-direct-store-mode #app-slider,
+body.is-direct-store-mode #page-home,
+body.is-direct-store-mode .bottom-nav,
+body.is-direct-store-mode .home-page,
+body.is-direct-store-mode #active-order-banner-container,
+body.is-direct-store-mode #global-cart-fab-btn {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  pointer-events: none !important;
 }
 
 .hide-mobile {
@@ -1415,6 +1440,8 @@ body.header-hidden .slide-overlay {
 
 /* ── 4. Cards (Comercio & Product) ── */
 .comercio-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
   border-radius: var(--radius-xl);
   overflow: hidden;
   background: var(--color-surface);
@@ -1520,6 +1547,8 @@ body.header-hidden .slide-overlay {
 }
 
 .product-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
   display: flex;
   justify-content: space-between;
   gap: var(--space-4);
@@ -3000,13 +3029,33 @@ body.header-hidden .slide-overlay {
   height: calc(100dvh - var(--navbar-height, 68px)) !important;
 }
 
+.slide-overlay:has(.cart-container),
+.slide-overlay:has(.cart-page),
+.slide-overlay.has-cart {
+  overflow: hidden !important;
+  height: 100% !important;
+  max-height: 100dvh !important;
+}
+
+.slide-overlay #app-content:has(.cart-container),
+.slide-overlay #app-content:has(.cart-page) {
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
 .cart-container {
-  display: flex;
-  flex-direction: column;
+  display: flex !important;
+  flex-direction: column !important;
   height: 100% !important;
   max-height: 100% !important;
+  min-height: 0 !important;
   background: var(--color-bg);
-  overflow: hidden;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
 }
 
 @media (max-width: 768px) {
@@ -3016,10 +3065,12 @@ body.header-hidden .slide-overlay {
 }
 
 .cart-scroll-area {
-  flex: 1;
-  padding: var(--space-4);
-  padding-top: 18px;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  padding: var(--space-4) !important;
+  padding-top: 14px !important;
   overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
   scrollbar-width: thin !important;
   scrollbar-color: var(--color-border) transparent !important;
 }
@@ -3046,13 +3097,13 @@ body.header-hidden .slide-overlay {
 }
 
 .cart-fixed-footer {
-  background: var(--color-bg-card);
-  border-top: 1px solid var(--color-border-light);
-  padding: 12px 16px calc(12px + max(env(safe-area-inset-bottom, 0px), 8px)) 16px;
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.06);
-  z-index: 1000;
-  border-radius: 20px 20px 0 0;
-  flex-shrink: 0;
+  background: var(--color-bg-card) !important;
+  border-top: 1px solid var(--color-border-light) !important;
+  padding: 12px 16px calc(12px + max(env(safe-area-inset-bottom, 0px), 8px)) 16px !important;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.08) !important;
+  z-index: 1000 !important;
+  border-radius: 20px 20px 0 0 !important;
+  flex-shrink: 0 !important;
 }
 /* -- Delivery Finances V3 -- */
 .delivery-finances-v3 {

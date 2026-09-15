@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { formatPrice } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { getLocalDateString } from '../../utils/analytics.js';
@@ -452,9 +452,10 @@ export async function renderAdminMetricsBreakdown() {
 
   // Load data
   try {
+    const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(1500));
     const [usersSnap, ordersSnap, comerciosSnap] = await Promise.all([
       getDocs(collection(db, 'users')),
-      getDocs(collection(db, 'orders')),
+      getDocs(ordersQuery).catch(() => getDocs(collection(db, 'orders'))),
       getDocs(collection(db, 'comercios'))
     ]);
 
