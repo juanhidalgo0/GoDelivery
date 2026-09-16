@@ -2268,12 +2268,34 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   if (!container) return;
 
   let cachedProducts = [];
+  let cachedRankingLabel = '';
   try {
     const raw = localStorage.getItem('gd_cached_popular_products');
     if (raw) {
       cachedProducts = JSON.parse(raw);
     }
+    cachedRankingLabel = localStorage.getItem('gd_cached_popular_ranking_label') || '';
   } catch (e) {}
+
+  // El encabezado depende de si hay datos de ventas reales. Cuando el ranking se
+  // completa con productos del catálogo (porque todavía no hay ventas suficientes),
+  // la sección NO se anuncia como "Top Ventas": mostrar productos al azar bajo ese
+  // cartel es decirle al vecino algo que no es cierto.
+  const renderSectionHeader = (rankingLabel) => `
+      <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+            <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              Destacados
+            </h2>
+            ${rankingLabel ? `
+            <span style="background: rgba(225, 29, 72, 0.1); color: var(--color-primary); font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
+              🔥 Top Ventas
+            </span>` : ''}
+          </div>
+        </div>
+        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">${rankingLabel || 'Productos de los comercios de Magdalena'}</span>
+      </div>`;
 
   const renderSliderContent = (productsList) => {
     return productsList.map(p => {
@@ -2337,19 +2359,7 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   // If cache exists, render immediately to completely bypass skeleton transition
   if (cachedProducts && cachedProducts.length > 0) {
     container.innerHTML = `
-      <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-            <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              Destacados
-            </h2>
-            <span style="background: rgba(225, 29, 72, 0.1); color: var(--color-primary); font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
-              🔥 Top Ventas
-            </span>
-          </div>
-        </div>
-        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los productos y platos más pedidos en tiempo real</span>
-      </div>
+      ${renderSectionHeader(cachedRankingLabel)}
       <div class="random-products-slider-wrapper">
         <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
           ${icon('chevronLeft', 20)}
@@ -2366,19 +2376,7 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   } else {
     // Show skeletons initially ONLY if cache is empty
     container.innerHTML = `
-      <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-            <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              Destacados
-            </h2>
-            <span style="background: rgba(225, 29, 72, 0.1); color: var(--color-primary); font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
-              🔥 Top Ventas
-            </span>
-          </div>
-        </div>
-        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Los productos y platos más pedidos en tiempo real</span>
-      </div>
+      ${renderSectionHeader(cachedRankingLabel)}
       <div class="random-products-slider-wrapper">
         <button id="prod-prev-btn" class="categories-arrow-btn prev-btn" style="display: none; position: absolute; left: 4px; top: calc(50% - 21px); z-index: 10; width: 42px; height: 42px; border-radius: 50%; background: var(--color-surface); border: 1.5px solid var(--color-border); box-shadow: var(--shadow-md); align-items: center; justify-content: center; color: var(--color-primary); cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
           ${icon('chevronLeft', 20)}
@@ -2401,42 +2399,67 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   // Fetch popular products in background (Stale-While-Revalidate)
   setTimeout(async () => {
     try {
-      // 1. Get top-selling products platform-wide via the denormalized `salesCount`
-      //    field (incremented server-side in functions/index.js onOrderCreated).
-      //    Replaces the old approach of fetching 60 recent orders and then running
-      //    one query per popular product (up to 12 extra round-trips on every home load).
       const activeShops = comercios.filter(c => c.isActive !== false);
       const popularProducts = [];
+      let rankingLabel = '';
 
+      // 1. Ranking mensual real, calculado desde los pedidos entregados del mes
+      //    (settings/topProducts). Cuando lo abre un admin y está desactualizado,
+      //    se recalcula; el resto de los usuarios sólo lo lee.
       try {
-        const popularQ = query(
-          collectionGroup(db, 'products'),
-          orderBy('salesCount', 'desc'),
-          limit(12)
-        );
-        const popularSnap = await getDocs(popularQ);
-        popularSnap.forEach(pDoc => {
-          const pData = pDoc.data();
-          if (pData.isActive === false || !pData.salesCount) return;
-          const cId = pDoc.ref.parent.parent.id;
-          const shop = activeShops.find(c => c.id === cId);
-          if (!shop) return;
-          popularProducts.push({
-            id: pDoc.id,
-            comercioId: cId,
-            comercioName: shop.name,
-            comercioLogo: shop.logo || '/logo.png',
-            isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
-            salesCount: pData.salesCount,
-            ...pData
+        const tp = await import('../utils/top-products.js');
+        let ranking = await tp.readTopProducts();
+
+        if (isAdmin() && tp.isTopProductsStale(ranking)) {
+          const job = tp.recomputeTopProducts().catch(err => {
+            console.warn('[TopProducts] No se pudo recalcular el ranking mensual:', err);
+            return null;
           });
-        });
+          // Si lo guardado ya sirve, se muestra y el recálculo queda para la próxima carga.
+          if (!tp.isTopProductsUsable(ranking)) {
+            ranking = (await job) || ranking;
+          }
+        }
+
+        if (tp.isTopProductsUsable(ranking)) {
+          const resolved = await Promise.all(ranking.items.map(async (it) => {
+            if (!it.productId) return null;
+            const shop = activeShops.find(c => c.id === it.comercioId);
+            if (!shop) return null;
+            try {
+              const pSnap = await getDoc(doc(db, 'comercios', it.comercioId, 'products', it.productId));
+              if (!pSnap.exists()) return null;
+              const pData = pSnap.data();
+              if (pData.isActive === false || pData.isAvailable === false) return null;
+              return {
+                id: pSnap.id,
+                comercioId: shop.id,
+                comercioName: shop.name,
+                comercioLogo: shop.logo || '/logo.png',
+                isGoMarket: (shop.name || '').toLowerCase().includes('go!') && (shop.name || '').toLowerCase().includes('market'),
+                ...pData,
+                salesCount: it.qty,
+              };
+            } catch (e) {
+              return null;
+            }
+          }));
+
+          const found = resolved.filter(Boolean);
+          if (found.length >= tp.MIN_PRODUCTS_FOR_RANKING) {
+            popularProducts.push(...found);
+            rankingLabel = ranking.month === tp.monthKey()
+              ? 'Los productos más pedidos este mes'
+              : `Los productos más pedidos en ${tp.monthName(ranking.month)}`;
+          }
+        }
       } catch (e) {
-        console.warn('Error loading popular products by salesCount (falling back to random selection):', e);
+        console.warn('[TopProducts] Error cargando el ranking mensual:', e);
       }
 
+
       // 4. Fallback if popular products are empty or fewer than 5 (fill with random products from GoMarket and others)
-      if (popularProducts.length < 5 && activeShops.length > 0) {
+      if (popularProducts.length === 0 && activeShops.length > 0) {
         const goMarket = activeShops.find(c => {
           const n = (c.name || '').toLowerCase();
           return n.includes('go!') && n.includes('market');
@@ -2483,6 +2506,8 @@ async function renderPopularProductsSlider(comercios, offers = []) {
       // Write to cache for next load
       try {
         localStorage.setItem('gd_cached_popular_products', JSON.stringify(popularProducts));
+        localStorage.setItem('gd_cached_popular_ranking_label', rankingLabel);
+        localStorage.removeItem('gd_cached_popular_is_real');
       } catch (e) {}
 
       // 5. Update slider silently
@@ -2490,6 +2515,17 @@ async function renderPopularProductsSlider(comercios, offers = []) {
       if (sliderEl) {
         sliderEl.innerHTML = renderSliderContent(popularProducts);
         setupArrowsAndAutoplay();
+      }
+
+      // Ajustar el encabezado a lo que realmente se está mostrando.
+      if (rankingLabel !== cachedRankingLabel) {
+        const headerEl = container.firstElementChild;
+        if (headerEl) {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = renderSectionHeader(rankingLabel).trim();
+          const fresh = tmp.firstElementChild;
+          if (fresh) headerEl.replaceWith(fresh);
+        }
       }
     } catch (e) {
       console.error('Error rendering popular products slider:', e);

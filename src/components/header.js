@@ -587,6 +587,15 @@ let globalNotifUnsub = null;
 let globalNotifUserId = null;
 
 export function initHeader() {
+  // Guard against double-init (guest mode and the logged-in path can both
+  // end up calling this for the same session) which would otherwise stack
+  // duplicate state subscriptions and hashchange listeners.
+  if (window._gdHeaderInitialized) {
+    renderHeader();
+    return;
+  }
+  window._gdHeaderInitialized = true;
+
   renderHeader();
 
   const startGlobalNotifListener = (user) => {

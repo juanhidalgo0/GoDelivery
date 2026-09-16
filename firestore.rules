@@ -1,25 +1,495 @@
 rules_version = '2';
+
+// ============================================================================
+// GoDelivery Magdalena — Reglas de seguridad de Firestore
+//
+// Principio: nada es público salvo el catálogo (comercios, productos, ofertas,
+// categorías y configuración de la app). Todo lo demás exige sesión iniciada y,
+// donde corresponde, ser el dueño del dato, el comercio dueño del pedido,
+// un cadete aprobado o un administrador.
+//
+// El backend (Cloud Functions con Admin SDK) NO pasa por estas reglas.
+// ============================================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Reglas Generales de la plataforma
-    match /{document=**} {
-      allow read, write: if true;
+
+    // ---------------------------------------------------------------- helpers
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Reglas específicas para el Marketplace
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // Datos del usuario que hace el pedido. Devuelve {} si todavía no tiene doc.
+    function ud() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(uid()))
+        ? get(/databases/$(database)/documents/users/$(uid())).data
+        : {};
+    }
+
+    function roleOf() {
+      return ud().get('role', 'user');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'kioscopaulos7@gmail.com' ||
+        roleOf() in ['admin', 'superadmin'] ||
+        ud().get('isAdmin', false) == true
+      );
+    }
+
+    function isDriver() {
+      return isSignedIn() && (
+        roleOf() in ['delivery', 'chofer', 'driver', 'repartidor'] ||
+        ud().get('isDelivery', false) == true ||
+        ud().get('deliveryStatus', '') == 'approved'
+      );
+    }
+
+    function isComercioUser() {
+      return isSignedIn() && (
+        roleOf() == 'comercio' ||
+        ud().get('isComercio', false) == true
+      );
+    }
+
+    // Personal de la plataforma: admin, cadete aprobado o comercio.
+    function isStaff() {
+      return isAdmin() || isDriver() || isComercioUser();
+    }
+
+    // ¿El usuario es dueño de este comercio? (cacheado por Firestore dentro
+    // de la misma consulta, así que una query de pedidos cuesta 1 lectura).
+    function ownsComercio(cid) {
+      return isSignedIn() && cid is string && cid != '' &&
+        exists(/databases/$(database)/documents/comercios/$(cid)) &&
+        get(/databases/$(database)/documents/comercios/$(cid)).data.get('ownerId', '') == uid();
+    }
+
+    // Campos que modifica esta escritura.
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function onlyFields(allowed) {
+      return changed().hasOnly(allowed);
+    }
+
+    function isOwnerField(field) {
+      return isSignedIn() && resource.data.get(field, '') == uid();
+    }
+
+    // ------------------------------------------------------------------ users
+    // Lo más sensible de la app: teléfonos, direcciones y roles de todo el pueblo.
+
+    match /users/{userId} {
+      function isSelf() {
+        return isSignedIn() && userId == uid();
+      }
+
+      // Privilegios y plata: jamás editables por el propio usuario.
+      function protectedKeys() {
+        return [
+          'role', 'isAdmin', 'isComercio', 'isDelivery', 'isCanonExempt',
+          'commissionRate', 'saldo', 'balance', 'settled',
+          'blocked', 'isBlocked', 'suspended', 'ratings'
+        ];
+      }
+
+      // Identificadores que la app completa al iniciar sesión en cuentas viejas
+      // (clientId, código de referido, ID de cadete). Se pueden escribir una
+      // sola vez: si ya existen, no se tocan. Sin esto se rompe el login.
+      function backfillOnly(key) {
+        return !changed().hasAny([key]) || !resource.data.keys().hasAny([key]);
+      }
+
+      function backfillIsValid() {
+        return backfillOnly('clientId') && backfillOnly('referralCode') && backfillOnly('deliveryId') && backfillOnly('goId');
+      }
+
+      // Cuenta de revisión de App Store / Google Play: se auto-habilita como
+      // cadete de prueba. Es una casilla que controlamos nosotros.
+      function isReviewTestAccount() {
+        return isSignedIn() && request.auth.token.email == 'test-delivery@godelivery.com';
+      }
+
+      // Postularse sí; auto-aprobarse no.
+      function statusChangesAreApplications() {
+        return (!changed().hasAny(['deliveryStatus']) || request.resource.data.deliveryStatus == 'pending')
+            && (!changed().hasAny(['commerceStatus']) || request.resource.data.commerceStatus == 'pending')
+            && (!changed().hasAny(['tripStatus'])     || request.resource.data.tripStatus == 'pending');
+      }
+
+      // Lectura de un doc puntual: cualquiera con sesión (el cadete necesita
+      // ver al cliente, el cliente al cadete). Listar/consultar la colección
+      // entera: sólo personal. Esto es lo que impide bajarse la base de datos.
+      allow get:  if isSignedIn();
+      allow list: if isStaff();
+
+      allow create: if isSelf() && (
+        isAdmin() || isReviewTestAccount() || (
+          request.resource.data.get('role', 'user') == 'user' &&
+          request.resource.data.get('isAdmin', false) == false &&
+          request.resource.data.get('isDelivery', false) == false &&
+          request.resource.data.get('isComercio', false) == false
+        )
+      );
+
+      allow update: if isAdmin()
+        || (isSelf() && isReviewTestAccount())
+        || (isSelf() && !changed().hasAny(protectedKeys()) && statusChangesAreApplications() && backfillIsValid())
+        // Calificaciones y puntos cruzados (cliente ↔ cadete, referidos).
+        || (isSignedIn() && !isSelf() && onlyFields(['ratings', 'points']));
+
+      allow delete: if isAdmin();
+
+      match /notifications/{notifId} {
+        allow read, update, delete: if isAdmin() || (isSignedIn() && userId == uid());
+        allow create: if isSignedIn();
+      }
+
+      match /fcmTokens/{token} {
+        allow read: if isAdmin() || (isSignedIn() && userId == uid());
+        allow write: if isSignedIn() && userId == uid();
+      }
+
+      match /challenges/{challengeId} {
+        allow read, write: if isAdmin() || (isSignedIn() && userId == uid());
+      }
+    }
+
+    // Consulta de grupo usada por el panel de control para push masivos.
+    match /{path=**}/fcmTokens/{token} {
+      allow read: if isAdmin();
+    }
+
+    // -------------------------------------------------------------- comercios
+    // Catálogo público: se navega sin login.
+
+    match /comercios/{comercioId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.get('ownerId', '') == uid();
+      allow update: if isAdmin() || ownsComercio(comercioId);
+      allow delete: if isAdmin();
+
+      match /products/{productId} {
+        allow read: if true;
+        allow write: if isAdmin() || ownsComercio(comercioId);
+      }
+
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow write: if isAdmin() || ownsComercio(comercioId);
+      }
+    }
+
+    // Búsqueda global de productos (home, buscador, ofertas).
+    match /{path=**}/products/{productId} {
+      allow read: if true;
+    }
+
+    // ----------------------------------------------------------------- orders
+
+    match /orders/{orderId} {
+      function isCustomer()  { return isOwnerField('userId'); }
+      function isAssigned()  { return isOwnerField('driverId'); }
+      function isTheShop()   { return ownsComercio(resource.data.get('comercioId', '')); }
+
+      // El cadete ve la bolsa de pedidos disponibles, no sólo los suyos.
+      allow read: if isAdmin() || isDriver() || isCustomer() || isAssigned() || isTheShop();
+
+      allow create: if isSignedIn() && (
+        request.resource.data.get('userId', '') == uid() || isStaff()
+      );
+
+      allow update: if isAdmin() || isDriver() || isCustomer() || isTheShop();
+
+      allow delete: if isAdmin() || isTheShop();
+
+      match /messages/{messageId} {
+        allow read, create: if isAdmin() || isDriver() || isCustomer() || isTheShop();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /favor_orders/{favorId} {
+      allow read:   if isAdmin() || isDriver() || isOwnerField('userId');
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || isDriver() || isOwnerField('userId');
+      allow delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------ chats
+
+    // El array `participants` mezcla uids con comercioId, y los pedidos no
+    // guardan comercioOwnerId, así que la pertenencia también se valida contra
+    // el pedido vinculado: cliente, cadete asignado y dueño del comercio.
+    function isPartyOfOrder(orderId) {
+      return isSignedIn() && orderId is string && orderId != '' &&
+        exists(/databases/$(database)/documents/orders/$(orderId)) && (
+          get(/databases/$(database)/documents/orders/$(orderId)).data.get('userId', '') == uid() ||
+          get(/databases/$(database)/documents/orders/$(orderId)).data.get('driverId', '') == uid() ||
+          ownsComercio(get(/databases/$(database)/documents/orders/$(orderId)).data.get('comercioId', ''))
+        );
+    }
+
+    function chatOf(chatId) {
+      return get(/databases/$(database)/documents/chats/$(chatId)).data;
+    }
+
+    function canUseChat(chatId) {
+      return isAdmin() || (
+        exists(/databases/$(database)/documents/chats/$(chatId)) && (
+          uid() in chatOf(chatId).get('participants', []) ||
+          isPartyOfOrder(chatOf(chatId).get('orderId', ''))
+        )
+      );
+    }
+
+    match /chats/{chatId} {
+      function isParticipant() {
+        return isSignedIn() && (
+          uid() in resource.data.get('participants', []) ||
+          isPartyOfOrder(resource.data.get('orderId', ''))
+        );
+      }
+
+      allow read:   if isAdmin() || isParticipant();
+      allow create: if isSignedIn() && (
+        uid() in request.resource.data.get('participants', []) ||
+        isPartyOfOrder(request.resource.data.get('orderId', ''))
+      );
+      allow update: if isAdmin() || isParticipant();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read:   if canUseChat(chatId);
+        // El primer mensaje puede llegar antes de que exista el doc del chat.
+        allow create: if canUseChat(chatId) ||
+          (isSignedIn() && !exists(/databases/$(database)/documents/chats/$(chatId)));
+        allow update: if canUseChat(chatId);
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /support_chats/{ticketId} {
+      function isMine() {
+        return isSignedIn() && (
+          ticketId == uid() || resource.data.get('userId', '') == uid()
+        );
+      }
+
+      allow read:   if isAdmin() || isMine();
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || isMine();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read, create, update: if isAdmin() || ticketId == uid() ||
+          (exists(/databases/$(database)/documents/support_chats/$(ticketId)) &&
+           get(/databases/$(database)/documents/support_chats/$(ticketId)).data.get('userId', '') == uid());
+        allow delete: if isAdmin();
+      }
+    }
+
+    // ------------------------------------------------------------ marketplace
+
     match /marketplace_products/{productId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && resource.data.sellerId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.get('sellerId', '') == uid();
+      allow update: if isAdmin() || isOwnerField('sellerId');
+      allow delete: if isAdmin() || isOwnerField('sellerId');
     }
 
     match /marketplace_chats/{chatId} {
-      allow read, write: if request.auth != null && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid);
-      allow create: if request.auth != null;
+      function isParty() {
+        return isSignedIn() && (
+          resource.data.get('buyerId', '') == uid() ||
+          resource.data.get('sellerId', '') == uid()
+        );
+      }
+
+      allow read:   if isAdmin() || isParty();
+      allow create: if isSignedIn() && (
+        request.resource.data.get('buyerId', '') == uid() ||
+        request.resource.data.get('sellerId', '') == uid()
+      );
+      allow update: if isAdmin() || isParty();
+      allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, write: if request.auth != null;
+        allow read, create, update: if isAdmin() || (
+          exists(/databases/$(database)/documents/marketplace_chats/$(chatId)) && (
+            get(/databases/$(database)/documents/marketplace_chats/$(chatId)).data.get('buyerId', '') == uid() ||
+            get(/databases/$(database)/documents/marketplace_chats/$(chatId)).data.get('sellerId', '') == uid()
+          )
+        );
+        allow delete: if isAdmin();
       }
+    }
+
+    // ---------------------------------------------- catálogo público / marketing
+
+    match /settings/{docId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    match /platformCategories/{categoryId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    match /offers/{offerId} {
+      allow read:  if true;
+      allow write: if isAdmin() || isComercioUser();
+    }
+
+    match /banners_mandados/{bannerId} {
+      allow read:   if true;
+      allow create: if isAdmin() || isComercioUser();
+      // Contador de clics/vistas desde la app.
+      allow update: if isAdmin() || isComercioUser() || (isSignedIn() && onlyFields(['stats']));
+      allow delete: if isAdmin();
+    }
+
+    match /customAds/{adId} {
+      allow read:   if true;
+      allow create: if isAdmin() || isComercioUser();
+      allow update: if isAdmin() || isComercioUser() || (isSignedIn() && onlyFields(['stats']));
+      allow delete: if isAdmin();
+    }
+
+    match /broadcasts/{broadcastId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /automated_broadcasts/{broadcastId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      allow read:   if true;
+      allow create: if isSignedIn() && request.resource.data.get('userId', '') == uid();
+      allow update: if isAdmin() || isOwnerField('userId');
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- cupones
+
+    match /coupons/{couponId} {
+      allow read:   if isSignedIn();
+      allow create: if isAdmin() || isComercioUser();
+      allow update: if isAdmin() || isComercioUser() || (isSignedIn() && onlyFields(['usedCount', 'remaining']));
+      allow delete: if isAdmin() || isComercioUser();
+
+      match /redemptions/{userId} {
+        allow read:   if isAdmin() || (isSignedIn() && userId == uid());
+        allow create: if isSignedIn() && userId == uid();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ------------------------------------------------ cadetes: sesiones y plata
+
+    match /deliverySessions/{sessionId} {
+      allow read:   if isAdmin() || isOwnerField('driverId');
+      allow create: if isAdmin() || (isDriver() && request.resource.data.get('driverId', '') == uid());
+      allow update: if isAdmin() || isOwnerField('driverId');
+      allow delete: if isAdmin();
+    }
+
+    match /delivery_transactions/{transactionId} {
+      allow read:   if isAdmin() || isOwnerField('driverId');
+      allow create: if isAdmin() || isDriver();
+      allow update, delete: if isAdmin();
+    }
+
+    match /delivery_canon_payments/{paymentId} {
+      allow read:   if isAdmin() || isOwnerField('driverId');
+      allow create: if isAdmin() || isDriver();
+      allow update: if isAdmin() || isOwnerField('driverId');
+      allow delete: if isAdmin();
+    }
+
+    match /delivery_settlement_proofs/{proofId} {
+      allow read:   if isAdmin() || isOwnerField('driverId');
+      allow create: if isAdmin() || isDriver();
+      allow update, delete: if isAdmin();
+    }
+
+    match /delivery_applications/{applicationId} {
+      allow read:   if isAdmin() || applicationId == uid() || isOwnerField('userId');
+      allow create: if isSignedIn() && applicationId == uid();
+      allow update: if isAdmin() || applicationId == uid();
+      allow delete: if isAdmin();
+    }
+
+    match /trip_applications/{applicationId} {
+      allow read:   if isAdmin() || applicationId == uid() || isOwnerField('userId');
+      allow create: if isSignedIn() && applicationId == uid();
+      allow update: if isAdmin() || applicationId == uid();
+      allow delete: if isAdmin();
+    }
+
+    match /job_applications/{applicationId} {
+      allow read:   if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------- caja de la empresa
+    // Liquidaciones, comisiones y gastos: sólo administración.
+
+    match /settlements/{settlementId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /owner_settlements/{settlementId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /company_expenses/{expenseId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /whatsapp_commerces/{commerceId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------- notificaciones y puntos
+
+    match /notifications/{notificationId} {
+      allow read:   if isAdmin() || isOwnerField('userId');
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || isOwnerField('userId');
+      allow delete: if isAdmin();
+    }
+
+    match /points_transactions/{transactionId} {
+      allow read:   if isAdmin() || isOwnerField('userId');
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------ telemetría interna
+
+    match /visits/{visitId} {
+      allow read:  if isAdmin();
+      allow write: if isSignedIn() && request.resource.data.get('userId', '') == uid();
+    }
+
+    // Contador para el número de cliente correlativo (se toca al registrarse).
+    match /counters/{counterId} {
+      allow read, write: if isSignedIn();
     }
   }
 }

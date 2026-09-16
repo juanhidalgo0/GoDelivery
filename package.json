@@ -9,11 +9,14 @@
     "build": "node ./node_modules/vite/bin/vite.js build && node post-build.js",
     "build:testing": "node ./node_modules/vite/bin/vite.js build --mode testing && node post-build.js",
     "deploy": "npm run build && firebase deploy --only hosting:app",
-    "deploy:all": "npm run build && firebase deploy",
-    "deploy:testing": "npm run build:testing && firebase deploy --project testing"
+    "deploy:all": "npm run build && firebase deploy --only hosting,firestore,storage,functions:default",
+    "deploy:functions": "firebase deploy --only functions:default",
+    "deploy:mango-functions": "firebase deploy --only functions:mango",
+    "deploy:testing": "npm run build:testing && firebase deploy --only hosting,firestore,storage,functions:default --project testing"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "vite": "^8.0.10"
   },
   "dependencies": {

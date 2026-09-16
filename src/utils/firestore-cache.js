@@ -1,17 +1,28 @@
 import { getDocs, getDocsFromServer, getDocsFromCache } from 'firebase/firestore';
 import { safeStorage } from './safe-storage.js';
 
+const DEFAULT_QUERY_TIMEOUT_MS = 8000;
+
+export function withTimeout(promise, ms, label) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 /**
  * Executes a Firestore query with smart caching based on local metadata.
  * Saves server read operations and provides near-instant load times.
  * Falls back to cache if offline or server fails.
- * 
+ *
  * @param {Query} queryRef Firestore query object
  * @param {string} cacheKey Unique string identifying this query type (e.g. 'platformCategories')
  * @param {number} ttlMs Time to live in milliseconds (default 5 minutes)
- * @returns {Promise<QuerySnapshot>}
+ * @param {number} timeoutMs Max time to wait for a server response before giving up (default 8s)
+ * @returns {Promise<QuerySnapshot & {error?: boolean}>}
  */
-export async function getDocsOptimized(queryRef, cacheKey, ttlMs = 5 * 60 * 1000) {
+export async function getDocsOptimized(queryRef, cacheKey, ttlMs = 5 * 60 * 1000, timeoutMs = DEFAULT_QUERY_TIMEOUT_MS) {
   const now = Date.now();
   const cacheMetaKey = `gd_cache_meta_${cacheKey}`;
   const cachedMeta = localStorage.getItem(cacheMetaKey);
@@ -40,20 +51,24 @@ export async function getDocsOptimized(queryRef, cacheKey, ttlMs = 5 * 60 * 1000
     }
   }
 
-  // 2. Fetch using standard getDocs (supports online & smart persistence)
+  // 2. Fetch using standard getDocs (supports online & smart persistence),
+  // bounded by a timeout so a slow/stuck connection can't hang the page forever.
   try {
-    const snap = await getDocs(queryRef);
+    const snap = await withTimeout(getDocs(queryRef), timeoutMs, cacheKey);
     safeStorage.setItem(cacheMetaKey, JSON.stringify({ timestamp: now }));
     return snap;
   } catch (err) {
     console.warn(`[FirestoreCache] Query failed for '${cacheKey}'. Checking fallback:`, err);
     try {
       const cachedSnap = await getDocsFromCache(queryRef);
-      return cachedSnap;
+      if (!cachedSnap.empty) return cachedSnap;
     } catch (cacheErr) {
-      // Return empty fallback snapshot instead of crashing the page
-      return { empty: true, docs: [], size: 0, forEach: () => {} };
+      // No usable cache either, fall through to the error snapshot below.
     }
+    // Return an empty snapshot but mark it as errored so callers can tell
+    // "no data" apart from "query failed" and show a retry option instead
+    // of silently rendering an empty page.
+    return { empty: true, docs: [], size: 0, forEach: () => {}, error: true };
   }
 }
 

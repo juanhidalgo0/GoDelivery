@@ -957,7 +957,7 @@ async function init() {
         if (isGuestMode) {
           const loginWall = document.getElementById('login-wall');
           if (loginWall) loginWall.remove();
-          
+
           const header = document.getElementById('app-header');
           const navbar = document.getElementById('app-navbar');
           if (header) {
@@ -968,6 +968,13 @@ async function init() {
             navbar.style.display = 'flex';
             navbar.style.opacity = '1';
           }
+          // Guests never sign in, so the "USER IS LOGGED IN" branch below
+          // (which normally mounts the real interactive header/search input)
+          // never runs for them — without this, guests are stuck staring at
+          // the static pre-rendered header skeleton from index.html forever,
+          // whose "search bar" is just decorative text with no <input>.
+          import('./components/header.js').then(m => m.initHeader());
+          import('./components/navbar.js').then(m => m.initNavbar());
           return;
         }
 
@@ -1190,7 +1197,13 @@ async function init() {
             navbar.style.display = 'flex';
             navbar.style.opacity = '1';
           }
-          
+
+          // Mount the real interactive header (search input, notifications,
+          // etc.) instead of leaving the static pre-rendered skeleton in
+          // place — see the isGuestMode branch above for why this is needed.
+          import('./components/header.js').then(m => m.initHeader());
+          import('./components/navbar.js').then(m => m.initNavbar());
+
           // Re-trigger routing to render correct state
           routerReady();
         });

@@ -497,11 +497,12 @@ export async function renderCategoryPage(categoryName, content) {
     if (backBtn) {
       backBtn.onclick = (e) => {
         e.preventDefault();
-        if (window.history.length > 1) {
-          window.history.back();
-        } else {
-          window.location.hash = '#/';
-        }
+        // Always return to Home from a category page, regardless of the
+        // real browser history — relying on history.back() here could land
+        // on whatever page happened to precede this one (e.g. a product
+        // deep link), which is confusing since categories are reached from
+        // Home in every normal flow.
+        window.location.hash = '#/';
       };
     }
     const filterOpenBtn = document.getElementById('filter-btn-open');

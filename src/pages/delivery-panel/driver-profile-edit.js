@@ -4,6 +4,7 @@
 import { getState, setState } from '../../state.js';
 import { icon } from '../../utils/icons.js';
 import { getDriverMapTheme } from '../../components/driver-navigation-map.js';
+import { db } from '../../firebase.js';
 
 export async function showDriverProfileEditModal(user) {
   const { showModal, closeModal } = await import('../../components/modal.js');
@@ -93,7 +94,7 @@ export async function showDriverProfileEditModal(user) {
 
       <div>
         <label style="font-size:11px; font-weight:900; color:var(--driver-text-secondary-b); text-transform:uppercase; letter-spacing:0.06em; display:block; margin-bottom:7px;">Alias / CBU para Cobros</label>
-        <input id="driver-alias-input" type="text" value="${latestUser.driverAlias || latestUser.alias || ''}" placeholder="Ej: juan.repartidor.mp" style="
+        <input id="driver-alias-input" type="text" value="${latestUser.transferAlias || latestUser.driverAlias || latestUser.alias || ''}" placeholder="Ej: juan.repartidor.mp" style="
           width:100%; height:50px; border-radius:16px; background:${isLight ? '#f8fafc' : '#0f172a'}; border:1.5px solid var(--driver-border-soft); color:var(--driver-text-primary); padding:0 16px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box; transition:border-color 0.2s;
         " onfocus="this.style.borderColor='#e11d48'" onblur="this.style.borderColor='var(--driver-border-soft)'" />
       </div>
@@ -177,7 +178,11 @@ export async function showDriverProfileEditModal(user) {
           vehiclePlate: newVehiclePlate,
           plate: newVehiclePlate,
           driverAlias: newAlias,
-          alias: newAlias
+          alias: newAlias,
+          // transferAlias is the field everything else in the app actually reads
+          // (order tracking, admin panel, the driver's own status pill) — without
+          // this, the alias silently saved to an orphaned field nobody displays.
+          transferAlias: newAlias
         };
         if (photoDataUrl && photoDataUrl !== latestUser.photoURL) {
           updates.photoURL = photoDataUrl;

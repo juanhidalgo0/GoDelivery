@@ -7751,6 +7751,10 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// Returns { locationGranted } instead of a bare boolean so callers can actually
+// enforce the location requirement — a driver with GPS denied/unavailable must
+// never be allowed to go online, since dispatch and live tracking both depend
+// on a real, continuously-updating driverLocation.
 export async function ensureDriverPermissions() {
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
@@ -7767,17 +7771,20 @@ export async function ensureDriverPermissions() {
     }
   }
 
+  let locationGranted = false;
   if ('geolocation' in navigator) {
     try {
       await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000, maximumAge: 60000, enableHighAccuracy: false });
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, maximumAge: 60000, enableHighAccuracy: false });
       });
+      locationGranted = true;
     } catch (err) {
       console.warn('Geolocation check:', err);
+      locationGranted = false;
     }
   }
 
-  return true;
+  return { locationGranted };
 }
 
 function showBlockingLoading(message = 'Cargando...') {
@@ -8451,7 +8458,29 @@ export async function promptStartSession(user) {
       showBlockingLoading('Verificando permisos y conectando...');
 
       try {
-        await ensureDriverPermissions();
+        const { locationGranted } = await ensureDriverPermissions();
+        if (!locationGranted) {
+          hideBlockingLoading();
+          showModal({
+            title: '📍 Ubicación Requerida',
+            content: `
+              <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; background: var(--color-bg);">
+                <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center;">
+                  ${icon('mapPin', 28)}
+                </div>
+                <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">No pudimos acceder a tu ubicación</h3>
+                <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
+                  Para conectarte y recibir pedidos, GoDelivery necesita permiso de ubicación activo — sin eso no podemos asignarte pedidos cercanos ni mostrar tu recorrido al cliente.<br><br>
+                  Activá el permiso de ubicación de la app en los ajustes de tu teléfono ("Permitir todo el tiempo") y volvé a intentar conectarte.
+                </p>
+              </div>
+            `,
+            height: 'auto',
+            headerBackground: '#E11D48',
+            headerTextColor: 'white'
+          });
+          return;
+        }
 
         if (isFirstConnectionToday) {
           try {

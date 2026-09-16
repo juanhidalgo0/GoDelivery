@@ -120,9 +120,6 @@ export async function renderComercioOrders(manualId = null) {
 
               <!-- Quick Action & Hamburger Menu -->
               <div style="display: flex; align-items: center; gap: 8px; position: relative; z-index: 2;">
-                <button id="quick-call-cadete-btn" style="background: rgba(255,255,255,0.22); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; border: 1.5px solid rgba(255,255,255,0.4); border-radius: 12px; font-size: 11.5px; font-weight: 800; padding: 7px 12px; display: flex; align-items: center; gap: 5px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.22)'">
-                  🛵 Pedir Cadete
-                </button>
                 <button id="header-menu-btn" style="width: 40px; height: 40px; border-radius: 12px; border: none; background: rgba(255,255,255,0.15); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
                   ${icon('menu', 22)}
                 </button>
@@ -135,18 +132,6 @@ export async function renderComercioOrders(manualId = null) {
         const bodyContainer = document.getElementById('commerce-drawer-body-container');
         if (bodyContainer) {
           bodyContainer.innerHTML = `
-            <!-- 1-Touch Cadete al Local (Highlight Purple) -->
-            <button class="commerce-drawer-item" id="drawer-call-cadete-btn" style="background: rgba(139, 92, 246, 0.12); border: 1.5px solid rgba(139, 92, 246, 0.3); border-radius: 14px; margin-bottom: 8px;">
-              <div class="drawer-item-icon-wrap" style="background: #8b5cf6; color: white;">
-                🛵
-              </div>
-              <div style="flex:1; display:flex; flex-direction:column; text-align:left;">
-                <span style="font-weight:900; color:#8b5cf6;">Pedir Cadete al Local</span>
-                <span style="font-size:10px; color:var(--color-text-secondary); font-weight:600;">1 toque · Sin cargar direcciones</span>
-              </div>
-              <span style="color:#8b5cf6; display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
             <!-- Direct WhatsApp Catalog & QR Drawer Item -->
             <button class="commerce-drawer-item" id="drawer-whatsapp-catalog-btn">
               <div class="drawer-item-icon-wrap" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">
@@ -252,15 +237,6 @@ export async function renderComercioOrders(manualId = null) {
         // Close events
         document.getElementById('commerce-drawer-backdrop')?.addEventListener('click', closeDrawer);
         document.getElementById('commerce-drawer-close-btn')?.addEventListener('click', closeDrawer);
-
-        // Bind Cadete Action
-        const handleCallCadete = () => {
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          closeDrawer();
-          dispatchCommerceCadeteOrder(comercioId, comData);
-        };
-        document.getElementById('quick-call-cadete-btn')?.addEventListener('click', handleCallCadete);
-        document.getElementById('drawer-call-cadete-btn')?.addEventListener('click', handleCallCadete);
 
         // Bind items
         document.getElementById('drawer-whatsapp-catalog-btn')?.addEventListener('click', async () => {
@@ -558,56 +534,6 @@ function renderFilteredOrders(orders, filter, comercioId, isHistory) {
   container.innerHTML = `<div class="orders-card-list">${filtered.map(o => renderOrderCard(o, isHistory)).join('')}</div>`;
   attachOrderListeners(container, filtered, comercioId);
   updateAllUnreadBadges(filtered);
-}
-
-async function dispatchCommerceCadeteOrder(comercioId, comData) {
-  showConfirm({
-    title: '🛵 Solicitar Cadete al Local',
-    message: `¿Deseás llamar a un cadete de GoDelivery a <strong>${comData?.name || 'tu local'}</strong>?<br><br><span style="font-size:12px; color:var(--color-text-secondary);">El repartidor se acercará a retirar tus paquetes y registrará la cantidad de envíos directamente en mostrador con tus comandas/tickets físicos.</span>`,
-    confirmText: '🛵 Sí, Llamar Cadete',
-    cancelText: 'Cancelar',
-    onConfirm: async () => {
-      try {
-        const s = getState();
-        const baseShipping = Math.max(s.deliveryMinPrice || 2000, s.deliveryCost || 1800, s.deliveryBasePrice || 1400);
-        const shortId = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        await addDoc(collection(db, 'orders'), {
-          orderId: shortId,
-          source: 'commerce_panel',
-          status: 'pending',
-          isFavor: true,
-          isCommerceCadeteria: true,
-          orderType: 'cadeteria',
-          favorType: 'cadeteria',
-          comercioId: comercioId,
-          comercioName: comData?.name || 'Comercio',
-          comercioAddress: comData?.address || 'Local del Comercio',
-          pickupAddress: comData?.address || comData?.name || 'Local del Comercio',
-          dropoffAddress: 'Entregas en Magdalena (según comandas en local)',
-          deliveryAddress: 'Entregas en Magdalena (según comandas en local)',
-          userName: comData?.name || 'Comercio',
-          userPhone: comData?.phone || comData?.whatsapp || '',
-          userId: comData?.ownerId || '',
-          details: `🛵 Cadetería On-Demand para ${comData?.name || 'Comercio'}.\nEl repartidor coordinará la cantidad de paquetes con tus tickets al retirar.`,
-          stopsCount: 1,
-          deliveryCost: baseShipping,
-          total: baseShipping,
-          driverEarnings: baseShipping,
-          paymentMethod: 'efectivo',
-          noCodeRequired: true,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-        
-        import('../../utils/audio-manager.js').then(m => m.AudioManager.playPop());
-        showToast('🛵 ¡Cadete solicitado! Ya está sonando en el radar de repartidores.', 'success');
-      } catch (err) {
-        console.error('Error solicitando cadete:', err);
-        showToast('Error al solicitar cadete: ' + err.message, 'danger');
-      }
-    }
-  });
 }
 
 function renderOrderCard(o, isHistory = false) {

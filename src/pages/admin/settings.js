@@ -1356,9 +1356,25 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         const driver = driversData.find((d) => d.id === uid);
         if (!driver) return;
         const newStatus = !(driver.isOnline === true);
+
+        // Connecting a driver from here skips their own app's location-permission
+        // check entirely (that only runs on their device) — the admin can't verify
+        // GPS is actually active on their phone. Warn when their last known location
+        // is missing or stale, so the admin knows this driver may not be trackable
+        // or properly dispatchable even though the system will show them as online.
+        let locationWarningHTML = "";
+        if (newStatus) {
+          const locUpdatedAt = driver.currentLocation?.updatedAt;
+          const locMs = locUpdatedAt?.toMillis ? locUpdatedAt.toMillis() : (locUpdatedAt ? new Date(locUpdatedAt).getTime() : 0);
+          const staleMinutes = locMs ? Math.round((Date.now() - locMs) / 60000) : null;
+          if (!locMs || staleMinutes > 15) {
+            locationWarningHTML = `<br><br>⚠️ <b>${!locMs ? "Este repartidor nunca report\xF3 su ubicaci\xF3n" : `Su \xFAltima ubicaci\xF3n conocida es de hace ${staleMinutes} minutos`}.</b> Es posible que su GPS no est\xE9 activo o que la app no est\xE9 abierta — puede quedar "en l\xEDnea" sin recibir ni poder entregar pedidos correctamente hasta que abra la app en su tel\xE9fono.`;
+          }
+        }
+
         showConfirm({
           title: "Estado de Conexi\xF3n",
-          message: `\xBFQuer\xE9s ${newStatus ? "CONECTAR" : "DESCONECTAR"} a ${driver.displayName || driver.name}?`,
+          message: `\xBFQuer\xE9s ${newStatus ? "CONECTAR" : "DESCONECTAR"} a ${driver.displayName || driver.name}?${locationWarningHTML}`,
           onConfirm: async () => {
             try {
               const { doc: doc2, updateDoc: updateDoc2, setDoc: setDoc2, increment, serverTimestamp: fTimestamp } = await import("firebase/firestore");

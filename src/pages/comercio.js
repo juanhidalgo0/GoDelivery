@@ -3,7 +3,8 @@ import { db, auth } from '../firebase.js';
 import { doc, getDoc, collection, getDocs, query, orderBy, where, limit, startAfter } from 'firebase/firestore';
 import { getRouteParams } from '../router.js';
 import { addToCart, getCartCount, subscribe, getState, isProductFavorite, setState } from '../state.js';
-import { getDocsOptimized } from '../utils/firestore-cache.js';
+import { getDocsOptimized, withTimeout } from '../utils/firestore-cache.js';
+import { safeStorage } from '../utils/safe-storage.js';
 import { formatPrice, isShopOpen } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { getFooterHTML } from '../components/footer.js';
@@ -86,16 +87,21 @@ export async function renderComercio(content, isDirectMode = false) {
     } catch (e) {}
   }
 
-  // 4. Parallel Firestore lookup (Fast 1-trip resolution)
+  // 4. Parallel Firestore lookup (Fast 1-trip resolution), bounded by a
+  // timeout so a slow connection shows the retry screen instead of hanging.
   if (!comercio) {
     try {
       const docRef = doc(db, 'comercios', comercioId);
       const slugQuery = query(collection(db, 'comercios'), where('slug', '==', cleanTarget), limit(1));
-      
-      const [snap, slugSnap] = await Promise.all([
-        getDoc(docRef).catch(() => null),
-        getDocs(slugQuery).catch(() => null)
-      ]);
+
+      const [snap, slugSnap] = await withTimeout(
+        Promise.all([
+          getDoc(docRef).catch(() => null),
+          getDocs(slugQuery).catch(() => null)
+        ]),
+        8000,
+        `resolve_comercio_${comercioId}`
+      );
 
       if (snap && snap.exists()) {
         comercio = { id: snap.id, ...snap.data() };
@@ -103,8 +109,16 @@ export async function renderComercio(content, isDirectMode = false) {
         const matchedDoc = slugSnap.docs[0];
         comercio = { id: matchedDoc.id, ...matchedDoc.data() };
       } else {
-        // Fallback: match by slug / name in all comercios
-        const allComSnap = await getDocs(collection(db, 'comercios'));
+        // Last-resort fallback: id/slug matched nothing directly (e.g. name
+        // used as target, or casing mismatch). Use the cached/optimized
+        // comercios list instead of a raw full-collection getDocs so repeat
+        // misses don't re-scan the whole collection on every load.
+        const allComSnap = await getDocsOptimized(
+          collection(db, 'comercios'),
+          'all_comercios_fallback',
+          15 * 60 * 1000,
+          8000
+        );
         if (!allComSnap.empty) {
           const matchedDoc = allComSnap.docs.find(d => {
             const data = d.data();
@@ -125,7 +139,7 @@ export async function renderComercio(content, isDirectMode = false) {
 
   if (comercio) {
     try {
-      localStorage.setItem(`gd_comercio_slug_${cleanTarget}`, JSON.stringify({ comercio }));
+      safeStorage.setItem(`gd_comercio_slug_${cleanTarget}`, JSON.stringify({ comercio }));
     } catch (e) {}
   }
 
@@ -137,7 +151,7 @@ export async function renderComercio(content, isDirectMode = false) {
   currentComercio = comercio;
   const resolvedComercioId = comercio.id;
   try {
-    localStorage.setItem('gd_last_visited_comercio', JSON.stringify({ id: comercio.id, name: comercio.name || 'Comercio' }));
+    safeStorage.setItem('gd_last_visited_comercio', JSON.stringify({ id: comercio.id, name: comercio.name || 'Comercio' }));
   } catch (e) {}
 
   let unsubComercios = null;
@@ -191,7 +205,7 @@ export async function renderComercio(content, isDirectMode = false) {
           if (rawCache) {
             const parsed = JSON.parse(rawCache);
             parsed.data.comercio = comercio;
-            localStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify(parsed));
+            safeStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify(parsed));
           }
         } catch (e) {}
         
@@ -338,33 +352,24 @@ export async function renderComercio(content, isDirectMode = false) {
       )
     ]);
 
-    catsSnap = catsRes.status === 'fulfilled' ? catsRes.value : null;
-    offersSnap = offersRes.status === 'fulfilled' ? offersRes.value : null;
-    initialProdSnap = prodsRes.status === 'fulfilled' ? prodsRes.value : null;
+    // getDocsOptimized already retries via cache internally and never throws
+    // (it resolves to an { error: true } empty snapshot on failure), so a
+    // second sequential getDocs() here would only double the wait time for
+    // no benefit. We just track whether any of them errored, to inform the
+    // user instead of silently rendering an empty menu.
+    catsSnap = catsRes.status === 'fulfilled' ? catsRes.value : { docs: [], error: true };
+    offersSnap = offersRes.status === 'fulfilled' ? offersRes.value : { docs: [], error: true };
+    initialProdSnap = prodsRes.status === 'fulfilled' ? prodsRes.value : { docs: [], error: true };
 
-    if (!catsSnap || !catsSnap.docs) {
-      try {
-        catsSnap = await getDocs(collection(db, 'comercios', resolvedComercioId, 'categories'));
-      } catch (e) {
-        catsSnap = { docs: [] };
-      }
-    }
-
-    if (!offersSnap || !offersSnap.docs) {
-      offersSnap = { docs: [] };
-    }
-
-    if (!initialProdSnap || !initialProdSnap.docs) {
-      try {
-        initialProdSnap = await getDocs(collection(db, 'comercios', resolvedComercioId, 'products'));
-      } catch (e) {
-        initialProdSnap = { docs: [] };
-      }
-    }
+    const hadLoadError = Boolean(catsSnap?.error || offersSnap?.error || initialProdSnap?.error);
 
     const categories = (catsSnap.docs || []).map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false);
     const activeOffers = (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
     let products = (initialProdSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+
+    if (hadLoadError && products.length === 0 && categories.length === 0 && !cachedData) {
+      throw new Error('Failed to load comercio menu data (categories/products query error)');
+    }
 
     // Helper to load products for a specific category dynamically
     const loadCategoryProducts = async (catId) => {
@@ -409,14 +414,10 @@ export async function renderComercio(content, isDirectMode = false) {
     // Store in memory & localStorage for next instant load
     const cachePayload = { comercio, categories, products, activeOffers };
     memoryCommerceCache.set(resolvedComercioId, cachePayload);
-    try {
-      localStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify({
-        timestamp: Date.now(),
-        data: cachePayload
-      }));
-    } catch (err) {
-      console.warn('Error saving to local cache:', err);
-    }
+    safeStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify({
+      timestamp: Date.now(),
+      data: cachePayload
+    }));
 
     setState('activeOffers', activeOffers);
     setState('currentProducts', products);
@@ -1258,18 +1259,31 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
   if (navBack) {
     navBack.onclick = (e) => {
       e.preventDefault();
-      const oldHash = window.location.hash;
-      if (window.history.length > 1) {
-        window.history.back();
-        setTimeout(() => {
-          if (window.location.hash === oldHash) {
-            const lastCat = sessionStorage.getItem('gd_last_category') || comercio.category;
-            window.location.hash = lastCat ? `#/category/${encodeURIComponent(lastCat)}` : '#/';
-          }
-        }, 150);
-      } else {
+      const fallbackToCategory = () => {
         const lastCat = sessionStorage.getItem('gd_last_category') || comercio.category;
         window.location.hash = lastCat ? `#/category/${encodeURIComponent(lastCat)}` : '#/';
+      };
+
+      if (window.history.length > 1) {
+        // Detect whether history.back() actually navigated us away via the
+        // real 'hashchange' event instead of guessing after a fixed delay.
+        // The old code compared the hash again after a blind 150ms timeout;
+        // on a slow render (previous page re-fetching data) back() could
+        // still be in flight past that point, so the fallback below fired
+        // as a false positive and *overwrote* the hash with the category
+        // page — creating a bogus forward history entry that sat on top of
+        // wherever the user actually came from. Pressing back again then
+        // landed back on the product, in an infinite back/forward loop.
+        let settled = false;
+        const onHashChange = () => { settled = true; };
+        window.addEventListener('hashchange', onHashChange, { once: true });
+        window.history.back();
+        setTimeout(() => {
+          window.removeEventListener('hashchange', onHashChange);
+          if (!settled) fallbackToCategory();
+        }, 600);
+      } else {
+        fallbackToCategory();
       }
     };
   }

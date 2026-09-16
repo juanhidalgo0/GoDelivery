@@ -237,6 +237,15 @@ export function updateGlobalCartFAB() {
 }
 
 export function initNavbar() {
+  // Guard against double-init (guest mode and the logged-in path can both
+  // end up calling this for the same session) which would otherwise stack
+  // duplicate state subscriptions and hashchange listeners.
+  if (window._gdNavbarInitialized) {
+    renderNavbar();
+    return;
+  }
+  window._gdNavbarInitialized = true;
+
   renderNavbar();
   updateGlobalCartFAB();
   subscribe('cart', () => {

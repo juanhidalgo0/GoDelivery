@@ -3,56 +3,92 @@ import { db } from '../firebase.js';
 import { collection, getDocs, query, where, collectionGroup } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
+import { withTimeout } from '../utils/firestore-cache.js';
+
+const SEARCH_QUERY_TIMEOUT_MS = 8000;
 
 let allComercios = [];
 let allProducts = [];
 let isLoaded = false;
+let loadedAt = 0;
+let loadingPromise = null;
 let selectedIndex = -1;
 
-async function loadSearchData() {
-  if (isLoaded) return;
+const SEARCH_DATA_TTL_MS = 5 * 60 * 1000;
+
+function loadSearchData() {
+  if (isLoaded && (Date.now() - loadedAt) < SEARCH_DATA_TTL_MS) return Promise.resolve();
+  if (loadingPromise) return loadingPromise;
+  loadingPromise = loadSearchDataInternal().finally(() => {
+    loadingPromise = null;
+  });
+  return loadingPromise;
+}
+
+async function loadSearchDataInternal() {
   try {
-    const comSnap = await getDocs(query(collection(db, 'comercios')));
+    const comSnap = await withTimeout(
+      getDocs(query(collection(db, 'comercios'))),
+      SEARCH_QUERY_TIMEOUT_MS,
+      'search_comercios'
+    );
     allComercios = comSnap.docs
       .map(doc => ({ id: doc.id, type: 'comercio', ...doc.data() }))
       .filter(c => c.isActive !== false);
 
-    // Fetch products with fallback if collectionGroup fails or index is missing
+    // Fetch products with fallback if collectionGroup fails, times out, or the index is missing
     try {
-      const prodSnap = await getDocs(collectionGroup(db, 'products'));
+      const prodSnap = await withTimeout(
+        getDocs(collectionGroup(db, 'products')),
+        SEARCH_QUERY_TIMEOUT_MS,
+        'search_products_group'
+      );
       allProducts = prodSnap.docs.map(doc => {
         const data = doc.data();
         const pathParts = doc.ref.path.split('/');
         const comercioId = pathParts[1];
         const comercio = allComercios.find(c => c.id === comercioId);
         if (!comercio) return null;
-        return { 
-          id: doc.id, 
-          type: 'product', 
-          comercioId, 
-          comercioName: comercio.name, 
-          ...data 
+        return {
+          id: doc.id,
+          type: 'product',
+          comercioId,
+          comercioName: comercio.name,
+          ...data
         };
       }).filter(p => p !== null);
     } catch (err) {
-      console.warn('CollectionGroup failed, fetching individually', err);
+      console.warn('CollectionGroup failed or timed out, fetching individually', err);
       const promises = allComercios.map(async (c) => {
-        const pSnap = await getDocs(collection(db, 'comercios', c.id, 'products'));
-        return pSnap.docs.map(d => ({
-          id: d.id,
-          type: 'product',
-          comercioId: c.id,
-          comercioName: c.name,
-          ...d.data()
-        }));
+        try {
+          const pSnap = await withTimeout(
+            getDocs(collection(db, 'comercios', c.id, 'products')),
+            SEARCH_QUERY_TIMEOUT_MS,
+            `search_products_${c.id}`
+          );
+          return pSnap.docs.map(d => ({
+            id: d.id,
+            type: 'product',
+            comercioId: c.id,
+            comercioName: c.name,
+            ...d.data()
+          }));
+        } catch (perComercioErr) {
+          // One slow/failing comercio shouldn't block search results for the rest.
+          return [];
+        }
       });
       const results = await Promise.all(promises);
       allProducts = results.flat().filter(p => allComercios.some(c => c.id === p.comercioId));
     }
 
     isLoaded = true;
+    loadedAt = Date.now();
   } catch (e) {
     console.error('Error loading search data:', e);
+    // Do not mark as loaded — next focus/input will retry instead of
+    // getting stuck with empty/partial results for the rest of the session.
+    isLoaded = false;
   }
 }
 
@@ -79,11 +115,28 @@ export function initSearchSuggestions() {
     suggestionsContainer.style.width = `${rect.width}px`;
   };
 
+  const awaitDataThenRender = () => {
+    suggestionsContainer.innerHTML = `<div class="search-suggestion-empty">Buscando...</div>`;
+    loadSearchData().then(() => {
+      const currentQuery = searchInput.value.trim().toLowerCase();
+      if (currentQuery.length < 2 || !suggestionsContainer.classList.contains('active')) return;
+      if (!isLoaded) {
+        suggestionsContainer.innerHTML = `<div class="search-suggestion-empty">No se pudo cargar la búsqueda. Revisá tu conexión e intentá de nuevo.</div>`;
+        return;
+      }
+      renderSuggestions(currentQuery, suggestionsContainer);
+    });
+  };
+
   searchInput.addEventListener('focus', () => {
-    loadSearchData();
     if (searchInput.value.trim().length >= 2) {
       positionDropdown();
       suggestionsContainer.classList.add('active');
+      if (!isLoaded) {
+        awaitDataThenRender();
+      }
+    } else {
+      loadSearchData();
     }
   });
 
@@ -118,6 +171,11 @@ export function initSearchSuggestions() {
       return;
     }
     positionDropdown();
+    suggestionsContainer.classList.add('active');
+    if (!isLoaded) {
+      awaitDataThenRender();
+      return;
+    }
     renderSuggestions(query, suggestionsContainer);
   });
 
