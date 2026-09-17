@@ -1038,19 +1038,14 @@ export async function showMandadoForm(targetContainer = null) {
 
 async function checkOnlineDrivers() {
   try {
-    const { query, collection, where, getDocsFromServer } = await import('firebase/firestore');
-    const q = query(
-      collection(db, 'users'), 
-      where('isOnline', '==', true)
-    );
-    const snap = await getDocsFromServer(q);
-    
-    return snap.docs.some(d => {
-      const data = d.data();
-      const role = (data.role || '').toLowerCase();
-      const isDel = data.isDelivery === true || data.isDelivery === 'true' || ['delivery', 'driver', 'repartidor', 'chofer'].includes(role);
-      return isDel;
-    });
+    // Las reglas de Firestore sólo permiten "list" sobre users/ a staff, así
+    // que el cliente no puede contar cadetes online directamente. Leemos el
+    // contador que mantiene la Cloud Function onDriverOnlineStatusChanged.
+    const { doc, getDoc } = await import('firebase/firestore');
+    const snap = await getDoc(doc(db, 'settings', 'driverAvailability'));
+    // Si el contador todavía no se calculó nunca (recién desplegado), no
+    // bloqueamos al cliente: fallamos abierto en vez de asumir 0 cadetes.
+    return snap.exists() ? (snap.data().onlineCount || 0) > 0 : true;
   } catch (err) {
     console.warn('Error verifying drivers, assuming offline:', err);
     return false;

@@ -8,7 +8,7 @@ import { isLoggedIn } from '../auth.js';
 import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { db, auth } from '../firebase.js';
-import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit, getDocsFromServer } from 'firebase/firestore';
+import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { isRainingInMagdalena } from '../utils/weather.js';
 import { AudioManager } from '../utils/audio-manager.js';
@@ -2063,17 +2063,13 @@ function openCouponModal() {
 
 async function checkOnlineDrivers() {
   try {
-    const q = query(
-      collection(db, 'users'), 
-      where('isOnline', '==', true)
-    );
-    const snap = await getDocsFromServer(q);
-    const hasDriver = snap.docs.some(d => {
-      const data = d.data();
-      const role = (data.role || '').toLowerCase();
-      const isDel = data.isDelivery === true || data.isDelivery === 'true' || ['delivery', 'driver', 'repartidor', 'chofer'].includes(role);
-      return isDel;
-    });
+    // Las reglas de Firestore sólo permiten "list" sobre users/ a staff, así
+    // que el cliente no puede contar cadetes online directamente. Leemos el
+    // contador que mantiene la Cloud Function onDriverOnlineStatusChanged.
+    const snap = await getDoc(doc(db, 'settings', 'driverAvailability'));
+    // Si el contador todavía no se calculó nunca (recién desplegado), no
+    // bloqueamos al cliente: fallamos abierto en vez de asumir 0 cadetes.
+    const hasDriver = snap.exists() ? (snap.data().onlineCount || 0) > 0 : true;
     console.log('Driver Verification: Found online delivery driver:', hasDriver);
     return hasDriver;
   } catch (err) {

@@ -3986,4 +3986,60 @@ exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event)
   }
 });
 
+// ═══════════════════════════════════════════════════
+// Mantiene settings/driverAvailability.onlineCount actualizado cada vez que
+// un cadete cambia su estado online. Las reglas de Firestore sólo dejan
+// "list" sobre users/ a staff, así que el cliente (rol "user") no puede
+// contar cadetes online por su cuenta; este contador se lee con un simple
+// "get", permitido para cualquier logueado.
+// ═══════════════════════════════════════════════════
+function isDeliveryDoc(data) {
+  if (!data) return false;
+  const role = (data.role || "").toLowerCase();
+  return data.isDelivery === true || data.isDelivery === "true" || ["delivery", "driver", "repartidor", "chofer"].includes(role);
+}
+
+async function recomputeDriverAvailability() {
+  const snap = await db.collection("users").where("isOnline", "==", true).get();
+  const onlineCount = snap.docs.filter((d) => isDeliveryDoc(d.data())).length;
+
+  await db.collection("settings").doc("driverAvailability").set({
+    onlineCount,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+
+  return onlineCount;
+}
+
+exports.onDriverOnlineStatusChanged = onDocumentWritten("users/{userId}", async (event) => {
+  try {
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+
+    const wasOnline = isDeliveryDoc(before) && before.isOnline === true;
+    const isOnline = isDeliveryDoc(after) && after.isOnline === true;
+
+    // Sólo recalcular si efectivamente cambió el estado online de un cadete.
+    if (wasOnline === isOnline) return null;
+
+    await recomputeDriverAvailability();
+    return null;
+  } catch (err) {
+    logger.error("[DriverAvailability] Error updating counter:", err);
+    return null;
+  }
+});
+
+// Red de seguridad: recalcula el contador cada 5 minutos por si algún
+// cambio de estado no disparó el trigger de arriba (o para poblarlo la
+// primera vez después de un deploy, sin esperar al próximo cambio real).
+exports.recomputeDriverAvailabilityPeriodic = onSchedule("*/5 * * * *", async () => {
+  try {
+    const onlineCount = await recomputeDriverAvailability();
+    logger.info(`[DriverAvailability] Recomputed periodically: ${onlineCount} online.`);
+  } catch (err) {
+    logger.error("[DriverAvailability] Error in periodic recompute:", err);
+  }
+});
+
 // Las funciones de Mango POS viven en su propio codebase: functions-mango/
