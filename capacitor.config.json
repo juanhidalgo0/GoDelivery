@@ -16,7 +16,7 @@
       "androidScaleType": "CENTER_CROP",
       "androidSplashResourceName": "splash"
     },
-    "PushNotifications": {
+    "FirebaseMessaging": {
       "presentationOptions": ["badge", "sound", "alert"]
     }
   }

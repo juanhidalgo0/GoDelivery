@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor-firebase/messaging": "^8.5.2",
     "@capacitor/android": "^8.4.0",
     "@capacitor/app": "^8.1.0",
     "@capacitor/camera": "^8.2.1",
@@ -28,7 +29,6 @@
     "@capacitor/core": "^8.4.0",
     "@capacitor/geolocation": "^8.2.0",
     "@capacitor/ios": "^8.4.0",
-    "@capacitor/push-notifications": "^8.1.1",
     "@capacitor/splash-screen": "^8.0.1",
     "@capawesome/capacitor-app-update": "^8.0.3",
     "@capawesome/capacitor-apple-sign-in": "^0.1.2",

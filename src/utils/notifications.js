@@ -35,17 +35,21 @@ export async function initPushNotifications() {
     const isNativeApp = window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web';
     if (isNativeApp) {
       console.log('[Push] Initializing Native Push Notifications...');
-      const { PushNotifications } = await import('@capacitor/push-notifications');
+      // @capacitor-firebase/messaging en lugar de @capacitor/push-notifications: en iOS este
+      // ultimo devuelve el token APNs crudo, y el backend envia con sendEachForMulticast, que
+      // exige tokens FCM. Por eso ningun iPhone podia recibir push. Los dos plugins no pueden
+      // convivir, asi que Android tambien pasa por aca (alli ya devolvia FCM, no cambia nada).
+      const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
       
-      let permStatus = await PushNotifications.checkPermissions();
+      let permStatus = await FirebaseMessaging.checkPermissions();
       if (permStatus.receive !== 'granted') {
-        permStatus = await PushNotifications.requestPermissions();
+        permStatus = await FirebaseMessaging.requestPermissions();
       }
       
       if (permStatus.receive === 'granted') {
         if (window.Capacitor.getPlatform() === 'android') {
           try {
-            await PushNotifications.createChannel({
+            await FirebaseMessaging.createChannel({
               id: 'default',
               name: 'GoDelivery',
               description: 'Notificaciones de pedidos y mensajes',
@@ -53,7 +57,7 @@ export async function initPushNotifications() {
               visibility: 1,
               vibration: true
             });
-            await PushNotifications.createChannel({
+            await FirebaseMessaging.createChannel({
               id: 'exclusive_offers',
               name: 'Ofertas Exclusivas',
               description: 'Alertas continuas para ofertas exclusivas directas',
@@ -62,7 +66,7 @@ export async function initPushNotifications() {
               vibration: true,
               sound: 'alert.mp3'
             });
-            await PushNotifications.createChannel({
+            await FirebaseMessaging.createChannel({
               id: 'order_offers',
               name: 'Ofertas de Pedidos',
               description: 'Ofertas de pedidos con botón de aceptación rápida',
@@ -71,36 +75,37 @@ export async function initPushNotifications() {
               vibration: true,
               sound: 'alert.mp3'
             });
+            // Channels the server targets (functions/index.js). If one doesn't exist on the
+            // device, Android falls back to a low-key default channel and the alert goes unnoticed.
+            await FirebaseMessaging.createChannel({
+              id: 'admin_alerts',
+              name: 'Alertas de Soporte',
+              description: 'Nuevos pedidos y avisos para soporte/administración',
+              importance: 5,
+              visibility: 1,
+              vibration: true,
+              sound: 'alert.mp3'
+            });
+            await FirebaseMessaging.createChannel({
+              id: 'auto_accept_alerts',
+              name: 'Pedidos Auto-aceptados',
+              description: 'Aviso cuando un pedido se acepta automáticamente',
+              importance: 5,
+              visibility: 1,
+              vibration: true
+            });
           } catch(e) { console.warn('Channel creation error', e); }
         }
 
-        try {
-          await PushNotifications.registerActionTypes({
-            types: [
-              {
-                id: 'ORDER_OFFER',
-                actions: [
-                  {
-                    id: 'ACCEPT_ORDER',
-                    title: '⚡ ACEPTAR PEDIDO',
-                    foreground: true
-                  },
-                  {
-                    id: 'VIEW_ORDER',
-                    title: 'Ver Detalles',
-                    foreground: true
-                  }
-                ]
-              }
-            ]
-          });
-        } catch(e) { console.warn('Action types registration error:', e); }
+        // Las action buttons de ORDER_OFFER ahora se registran nativamente en AppDelegate.swift:
+        // @capacitor-firebase/messaging no expone registerActionTypes.
 
         if (!listenersAttached) {
           listenersAttached = true;
           
-          PushNotifications.addListener('registration', async (token) => {
-            console.log('[Push] Native token registration success:', token.value);
+          FirebaseMessaging.addListener('tokenReceived', async (event) => {
+            const token = { value: event.token };
+            console.log('[Push] Native FCM token registration success:', token.value);
             localStorage.setItem('gd_last_fcm_token', token.value);
             localStorage.setItem('gd_fcm_registration_status', 'success');
             localStorage.removeItem('gd_fcm_error');
@@ -124,14 +129,10 @@ export async function initPushNotifications() {
             }
           });
 
-          PushNotifications.addListener('registrationError', (error) => {
-            console.error('[Push] Native registration error:', error);
-            localStorage.setItem('gd_fcm_registration_status', 'error');
-            localStorage.setItem('gd_fcm_error', JSON.stringify(error) || String(error));
-          });
 
-          PushNotifications.addListener('pushNotificationReceived', async (notification) => {
-            console.log('[Push] Native push received in foreground:', notification);
+          FirebaseMessaging.addListener('notificationReceived', async (event) => {
+            console.log('[Push] Native push received in foreground:', event);
+          const notification = event.notification || {};
           const { title, body } = notification;
           const isOnDelivery = window.location.hash.startsWith('#/delivery');
           const isAdminAlert = (title && title.includes('[SOPORTE')) || 
@@ -170,7 +171,7 @@ export async function initPushNotifications() {
           });
         });
 
-        PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        FirebaseMessaging.addListener('notificationActionPerformed', (action) => {
           console.log('[Push] Native push action performed:', action);
 
           const actionId = action.actionId;
@@ -256,7 +257,14 @@ export async function initPushNotifications() {
         });
       }
 
-      await PushNotifications.register();
+      // getToken() dispara el registro y devuelve el token FCM real en ambas plataformas.
+      try {
+        const { token } = await FirebaseMessaging.getToken();
+        console.log('[Push] FCM token obtenido:', token ? token.slice(0, 12) + '...' : 'vacio');
+      } catch (tokenErr) {
+        console.error('[Push] No se pudo obtener el token FCM:', tokenErr);
+        try { localStorage.setItem('gd_fcm_registration_status', 'error'); } catch (e) {}
+      }
     } else {
       console.warn('[Push] Push permission denied by user. Proceeding without native push notifications.');
       return;
@@ -456,11 +464,11 @@ function showPushRequiredLockScreen() {
 
   document.getElementById('push-permission-grant-btn').onclick = async () => {
     try {
-      const { PushNotifications } = await import('@capacitor/push-notifications');
-      let status = await PushNotifications.requestPermissions();
+      const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
+      let status = await FirebaseMessaging.requestPermissions();
       if (status.receive === 'granted') {
         lockScreen.remove();
-        await PushNotifications.register();
+        await FirebaseMessaging.getToken();
         // Force reload page to resume flows
         window.location.reload();
       } else {

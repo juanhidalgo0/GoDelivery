@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import UserNotifications
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,7 +8,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        registerOrderOfferCategory()
         return true
     }
 
@@ -52,6 +53,36 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
+    // Requerido por @capacitor-firebase/messaging para entregar las push silenciosas y de datos.
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        NotificationCenter.default.post(name: Notification.Name.init("didReceiveRemoteNotification"), object: completionHandler, userInfo: userInfo)
+    }
+
+    // Botones de accion de las ofertas de pedido. Antes se registraban desde JS con
+    // PushNotifications.registerActionTypes(); @capacitor-firebase/messaging no expone esa API,
+    // asi que la categoria se declara nativamente. Los identificadores deben coincidir con los
+    // que espera el listener notificationActionPerformed en src/utils/notifications.js y con el
+    // valor de "category" que manda el backend en el payload apns.
+    private func registerOrderOfferCategory() {
+        let accept = UNNotificationAction(
+            identifier: "ACCEPT_ORDER",
+            title: "\u{26A1} ACEPTAR PEDIDO",
+            options: [.foreground]
+        )
+        let view = UNNotificationAction(
+            identifier: "VIEW_ORDER",
+            title: "Ver Detalles",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: "ORDER_OFFER",
+            actions: [accept, view],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
 }

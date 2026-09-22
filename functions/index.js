@@ -455,7 +455,11 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
             },
             sound: "default",
             badge: 1,
-            "content-available": 1
+            "content-available": 1,
+            // iOS solo muestra los botones de accion si la categoria del payload coincide con una
+            // categoria registrada en el dispositivo (ver registerOrderOfferCategory en
+            // AppDelegate.swift). Sin esto, la push llega pero sin "ACEPTAR PEDIDO".
+            category: data.category || (data.channelId === "order_offers" ? "ORDER_OFFER" : undefined)
           },
           url: targetUrl,
           ...data
