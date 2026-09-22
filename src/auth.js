@@ -46,6 +46,74 @@ export async function signInWithTestAccount(email, password) {
 
 const ADMIN_EMAILS = ['kioscopaulos7@gmail.com'];
 
+// Client IDs de Google (los mismos que ya usaban los builds publicados).
+const GOOGLE_SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
+const GOOGLE_IOS_CLIENT_ID = '848164656125-88riq0u6lpesph0i28sv0d2al1ciq0j3.apps.googleusercontent.com';
+
+const LEGACY_GOOGLE_CANCELLED = Symbol('legacy-google-cancelled');
+
+/**
+ * PUENTE TEMPORAL — quitar cuando no queden instalaciones anteriores al build 65 de Android.
+ *
+ * En septiembre cambiamos el plugin nativo de Google (codetrix -> capawesome), pero los APK ya
+ * publicados sólo traen el viejo y cargan este JS desde Hosting (capacitor.config usa server.url).
+ * Para esas instalaciones, GoogleSignIn.signIn() no existe: sin este puente caen al camino web,
+ * que dentro del WebView termina en signInWithRedirect, se escapa a Chrome y muere con
+ * auth/missing-initial-state, dejando al usuario sin ninguna forma de entrar.
+ *
+ * En los builds nuevos el plugin capawesome resuelve primero y esto nunca se ejecuta.
+ *
+ * @returns {Promise<string|symbol|null>} idToken, LEGACY_GOOGLE_CANCELLED, o null si no se pudo.
+ */
+async function getLegacyGooglePlugin() {
+  // registerPlugin habla directo con el plugin nativo ya registrado en el APK viejo,
+  // así no hace falta reinstalar la dependencia de codetrix que ya sacamos del package.json.
+  const { registerPlugin } = await import('@capacitor/core');
+  return registerPlugin('GoogleAuth');
+}
+
+// NOTA: no llamamos a GoogleAuth.signOut() en este plugin, ni al entrar ni al salir. La llamada
+// nativa deja al plugin en un estado donde signIn() no vuelve a resolver y el login queda colgado
+// en "Iniciando sesión...". Consecuencia conocida: en los APK anteriores al build 65 el login
+// reusa la última cuenta sin mostrar el selector. Se resuelve solo al actualizar al build nuevo,
+// donde el plugin capawesome maneja la selección de cuenta.
+async function signInWithLegacyGooglePlugin() {
+  try {
+    const GoogleAuth = await getLegacyGooglePlugin();
+
+    const isIos = window.Capacitor?.getPlatform
+      ? window.Capacitor.getPlatform() === 'ios'
+      : /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+    try {
+      await GoogleAuth.initialize({
+        clientId: isIos ? GOOGLE_IOS_CLIENT_ID : GOOGLE_SERVER_CLIENT_ID,
+        serverClientId: GOOGLE_SERVER_CLIENT_ID,
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: false
+      });
+    } catch (initErr) {
+      console.warn('[Auth] Legacy GoogleAuth.initialize notice:', initErr);
+    }
+
+    const googleUser = await GoogleAuth.signIn();
+    const idToken = googleUser?.authentication?.idToken || googleUser?.idToken;
+    if (!idToken) {
+      console.warn('[Auth] Legacy GoogleAuth returned no idToken');
+      return null;
+    }
+    console.log('[Auth] Signed in via legacy GoogleAuth plugin (APK anterior al build 65)');
+    return idToken;
+  } catch (legacyErr) {
+    console.warn('[Auth] Legacy GoogleAuth plugin unavailable/failed:', legacyErr);
+    const msg = legacyErr?.message?.toLowerCase() || '';
+    if (legacyErr?.code === '12501' || msg.includes('cancel') || msg.includes('dismissed')) {
+      return LEGACY_GOOGLE_CANCELLED;
+    }
+    return null;
+  }
+}
+
 // Sign in with Google
 export async function signInWithGoogle() {
   try {
@@ -59,10 +127,8 @@ export async function signInWithGoogle() {
 
         // Must be the WEB client ID on every platform (including iOS) per this plugin's docs —
         // unlike the old codetrix-studio plugin, there's no separate iOS client ID here.
-        const SERVER_CLIENT_ID = '848164656125-dfogmhkrg5fbh0h2vh2r1203n1u1ru5l.apps.googleusercontent.com';
-
         try {
-          await GoogleSignIn.initialize({ clientId: SERVER_CLIENT_ID });
+          await GoogleSignIn.initialize({ clientId: GOOGLE_SERVER_CLIENT_ID });
         } catch (initErr) {
           console.warn('[Auth] GoogleSignIn.initialize notice:', initErr);
         }
@@ -83,7 +149,37 @@ export async function signInWithGoogle() {
           showToast('Inicio de sesión cancelado', 'info');
           return null;
         }
-        console.log('[Auth] Falling back to Web Google Sign-In...');
+
+        // El plugin nuevo falló. Antes de rendirnos, probamos el plugin nativo viejo: los APK
+        // publicados hasta el build 64 son los únicos que lo tienen, y para ellos es la única
+        // vía posible (ver signInWithLegacyGooglePlugin).
+        const legacyToken = await signInWithLegacyGooglePlugin();
+
+        if (legacyToken === LEGACY_GOOGLE_CANCELLED) {
+          showToast('Inicio de sesión cancelado', 'info');
+          return null;
+        }
+
+        if (legacyToken) {
+          const credential = GoogleAuthProvider.credential(legacyToken);
+          const result = await signInWithCredential(auth, credential);
+          const user = result.user;
+          await ensureUserDoc(user);
+          showToast(`¡Bienvenido, ${user.displayName || user.email}!`, 'success');
+          return user;
+        }
+
+        // Dentro de la app nativa NO existe fallback web posible: el WebView de Android no puede
+        // abrir el popup de Google, así que terminaríamos en signInWithRedirect, que se escapa a
+        // Chrome y muere con "auth/missing-initial-state" (el estado inicial quedó en el WebView).
+        // Preferimos cortar acá y mostrar el motivo real del fallo nativo.
+        const detalle = nativeErr?.code || nativeErr?.message || 'Desconocido';
+        console.error('[Auth] Native Google Sign-In failed, no web fallback in native:', detalle);
+        showToast(
+          'No se pudo iniciar sesión con Google en este teléfono. Revisá que tengas una cuenta de Google agregada en los ajustes del dispositivo y Google Play Services actualizado. (' + detalle + ')',
+          'error'
+        );
+        return null;
       }
     }
 
@@ -423,6 +519,12 @@ export function initAuth(callback) {
     })
     .catch((err) => {
       console.error('Auth: [getRedirectResult] Error processing redirect', err);
+      // El estado del redirect vive en el storage del origen que inició el login. Si el navegador
+      // lo particiona (cookies de terceros bloqueadas) o el flujo cambió de contexto, se pierde.
+      if (err?.code === 'auth/missing-initial-state') {
+        showToast('No pudimos completar el inicio de sesión en este navegador. Probá de nuevo desde la app o habilitá las cookies para este sitio.', 'error');
+        return;
+      }
       showToast('Error al procesar el inicio de sesión: ' + (err.message || 'Desconocido'), 'error');
     });
 
