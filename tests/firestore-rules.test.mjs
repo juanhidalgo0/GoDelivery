@@ -349,6 +349,35 @@ await check('un tercero NO lee los mensajes de soporte ajenos',
   assertFails(getDocs(collection(cliente1, 'support_chats/cliente2/messages'))));
 
 console.log('');
+console.log('=========== UBICACION EN VIVO DEL CADETE (orders/{id}/live/driver) ===========');
+
+const livePos = () => ({ lat: -35.08, lng: -57.51, heading: 90, speed: 5, updatedAt: new Date() });
+// Pedidos propios: los tests de arriba borran o3 y le asignan o2 al cadete.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, 'orders/o4'), { userId: 'cliente1', comercioId: 'pizza', status: 'delivering', driverId: 'cadete1', total: 9000 });
+  await setDoc(doc(db, 'orders/o5'), { userId: 'cliente2', comercioId: 'kiosco', status: 'ready', total: 5000 });
+});
+await check('cadete asignado escribe su ubicacion en vivo',
+  assertSucceeds(setDoc(doc(cadete1, 'orders/o4/live/driver'), livePos())));
+await check('cliente del pedido lee la ubicacion en vivo',
+  assertSucceeds(getDoc(doc(cliente1, 'orders/o4/live/driver'))));
+await check('comercio del pedido lee la ubicacion en vivo',
+  assertSucceeds(getDoc(doc(duenoPizza, 'orders/o4/live/driver'))));
+await check('un vecino ajeno NO lee la ubicacion en vivo',
+  assertFails(getDoc(doc(cliente2, 'orders/o4/live/driver'))));
+await check('anonimo NO lee la ubicacion en vivo',
+  assertFails(getDoc(doc(anon, 'orders/o4/live/driver'))));
+await check('cadete NO escribe ubicacion en un pedido que no es suyo',
+  assertFails(setDoc(doc(cadete1, 'orders/o5/live/driver'), livePos())));
+await check('cliente NO puede falsear la ubicacion del cadete',
+  assertFails(setDoc(doc(cliente1, 'orders/o4/live/driver'), livePos())));
+await check('cadete NO mete campos extra en la ubicacion',
+  assertFails(setDoc(doc(cadete1, 'orders/o4/live/driver'), { ...livePos(), status: 'completed' })));
+await check('cadete NO escribe otro doc que no sea "driver"',
+  assertFails(setDoc(doc(cadete1, 'orders/o4/live/otro'), livePos())));
+
+console.log('');
 console.log('================================================');
 console.log('  PASARON: ' + pass + '   |   FALLARON: ' + fail);
 if (failures.length) {

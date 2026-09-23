@@ -215,6 +215,24 @@ service cloud.firestore {
         allow read, create: if isAdmin() || isDriver() || isCustomer() || isTheShop();
         allow update, delete: if isAdmin();
       }
+
+      // Ubicación en vivo del cadete (cada pocos segundos). Vive fuera del doc del
+      // pedido para no disparar onOrderStatusChange en cada punto de GPS. La lee
+      // quien puede leer el pedido; la escribe sólo el cadete asignado.
+      match /live/{liveId} {
+        function parentOrder() {
+          return get(/databases/$(database)/documents/orders/$(orderId)).data;
+        }
+        allow read: if isAdmin() || isDriver() || (isSignedIn() && (
+          parentOrder().get('userId', '') == uid() ||
+          parentOrder().get('driverId', '') == uid() ||
+          ownsComercio(parentOrder().get('comercioId', ''))
+        ));
+        allow write: if isSignedIn() && liveId == 'driver' &&
+          parentOrder().get('driverId', '') == uid() &&
+          request.resource.data.keys().hasOnly(['lat', 'lng', 'heading', 'speed', 'updatedAt']) &&
+          request.resource.data.lat is number && request.resource.data.lng is number;
+      }
     }
 
     match /favor_orders/{favorId} {

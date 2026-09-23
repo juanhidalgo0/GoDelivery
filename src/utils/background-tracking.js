@@ -1,6 +1,6 @@
 // GoDelivery — Global Background Geolocation Tracking for Delivery Drivers
 import { db } from '../firebase.js';
-import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { subscribe, getState } from '../state.js';
 import { isDelivery } from '../auth.js';
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -163,6 +163,7 @@ async function requestWakeLock() {
 }
 
 let lastFirestoreWriteTime = 0;
+const lastOrderDocLocationWrite = new Map(); // orderId -> ms of the last driverLocation write on the order doc
 let lastFirestoreWriteCoords = null;
 
 async function handleLocationUpdate(pos) {
@@ -298,14 +299,32 @@ async function handleLocationUpdate(pos) {
   lastFirestoreWriteTime = now;
   lastFirestoreWriteCoords = { lat: latitude, lng: longitude };
 
-  const updates = currentActiveOrders.map(o => {
-    return updateDoc(doc(db, 'orders', o.id), {
-      driverLocation: {
-        lat: latitude,
-        lng: longitude,
-        updatedAt: serverTimestamp()
-      }
-    });
+  // Every tick goes to orders/{id}/live/driver, which the customer's map listens to. The order
+  // doc itself only gets the position every 30s (panels and the WhatsApp page still read it):
+  // writing it every 3.5s fired the onOrderStatusChange Cloud Function on every GPS point.
+  const liveHeading = Number.isFinite(pos?.coords?.heading) ? pos.coords.heading : 0;
+  const liveSpeed = Number.isFinite(pos?.coords?.speed) ? pos.coords.speed : 0;
+  const updates = currentActiveOrders.flatMap(o => {
+    const writes = [setDoc(doc(db, 'orders', o.id, 'live', 'driver'), {
+      lat: latitude,
+      lng: longitude,
+      heading: liveHeading,
+      speed: liveSpeed,
+      updatedAt: serverTimestamp()
+    }).catch(err => console.warn('Failed to write live driver location:', err))];
+
+    const lastOrderWrite = lastOrderDocLocationWrite.get(o.id) || 0;
+    if (now - lastOrderWrite >= 30000 || geofenceTriggeredThisTick) {
+      lastOrderDocLocationWrite.set(o.id, now);
+      writes.push(updateDoc(doc(db, 'orders', o.id), {
+        driverLocation: {
+          lat: latitude,
+          lng: longitude,
+          updatedAt: serverTimestamp()
+        }
+      }));
+    }
+    return writes;
   });
 
   // Only update driver user profile currentLocation when driver is IDLE or on a 60s throttle

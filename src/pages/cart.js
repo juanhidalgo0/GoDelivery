@@ -78,7 +78,7 @@ export async function renderCart(content, isDirectMode = false) {
     document.body.classList.add('is-direct-store-mode');
   }
 
-  currentCartStep = 1; // Reset to step 1 when page loads
+  currentCartStep = 2; // Single-screen checkout: payment and confirm live on the cart page
   selectedPaymentMethod = selectedPaymentMethod || 'efectivo'; // Default to efectivo
   selectedDeliveryType = 'delivery';
 
@@ -306,9 +306,10 @@ export async function renderCart(content, isDirectMode = false) {
     if (checkoutBtn) {
       const isTakeaway = selectedDeliveryType === 'takeaway';
       const hasAddress = isTakeaway || Boolean(state.deliveryAddress);
-      const isReady = currentCartStep === 1 
-        ? (isTakeaway || hasAddress)
-        : (isTakeaway ? Boolean(selectedPaymentMethod) : (hasAddress && allFeesReady && selectedPaymentMethod));
+      // Without an address the button stays tappable: it opens the address picker.
+      const isReady = isTakeaway
+        ? Boolean(selectedPaymentMethod)
+        : (!hasAddress || (allFeesReady && selectedPaymentMethod));
 
       if (isReady) {
         checkoutBtn.removeAttribute('disabled');
@@ -360,7 +361,7 @@ export async function renderCart(content, isDirectMode = false) {
       }
       const scrollArea = activeContent.querySelector('.cart-scroll-area');
       const cart = getState().cart;
-      if (scrollArea && currentCartStep === 1 && cart.length > 0) {
+      if (scrollArea && cart.length > 0) {
         const itemEls = scrollArea.querySelectorAll('.cart-item');
         if (itemEls.length === cart.length) {
           updateCartDOMInPlace(activeContent);
@@ -723,7 +724,9 @@ function renderCartContent(content) {
     </div>
   `;
 
-  const stepHeaderOrProducts = currentCartStep === 1 ? `
+  // Single-screen checkout: products, delivery, benefits and payment together, one button to
+  // confirm. There used to be a separate "Paso 2 de 2" screen before the confirmation sheet.
+  const stepHeaderOrProducts = `
         <!-- Header Principal -->
         ${deliveryStyleCartHeaderHTML}
         ${deliveryTypeSelectorHTML}
@@ -809,25 +812,8 @@ function renderCartContent(content) {
             </div>
           `;
           }).join('')}
-          <div style="display:flex; justify-content:center; align-items:center; margin: 24px 0 16px;">
-            <button class="btn btn-ghost" style="color:var(--color-danger); opacity:0.85; font-size:11px; padding:8px 16px; height:auto; display:flex; align-items:center; gap:6px; font-weight:800; background:rgba(239, 68, 68, 0.05); border-radius:12px; border:1px solid rgba(239, 68, 68, 0.1); cursor:pointer;" id="clear-cart-btn">
-              ${icon('trash', 12)} VACIAR TODO EL CARRITO
-            </button>
-          </div>
-        </div>
-  ` : `
-        <!-- Paso 2 Header y Botones de Beneficios (Scrollable) -->
-        <div class="cart-scroll-area">
-          <div style="display:flex; align-items:center; gap:16px; margin-bottom:24px; margin-top:12px; background:var(--color-bg-card); border-radius:18px; border:1px solid var(--color-border-light); padding:16px; box-shadow:var(--shadow-xs);">
-            <button class="btn btn-ghost" id="cart-back-step-btn" style="padding:0; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); cursor:pointer; color:var(--color-text-primary);">
-              ${icon('back', 20)}
-            </button>
-            <div>
-              <h2 style="font-family:var(--font-display); font-size:17px; font-weight:900; margin:0; color:var(--color-text-primary); text-align:left;">Beneficios y Propina</h2>
-              <p style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 0 0; opacity:0.8; text-align:left;">Paso 2 de 2: Personalizá tu orden</p>
-            </div>
-          </div>
-
+          <div style="margin: 20px 0 0;">
+            <div style="font-family:var(--font-display); font-size:14px; font-weight:900; color:var(--color-text-primary); margin:0 2px 10px;">Beneficios</div>
           <!-- Compact Tipping, GoPoints, and Coupon (Step 2 Top) -->
           ${(() => {
             const state = getState();
@@ -894,6 +880,12 @@ function renderCartContent(content) {
               </div>
             `;
           })()}
+          </div>
+          <div style="display:flex; justify-content:center; align-items:center; margin: 8px 0 16px;">
+            <button class="btn btn-ghost" style="color:var(--color-danger); opacity:0.85; font-size:11px; padding:8px 16px; height:auto; display:flex; align-items:center; gap:6px; font-weight:800; background:rgba(239, 68, 68, 0.05); border-radius:12px; border:1px solid rgba(239, 68, 68, 0.1); cursor:pointer;" id="clear-cart-btn">
+              ${icon('trash', 12)} VACIAR TODO EL CARRITO
+            </button>
+          </div>
         </div>
   `;
 
@@ -924,7 +916,7 @@ function renderCartContent(content) {
           const isReadyToCalculate = isTakeaway || (hasAddress && allFeesReady);
           const isStep1Ready = isTakeaway || hasAddress;
           const isStep2Ready = isTakeaway ? true : (hasAddress && allFeesReady);
-          const isCheckoutBtnEnabled = currentCartStep === 1 ? isStep1Ready : isStep2Ready;
+          const isCheckoutBtnEnabled = !isStep1Ready || isStep2Ready;
 
           let baseDeliveryFeeCalc = null;
           let nightSurcharge = null;

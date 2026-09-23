@@ -698,6 +698,33 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     return;
   }
 
+  // Live position: the driver writes it to orders/{id}/live/driver every few seconds; the order
+  // doc only gets it every 30s. Whichever is newer wins.
+  let latestLiveLocation = null;
+  const locationMs = (loc) => {
+    const t = loc?.updatedAt;
+    return t?.toMillis ? t.toMillis() : (t ? new Date(t).getTime() : 0);
+  };
+  const withFreshestLocation = (order) => {
+    if (latestLiveLocation && locationMs(latestLiveLocation) >= locationMs(order.driverLocation)) {
+      return { ...order, driverLocation: latestLiveLocation };
+    }
+    return order;
+  };
+  let unsubLive = () => {};
+  try {
+    unsubLive = onSnapshot(doc(db, 'orders', orderDocRef.id, 'live', 'driver'), (liveSnap) => {
+      if (!liveSnap.exists()) return;
+      latestLiveLocation = liveSnap.data();
+      const current = window.lastOrderData;
+      if (!current || current.id !== orderDocRef.id || ['completed', 'cancelled'].includes(current.status)) return;
+      const merged = withFreshestLocation(current);
+      window.lastOrderData = merged;
+      updateMap(merged);
+      refreshDriverLocationFreshness(merged);
+    }, (err) => console.warn('[OrderTracking] Live location unavailable, using the order doc:', err?.code || err));
+  } catch (e) {}
+
   const unsub = onSnapshot(orderDocRef, (snapshot) => {
     if (!snapshot.exists()) {
       if (liveMap) {
@@ -818,9 +845,10 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       }
     }
 
-    window.lastOrderData = order;
-    updateUI(order, isDriverViewOverride);
-    updateMap(order);
+    const orderWithLocation = withFreshestLocation(order);
+    window.lastOrderData = orderWithLocation;
+    updateUI(orderWithLocation, isDriverViewOverride);
+    updateMap(orderWithLocation);
 
     // Real-time update for Price Breakdown Modal if currently open
     const priceModalBackdrop = document.getElementById('v5-price-modal-backdrop');
@@ -1032,6 +1060,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   return {
     cleanup: () => {
       unsub();
+      unsubLive();
       if (freshnessTimer) {
         clearInterval(freshnessTimer);
         freshnessTimer = null;

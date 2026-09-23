@@ -104,8 +104,19 @@ export function renderPublicWATracking(container, orderId) {
       }
 
       if (data.driverLocation && data.driverLocation.lat && data.driverLocation.lng && map) {
-        const dLat = data.driverLocation.lat;
-        const dLng = data.driverLocation.lng;
+        placeDriver(data.driverLocation.lat, data.driverLocation.lng);
+      }
+    });
+
+    // Every few seconds from orders/{id}/live/driver; the order doc above only gets it every 30s.
+    onSnapshot(doc(db, 'orders', orderId, 'live', 'driver'), (liveSnap) => {
+      const live = liveSnap.exists() ? liveSnap.data() : null;
+      if (live && live.lat && live.lng && map) placeDriver(live.lat, live.lng);
+    }, () => {});
+  };
+
+  const placeDriver = (dLat, dLng) => {
+      {
 
         if (!driverMarker) {
           const bikeIcon = L.divIcon({
@@ -120,7 +131,6 @@ export function renderPublicWATracking(container, orderId) {
         }
         map.panTo([dLat, dLng]);
       }
-    });
   };
 
   loadLeaflet();
