@@ -2,7 +2,7 @@
 import { db, auth } from '../firebase.js';
 import { doc, getDoc, collection, getDocs, query, orderBy, where, limit, startAfter } from 'firebase/firestore';
 import { getRouteParams } from '../router.js';
-import { addToCart, getCartCount, subscribe, getState, isProductFavorite, setState } from '../state.js';
+import { addToCart, getCartCount, subscribe, getState, isProductFavorite, setState, getItemUnitPrice } from '../state.js';
 import { getDocsOptimized, withTimeout } from '../utils/firestore-cache.js';
 import { safeStorage } from '../utils/safe-storage.js';
 import { formatPrice, isShopOpen } from '../utils/format.js';
@@ -224,7 +224,7 @@ export async function renderComercio(content, isDirectMode = false) {
       const qOrders = query(
         collection(db, 'orders'),
         where('userId', '==', currentUser.uid),
-        where('status', 'in', ['pending', 'confirmed', 'ready', 'delivering'])
+        where('status', 'in', ['pending', 'confirmed', 'accepted', 'preparing', 'ready', 'picked_up', 'at_door', 'delivering'])
       );
       unsubActiveOrders = onSnapshot(qOrders, (snap) => {
         const activeOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
@@ -346,9 +346,11 @@ export async function renderComercio(content, isDirectMode = false) {
         5 * 60 * 1000
       ),
       getDocsOptimized(
-        query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(100)),
+        // 100 silently hid the rest of bigger menus. 2 min cache instead of 15 so a product the
+        // commerce just paused or ran out of doesn't keep showing as available.
+        query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(400)),
         `comercio_products_${resolvedComercioId}_cat_all`,
-        15 * 60 * 1000
+        2 * 60 * 1000
       )
     ]);
 
@@ -376,7 +378,7 @@ export async function renderComercio(content, isDirectMode = false) {
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
       if (catId === 'all') {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(100));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(400));
       } else if (catId === 'discounts') {
         const productIds = [];
         activeOffers.forEach(o => {
@@ -395,11 +397,11 @@ export async function renderComercio(content, isDirectMode = false) {
           return [];
         }
       } else {
-        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('categoryId', '==', catId), limit(100));
+        q = query(collection(db, 'comercios', resolvedComercioId, 'products'), where('categoryId', '==', catId), limit(300));
       }
 
       try {
-        const prodsSnap = await getDocsOptimized(q, cacheKey, 15 * 60 * 1000);
+        const prodsSnap = await getDocsOptimized(q, cacheKey, 2 * 60 * 1000);
         return (prodsSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
       } catch (err) {
         try {
@@ -893,7 +895,7 @@ function updateDirectCartBar(comercioId, activeOrder = currentActiveOrder) {
   if (storeItems.length > 0) {
     const totalCount = storeItems.reduce((s, i) => s + i.qty, 0);
     const totalPrice = storeItems.reduce((s, item) => {
-      const base = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const base = getItemUnitPrice(item);
       return s + (base * item.qty);
     }, 0);
 

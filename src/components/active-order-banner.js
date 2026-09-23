@@ -1,6 +1,6 @@
 // GoDelivery — Active Order Banner Component (Customer Side)
 import { db } from '../firebase.js';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { getState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
 import { setBanner, clearBanner } from './banner-manager.js';
@@ -8,7 +8,13 @@ import { sendLocalNotification } from '../utils/notifications.js';
 import { FABStack } from '../utils/fab-stack.js';
 
 let activeUnsub = null;
+let listeningUid = null;
 let lastStatuses = {}; // Track last status per orderId
+
+// Every status an order goes through before it's finished. 'accepted' (a driver took a commerce
+// order), 'preparing', 'picked_up' and 'at_door' were missing, so the banner vanished right
+// when the driver was heading out and came back only once they picked the order up.
+const ACTIVE_STATUSES = ['pending', 'confirmed', 'accepted', 'preparing', 'ready', 'picked_up', 'at_door', 'delivering'];
 
 let isMonitorInitialized = false;
 
@@ -25,9 +31,11 @@ export function initActiveOrderBanner() {
     startListening(user.uid);
   }
 
+  // The user doc changes constantly (points, location...). Only a different account needs new
+  // listeners; re-subscribing on every change re-read all of the customer's orders each time.
   subscribe('user', (newUser) => {
     if (newUser) {
-      startListening(newUser.uid);
+      if (newUser.uid !== listeningUid) startListening(newUser.uid);
     } else {
       stopListening();
     }
@@ -36,15 +44,38 @@ export function initActiveOrderBanner() {
 
 function startListening(userId) {
   if (activeUnsub) activeUnsub();
+  listeningUid = userId;
 
-  const q = query(
+  // Completed orders only matter for the rating prompt of the last 12 hours. Listening to all of
+  // them (every order the customer ever made) grew slower and costlier with each purchase.
+  const activeQuery = query(
     collection(db, 'orders'),
     where('userId', '==', userId),
-    where('status', 'in', ['pending', 'confirmed', 'ready', 'delivering', 'completed'])
+    where('status', 'in', ACTIVE_STATUSES)
+  );
+  const recentCompletedQuery = query(
+    collection(db, 'orders'),
+    where('userId', '==', userId),
+    where('status', '==', 'completed'),
+    where('createdAt', '>=', Timestamp.fromMillis(Date.now() - 12 * 60 * 60 * 1000))
   );
 
-  activeUnsub = onSnapshot(q, (snap) => {
-    const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  let activeDocs = [];
+  let completedDocs = [];
+  const onError = (err) => console.error('Error in ActiveOrderBanner listener:', err);
+  const unsubActive = onSnapshot(activeQuery, (snap) => {
+    activeDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    handleCustomerOrders([...activeDocs, ...completedDocs]);
+  }, onError);
+  const unsubCompleted = onSnapshot(recentCompletedQuery, (snap) => {
+    completedDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    handleCustomerOrders([...activeDocs, ...completedDocs]);
+  }, onError);
+  activeUnsub = () => { unsubActive(); unsubCompleted(); };
+}
+
+function handleCustomerOrders(orders) {
+  {
 
     // Check for completed orders that haven't been dismissed yet and are recent (less than 12 hours old)
     const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
@@ -73,7 +104,7 @@ function startListening(userId) {
 
     const activeOrders = orders.filter(o => !['completed', 'cancelled'].includes(o.status))
       .sort((a, b) => {
-        const statusOrder = { delivering: 0, ready: 1, confirmed: 2, pending: 3 };
+        const statusOrder = { at_door: 0, delivering: 0, picked_up: 0, ready: 1, preparing: 2, accepted: 2, confirmed: 2, pending: 3 };
         const aStatus = statusOrder[a.status] ?? 99;
         const bStatus = statusOrder[b.status] ?? 99;
         if (aStatus !== bStatus) return aStatus - bStatus;
@@ -81,12 +112,11 @@ function startListening(userId) {
       });
 
     updateBannerState(activeOrders[0] || null, activeOrders);
-  }, (err) => {
-    console.error('Error in ActiveOrderBanner listener:', err);
-  });
+  }
 }
 
 function stopListening() {
+  listeningUid = null;
   if (activeUnsub) {
     activeUnsub();
     activeUnsub = null;
@@ -130,7 +160,31 @@ function updateBannerState(order, allOrders = []) {
 
   let color1, color2, title, iconName = 'shoppingBag';
 
-  switch (order.status) {
+  // Statuses a driver can set that the banner used to ignore ('default: return' hid it).
+  const displayStatus = (order.status === 'picked_up') ? 'delivering' : order.status;
+
+  switch (displayStatus) {
+    case 'accepted':
+    case 'preparing':
+      if (order.isTrip) {
+        color1 = '#EF4444'; color2 = '#DC2626';
+        title = 'Chofer en camino';
+        iconName = 'car';
+      } else if (order.isFavor) {
+        color1 = '#0284c7'; color2 = '#0369a1';
+        title = 'Yendo a buscar pedido';
+        iconName = 'bike';
+      } else {
+        color1 = '#0284c7'; color2 = '#0369a1';
+        title = order.driverId ? 'Repartidor asignado' : 'Preparando pedido';
+        iconName = order.driverId ? 'bike' : 'shoppingBag';
+      }
+      break;
+    case 'at_door':
+      color1 = '#059669'; color2 = '#10b981';
+      title = order.isTrip ? '¡Tu chofer llegó!' : '¡El repartidor llegó!';
+      iconName = order.isTrip ? 'car' : 'bike';
+      break;
     case 'pending':
       if (order.isTrip) {
         color1 = '#EF4444'; color2 = '#DC2626';
@@ -193,7 +247,7 @@ function updateBannerState(order, allOrders = []) {
   const isCommerceOrder = !order.isFavor && !order.isTrip;
   const isEncomienda = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
   const showCode = !order.isTrip && !isEncomienda && !!order.verificationCode && (
-    isCommerceOrder ? (order.status === 'delivering' || (order.bundleId && allOrders.some(o => o.bundleId === order.bundleId && o.status === 'delivering'))) : !['delivered', 'cancelled', 'completed'].includes(order.status)
+    isCommerceOrder ? (['delivering', 'picked_up', 'at_door'].includes(order.status) || (order.bundleId && allOrders.some(o => o.bundleId === order.bundleId && o.status === 'delivering'))) : !['delivered', 'cancelled', 'completed'].includes(order.status)
   );
   updateOrderFAB(order, { color1, color2, title, iconName, showCode });
 
@@ -212,7 +266,9 @@ function updateBannerState(order, allOrders = []) {
         statusDesc = `Tu viaje cambió al estado: ${order.status}`;
       }
     } else if (order.isFavor) {
-      switch (order.status) {
+      switch (displayStatus) {
+        case 'accepted':
+        case 'preparing':
         case 'confirmed':
         case 'ready':
           statusDesc = 'El repartidor aceptó tu GoFavor y está yendo a buscar tu pedido.';
@@ -226,9 +282,16 @@ function updateBannerState(order, allOrders = []) {
           statusDesc = `Tu GoFavor cambió al estado: ${order.status}`;
       }
     } else {
-      switch (order.status) {
+      switch (displayStatus) {
+        case 'accepted':
+          statusDesc = 'Un repartidor tomó tu pedido y va a buscarlo al comercio.';
+          break;
+        case 'preparing':
         case 'confirmed':
           statusDesc = 'El comercio confirmó tu pedido y comenzó a prepararlo.';
+          break;
+        case 'at_door':
+          statusDesc = `¡El repartidor llegó! Tené a mano tu código de entrega: ${order.verificationCode || '----'}`;
           break;
         case 'ready':
           statusDesc = 'El comercio ya preparó tu pedido y el repartidor se dirige a retirarlo.';

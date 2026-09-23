@@ -64,6 +64,45 @@ function formatFavorDetailsHTML(detailsStr) {
 
 let liveMap = null;
 let riderMarker = null;
+let freshnessTimer = null;
+
+// The driver's position only means "live" if it's recent. With no signal, or the OS killing
+// the driver's app, the marker froze while the pill kept saying EN VIVO. Re-evaluated on a
+// timer too, because a stale driver is exactly when no new snapshot arrives.
+function refreshDriverLocationFreshness(order) {
+  const livePill = document.querySelector('.v5-live-pill');
+  const status = (order?.status || '').toString().toLowerCase();
+  if (!livePill || !order?.driverId || ['completed', 'cancelled'].includes(status)) return;
+
+  const updatedAt = order.driverLocation?.updatedAt;
+  const updatedMs = updatedAt?.toMillis ? updatedAt.toMillis() : (updatedAt ? new Date(updatedAt).getTime() : 0);
+  const ageMs = updatedMs ? Date.now() - updatedMs : Infinity;
+  const isStale = ageMs > 60 * 1000;
+
+  if (isStale) {
+    const mins = Number.isFinite(ageMs) ? Math.max(1, Math.round(ageMs / 60000)) : null;
+    livePill.innerHTML = mins ? `📶 Ubicación de hace ${mins} min` : '📶 Esperando ubicación';
+    livePill.style.color = '#b45309';
+    livePill.style.background = 'rgba(245, 158, 11, 0.14)';
+  } else if (!livePill.querySelector('.v5-pulse-dot')) {
+    livePill.innerHTML = `<span class="v5-pulse-dot"></span> EN VIVO`;
+    livePill.style.color = '';
+    livePill.style.background = '';
+  }
+  const markerEl = riderMarker?.getElement?.();
+  if (markerEl) markerEl.style.opacity = isStale ? '0.55' : '1';
+
+  if (!freshnessTimer) {
+    freshnessTimer = setInterval(() => {
+      if (!document.querySelector('.v5-live-pill')) {
+        clearInterval(freshnessTimer);
+        freshnessTimer = null;
+        return;
+      }
+      refreshDriverLocationFreshness(window.lastOrderData);
+    }, 15000);
+  }
+}
 let homeMarker = null;
 let pickupMarker = null;
 let dropoffMarker = null;
@@ -993,6 +1032,10 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   return {
     cleanup: () => {
       unsub();
+      if (freshnessTimer) {
+        clearInterval(freshnessTimer);
+        freshnessTimer = null;
+      }
       if (riderMoveAnimFrame) {
         cancelAnimationFrame(riderMoveAnimFrame);
         riderMoveAnimFrame = null;
@@ -1095,6 +1138,7 @@ function updateUI(order, isDriverViewOverride = false) {
       livePill.innerHTML = `<span class="v5-pulse-dot"></span> EN VIVO`;
     }
   }
+  refreshDriverLocationFreshness(order);
 
   // Update Top Floating Header Driver/Commerce Card
   const headerDriverCard = document.getElementById('v5-header-driver-card');

@@ -1980,7 +1980,118 @@ function calculateScheduleSurcharge(config, baseValue) {
 // ═══════════════════════════════════════════════════
 // BACKEND-DRIVEN CHECKOUT & ORDER CREATION (Pilar 1)
 // ═══════════════════════════════════════════════════
-exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, res) => {
+// Makes order creation safe to retry. If the connection drops after the server created the
+// order, the app used to show "Error de conexión" and the retry created a SECOND order. The app
+// now sends a clientRequestId that stays the same across retries of one checkout; the first
+// successful response is stored and replayed to any retry with that id.
+function withOrderIdempotency(handler) {
+  return async (req, res) => {
+    const requestId = req.body && req.body.clientRequestId;
+    const authHeader = req.headers.authorization || "";
+    if (req.method !== "POST" || typeof requestId !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId) || !authHeader.startsWith("Bearer ")) {
+      return handler(req, res);
+    }
+
+    let uid;
+    try {
+      uid = (await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1])).uid;
+    } catch (err) {
+      return handler(req, res); // the handler answers 401
+    }
+
+    const ref = db.collection("orderRequests").doc(`${uid}_${requestId}`);
+    try {
+      await ref.create({ uid, status: "processing", createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    } catch (err) {
+      const snap = await ref.get();
+      const data = snap.exists ? snap.data() : null;
+      if (data && data.status === "done" && data.response) {
+        logger.info(`[Idempotency] Replaying stored response for request ${requestId} (uid ${uid}).`);
+        return res.status(200).json(data.response);
+      }
+      const startedMs = data && data.createdAt && data.createdAt.toMillis ? data.createdAt.toMillis() : 0;
+      if (data && data.status === "processing" && Date.now() - startedMs < 2 * 60 * 1000) {
+        return res.status(409).json({ error: "Tu pedido ya se está procesando. Esperá unos segundos.", inProgress: true });
+      }
+      // A stale claim (the instance died mid-request): take it over.
+      await ref.set({ uid, status: "processing", createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    }
+
+    let statusCode = 200;
+    const originalStatus = res.status.bind(res);
+    const originalJson = res.json.bind(res);
+    res.status = (code) => { statusCode = code; return originalStatus(code); };
+    res.json = (body) => {
+      const settle = statusCode >= 200 && statusCode < 300
+        ? ref.set({ status: "done", response: body, finishedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        : ref.delete();
+      // Awaited before answering: on Cloud Run the CPU is throttled once the response is sent.
+      return settle.catch(e => logger.warn("[Idempotency] Could not settle request:", e)).then(() => originalJson(body));
+    };
+
+    try {
+      await handler(req, res);
+    } catch (err) {
+      await ref.delete().catch(() => {});
+      throw err;
+    }
+  };
+}
+
+// Shipping fee for a commerce order. Must stay identical to calculateDynamicFee() +
+// getQuickDistance() in src/utils/geo.js: the server used a cheaper formula (no road factor,
+// no distance tiers, other defaults), so the price the customer saw was never really checked.
+function computeDeliveryFee(straightKm, settings) {
+  const distanceKm = straightKm * 1.25; // road correction factor, as in the app
+
+  const rules = Array.isArray(settings.deliveryDistanceRules) ? settings.deliveryDistanceRules : [];
+  const tier = [...rules].sort((a, b) => b.limitKm - a.limitKm).find(r => distanceKm >= r.limitKm);
+  if (tier) return Math.ceil(tier.price / 10) * 10;
+
+  const fixedKm = Number(settings.deliveryFixedThresholdKm) || 0;
+  const fixedPrice = Number(settings.deliveryFixedThresholdPrice) || 0;
+  if (fixedKm > 0 && fixedPrice > 0 && distanceKm >= fixedKm) return Math.ceil(fixedPrice / 10) * 10;
+
+  const base = Number(settings.deliveryBasePrice) || 1500;
+  const perKm = Number(settings.deliveryPricePerKm) || 300;
+  const min = Number(settings.deliveryMinPrice) || 1500;
+  return Math.ceil(Math.max(min, base + distanceKm * perKm) / 10) * 10;
+}
+
+// A tip only ever adds to the total: negative or absurd values from the app are dropped.
+function sanitizeTip(tip) {
+  const value = Math.round(Number(tip) || 0);
+  return value > 0 && value <= 1000000 ? value : 0;
+}
+
+// Unit price of a cart line computed from the product as stored, never from prices sent by
+// the app (those could be edited, even negative). Mirrors getItemUnitPrice() in
+// src/state.js: an option in 'replace' mode sets the base, the rest add on top. Options
+// that aren't in the product's own groups (shared flavors) carry no price.
+function secureUnitPrice(pData, clientOptions) {
+  const options = Array.isArray(clientOptions) ? clientOptions : [];
+  const groups = Array.isArray(pData.optionsGroups) ? pData.optionsGroups : [];
+  const norm = (v) => String(v || "").trim().toLowerCase();
+
+  const resolved = options.map(o => {
+    const group = groups.find(g => norm(g.name) === norm(o && o.groupName));
+    const stored = group && Array.isArray(group.options)
+      ? group.options.find(opt => norm(opt.name) === norm(o && o.name))
+      : null;
+    return {
+      price: stored ? Math.max(0, Number(stored.price) || 0) : 0,
+      qty: Math.min(99, Math.max(1, Number(o && o.qty) || 1)),
+      replace: Boolean(group && group.priceMode === "replace" && stored)
+    };
+  });
+
+  const replaceOption = resolved.find(o => o.replace);
+  const base = replaceOption ? replaceOption.price : (Number(pData.price) || 0);
+  const extras = resolved.reduce((sum, o) => (o === replaceOption ? sum : sum + o.price * o.qty), 0);
+  return base + extras;
+}
+
+exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 }, withOrderIdempotency(async (req, res) => {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed");
   }
@@ -2216,10 +2327,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
       // ---------------------------------------------
 
       // --- SECURE SHIPPING FEE VALIDATION ---
-      const basePriceVal = globalSettings.deliveryBasePrice !== undefined ? Number(globalSettings.deliveryBasePrice) : 350;
-      const pricePerKmVal = globalSettings.deliveryPricePerKm !== undefined ? Number(globalSettings.deliveryPricePerKm) : 120;
-      const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
-      const extraStopFeeVal = globalSettings.deliveryExtraStopFee !== undefined ? Number(globalSettings.deliveryExtraStopFee) : 200;
+      const extraStopFeeVal = Number(globalSettings.deliveryExtraStopFee) || 500;
 
       const individualFees = [];
       const clientLat = deliveryCoords && (deliveryCoords.lat !== undefined ? deliveryCoords.lat : deliveryCoords.latitude);
@@ -2232,13 +2340,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
             const cLat = cData.coords.lat !== undefined ? cData.coords.lat : cData.coords.latitude;
             const cLng = cData.coords.lng !== undefined ? cData.coords.lng : cData.coords.longitude;
             if (cLat !== undefined && cLng !== undefined) {
-              const distance = getDistance(clientLat, clientLng, cLat, cLng);
-              let rawFee = basePriceVal + (distance * pricePerKmVal);
-              if (rawFee < minPriceVal) {
-                rawFee = minPriceVal;
-              }
-              const roundedFee = Math.ceil(rawFee / 10) * 10;
-              individualFees.push(roundedFee);
+              individualFees.push(computeDeliveryFee(getDistance(clientLat, clientLng, cLat, cLng), globalSettings));
             }
           }
         }
@@ -2256,16 +2358,17 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
           const maxIndividualFee = Math.max(...individualFees);
           calculatedDeliveryFee = maxIndividualFee + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
         } else {
-          calculatedDeliveryFee = minPriceVal + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
+          calculatedDeliveryFee = (Number(globalSettings.deliveryMinPrice) || 1500) + (commerceEntries.length - 1) * extraStopFeeVal + activeRainSurcharge;
         }
         activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, calculatedDeliveryFee);
         activeDriverIncentive = calculateScheduleSurcharge(globalSettings.driverIncentiveConfig, calculatedDeliveryFee);
 
-        driverTip = Number(tip || 0);
+        driverTip = sanitizeTip(tip);
         totalCalculatedDelivery = calculatedDeliveryFee + driverTip + activeNightSurcharge;
 
         finalDeliveryCost = Number(totalDelivery || 0);
-        if (finalDeliveryCost < 0.9 * totalCalculatedDelivery) {
+        // Same formula as the app now, so only rounding can differ: 3% margin, not 10%.
+        if (finalDeliveryCost < 0.97 * totalCalculatedDelivery) {
           logger.warn(`Shipping fee tampering detected! Client sent totalDelivery: ${finalDeliveryCost}, calculated: ${totalCalculatedDelivery}. Overwriting.`);
           finalDeliveryCost = totalCalculatedDelivery;
         }
@@ -2288,7 +2391,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
         const subProductsTotal = g.items.reduce((s, item, idx) => {
           const pSnap = pDocs[idx];
           const pData = pSnap.data();
-          const basePrice = (pData.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+          const basePrice = secureUnitPrice(pData, item.options);
 
           const offer = activeOffers.find(o => 
             o.active && 
@@ -2393,7 +2496,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
           items: g.items.map((item, idx) => {
             const pSnap = pDocs[idx];
             const pData = pSnap.data();
-            const basePrice = (pData.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+            const basePrice = secureUnitPrice(pData, item.options);
 
             const offer = activeOffers.find(o => 
               o.active && 
@@ -2425,7 +2528,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
           }),
           subtotal: subProductsTotal,
           deliveryCost: subDeliveryCost,
-          tip: i === 0 ? Number(tip || 0) : 0,
+          tip: i === 0 ? sanitizeTip(tip) : 0,
           isRaining: isRaining,
           rainSurcharge: i === 0 ? activeRainSurcharge : 0,
           nightSurcharge: i === 0 ? activeNightSurcharge : 0,
@@ -2531,9 +2634,9 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, re
     logger.error("Create Order Error:", error);
     res.status(500).json({ error: error.message });
   }
-});
+}));
 
-exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (req, res) => {
+exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 }, withOrderIdempotency(async (req, res) => {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed");
   }
@@ -2743,7 +2846,13 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
         finalCouponDiscount = 0;
       }
 
-      const rawTotal = subtotalVal + finalAppUsageFee + Number(extraStopsFee || 0) + Number(tip || 0) - finalCouponDiscount;
+      // Tip and extra stops came straight from the app and could be negative, lowering the
+      // total. Extra stops are recomputed like the app does; the tip can only add.
+      const secureStopsCount = Math.min(10, Math.max(1, Math.floor(Number(stopsCount) || 1)));
+      const extraStopUnitFee = globalSettings.deliveryExtraStopFee !== undefined ? Number(globalSettings.deliveryExtraStopFee) : 500;
+      const secureExtraStopsFee = (secureStopsCount - 1) * extraStopUnitFee;
+      const secureTip = sanitizeTip(tip);
+      const rawTotal = subtotalVal + finalAppUsageFee + secureExtraStopsFee + secureTip - finalCouponDiscount;
       const finalTotal = Math.max(0, Math.ceil(rawTotal));
 
       // Extract address notes from deliveryAddress if formatted as "Address (Detalle: Notes)"
@@ -2786,14 +2895,14 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
         nightSurcharge: activeNightSurcharge,
         purchaseFee: finalPurchaseFee,
         appUsageFee: finalAppUsageFee,
-        extraStopsFee: Number(extraStopsFee || 0),
-        stopsCount: Number(stopsCount || 1),
+        extraStopsFee: secureExtraStopsFee,
+        stopsCount: secureStopsCount,
         total: finalTotal,
         status: 'pending',
         paymentMethod: paymentMethod || 'efectivo',
         paymentStatus: 'pending',
         verificationCode,
-        tip: Number(tip || 0),
+        tip: secureTip,
         couponCode: couponCode || null,
         couponDiscount: finalCouponDiscount,
         directDriverUid: directDriverUid && directDriverUid !== 'rotation' ? directDriverUid : null,
@@ -2837,7 +2946,7 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15 }, async (re
     logger.error("Create Favor Order Error:", error);
     res.status(500).json({ error: error.message });
   }
-});
+}));
 
 /**
  * Endpoint: Send customized, segmented push notifications to devices via Pub/Sub Topics (Admin only)

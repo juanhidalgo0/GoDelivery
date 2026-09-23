@@ -1149,7 +1149,6 @@ async function createFavorOrder(data) {
   
   const user = auth.currentUser;
   if (!user) throw new Error('Usuario no autenticado');
-  const idToken = await user.getIdToken();
 
   const body = {
     type: data.type,
@@ -1185,21 +1184,16 @@ async function createFavorOrder(data) {
     body.goCashType = data.goCashType;
   }
 
-  const response = await fetch('https://us-central1-godelivery-magdalena.cloudfunctions.net/createFavorOrder', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${idToken}`
-    },
-    body: JSON.stringify(body)
-  });
-
-  if (!response.ok) {
-    const errData = await response.json();
-    throw new Error(errData.error || 'Error al procesar el favor en el servidor');
+  // Timeout, safe retries and no duplicate favors on a dropped connection (see order-request.js).
+  const { postOrderRequest } = await import('../utils/order-request.js');
+  const resData = await postOrderRequest(
+    'https://us-central1-godelivery-magdalena.cloudfunctions.net/createFavorOrder',
+    body,
+    () => user.getIdToken()
+  );
+  if (!resData.orderId && !resData.broadcastId) {
+    throw new Error('No pudimos confirmar tu pedido. Revisá "Mis pedidos" antes de volver a intentarlo.');
   }
-
-  const resData = await response.json();
 
   // Save last address to Firestore
   return resData.orderId;

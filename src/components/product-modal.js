@@ -522,7 +522,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           <span class="pm-main-qty-val">${qty}</span>
           <button class="pm-main-qty-btn" id="pm-qty-plus">${icon('plus', 18)}</button>
         </div>
-        <button class="pm-add-btn" id="pm-add-btn" ${isAddDisabled ? 'disabled style="background: #cbd5e1; color: #94a3b8; cursor: not-allowed; justify-content: center; width: 100%; display: flex; border: none; box-shadow: none;"' : 'style="display: flex; align-items: center; justify-content: space-between; gap: 8px;"'}>
+        <button class="pm-add-btn" id="pm-add-btn" ${(isAddDisabled && !(isCommerceOpen && !isOutOfStock && missingRequired)) ? 'disabled ' : ''}${isAddDisabled ? 'style="background: #cbd5e1; color: #94a3b8; cursor: not-allowed; justify-content: center; width: 100%; display: flex; border: none; box-shadow: none;"' : 'style="display: flex; align-items: center; justify-content: space-between; gap: 8px;"'}>
           ${btnText}
         </button>
       </div>
@@ -637,7 +637,16 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     modalContent.querySelector('#pm-add-btn').onclick = () => {
       if (isAddDisabled) {
         if (missingRequired) {
-          showToast(missingRequiredFlavors ? 'Por favor elegí los sabores antes de agregar al carrito.' : 'Por favor completá las opciones obligatorias.', 'warning');
+          // The button used to be `disabled`, so tapping it did nothing and never said what was
+          // missing. Now it takes the customer to the first required group left to choose.
+          showToast(missingRequiredFlavors ? 'Elegí los sabores para poder agregarlo.' : 'Te falta elegir una opción obligatoria.', 'warning');
+          const firstMissingIdx = optionsGroups.findIndex(group => group.required &&
+            selectedOptions.filter(o => o.groupName === group.name).reduce((sum, o) => sum + (o.qty || 1), 0) === 0);
+          const groupEl = modalContent.querySelector(`.pm-group[data-group-idx="${firstMissingIdx}"]`);
+          if (groupEl) {
+            groupEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            groupEl.animate?.([{ backgroundColor: 'rgba(225,29,72,0.12)' }, { backgroundColor: 'transparent' }], { duration: 1200 });
+          }
         }
         return;
       }
@@ -647,7 +656,9 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       }
       if (isOutOfStock) return;
 
-      addToCart(product, comercioId, comercioName, qty, selectedOptions, productNotes);
+      // activeProduct carries the price/stock fetched when the modal opened; `product` is the
+      // (possibly stale) copy from the list, and the cart must not keep the old price.
+      addToCart(activeProduct, comercioId, comercioName, qty, selectedOptions, productNotes);
       closeModal();
       showToast(`${qty} x ${product.name} al carrito`, 'success');
 

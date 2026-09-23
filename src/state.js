@@ -413,10 +413,25 @@ export function clearCart() {
   notify('appliedCoupon');
 }
 
+// Unit price of a cart line, exactly as the product modal shows it: an option in 'replace'
+// mode sets the base price, the rest add on top. The cart, the checkout and the server
+// (functions/index.js secureUnitPrice) must all agree with this, or the customer sees one
+// total and is charged another.
+export function getItemUnitPrice(item) {
+  const options = Array.isArray(item?.options) ? item.options : [];
+  const replaceOption = options.find(o => o && o.priceMode === 'replace');
+  const base = replaceOption ? (Number(replaceOption.price) || 0) : (Number(item?.product?.price) || 0);
+  const extras = options.reduce((sum, o) => {
+    if (!o || o === replaceOption) return sum;
+    return sum + Math.max(0, Number(o.price) || 0) * (Number(o.qty) || 1);
+  }, 0);
+  return base + extras;
+}
+
 export function getCartTotal() {
   const activeOffers = state.activeOffers || [];
   return state.cart.reduce((sum, item) => {
-    const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+    const basePrice = getItemUnitPrice(item);
     
     // Find active offer
     const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
@@ -431,6 +446,54 @@ export function getCartTotal() {
     }
     return sum + basePrice * item.qty;
   }, 0);
+}
+
+// The cart keeps a copy of each product from when it was added. If the commerce changed a
+// price or ran out since then, the customer saw one total and the server charged another (or
+// rejected the order at the very end). This re-reads the products and fixes the cart up front.
+let lastCartRefreshAt = 0;
+export async function refreshCartProducts({ force = false } = {}) {
+  const result = { removed: [], changed: [] };
+  if (state.cart.length === 0) return result;
+  if (!force && Date.now() - lastCartRefreshAt < 60 * 1000) return result;
+  lastCartRefreshAt = Date.now();
+
+  const keys = [...new Set(state.cart.map(i => `${i.comercioId}/${i.product?.id}`))].filter(k => !k.endsWith('/undefined'));
+  const fresh = new Map();
+  await Promise.all(keys.map(async (key) => {
+    const [comercioId, productId] = key.split('/');
+    try {
+      const snap = await getDoc(doc(db, 'comercios', comercioId, 'products', productId));
+      fresh.set(key, snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    } catch (e) {
+      // Offline or denied: keep the item as is, the server still validates at checkout.
+    }
+  }));
+
+  let touched = false;
+  state.cart = state.cart.filter(item => {
+    const key = `${item.comercioId}/${item.product?.id}`;
+    if (!fresh.has(key)) return true;
+    const latest = fresh.get(key);
+    const soldOut = latest && latest.stockMode === 'limited' && !latest.useGlobalFlavors && (Number(latest.stockQuantity) || 0) <= 0;
+    if (!latest || latest.isAvailable === false || soldOut) {
+      result.removed.push(item.product?.name || 'Un producto');
+      touched = true;
+      return false;
+    }
+    if (Number(latest.price) !== Number(item.product.price)) {
+      result.changed.push(item.product?.name || latest.name || 'Un producto');
+      touched = true;
+    }
+    item.product = { ...item.product, ...latest };
+    return true;
+  });
+
+  if (touched) {
+    saveCart();
+    notify('cart');
+  }
+  return result;
 }
 
 export function getCartCount() {

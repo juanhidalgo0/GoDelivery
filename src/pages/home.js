@@ -417,11 +417,16 @@ export async function renderHome(content) {
   // on every home load (was previously unbounded — see docs/plan for follow-up geoquery work).
   const comerciosQuery = query(collection(db, 'comercios'), limit(150));
 
-  // Parallel getDocs fetch as immediate fallback for iOS Safari/Capacitor WebKit
+  // Fallback for iOS Safari/Capacitor WebKit when the live listener stalls. It used to run in
+  // parallel on every home visit, reading the same 150 comercios twice; now it only fires if
+  // the listener hasn't delivered anything after 1.5s.
+  let listenerDelivered = false;
+  setTimeout(() => {
+  if (listenerDelivered) return;
   getDocs(comerciosQuery).then((comSnap) => {
     if (comSnap.docs && comSnap.docs.length > 0) {
       const fetchedComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (comercios.length === 0 || isLoadingComercios) {
+      if (!listenerDelivered) {
         comercios = fetchedComercios;
         isLoadingComercios = false;
         clearTimeout(homeSafetyTimer);
@@ -432,11 +437,13 @@ export async function renderHome(content) {
   }).catch((err) => {
     console.warn('[Parallel getDocs comercios warning]', err);
   });
+  }, 1500);
 
   // Set up live snapshot listener for comercios IMMEDIATELY (optimized without metadata duplication)
   let lastComerciosSignature = '';
   try {
     unsubComercios = onSnapshot(comerciosQuery, (comSnap) => {
+      listenerDelivered = true;
       clearTimeout(homeSafetyTimer);
       const isFromCache = comSnap.metadata.fromCache;
       const newComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));

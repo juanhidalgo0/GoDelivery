@@ -1,5 +1,5 @@
 // GoDelivery — Cart Page
-import { getState, setState, getCartByComercio, getCartTotal, getCartCount, updateCartQty, removeFromCart, clearCart, subscribe, setDeliveryAddress } from '../state.js';
+import { getState, setState, getCartByComercio, getCartTotal, getCartCount, updateCartQty, removeFromCart, clearCart, subscribe, setDeliveryAddress, getItemUnitPrice } from '../state.js';
 import { formatPrice, calculateScheduleSurcharge } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 window.showToast = showToast; // Global access for inline modal events
@@ -50,6 +50,8 @@ function escapeHtmlAttr(str) {
 export async function renderCart(content, isDirectMode = false) {
   const hash = window.location.hash || '';
   const isCartRoute = hash === '#/cart' || hash.startsWith('#/cart?') || hash.includes('/cart');
+
+  if (isCartRoute) announceCartRefresh(false);
 
   if (!content) {
     if (isCartRoute) {
@@ -174,7 +176,7 @@ export async function renderCart(content, isDirectMode = false) {
         }
       }
       
-      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const basePrice = getItemUnitPrice(item);
       const originalTotal = basePrice * item.qty;
       let finalTotal = originalTotal;
       
@@ -206,7 +208,7 @@ export async function renderCart(content, isDirectMode = false) {
     });
     
     const totalProducts = cart.reduce((sum, item) => {
-      const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+      const basePrice = getItemUnitPrice(item);
       const originalTotal = basePrice * item.qty;
       let finalTotal = originalTotal;
       const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
@@ -262,7 +264,7 @@ export async function renderCart(content, isDirectMode = false) {
         const targetProductsTotal = cart
           .filter(item => !coupon.comercioId || item.comercioId === coupon.comercioId)
           .reduce((sum, item) => {
-            const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+            const basePrice = getItemUnitPrice(item);
             const originalTotal = basePrice * item.qty;
             let finalTotal = originalTotal;
             const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
@@ -747,7 +749,7 @@ function renderCartContent(content) {
               </div>
               
               ${group.items.map(item => {
-                const basePrice = (item.product.price || 0) + (item.options || []).reduce((os, o) => os + (o.price * (o.qty || 1) || 0), 0);
+                const basePrice = getItemUnitPrice(item);
                 const activeOffers = getState().activeOffers || [];
                 const offer = activeOffers.find(o => o.active && o.comercioId === comercioId && o.productIds && o.productIds.includes(item.product.id));
 
@@ -965,7 +967,7 @@ function renderCartContent(content) {
                 targetProductsTotal = cart
                   .filter(item => item.comercioId === merchantId)
                   .reduce((sum, item) => {
-                    const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                    const basePrice = getItemUnitPrice(item);
                     const activeOffers = getState().activeOffers || [];
                     const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
                     if (offer) {
@@ -984,7 +986,7 @@ function renderCartContent(content) {
                 targetProductsTotal = cart
                   .filter(item => appliedCoupon.comercioIds.includes(item.comercioId))
                   .reduce((sum, item) => {
-                    const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                    const basePrice = getItemUnitPrice(item);
                     const activeOffers = getState().activeOffers || [];
                     const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
                     if (offer) {
@@ -1949,7 +1951,7 @@ function openCouponModal() {
             targetProductsTotal = cart
               .filter(item => item.comercioId === merchantId)
               .reduce((sum, item) => {
-                const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                const basePrice = getItemUnitPrice(item);
                 const activeOffers = getState().activeOffers || [];
                 const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
                 if (offer) {
@@ -1968,7 +1970,7 @@ function openCouponModal() {
             targetProductsTotal = cart
               .filter(item => cData.comercioIds.includes(item.comercioId))
               .reduce((sum, item) => {
-                const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+                const basePrice = getItemUnitPrice(item);
                 const activeOffers = getState().activeOffers || [];
                 const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
                 if (offer) {
@@ -2078,7 +2080,34 @@ async function checkOnlineDrivers() {
   }
 }
 
+function describeNames(names) {
+  const unique = [...new Set(names)];
+  return unique.length <= 2 ? unique.join(' y ') : `${unique.slice(0, 2).join(', ')} y ${unique.length - 2} más`;
+}
+
+async function announceCartRefresh(force) {
+  try {
+    const { refreshCartProducts } = await import('../state.js');
+    const { removed, changed } = await refreshCartProducts({ force });
+    if (removed.length === 0 && changed.length === 0) return false;
+    const { showToast } = await import('../components/toast.js');
+    if (removed.length) showToast(`Sacamos del carrito lo que ya no está disponible: ${describeNames(removed)}.`, 'warning', 6000);
+    if (changed.length) showToast(`Actualizamos el precio de ${describeNames(changed)}. Revisá el total.`, 'info', 6000);
+    return true;
+  } catch (e) {
+    console.warn('[Cart] Could not refresh products:', e);
+    return false;
+  }
+}
+
 async function openCheckoutConfirmationModal() {
+  // Last check before paying: if a price changed or something sold out, stop here so the
+  // customer confirms the real total instead of finding out from the server's error.
+  if (await announceCartRefresh(true)) {
+    isSubmitting = false;
+    return;
+  }
+
   if (!selectedPaymentMethod) {
     const { showToast } = await import('../components/toast.js');
     showToast('Por favor, selecciona un método de pago', 'warning');
@@ -2180,7 +2209,7 @@ async function openCheckoutConfirmationModal() {
         targetProductsTotal = cart
           .filter(item => item.comercioId === merchantId)
           .reduce((sum, item) => {
-            const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+            const basePrice = getItemUnitPrice(item);
             const activeOffers = getState().activeOffers || [];
             const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
             if (offer) {
@@ -2199,7 +2228,7 @@ async function openCheckoutConfirmationModal() {
         targetProductsTotal = cart
           .filter(item => appliedCoupon.comercioIds.includes(item.comercioId))
           .reduce((sum, item) => {
-            const basePrice = (item.product.price || 0) + (item.options || []).reduce((s, opt) => s + (opt.price * (opt.qty || 1) || 0), 0);
+            const basePrice = getItemUnitPrice(item);
             const activeOffers = getState().activeOffers || [];
             const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
             if (offer) {
@@ -2752,12 +2781,8 @@ async function openCheckoutConfirmationModal() {
   const submitBtn = modalContent.querySelector('#confirm-submit-btn');
   submitBtn.onclick = async () => {
     if (!isTakeaway) {
-      const isStillAvailable = await checkOnlineDrivers();
-      if (!isStillAvailable) {
-        showToast('Sin repartidores disponibles. No es posible confirmar el pedido en este momento.', 'error');
-        close();
-        return;
-      }
+      // Driver availability was checked when this modal opened and createOrder checks it again
+      // on the server; a third lookup here only made the customer wait after tapping.
       if (!getState().deliveryAddress) {
         showToast('Por favor selecciona una dirección de entrega.', 'warning');
         return;
@@ -2781,7 +2806,6 @@ async function openCheckoutConfirmationModal() {
     try {
       const bundleId = `BNDL-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
       const { redeemedPoints } = getState();
-      const idToken = await auth.currentUser.getIdToken();
       
       // Fetch latest coordinates and address from state to ensure no race condition
       const finalAddress = isTakeaway ? 'Retiro en el local' : (getState().deliveryAddress || 'Retiro en el local');
@@ -2809,13 +2833,8 @@ async function openCheckoutConfirmationModal() {
         }
       }
 
-      const response = await fetch('https://us-central1-godelivery-magdalena.cloudfunctions.net/createOrder', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify({
+      const { postOrderRequest } = await import('../utils/order-request.js');
+      const resData = await postOrderRequest('https://us-central1-godelivery-magdalena.cloudfunctions.net/createOrder', {
           cart: getState().cart,
           address: finalAddress,
           addressNotes: finalAddressNotes,
@@ -2835,47 +2854,22 @@ async function openCheckoutConfirmationModal() {
           deliveryType: selectedDeliveryType,
           source: isDirectStoreCart ? 'catalogo_whatsapp' : 'app',
           isDirectOrder: isDirectStoreCart
-        })
-      });
+      }, () => auth.currentUser.getIdToken());
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'Error al procesar el pedido en el servidor');
-      }
-
-      const resData = await response.json();
       const result = resData.orders; // Returns [{ docId, orderId, commerceId, total }]
-
-      // Save last address to Firestore if not takeaway
-      if (auth.currentUser && !isTakeaway) {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        const { db } = await import('../firebase.js');
-        const userRef = doc(db, 'users', auth.currentUser.uid);
-        try {
-          await updateDoc(userRef, {
-            lastAddress: {
-              address: finalAddress,
-              notes: finalAddressNotes || '',
-              coords: finalCoords || null
-            }
-          });
-        } catch (err) {
-          console.error('Error saving lastAddress to user profile:', err);
-        }
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error('No pudimos confirmar tu pedido. Revisá "Mis pedidos" antes de volver a intentarlo.');
       }
 
-      if (finalAddressNotes && !isTakeaway) {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        const { db } = await import('../firebase.js');
-        for (const createdOrder of result) {
-          try {
-            await updateDoc(doc(db, 'orders', createdOrder.docId), {
-              addressNotes: finalAddressNotes
-            });
-          } catch (updateErr) {
-            console.error('Error updating addressNotes on order:', updateErr);
-          }
-        }
+      // Remember the address for next time without making the customer wait for it
+      // (the order already carries addressNotes: the server stores them).
+      if (auth.currentUser && !isTakeaway) {
+        import('firebase/firestore').then(async ({ doc, updateDoc }) => {
+          const { db } = await import('../firebase.js');
+          await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+            lastAddress: { address: finalAddress, notes: finalAddressNotes || '', coords: finalCoords || null }
+          });
+        }).catch(err => console.error('Error saving lastAddress to user profile:', err));
       }
 
       // Close confirm modal
@@ -2895,14 +2889,14 @@ async function openCheckoutConfirmationModal() {
 
       showToast('¡Pedido realizado con éxito!', 'success');
       
-      // Delay redirection (2000ms) so the user can enjoy the gorgeous confetti rain and success chime
+      // Short pause so the confetti registers, then straight to live tracking.
       setTimeout(() => {
         if (isDirectStoreCart && result[0]?.commerceId) {
           location.hash = `#/tienda/${result[0].commerceId}/tracking/${result[0].docId}`;
         } else {
           location.hash = `#/pedido/${result[0].docId}`;
         }
-      }, 2000);
+      }, 900);
 
     } catch (err) {
       isSubmitting = false;
@@ -2919,16 +2913,15 @@ async function openCheckoutConfirmationModal() {
                             err.message.toLowerCase().includes('coupon');
       const currentCoupon = isCouponError ? getState().appliedCoupon : null;
       
-      const isConnectionError = err.message.includes('Failed to fetch') || 
-                                err.message.includes('network') || 
-                                err.message.includes('NetworkError') ||
-                                err.message === 'Error al procesar el pedido en el servidor';
+      const isConnectionError = err.isConnection === true ||
+                                err.message.includes('Failed to fetch') ||
+                                err.message.includes('network') ||
+                                err.message.includes('NetworkError');
                                 
       const errorTitle = isConnectionError ? '⚠️ Error de Conexión' : '⚠️ Error al procesar pedido';
       const errorIcon = isConnectionError ? '📶' : '❌';
-      const errorMessage = isConnectionError 
-        ? 'No pudimos enviar tu pedido al servidor debido a un problema de conexión. Por favor, verifica tu internet e intentalo nuevamente.'
-        : err.message;
+      // Connection errors from postOrderRequest already explain that retrying won't duplicate.
+      const errorMessage = err.message || 'No pudimos procesar tu pedido. Probá de nuevo.';
         
       const retryText = isCouponError ? 'INTENTAR SIN CUPÓN' : 'INTENTAR DE NUEVO';
       

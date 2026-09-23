@@ -1327,12 +1327,7 @@ async function init() {
       // Fetch GoMarket Logo for Banner and Auto-Sync new Assets in Firestore (Non-blocking background)
       (async () => {
         try {
-          const { collection, getDocs } = await import('firebase/firestore');
-          const comSnap = await getDocs(collection(db, 'comercios'));
-          const gm = comSnap.docs.find(d => {
-            const n = (d.data().name || '').toLowerCase();
-            return n.includes('go!') && n.includes('market');
-          });
+          const gm = await findGoMarketDoc();
           if (gm) {
             const data = gm.data();
             localStorage.setItem('gd_gomarket_id', gm.id);
@@ -1373,11 +1368,7 @@ async function init() {
             let comId = null;
 
             if (isAdmin()) {
-              const comSnap = await getDocs(collection(db, 'comercios'));
-              const gm = comSnap.docs.find(d => {
-                const n = (d.data().name || '').toLowerCase();
-                return n.includes('go!') && n.includes('market');
-              });
+              const gm = await findGoMarketDoc();
               if (gm) {
                 comId = gm.id;
                 import('./state.js').then(m => m.setState('currentComercio', { id: gm.id, ...gm.data() }));
@@ -1799,3 +1790,27 @@ function scheduleIdlePrefetch() {
 console.log('🚀 Go Delivery v1.3.4 - Ready');
 init();
 scheduleIdlePrefetch();
+
+
+// GO! Market's doc, found by name. Every app start used to read the WHOLE comercios collection
+// to find it; the id is cached, so after the first time this is a single document read.
+async function findGoMarketDoc() {
+  const { collection, getDocs, doc, getDoc } = await import('firebase/firestore');
+  const isGoMarket = (d) => {
+    const n = (d.data()?.name || '').toLowerCase();
+    return n.includes('go!') && n.includes('market');
+  };
+
+  const cachedId = localStorage.getItem('gd_gomarket_id');
+  if (cachedId) {
+    try {
+      const snap = await getDoc(doc(db, 'comercios', cachedId));
+      if (snap.exists() && isGoMarket(snap)) return snap;
+    } catch (e) {}
+  }
+
+  const comSnap = await getDocs(collection(db, 'comercios'));
+  const gm = comSnap.docs.find(isGoMarket) || null;
+  if (gm) localStorage.setItem('gd_gomarket_id', gm.id);
+  return gm;
+}
