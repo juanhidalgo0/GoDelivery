@@ -1000,7 +1000,9 @@ export async function showMandadoForm(targetContainer = null) {
     }
 
     const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-    const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+    // Same as the total shown on screen: the night surcharge was missing at confirm time.
+    const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedFee);
+    const total = Math.max(calculatedFee + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
 
     verifyDriversAndConfirm({
       title: '¿Confirmar encomienda?',
@@ -1876,7 +1878,9 @@ export async function showCompraForm(targetContainer = null) {
     }
 
     const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-    const total = Math.max(subtotal + rainSurcharge + appFee - couponDiscount - bannerDiscount + selectedTip, 0);
+    // Same as the total shown on screen: the night surcharge was missing at confirm time.
+    const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedDistFee);
+    const total = Math.max(subtotal + rainSurcharge + nightSurcharge + appFee - couponDiscount - bannerDiscount + selectedTip, 0);
     const stopsLabel = stopsCount === 1 ? '1 comercio' : `${stopsCount} comercios`;
 
     let packagedDetails = stopsList.map((stop, idx) => `🏪 **${idx + 1}. Comercio:** ${stop.store}\n📦 **Pedido:** ${stop.items}`).join('\n\n');
@@ -2245,7 +2249,9 @@ export async function showGoCashForm(targetContainer = null) {
     }
 
     const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-    const total = Math.max(calculatedFee + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+    // Same as the total shown on screen: the night surcharge was missing at confirm time.
+    const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, calculatedFee);
+    const total = Math.max(calculatedFee + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
     const typeText = selectedType === 'cash_to_transfer' ? 'Efectivo a Transferencia' : 'Transferencia a Efectivo';
     
     verifyDriversAndConfirm({
@@ -3133,7 +3139,9 @@ export async function showPagoServiciosForm(targetContainer = null) {
 
     const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
     const logisticsCost = baseFee + calculatedDistFee;
-    const total = Math.max(logisticsCost + rainSurcharge + appFee - couponDiscount + selectedTip, 0);
+    // Same as the total shown on screen: the night surcharge was missing at confirm time.
+    const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, logisticsCost);
+    const total = Math.max(logisticsCost + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
 
     const deliveryTypeLabel = receiptDeliveryType === 'physical' ? 'Comprobante Físico a Domicilio' : 'Foto Digital por Chat';
     const detailPayload = `🏢 **Servicio:** ${selectedService}\n📄 **Facturas & Código:** ${detailsText}\n📩 **Entrega Comprobante:** ${deliveryTypeLabel}`;

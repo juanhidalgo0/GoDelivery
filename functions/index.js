@@ -2765,31 +2765,26 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
       if (type === 'pagodeservicios' && receiptDeliveryType === 'digital') {
          secureDeliveryCost = 0;
       } else if (pLat !== undefined && pLng !== undefined && dLat !== undefined && dLng !== undefined) {
-         const distance = getDistance(pLat, pLng, dLat, dLng);
-         const basePriceVal = globalSettings.deliveryBasePrice !== undefined ? Number(globalSettings.deliveryBasePrice) : 350;
-         const pricePerKmVal = globalSettings.deliveryPricePerKm !== undefined ? Number(globalSettings.deliveryPricePerKm) : 120;
-         const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
-         
-         let rawFee = basePriceVal + (distance * pricePerKmVal);
-         if (rawFee < minPriceVal) {
-           rawFee = minPriceVal;
-         }
-         secureDeliveryCost = Math.ceil(rawFee / 10) * 10;
+         // Mandados have no real pickup point: the app sends the town center as pickupCoords,
+         // so this is center -> customer, with the same formula the app shows.
+         secureDeliveryCost = computeDeliveryFee(getDistance(pLat, pLng, dLat, dLng), globalSettings);
       } else {
-         const minPriceVal = globalSettings.deliveryMinPrice !== undefined ? Number(globalSettings.deliveryMinPrice) : 400;
-         secureDeliveryCost = minPriceVal;
+         secureDeliveryCost = Number(globalSettings.deliveryMinPrice) || 1500;
       }
 
       const activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, secureDeliveryCost);
 
-      if (secureDeliveryCost > 0) {
-        secureDeliveryCost += activeRainSurcharge + activeNightSurcharge;
-      }
-
-      let finalDeliveryCost = Number(deliveryCost);
-      if (finalDeliveryCost < 0.9 * secureDeliveryCost) {
+      // The app sends the BASE fee and shows rain and night surcharges on top of it. Validate the
+      // base, then always add both, so the charge matches what the customer saw. (Comparing the
+      // base against base+surcharges overwrote some orders and let others skip the surcharges.)
+      let finalDeliveryCost = Math.max(0, Number(deliveryCost) || 0);
+      if (finalDeliveryCost < 0.97 * secureDeliveryCost) {
         logger.warn(`GoFavor Delivery fee tampering detected! Client: ${finalDeliveryCost}, calculated: ${secureDeliveryCost}. Overwriting.`);
         finalDeliveryCost = secureDeliveryCost;
+      }
+      const validatedBaseFee = finalDeliveryCost;
+      if (finalDeliveryCost > 0) {
+        finalDeliveryCost += activeRainSurcharge + activeNightSurcharge;
       }
 
       const securePurchaseFee = type === 'compra' 
@@ -2804,9 +2799,15 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         finalPurchaseFee = 0;
       }
 
-      const appUsageFeeRate = globalSettings.appUsageFeeRate !== undefined ? Number(globalSettings.appUsageFeeRate) : 0.05;
       const subtotalVal = finalDeliveryCost + finalPurchaseFee;
-      const secureAppUsageFee = Math.ceil((subtotalVal * appUsageFeeRate) / 10) * 10;
+      // Same fee config the app shows for services (servicesAppFeeConfig, 1.2% by default), not
+      // the 5% commerce rate: that one overwrote the fee shown to the customer with a higher
+      // one. Computed on the base fee, the smallest base any form uses, so it's a true floor.
+      const feeConfigs = globalSettings.servicesAppFeeConfig || {};
+      const feeConfig = (req.body.isGoCash === true ? feeConfigs.gocash : feeConfigs.gofavor) || { type: "percentage", value: 1.2 };
+      const secureAppUsageFee = feeConfig.type === "fixed"
+        ? Number(feeConfig.value) || 0
+        : Math.ceil((validatedBaseFee * ((Number(feeConfig.value) || 0) / 100)) / 10) * 10;
 
       let finalAppUsageFee = Number(appUsageFee || 0);
       if (finalAppUsageFee < 0.9 * secureAppUsageFee) {
@@ -2821,10 +2822,11 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         const couponVal = Number(couponData.value || 0);
 
         if (scope === 'shipping' || couponData.type === 'free_delivery') {
+          // Shipping coupons apply to the base fee, as in the app (not to rain/night surcharges).
           if (couponData.type === 'free_delivery') {
-            secureCouponDiscount = finalDeliveryCost;
+            secureCouponDiscount = validatedBaseFee;
           } else if (discountType === 'percentage') {
-            secureCouponDiscount = finalDeliveryCost * (couponVal / 100);
+            secureCouponDiscount = Math.floor(validatedBaseFee * (couponVal / 100));
           } else {
             secureCouponDiscount = couponVal;
           }
