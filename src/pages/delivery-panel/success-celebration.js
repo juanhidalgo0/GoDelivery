@@ -65,7 +65,13 @@ export async function showSuccessCelebration(orders, onFinish) {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: #0f172a;
+    color: ${isLight ? '#0f172a' : '#ffffff'};
+    /* Own copy of the driver theme tokens. The panel defines them on body.is-delivery-mode,
+       which isn't always set when this overlay opens; then every var() fell back to the
+       overlay's dark text on the dark card and nothing was readable in dark mode. */
+    --driver-text-primary: ${isLight ? '#0f172a' : '#ffffff'};
+    --driver-text-secondary: ${isLight ? '#64748b' : '#cbd5e1'};
+    --driver-accent-text: ${isLight ? '#e11d48' : '#fb7185'};
     font-family: var(--font-display, 'Outfit', sans-serif);
     opacity: 0;
     transition: opacity 0.5s cubic-bezier(0.19, 1, 0.22, 1);

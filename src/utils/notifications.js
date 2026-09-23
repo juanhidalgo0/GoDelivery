@@ -14,6 +14,141 @@ const VAPID_KEY = 'BM6qIHSE3GmXuZqlJvse3_tQ_B1Ymhz4A-5yiomDR7fFxgQuKNeln7q-MRETw
 let initialized = false;
 let listenersAttached = false;
 
+// The app loads its JS from Hosting, but native plugins live in the installed binary.
+// Builds published before the migration only ship @capacitor/push-notifications, and
+// calling @capacitor-firebase/messaging there fails. This picks whichever plugin the
+// binary has and exposes the @capacitor-firebase/messaging API shape for both.
+let nativePushPluginPromise = null;
+function getNativePushPlugin() {
+  if (!nativePushPluginPromise) {
+    nativePushPluginPromise = loadNativePushPlugin().catch(err => {
+      nativePushPluginPromise = null;
+      throw err;
+    });
+  }
+  return nativePushPluginPromise;
+}
+
+async function loadNativePushPlugin() {
+  const cap = window.Capacitor;
+  const hasFirebaseMessaging = typeof cap?.isPluginAvailable === 'function' && cap.isPluginAvailable('FirebaseMessaging');
+  if (hasFirebaseMessaging) {
+    const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
+    return FirebaseMessaging;
+  }
+
+  const { registerPlugin } = await import('@capacitor/core');
+  const Legacy = registerPlugin('PushNotifications');
+  const tokenWaiters = [];
+  Legacy.addListener('registration', (t) => {
+    tokenWaiters.splice(0).forEach(w => w.resolve(t?.value || null));
+  });
+  Legacy.addListener('registrationError', (err) => {
+    tokenWaiters.splice(0).forEach(w => w.reject(err));
+  });
+
+  return {
+    isLegacy: true,
+    checkPermissions: () => Legacy.checkPermissions(),
+    requestPermissions: () => Legacy.requestPermissions(),
+    createChannel: (channel) => Legacy.createChannel(channel),
+    registerActionTypes: (types) => Legacy.registerActionTypes(types),
+    addListener: (eventName, cb) => {
+      if (eventName === 'tokenReceived') {
+        return Legacy.addListener('registration', (t) => cb({ token: t?.value }));
+      }
+      if (eventName === 'notificationReceived') {
+        return Legacy.addListener('pushNotificationReceived', (n) => cb({ notification: n }));
+      }
+      if (eventName === 'notificationActionPerformed') {
+        return Legacy.addListener('pushNotificationActionPerformed', cb);
+      }
+      return Legacy.addListener(eventName, cb);
+    },
+    getToken: () => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Push registration timed out')), 15000);
+      tokenWaiters.push({
+        resolve: (token) => { clearTimeout(timer); resolve({ token }); },
+        reject: (err) => { clearTimeout(timer); reject(err); }
+      });
+      Legacy.register().catch(err => { clearTimeout(timer); reject(err); });
+    })
+  };
+}
+
+// Saves the device token for whoever is logged in *now* (not whoever was logged in when the
+// listeners were attached: drivers share phones and switch accounts).
+let lastSavedTokenKey = '';
+let lastSavedTokenAt = 0;
+async function saveNativeToken(tokenValue) {
+  if (!tokenValue) return;
+  try {
+    localStorage.setItem('gd_last_fcm_token', tokenValue);
+    localStorage.setItem('gd_fcm_registration_status', 'success');
+    localStorage.removeItem('gd_fcm_error');
+  } catch (e) {}
+
+  let owner = getState().user;
+  if (!owner) {
+    try {
+      const { auth } = await import('../firebase.js');
+      owner = auth.currentUser;
+    } catch (e) {}
+  }
+  if (!owner?.uid) return;
+
+  // getToken() and the registration event both deliver the same token on startup.
+  const saveKey = `${owner.uid}:${tokenValue}`;
+  if (saveKey === lastSavedTokenKey && Date.now() - lastSavedTokenAt < 60 * 1000) return;
+  lastSavedTokenKey = saveKey;
+  lastSavedTokenAt = Date.now();
+
+  const currentPlatform = window.Capacitor?.getPlatform ? window.Capacitor.getPlatform() : 'web';
+  await setDoc(doc(db, 'users', owner.uid, 'fcmTokens', tokenValue), {
+    token: tokenValue,
+    lastSession: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    platform: `${currentPlatform}-native`
+  }, { merge: true });
+
+  // Mirror token to user doc root to ensure fallback paths can query it
+  await setDoc(doc(db, 'users', owner.uid), {
+    lastFcmToken: tokenValue,
+    lastFcmTokenUpdatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+async function isOfferStillPendingForMe(data) {
+  const orderId = data?.orderId || data?.takeOrderId;
+  const uid = getState().user?.uid;
+  if (!orderId || !uid) return true; // can't tell: better to ring than to miss an offer
+  try {
+    const { getDoc } = await import('firebase/firestore');
+    const snap = await getDoc(doc(db, 'orders', orderId));
+    if (!snap.exists()) return false;
+    const o = snap.data();
+    return !o.driverId && o.queueTargetDriverId === uid;
+  } catch (e) {
+    return true;
+  }
+}
+
+/**
+ * Where native push stands on this device: 'granted', 'denied', 'prompt' or 'unsupported'
+ * (web / plugin missing). Used by the driver panel to warn drivers who won't get offers.
+ */
+export async function getNativePushPermission() {
+  const isNativeApp = window.Capacitor?.getPlatform && window.Capacitor.getPlatform() !== 'web';
+  if (!isNativeApp) return 'unsupported';
+  try {
+    const plugin = await getNativePushPlugin();
+    const status = await plugin.checkPermissions();
+    return status.receive || 'prompt';
+  } catch (e) {
+    return 'unsupported';
+  }
+}
+
 /**
  * Initialize push notifications after user login.
  * Requests permission, gets FCM token, saves to Firestore, listens for foreground messages.
@@ -39,7 +174,9 @@ export async function initPushNotifications() {
       // ultimo devuelve el token APNs crudo, y el backend envia con sendEachForMulticast, que
       // exige tokens FCM. Por eso ningun iPhone podia recibir push. Los dos plugins no pueden
       // convivir, asi que Android tambien pasa por aca (alli ya devolvia FCM, no cambia nada).
-      const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
+      // Los binarios publicados antes de la migracion solo traen el plugin viejo: ver
+      // getNativePushPlugin().
+      const FirebaseMessaging = await getNativePushPlugin();
       
       let permStatus = await FirebaseMessaging.checkPermissions();
       if (permStatus.receive !== 'granted') {
@@ -98,32 +235,29 @@ export async function initPushNotifications() {
         }
 
         // Las action buttons de ORDER_OFFER ahora se registran nativamente en AppDelegate.swift:
-        // @capacitor-firebase/messaging no expone registerActionTypes.
+        // @capacitor-firebase/messaging no expone registerActionTypes. Los binarios viejos
+        // (plugin legacy) todavia las necesitan desde JS.
+        if (FirebaseMessaging.isLegacy) {
+          try {
+            await FirebaseMessaging.registerActionTypes({
+              types: [{
+                id: 'ORDER_OFFER',
+                actions: [
+                  { id: 'ACCEPT_ORDER', title: '⚡ ACEPTAR PEDIDO', foreground: true },
+                  { id: 'VIEW_ORDER', title: 'Ver Detalles', foreground: true }
+                ]
+              }]
+            });
+          } catch (e) { console.warn('Action types registration error:', e); }
+        }
 
         if (!listenersAttached) {
           listenersAttached = true;
           
           FirebaseMessaging.addListener('tokenReceived', async (event) => {
-            const token = { value: event.token };
-            console.log('[Push] Native FCM token registration success:', token.value);
-            localStorage.setItem('gd_last_fcm_token', token.value);
-            localStorage.setItem('gd_fcm_registration_status', 'success');
-            localStorage.removeItem('gd_fcm_error');
-            // Forcing re-upload of admin/driver tokens on every boot/registration to repair missing profiles
+            console.log('[Push] Native FCM token refreshed');
             try {
-              const currentPlatform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'web';
-              await setDoc(doc(db, 'users', user.uid, 'fcmTokens', token.value), {
-                token: token.value,
-                lastSession: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                platform: `${currentPlatform}-native`
-              }, { merge: true });
-              
-              // Mirror token to user doc root to ensure fallback paths can query it
-              await setDoc(doc(db, 'users', user.uid), {
-                lastFcmToken: token.value,
-                lastFcmTokenUpdatedAt: serverTimestamp()
-              }, { merge: true });
+              await saveNativeToken(event.token);
             } catch(err) {
               console.error('Error saving push token to database:', err);
             }
@@ -152,8 +286,13 @@ export async function initPushNotifications() {
             const isAutoAccept = title.includes("auto-aceptado") || (notification.data && (notification.data.type === "auto_accept" || notification.data.channelId === "auto_accept_alerts"));
 
             if (isExclusive) {
-              import('../pages/delivery-panel.js').then(({ playExclusiveOfferAlert }) => {
-                playExclusiveOfferAlert();
+              // A push can arrive late (bad signal, or the second push of the same offer) when
+              // the driver already took the order. Only ring if the offer is still theirs.
+              isOfferStillPendingForMe(notification.data).then(pending => {
+                if (!pending) return;
+                return import('../pages/delivery-panel.js').then(({ playExclusiveOfferAlert }) => {
+                  playExclusiveOfferAlert();
+                });
               }).catch(err => console.warn('Could not trigger playExclusiveOfferAlert:', err));
             } else if (isAutoAccept) {
               // Play a prominent cash register coin sound for auto-accepted orders
@@ -162,7 +301,8 @@ export async function initPushNotifications() {
               AudioManager.playSynthChime();
             }
           }
-          await addDoc(collection(db, 'users', user.uid, 'notifications'), {
+          const currentUid = getState().user?.uid || user.uid;
+          await addDoc(collection(db, 'users', currentUid, 'notifications'), {
             title: title || '',
             body: body || '',
             type: 'system',
@@ -258,9 +398,12 @@ export async function initPushNotifications() {
       }
 
       // getToken() dispara el registro y devuelve el token FCM real en ambas plataformas.
+      // Hay que guardarlo aca: 'tokenReceived' solo se dispara cuando el token CAMBIA, asi que
+      // en un arranque normal nunca llega y el backend se quedaba sin token para este equipo.
       try {
         const { token } = await FirebaseMessaging.getToken();
         console.log('[Push] FCM token obtenido:', token ? token.slice(0, 12) + '...' : 'vacio');
+        await saveNativeToken(token);
       } catch (tokenErr) {
         console.error('[Push] No se pudo obtener el token FCM:', tokenErr);
         try { localStorage.setItem('gd_fcm_registration_status', 'error'); } catch (e) {}
@@ -464,7 +607,7 @@ function showPushRequiredLockScreen() {
 
   document.getElementById('push-permission-grant-btn').onclick = async () => {
     try {
-      const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
+      const FirebaseMessaging = await getNativePushPlugin();
       let status = await FirebaseMessaging.requestPermissions();
       if (status.receive === 'granted') {
         lockScreen.remove();
@@ -591,3 +734,16 @@ export async function requestWebPushPermission() {
 
 
 
+
+// Drivers depend on push to hear about offers while the phone is in their pocket. Startup
+// registration alone was not enough: it runs only after onboarding, only if someone was
+// logged in at boot, and never again while the app stays open (a token pruned by the server
+// was never replaced). The driver panel calls this whenever the driver is online.
+let lastDriverPushCheck = 0;
+export async function ensureDriverPushReady({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - lastDriverPushCheck < 10 * 60 * 1000) return null;
+  lastDriverPushCheck = now;
+  await initPushNotifications();
+  return getNativePushPermission();
+}

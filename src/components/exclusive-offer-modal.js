@@ -84,9 +84,16 @@ export function playExclusiveOfferAlert() {
       try { navigator.vibrate([600, 200, 600, 200, 600]); } catch (e) {}
     }
   }, 2500);
+
+  // Safety net: an offer lasts 60s. Whatever path started the alarm, it must never outlive
+  // the offer (a late push after accepting used to leave the bell ringing forever).
+  clearTimeout(window.exclusiveAlertSafetyTimer);
+  window.exclusiveAlertSafetyTimer = setTimeout(stopExclusiveOfferAlert, 75000);
 }
 
 export function stopExclusiveOfferAlert() {
+  clearTimeout(window.exclusiveAlertSafetyTimer);
+  window.exclusiveAlertSafetyTimer = null;
   try {
     AudioManager.stopDriverOfferLoop();
   } catch (err) {
@@ -184,6 +191,7 @@ export async function updateDispatchQueue(orderId) {
           queueTargetDriverId: nextDriverId,
           queueTargetDriverName: nextDriverName,
           queueOfferedAt: new Date(now),
+          queueOfferedBy: 'client',
           queueOfferedDrivers: [...offeredDrivers, nextDriverId]
         });
       });
@@ -542,7 +550,15 @@ export function showExclusiveOfferOverlay(batch, user) {
       try {
         window._animatePickupPill = true;
         const { takeBatch } = await import('../pages/delivery-panel.js');
-        await takeBatch(batch.id, currentUser, batch, acceptBtn);
+        const accepted = await takeBatch(batch.id, currentUser, batch, acceptBtn);
+        if (accepted === false) {
+          // takeBatch already told the driver why. Keep the offer on screen so they can retry
+          // (a network blip used to close it and the order was silently lost), but stop the
+          // alarm: the driver is already looking at it.
+          if (loader) loader.remove();
+          stopExclusiveOfferAlert();
+          return;
+        }
       } catch (err) {
         console.error('[Accept batch error]', err);
         if (loader) loader.remove();

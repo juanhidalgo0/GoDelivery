@@ -11,6 +11,20 @@ setGlobalOptions({ maxInstances: 20, memory: "512Mi", region: "us-central1" });
 admin.initializeApp();
 const db = admin.firestore();
 
+const ORDER_AUTO_CANCEL_MS = 10 * 60 * 1000;
+const DRIVER_INACTIVITY_MS = 2 * 60 * 60 * 1000;
+
+function tsToMs(t) {
+  if (!t) return 0;
+  if (typeof t.toMillis === "function") return t.toMillis();
+  const ms = new Date(t).getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+// token -> uid, filled by getUserTokens so sendPush can prune dead tokens
+// even when the caller didn't pass the owner explicitly.
+const tokenOwners = new Map();
+
 // ═══════════════════════════════════════════════════
 // MERCADO PAGO FUNCTIONS (existing)
 // ═══════════════════════════════════════════════════
@@ -323,16 +337,34 @@ async function getUserTokens(userId) {
     }
 
     const tokensSnap = await db.collection("users").doc(userId).collection("fcmTokens").get();
-    let tokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
+
+    // token -> last-seen ms. Keep the most recently registered ones: old
+    // devices/reinstalls leave stale tokens behind and must not push out the
+    // fresh token of the device the person is actually holding.
+    const seen = new Map();
+    const remember = (token, ms) => {
+      if (!token || typeof token !== "string") return;
+      seen.set(token, Math.max(seen.get(token) || 0, ms || 0));
+    };
+
+    tokensSnap.docs.forEach(d => {
+      const t = d.data();
+      remember(t.token || d.id, tsToMs(t.updatedAt) || tsToMs(t.lastSession));
+    });
 
     const userSnap = await db.collection("users").doc(userId).get();
     if (userSnap.exists) {
       const uData = userSnap.data();
-      if (uData.lastFcmToken) tokens.push(uData.lastFcmToken);
-      if (Array.isArray(uData.fcmTokens)) tokens = tokens.concat(uData.fcmTokens);
+      remember(uData.lastFcmToken, tsToMs(uData.lastFcmTokenUpdatedAt) || Date.now());
+      if (Array.isArray(uData.fcmTokens)) uData.fcmTokens.forEach(t => remember(t, 0));
     }
 
-    return [...new Set(tokens)].filter(Boolean).slice(-10);
+    const tokens = [...seen.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([token]) => token);
+    tokens.forEach(t => tokenOwners.set(t, userId));
+    return tokens;
   } catch (err) {
     logger.warn(`Error getting tokens for user ${userId}:`, err);
     return [];
@@ -356,10 +388,21 @@ function sanitizeFcmData(obj) {
 }
 
 // Error codes that mean the token is permanently dead — safe to delete.
+// NOTE: 'messaging/invalid-argument' is deliberately NOT here: it is also
+// returned for a malformed payload, and pruning on it would wipe the valid
+// tokens of every recipient of that message.
 const DEAD_TOKEN_ERROR_CODES = new Set([
   'messaging/registration-token-not-registered',
-  'messaging/invalid-registration-token',
-  'messaging/invalid-argument'
+  'messaging/invalid-registration-token'
+]);
+
+// Temporary FCM failures: worth one retry so an offer push isn't lost to a blip.
+const TRANSIENT_ERROR_CODES = new Set([
+  'messaging/internal-error',
+  'messaging/server-unavailable',
+  'messaging/unavailable',
+  'messaging/quota-exceeded',
+  'messaging/device-message-rate-exceeded'
 ]);
 
 // Removes a dead FCM token from Firestore so future sends stop wasting
@@ -499,21 +542,43 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
       };
     }
 
-    try {
-      const response = await admin.messaging().sendEachForMulticast(message);
+    const handleResponse = (response, sentTokens) => {
       totalSuccess += response.successCount;
       totalFailure += response.failureCount;
       logger.info(`[sendPush] Multicast result: ${response.successCount} success, ${response.failureCount} failed for target ${displayTitle}`);
 
+      const retryTokens = [];
       response.responses.forEach((r, i) => {
         if (!r.success) {
-          const token = chunk[i];
-          logger.warn(`[sendPush] Token failed (${token.slice(0, 12)}...): ${r.error?.code} - ${r.error?.message}`);
-          if (ownerUid && DEAD_TOKEN_ERROR_CODES.has(r.error?.code)) {
-            pruneDeadToken(ownerUid, token);
+          const token = sentTokens[i];
+          const code = r.error?.code;
+          logger.warn(`[sendPush] Token failed (${token.slice(0, 12)}...): ${code} - ${r.error?.message}`);
+          const owner = ownerUid || tokenOwners.get(token);
+          if (owner && DEAD_TOKEN_ERROR_CODES.has(code)) {
+            pruneDeadToken(owner, token);
+          } else if (TRANSIENT_ERROR_CODES.has(code)) {
+            retryTokens.push(token);
           }
         }
       });
+      return retryTokens;
+    };
+
+    try {
+      const response = await admin.messaging().sendEachForMulticast(message);
+      const retryTokens = handleResponse(response, chunk);
+
+      if (retryTokens.length > 0) {
+        logger.info(`[sendPush] Retrying ${retryTokens.length} token(s) after transient FCM error.`);
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const retryResponse = await admin.messaging().sendEachForMulticast({ ...message, tokens: retryTokens });
+          totalFailure -= retryTokens.length;
+          handleResponse(retryResponse, retryTokens);
+        } catch (retryErr) {
+          logger.error("[sendPush] Retry failed:", retryErr);
+        }
+      }
     } catch (err) {
       logger.error("Error sending chunk of push notifications:", err);
     }
@@ -550,7 +615,8 @@ async function getOnlineDeliveryTokens() {
  */
 async function getAllAdminDocs() {
   try {
-    const [byRoleAdmin, byFlagAdmin, byRoleSuper, byRoleSupport, byFlagSupport] = await Promise.all([
+    // allSettled: if one of the queries fails, the others must still notify support.
+    const results = await Promise.allSettled([
       db.collection("users").where("role", "==", "admin").get(),
       db.collection("users").where("isAdmin", "==", true).get(),
       db.collection("users").where("role", "==", "superadmin").get(),
@@ -559,8 +625,12 @@ async function getAllAdminDocs() {
     ]);
     const seenIds = new Set();
     const allDocs = [];
-    for (const snap of [byRoleAdmin, byFlagAdmin, byRoleSuper, byRoleSupport, byFlagSupport]) {
-      for (const d of snap.docs) {
+    for (const result of results) {
+      if (result.status !== "fulfilled") {
+        logger.error("[getAllAdminDocs] One admin query failed:", result.reason);
+        continue;
+      }
+      for (const d of result.value.docs) {
         if (!seenIds.has(d.id)) {
           seenIds.add(d.id);
           allDocs.push(d);
@@ -586,8 +656,11 @@ async function getAdminTokens() {
       tokens = tokens.concat(userTokens);
       const uData = doc.data();
       if (uData) {
-        if (uData.lastFcmToken) tokens.push(uData.lastFcmToken);
-        if (Array.isArray(uData.fcmTokens)) tokens = tokens.concat(uData.fcmTokens);
+        const extra = [];
+        if (uData.lastFcmToken) extra.push(uData.lastFcmToken);
+        if (Array.isArray(uData.fcmTokens)) extra.push(...uData.fcmTokens);
+        extra.forEach(t => { if (t && !tokenOwners.has(t)) tokenOwners.set(t, doc.id); });
+        tokens = tokens.concat(extra);
       }
     }
     return [...new Set(tokens)].filter(Boolean);
@@ -604,9 +677,6 @@ async function getAdminTokens() {
  */
 async function serverSideDispatch(orderId, order) {
   try {
-    // Auto-cancellation disabled completely per user directive.
-    // Orders must ONLY be cancelled manually.
-
     // Guard: Takeaway orders should NEVER be dispatched to delivery drivers
     if (order.deliveryType === 'takeaway' || order.deliveryType === 'retiro') {
       logger.info(`[ServerDispatch] Order ${orderId} is Takeaway / Retiro en el local. Skipping driver dispatch.`);
@@ -784,6 +854,8 @@ async function serverSideDispatch(orderId, order) {
         queueTargetDriverId: chosen.id,
         queueTargetDriverName: chosen.displayName || chosen.name || "Repartidor",
         queueOfferedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // This function sends the offer push itself; onOrderStatusChange must not send a second one.
+        queueOfferedBy: "server",
         queueRejectedDrivers: rejected,
         isPermanentOffer: isOnlyDriver ? true : null
       });
@@ -832,6 +904,9 @@ async function serverSideDispatch(orderId, order) {
             channelId: "exclusive_offers"
           });
           logger.info(`[ServerDispatch] Sent FCM push to target driver ${chosen.id}`);
+        } else {
+          // The offer is live but only reaches the driver if their app happens to be open.
+          logger.warn(`[ServerDispatch] Driver ${chosen.id} (${chosen.displayName || chosen.name}) has NO push token: offer for ${orderId} sent in-app only.`);
         }
       } catch (pushErr) {
         logger.error(`[ServerDispatch] Error sending push to target driver ${chosen.id}:`, pushErr);
@@ -1242,8 +1317,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           });
 
           return; // Stop execution of the current invocation as document update will trigger a new event
-        } else {
-          // Standard Exclusive Offer Push Notification
+        } else if (after.queueOfferedBy !== "server") {
+          // Standard Exclusive Offer Push Notification (offers made by serverSideDispatch already pushed)
           try {
             const driverTokens = await getUserTokens(driverId);
             const orderTypeStr = after.isFavor 
@@ -3164,14 +3239,129 @@ async function getAllDeliveryDrivers() {
   return Array.from(driversMap.values());
 }
 
-exports.autoDisconnectDrivers = onSchedule("*/10 * * * *", async (event) => {
-  // Desconexión automática deshabilitada: Los repartidores nunca se desconectan por inactividad.
-  logger.info("[autoDisconnectDrivers] Desconexión automática deshabilitada por configuración.");
+// Disconnects online drivers after 2 hours without activity. "Activity" is the
+// same clock the driver panel shows as the live timer: connecting, accepting an
+// order or renewing the session (lastTripAcceptedAt). The heartbeat
+// (lastActivityAt) only proves the app is open, so it is just a fallback for
+// old profiles. Drivers with an order in progress are never disconnected.
+exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
+  try {
+    const now = Date.now();
+    const snap = await db.collection("users").where("isOnline", "==", true).get();
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      if (!isDeliveryDoc(data)) continue;
+
+      const lastActivityMs = tsToMs(data.lastTripAcceptedAt) || tsToMs(data.lastActivityAt);
+      if (now - lastActivityMs < DRIVER_INACTIVITY_MS) continue;
+
+      const activeOrdersSnap = await db.collection("orders")
+        .where("driverId", "==", docSnap.id)
+        .where("status", "in", ["accepted", "confirmed", "preparing", "ready", "picked_up", "at_door", "delivering"])
+        .limit(1)
+        .get();
+      if (!activeOrdersSnap.empty) continue;
+
+      await docSnap.ref.update({
+        isOnline: false,
+        currentSessionId: null,
+        disconnectedReason: "inactivity",
+        autoDisconnectedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      if (data.currentSessionId) {
+        try {
+          await db.collection("deliverySessions").doc(data.currentSessionId).update({
+            endTime: admin.firestore.FieldValue.serverTimestamp()
+          });
+        } catch (sessErr) {
+          logger.warn(`[autoDisconnectDrivers] Could not close session ${data.currentSessionId}:`, sessErr.message);
+        }
+      }
+
+      logger.info(`[autoDisconnectDrivers] Disconnected driver ${docSnap.id} after 2h of inactivity.`);
+    }
+  } catch (err) {
+    logger.error("[autoDisconnectDrivers] Error:", err);
+  }
 });
 
-exports.cancelUnassignedOrders = onSchedule("*/5 * * * *", async (event) => {
-  logger.info("Automatic cancellation of unassigned orders is disabled per user directive.");
-  return;
+// Cancels orders nobody picked up within 10 minutes:
+//  - commerce orders the commerce never accepted (status pending)
+//  - GoFavor / GoViaje orders no driver took (counted from creation)
+//  - commerce orders ready for delivery that no driver took (counted from ready)
+// Takeaway orders never need a driver, and scheduled trips (status "scheduled")
+// are outside the statuses queried, so neither is touched by the driver rule.
+exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
+  try {
+    const now = Date.now();
+    const snap = await db.collection("orders")
+      .where("status", "in", ["pending", "confirmed", "preparing", "ready"])
+      .get();
+
+    for (const docSnap of snap.docs) {
+      const o = docSnap.data();
+      if (o.driverId) continue;
+
+      const createdMs = tsToMs(o.createdAt);
+      const isService = o.isFavor === true || o.isTrip === true;
+      const isTakeaway = o.deliveryType === "takeaway" || o.deliveryType === "retiro";
+
+      let referenceMs = 0;
+      let cancelReason = "";
+
+      if (isService) {
+        referenceMs = createdMs;
+        cancelReason = "Ningún repartidor tomó el pedido en 10 minutos.";
+      } else if (o.status === "pending") {
+        referenceMs = createdMs;
+        cancelReason = "El comercio no aceptó el pedido en 10 minutos.";
+      } else if (o.status === "ready" && !isTakeaway) {
+        referenceMs = tsToMs(o.readyAt) || tsToMs(o.updatedAt) || createdMs;
+        cancelReason = "Ningún repartidor tomó el pedido en 10 minutos.";
+      } else {
+        continue;
+      }
+
+      if (!referenceMs || now - referenceMs < ORDER_AUTO_CANCEL_MS) continue;
+
+      try {
+        const orderRef = docSnap.ref;
+        const cancelled = await db.runTransaction(async (tx) => {
+          const freshSnap = await tx.get(orderRef);
+          if (!freshSnap.exists) return false;
+          const fresh = freshSnap.data();
+          // Someone may have accepted / advanced the order since the query ran.
+          if (fresh.driverId || fresh.status !== o.status) return false;
+
+          tx.update(orderRef, {
+            status: "cancelled",
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            cancelledBy: "system",
+            cancelReason,
+            queueTargetDriverId: null,
+            queueOfferedAt: null
+          });
+
+          if (fresh.pointsRedeemed > 0 && fresh.userId) {
+            tx.update(db.collection("users").doc(fresh.userId), {
+              points: admin.firestore.FieldValue.increment(fresh.pointsRedeemed)
+            });
+          }
+          return true;
+        });
+
+        if (cancelled) {
+          logger.info(`[AutoCancel] Order ${docSnap.id} cancelled: ${cancelReason}`);
+        }
+      } catch (orderErr) {
+        logger.error(`[AutoCancel] Error cancelling order ${docSnap.id}:`, orderErr);
+      }
+    }
+  } catch (err) {
+    logger.error("[AutoCancel] Error:", err);
+  }
 });
 
 exports.checkWeatherPeriodic = onSchedule("*/15 * * * *", async (event) => {
@@ -3954,13 +4144,18 @@ exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event)
     const nowOffline = after.isOnline === false || after.isOnline === null || after.isOnline === undefined;
     if (!wasOnline || !nowOffline) return null;
 
+    const byInactivity = after.disconnectedReason === "inactivity";
     const driverName = after.displayName || after.name || "Repartidor";
-    logger.info(`[DriverDisconnect] ${driverName} (${userId}) went offline. Sending push notification.`);
+    logger.info(`[DriverDisconnect] ${driverName} (${userId}) went offline (inactivity=${byInactivity}). Sending push notification.`);
+
+    const notifBody = byInactivity
+      ? "Te desconectamos porque pasaron 2 horas sin actividad. Volvé a conectarte desde el Panel de Repartidor cuando quieras."
+      : "Tu sesión de repartidor fue cerrada. Volvé a conectarte desde el Panel de Repartidor.";
 
     // 1. Write in-app notification so it appears in the drawer
     await db.collection("users").doc(userId).collection("notifications").add({
       title: "🔴 Sesión finalizada",
-      body: "Tu sesión de repartidor fue cerrada. Volvé a conectarte desde el Panel de Repartidor.",
+      body: notifBody,
       type: "driver_disconnected",
       url: "#/delivery-panel",
       status: "unread",
@@ -3972,7 +4167,9 @@ exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event)
     if (tokens.length > 0) {
       await sendPush(tokens, {
         title: "🔴 Sesión finalizada",
-        body: "Tu sesión de repartidor fue cerrada. Tocá para volver a conectarte."
+        body: byInactivity
+          ? "Te desconectamos por 2 horas sin actividad. Tocá para volver a conectarte."
+          : "Tu sesión de repartidor fue cerrada. Tocá para volver a conectarte."
       }, {
         type: "driver_disconnected",
         url: "#/delivery-panel",

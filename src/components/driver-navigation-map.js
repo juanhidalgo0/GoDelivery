@@ -21,6 +21,10 @@ let lastDriverPos = null;
 let lastHeading = 0;
 let consecutiveOffRouteCount = 0;
 let lastRerouteTimestamp = 0;
+// Bumped by every draw and by clearDriverRoute(). Route fetches take seconds (OSRM, two endpoints with 6s
+// timeouts each); a fetch started before the order was delivered must not paint its line
+// after the route was cleared.
+let routeGeneration = 0;
 
 
 import { getDeepOledDarkStyle, MAPTILER_STREETS, MAPTILER_OLED_DARK, MAPTILER_API_KEY } from '../utils/map-styles.js';
@@ -96,6 +100,9 @@ export async function setDriverMapTheme(theme, isManual = true) {
       driverMap.once('style.load', () => {
         add3dBuildingsLayer(driverMap, newTheme === 'dark');
         renderRouteHud();
+        // setStyle wiped the route source; without resetting the dedupe hash the same
+        // coordinates would be skipped and the route would vanish after a theme switch.
+        _lastSetGeoJsonHash = '';
         updateWebGlSource(activeRoutePathCoords);
         const currentPos = lastDriverPos || window.lastRiderPos;
         if (currentPos) {
@@ -1084,7 +1091,7 @@ export function updateDriverMapLocation(coords, heading = 0) {
 let pendingRouteCoords = null;
 
 function ensureWebGlRouteLayers() {
-  if (!driverMap || !driverMap.isStyleLoaded()) return;
+  if (!driverMap || !isMapStyleReady()) return;
 
   const isLight = getDriverMapTheme() === 'light';
 
@@ -1318,7 +1325,7 @@ export function startRouteArrowAnimation() {
       return;
     }
 
-    if (activeRoutePathCoords && activeRoutePathCoords.length >= 2 && driverMap.isStyleLoaded()) {
+    if (activeRoutePathCoords && activeRoutePathCoords.length >= 2) {
       if (timestamp - lastTime > 32) {
         lastTime = timestamp;
         _animOffsetMeters = (_animOffsetMeters + 0.45) % 30;
@@ -1397,24 +1404,43 @@ function updateWebGlSource(coords) {
   if (hash === _lastSetGeoJsonHash) return;
   _lastSetGeoJsonHash = hash;
 
-  if (!driverMap.isStyleLoaded()) {
-    driverMap.once('load', () => {
-      ensureWebGlRouteLayers();
-      const src = driverMap.getSource('driver-route-source');
-      if (src) src.setData(geojsonData);
-    });
-    return;
-  }
-
+  // isStyleLoaded() is also false while TILES are loading (i.e. almost always while driving),
+  // so gating on it skipped updates, including the clear after a delivery: the old line stayed
+  // on the map. If the source exists, write to it; only creating it needs a ready style.
   try {
-    ensureWebGlRouteLayers();
-    let src = driverMap.getSource('driver-route-source');
-    if (src) {
-      src.setData(geojsonData);
+    const existing = driverMap.getSource('driver-route-source');
+    if (existing) {
+      existing.setData(geojsonData);
+      return;
+    }
+    if (isMapStyleReady()) {
+      ensureWebGlRouteLayers();
+      const created = driverMap.getSource('driver-route-source');
+      if (created) {
+        created.setData(geojsonData);
+        return;
+      }
     }
   } catch(err) {
     console.warn('[DriverMap] WebGL source update warning:', err);
   }
+
+  // Not possible yet: apply the latest pending coordinates once the map settles.
+  _lastSetGeoJsonHash = '';
+  if (!_routeRetryScheduled) {
+    _routeRetryScheduled = true;
+    driverMap.once('idle', () => {
+      _routeRetryScheduled = false;
+      if (pendingRouteCoords !== null) updateWebGlSource(pendingRouteCoords);
+    });
+  }
+}
+
+let _routeRetryScheduled = false;
+
+function isMapStyleReady() {
+  if (!driverMap) return false;
+  return driverMap.isStyleLoaded() || driverMap.style?._loaded === true;
 }
 
 function generateStreetGridFallbackRoute(startLng, startLat, endLng, endLat) {
@@ -1507,6 +1533,7 @@ async function fetchTurnByTurnRoute(startLng, startLat, endLng, endLat) {
 }
 
 export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetStage = 'pickup') {
+  const generation = ++routeGeneration; // a newer draw also supersedes this one
   window.lastDriverRouteArgs = { driverPos, pickupPos, dropoffPos, targetStage };
   lastActiveOrderRouteParams = { pickupPos, dropoffPos, targetStage };
 
@@ -1555,6 +1582,8 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
   // Fetch guaranteed street route (OSRM + Mirror + Magdalena Street Grid)
   try {
     const data = await fetchTurnByTurnRoute(driverLng, driverLat, targetLngLat[0], targetLngLat[1]);
+    // The order was delivered/cancelled (or a newer route was requested) while we waited.
+    if (generation !== routeGeneration) return;
     if (data && data.routes?.[0]?.geometry?.coordinates) {
       const rawCoords = data.routes[0].geometry.coordinates;
       // Make sure the path starts EXACTLY at the driver's current position
@@ -1605,6 +1634,8 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
   } catch (err) {
     console.warn('[DriverMap] OSRM routing note:', err);
   }
+
+  if (generation !== routeGeneration) return;
 
   // Update Destination Markers with 3D Arrival Beacon
   if (targetStage === 'pickup' && effectivePickup) {
@@ -1665,6 +1696,7 @@ export function clearMultiStopMarkers() {
 }
 
 export async function renderMultiStopRoute(stops = [], driverPos = null) {
+  const generation = ++routeGeneration; // a newer draw also supersedes this one
   clearMultiStopMarkers();
   if (!driverMap || !Array.isArray(stops) || stops.length === 0) return;
 
@@ -1743,9 +1775,14 @@ export async function renderMultiStopRoute(stops = [], driverPos = null) {
       ];
 
       const url = `https://router.project-osrm.org/route/v1/driving/${coordPairs.join(';')}?overview=full&geometries=geojson&steps=true`;
-      const res = await fetch(url);
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(tid);
+      if (generation !== routeGeneration) return;
       if (res.ok) {
         const data = await res.json();
+        if (generation !== routeGeneration) return;
         if (data.routes && data.routes[0]) {
           const route = data.routes[0];
           fullRoutePathCoords = route.geometry.coordinates;
@@ -1841,8 +1878,12 @@ export function checkAutoSolarTheme() {
 }
 
 export function clearDriverRoute() {
+  routeGeneration++;
   lastActiveOrderRouteParams = null;
   window.lastDriverRouteArgs = null;
+  // updateDriverMapLocation() re-slices fullRoutePathCoords on every GPS tick. Leaving it set
+  // is what made the old route reappear on the map right after an order was delivered.
+  fullRoutePathCoords = [];
   activeRoutePathCoords = [];
   activeRouteManeuverSteps = [];
   currentManeuverStepIndex = 0;
@@ -1850,7 +1891,7 @@ export function clearDriverRoute() {
   renderRouteHud();
   updateWebGlSource([]);
   driverHistoryCoords = [];
-  if (driverMap && driverMap.isStyleLoaded()) {
+  if (driverMap) {
     try {
       const routeSrc = driverMap.getSource('driver-route-source');
       if (routeSrc) routeSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });

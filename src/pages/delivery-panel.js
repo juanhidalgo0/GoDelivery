@@ -1,4 +1,4 @@
-import { collection, query, where, getDocs, doc, updateDoc, onSnapshot as firebaseOnSnapshot, runTransaction, serverTimestamp, writeBatch, increment, addDoc, getDoc, arrayUnion, deleteField, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, setDoc, onSnapshot as firebaseOnSnapshot, runTransaction, serverTimestamp, writeBatch, increment, addDoc, getDoc, arrayUnion, deleteField, limit } from 'firebase/firestore';
 import { getState, setState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
 import { formatPrice, isScheduleActive } from '../utils/format.js';
@@ -42,6 +42,85 @@ export function getOrderDriverEarnings(o) {
 }
 import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clearDriverRoute, setMap3DPerspective, recenterOnDriver, zoomInDriverMap, zoomOutDriverMap, getDriverMapTheme, setDriverMapTheme, getDriverThemeMode, setDriverThemeMode, renderDemandHotspots, checkAutoSolarTheme, startGpsRouteSimulation, stopGpsRouteSimulation, isGpsSimulationRunning, renderMultiStopRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { NavigationVoice } from '../utils/navigation-voice.js';
+
+// Set while the driver asked to disconnect and the server hasn't confirmed it yet,
+// so a write that never landed is re-sent instead of leaving the driver "online".
+const DRIVER_OFFLINE_INTENT_KEY = 'gd_driver_intent_offline';
+
+async function writeWithRetry(fn, attempts = 4) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+    }
+  }
+  throw lastErr;
+}
+
+// showDeliveryMapModal was called here without ever being imported, so these buttons threw
+// a ReferenceError. Loaded on demand to keep it out of the panel's initial bundle.
+async function openDeliveryMapModal(order, batch = null) {
+  if (!order) return;
+  const { showDeliveryMapModal } = await import('../components/delivery-map-modal.js');
+  showDeliveryMapModal(order, batch);
+}
+
+// An online driver without push gets offers assigned by the server that they never hear
+// about (the offer only shows if the app happens to be open). Re-register the token and,
+// if the OS blocks notifications, say so on screen instead of failing silently.
+async function checkDriverPushHealth(force = false) {
+  try {
+    const { ensureDriverPushReady } = await import('../utils/notifications.js');
+    const permission = await ensureDriverPushReady({ force });
+    if (permission === null) return; // checked recently
+    if (permission === 'denied' || permission === 'prompt') {
+      showDriverPushWarning(permission);
+    } else {
+      hideDriverPushWarning();
+    }
+  } catch (err) {
+    console.warn('[Driver] Push health check failed:', err);
+  }
+}
+
+function hideDriverPushWarning() {
+  document.getElementById('driver-push-warning')?.remove();
+}
+
+function showDriverPushWarning(permission) {
+  if (!document.body.classList.contains('is-delivery-mode')) return;
+  let banner = document.getElementById('driver-push-warning');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'driver-push-warning';
+    banner.setAttribute('role', 'alert');
+    banner.style.cssText = `
+      position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 72px);
+      z-index: 9000; display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-radius: 14px;
+      background: #7f1d1d; color: #fff; border: 1px solid rgba(255,255,255,0.18);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45); font-size: 12.5px; line-height: 1.35;
+    `;
+    document.body.appendChild(banner);
+    window.addEventListener('hashchange', hideDriverPushWarning, { once: true });
+  }
+  banner.innerHTML = `
+    <span style="display:inline-flex; flex-shrink:0;">${icon('alertTriangle', 20)}</span>
+    <span style="flex:1;"><strong>No vas a recibir avisos de pedidos.</strong> Las notificaciones están desactivadas en este teléfono.</span>
+    <button type="button" id="driver-push-warning-btn" style="flex-shrink:0; background:#fff; color:#7f1d1d; border:none; border-radius:10px; padding:8px 10px; font-weight:900; font-size:12px; cursor:pointer;">Activar</button>
+  `;
+  banner.querySelector('#driver-push-warning-btn').onclick = async () => {
+    await checkDriverPushHealth(true);
+    if (document.getElementById('driver-push-warning')) {
+      showToast('Abrí Ajustes del teléfono → Apps → GoDelivery → Notificaciones y activalas.', 'warning', 8000);
+    } else {
+      showToast('✅ Notificaciones activadas. Ya vas a recibir los pedidos.', 'success');
+    }
+  };
+}
 
 export function cleanMandadoText(text) {
   if (!text || typeof text !== 'string') return '';
@@ -662,6 +741,29 @@ function parseFavorDetails(details) {
 
 let activeOrdersCount = 0;
 let activeOrdersList = [];
+
+// Re-rendering the dock replaces the action slider. If that happens while the driver is
+// dragging it (the commerce marks the order "ready", a GPS sync, a theme change...), the
+// handle vanishes from under their finger and the swipe "doesn't work". While a drag is in
+// progress the refresh is parked and applied as soon as the finger lifts.
+let pendingDockRefresh = null;
+
+function refreshBottomDock(dockEl, user, orders) {
+  if (!dockEl) return;
+  if (window.__driverSliderDragging) {
+    pendingDockRefresh = { user, orders };
+    return;
+  }
+  pendingDockRefresh = null;
+  dockEl.innerHTML = renderBottomDockContent(user, orders);
+  attachBottomDockListeners(user, orders);
+}
+
+function flushPendingDockRefresh() {
+  if (!pendingDockRefresh || window.__driverSliderDragging) return;
+  const { user, orders } = pendingDockRefresh;
+  refreshBottomDock(document.getElementById('driver-footer-dock-container'), getState().user || user, orders);
+}
 const commerceCache = new Map();
 
 // Right after reconnecting (or on a cold start with a cleared cache), Firebase Auth
@@ -797,10 +899,18 @@ export async function renderDeliveryPanel(containerArg) {
       }
     }, { passive: false });
 
+    // Deciding whether a drag may scroll walks the ancestors with getComputedStyle. Doing that
+    // on every touchmove (60+ per second) made every drag in driver mode stutter, the action
+    // slider included. The answer can't change mid-gesture, so it's computed once per touch.
+    let touchScrollDecision = null;
+    window.addEventListener('touchstart', () => { touchScrollDecision = null; }, { passive: true, capture: true });
+
     window.addEventListener('touchmove', (e) => {
       if (document.body.classList.contains('is-delivery-mode')) {
+        if (touchScrollDecision === 'allow') return;
+        if (touchScrollDecision === 'block') { e.preventDefault(); return; }
         const isMap = e.target.closest('#driver-fullscreen-map, .maplibregl-map, .maplibregl-canvas, .maplibregl-marker');
-        if (isMap) return; // Allow MapLibre native gestures to process without interruption
+        if (isMap) { touchScrollDecision = 'allow'; return; } // Allow MapLibre native gestures to process without interruption
         const scrollable = e.target.closest('#exclusive-offer-fullscreen-overlay, .modal-content, .drawer-menu, #driver-bottom-sheet-card, #dock-expanded-orders-list, [data-scrollable="true"], #mandado-purchase-modal-card, #mandado-purchase-modal-overlay, .mandado-stops-scroll-container, .modal-overlay, .modal, .modal-body, .scrollable-y, input, textarea, select, button');
         // The explicit selector whitelist above missed real scrollable panels
         // (Ganancias, historial de sesiones, other sub-páginas) added later, so a
@@ -819,7 +929,8 @@ export async function renderDeliveryPanel(containerArg) {
             el = el.parentElement;
           }
         }
-        if (!scrollable && !hasOverflowAncestor) {
+        touchScrollDecision = (!scrollable && !hasOverflowAncestor) ? 'block' : 'allow';
+        if (touchScrollDecision === 'block') {
           e.preventDefault();
         }
       }
@@ -892,8 +1003,7 @@ export async function renderDeliveryPanel(containerArg) {
       const bottomDock = document.getElementById('driver-footer-dock-container');
       const currentUser = getState().user;
       if (bottomDock) {
-        bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-        attachBottomDockListeners(currentUser, activeOrdersList);
+        refreshBottomDock(bottomDock, currentUser, activeOrdersList);
       }
 
       const statusBar = document.getElementById('session-status-bar-container');
@@ -1452,6 +1562,10 @@ export async function renderDeliveryPanel(containerArg) {
     };
     updateLiveTimer();
     window._driverLiveTimerInterval = setInterval(updateLiveTimer, 30000);
+
+    checkDriverPushHealth();
+  } else {
+    hideDriverPushWarning();
   }
     setupPersistentBadges();
 
@@ -1843,10 +1957,69 @@ export async function renderDeliveryPanel(containerArg) {
   };
   window.addEventListener('switch-delivery-tab', handleExternalSwitch);
 
+  // Keep the driver's connection honest against Firestore. auth.js already mirrors the user
+  // doc into state, but nothing re-rendered the panel when the SERVER disconnected the
+  // driver (2h inactivity, admin), and a disconnect write that never landed left Firestore
+  // "online" while the app said "disconnected".
+  if (window.__gd_driver_doc_unsub) {
+    window.__gd_driver_doc_unsub();
+    window.__gd_driver_doc_unsub = null;
+  }
+  if (user?.uid) {
+    let lastServerOnline = null;
+    window.__gd_driver_doc_unsub = firebaseOnSnapshot(doc(db, 'users', user.uid), (snap) => {
+      if (!snap.exists() || snap.metadata.hasPendingWrites || snap.metadata.fromCache) return;
+
+      const serverData = snap.data();
+      const serverOnline = serverData.isOnline === true;
+      const previousServerOnline = lastServerOnline;
+      lastServerOnline = serverOnline;
+
+      const intentTs = Number(localStorage.getItem(DRIVER_OFFLINE_INTENT_KEY) || 0);
+      const wantsOffline = intentTs > 0 && Date.now() - intentTs < 24 * 60 * 60 * 1000;
+      const selfInitiated = intentTs > 0 && Date.now() - intentTs < 60 * 1000;
+
+      if (!serverOnline) {
+        localStorage.removeItem(DRIVER_OFFLINE_INTENT_KEY);
+
+        // Went online -> offline without the driver pressing the button.
+        if (previousServerOnline === true && !selfInitiated) {
+          stopHeartbeat();
+          hideExclusiveOfferOverlay();
+          stopExclusiveOfferAlert();
+          showToast(
+            serverData.disconnectedReason === 'inactivity'
+              ? 'Te desconectamos por 2 horas sin actividad. Volvé a conectarte cuando quieras.'
+              : 'Tu sesión fue cerrada.',
+            'info'
+          );
+          renderDeliveryPanel();
+        }
+        return;
+      }
+
+      // The driver pressed "Desconectarme" but Firestore still says online: finish the job.
+      if (wantsOffline) {
+        const localUser = getState().user;
+        if (localUser && localUser.uid === user.uid && localUser.isOnline === true) {
+          setState('user', { ...localUser, isOnline: false, currentSessionId: null, lastActivityAt: null });
+          stopHeartbeat();
+          renderDeliveryPanel();
+        }
+        writeWithRetry(() => updateDoc(doc(db, 'users', user.uid), { isOnline: false, currentSessionId: null, lastActivityAt: null }))
+          .catch(err => console.error('[Driver] Could not re-apply disconnect:', err));
+      }
+    }, (err) => console.warn('[Driver] User doc listener error:', err));
+  }
+
   window.addEventListener('hashchange', () => {
     if (window.__gd_delivery_unsub) {
       window.__gd_delivery_unsub();
       window.__gd_delivery_unsub = null;
+    }
+    if (window.__gd_driver_doc_unsub) {
+      window.__gd_driver_doc_unsub();
+      window.__gd_driver_doc_unsub = null;
     }
     window.removeEventListener('switch-delivery-tab', handleExternalSwitch);
   }, { once: true });
@@ -1924,8 +2097,7 @@ export async function renderDeliveryPanel(containerArg) {
         const bottomDock = document.getElementById('driver-footer-dock-container');
         if (bottomDock) {
           bottomDock.style.removeProperty('display');
-          bottomDock.innerHTML = renderBottomDockContent(getState().user || user, activeOrders);
-          attachBottomDockListeners(getState().user || user, activeOrders);
+          refreshBottomDock(bottomDock, getState().user || user, activeOrders);
         }
 
         // Refresh Top Status Bar with Full-Width Customer Header
@@ -2880,7 +3052,7 @@ function loadTabContent(tab, container, user) {
         container.querySelectorAll('.view-map-btn').forEach(btn => {
           const batch = sortedBatches.find(b => b.id === btn.dataset.id);
           const orderForMap = batch.isBundle ? batch.orders[0] : batch.order;
-          btn.addEventListener('click', () => showDeliveryMapModal(orderForMap, batch.isBundle ? batch.orders : null));
+          btn.addEventListener('click', () => openDeliveryMapModal(orderForMap, batch.isBundle ? batch.orders : null));
         });
         });
 
@@ -4394,7 +4566,7 @@ function loadTabContent(tab, container, user) {
         container.querySelectorAll('.view-active-map-btn').forEach(btn => {
           const firstId = btn.dataset.id.split(',')[0];
           const order = orders.find(o => o.id === firstId);
-          btn.addEventListener('click', () => showDeliveryMapModal(order, orders));
+          btn.addEventListener('click', () => openDeliveryMapModal(order, orders));
         });
 
         container.querySelectorAll('.edit-favor-price-btn').forEach(btn => {
@@ -5782,8 +5954,11 @@ async function startSession(user) {
       console.warn('Failed to create deliverySession doc:', e);
     }
 
+    localStorage.removeItem(DRIVER_OFFLINE_INTENT_KEY);
+    // Going online is when a missing push token matters most: re-register it now, not in 10 min.
+    checkDriverPushHealth(true);
     const sessionId = sessionRef ? sessionRef.id : 'session_' + Date.now();
-    const updatedUser = { 
+    const updatedUser = {
       ...getState().user, 
       ...latestUser,
       isOnline: true, 
@@ -5836,22 +6011,49 @@ async function endSession(user) {
   hideExclusiveOfferOverlay();
   stopExclusiveOfferAlert();
 
+  try { localStorage.setItem(DRIVER_OFFLINE_INTENT_KEY, String(Date.now())); } catch (e) {}
+
+  // Issue the write first and synchronously: it lands in the local cache right away, so no
+  // incoming snapshot can flip the panel back to "online" before it is queued. Retried,
+  // because if it is lost the driver stays "online" in Firestore and keeps getting offers.
+  const disconnectWrite = writeWithRetry(() => updateDoc(doc(db, 'users', user.uid), {
+    isOnline: false,
+    currentSessionId: null,
+    lastActivityAt: null
+  }));
+  disconnectWrite.catch(() => {});
+
   const { setState, getState } = await import('../state.js');
   setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
-  showToast('Te has desconectado correctamente.', 'info');
+  showToast('Desconectando...', 'info');
   renderDeliveryPanel();
 
   // 2. Background Firestore synchronization
   (async () => {
     try {
       const { doc, updateDoc, getDoc, serverTimestamp } = await import('firebase/firestore');
-      
-      // Update user document
-      await updateDoc(doc(db, 'users', user.uid), {
-        isOnline: false,
-        currentSessionId: null,
-        lastActivityAt: null
-      });
+
+      // updateDoc only resolves once the SERVER acknowledged the write. Offline it stays
+      // pending (it does not fail), so a timeout is how we tell the driver the truth.
+      const confirmedInTime = await Promise.race([
+        disconnectWrite.then(() => true, () => false),
+        new Promise(resolve => setTimeout(() => resolve(null), 8000))
+      ]);
+
+      if (confirmedInTime === true) {
+        showToast('Te has desconectado correctamente.', 'info');
+      } else if (confirmedInTime === null) {
+        showToast('⚠️ Sin señal: tu desconexión todavía no se confirmó. Se completará apenas vuelva la conexión.', 'warning', 6000);
+      }
+
+      try {
+        await disconnectWrite;
+      } catch (disconnectErr) {
+        console.error('[endSession] Disconnect write failed after retries:', disconnectErr);
+        showToast('⚠️ No pudimos confirmar tu desconexión. Se reintentará automáticamente.', 'warning');
+        return;
+      }
+      if (confirmedInTime === null) showToast('✅ Desconexión confirmada.', 'success');
 
       // Update session statistics if session was active
       if (user.currentSessionId) {
@@ -6455,6 +6657,123 @@ function renderStatusBar(user) {
   `;
 }
 
+// Payment summary + slide-to-confirm for the order in progress. Shared by the collapsed and
+// the expanded dock so the action sits in the same place, at the bottom, in both.
+// Red = go pick it up, green = hand it over: the step is readable at a glance.
+function renderDockActionRow(order, orderIsPickup, isLight) {
+  const isCash = order.paymentMethod === 'efectivo' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('efect'));
+  const paymentLabel = isCash ? 'PAGA EN EFECTIVO:' : 'PAGA CON TRANSFERENCIA:';
+  const paymentIcon = icon(isCash ? 'dollarSign' : 'creditCard', 11);
+  const paymentColor = isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#be123c' : '#fb7185');
+  const paymentBg = isCash ? (isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') : (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)');
+  const paymentBorder = isCash ? '#fde68a' : (isLight ? '#fecaca' : 'rgba(225, 29, 72, 0.35)');
+
+  const accent = orderIsPickup ? '#e11d48' : '#059669';
+  const accentDark = orderIsPickup ? '#be123c' : '#047857';
+  const trackBg = orderIsPickup
+    ? (isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)')
+    : (isLight ? '#ecfdf5' : 'rgba(15, 23, 42, 0.94)');
+  const trackBorder = orderIsPickup
+    ? (isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)')
+    : (isLight ? 'rgba(5, 150, 105, 0.4)' : 'rgba(16, 185, 129, 0.5)');
+  const labelColor = isLight ? (orderIsPickup ? '#9f1239' : '#065f46') : '#ffffff';
+
+  return `
+    <div id="dock-pinned-action-slider-row" style="flex-shrink: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; background:${paymentBg}; border:1px solid ${paymentBorder}; padding:7px 12px; border-radius:12px;">
+        <div style="display:flex; flex-direction:column;">
+          <span style="font-size:9.5px; font-weight:900; color:${paymentColor}; text-transform:uppercase; letter-spacing:0.4px; display:inline-flex; align-items:center; gap:4px;">
+            <span style="display:inline-flex;">${paymentIcon}</span>${paymentLabel}
+          </span>
+          <strong style="font-size:15px; font-weight:950; color:${paymentColor};">
+            $${Number(order.totalAmount || order.total || 0).toLocaleString('es-AR')}
+          </strong>
+        </div>
+
+        <button class="open-order-breakdown-btn" data-order-id="${order.id}" style="
+          background: ${isLight ? '#ffffff' : 'rgba(0,0,0,0.35)'};
+          border: 1px solid ${paymentBorder};
+          color: ${paymentColor};
+          padding: 5px 10px; border-radius: 9px;
+          font-size: 11px; font-weight: 800; cursor: pointer;
+          display: flex; align-items: center; gap: 4px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
+        ">
+          <span style="display:inline-flex;">${icon('info', 13)}</span>
+          <span>Ver Desglose</span>
+        </button>
+      </div>
+
+      <div class="driver-swipe-slider" data-action="${orderIsPickup ? 'pickup' : 'deliver'}" data-id="${order.id}" data-codes="${order.verificationCode || ''}" role="slider" aria-label="${orderIsPickup ? 'Deslizá para marcar el pedido como retirado' : 'Deslizá para marcar el pedido como entregado'}" style="
+        position: relative;
+        width: 100%;
+        height: 54px;
+        border-radius: 27px;
+        background: ${trackBg};
+        border: 1.5px solid ${trackBorder};
+        overflow: hidden;
+        user-select: none;
+        touch-action: none;
+        box-shadow: 0 6px 20px ${isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(0, 0, 0, 0.55)'};
+        display: flex; align-items: center;
+      ">
+        <div class="swipe-slider-fill" style="
+          position: absolute; top: 0; left: 0; height: 100%; width: 0%;
+          background: linear-gradient(90deg, ${accent} 0%, ${accentDark} 100%);
+          border-radius: 27px; pointer-events: none;
+        "></div>
+
+        <div class="swipe-slider-label" style="
+          position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+          font-size: 13px; font-weight: 900; letter-spacing: 1.5px;
+          color: ${labelColor};
+          text-transform: uppercase; pointer-events: none; padding-left: 28px;
+          transition: opacity 0.15s ease;
+        ">
+          ${orderIsPickup ? 'DESLIZÁ › RETIRADO' : 'DESLIZÁ › ENTREGADO'}
+        </div>
+
+        <div class="swipe-slider-handle" style="
+          position: absolute; top: 4px; left: 3px; width: 46px; height: 46px;
+          background: #ffffff; border-radius: 50%;
+          box-shadow: 0 4px 14px ${orderIsPickup ? 'rgba(225, 29, 72, 0.45)' : 'rgba(5, 150, 105, 0.45)'};
+          display: flex; align-items: center; justify-content: center;
+          cursor: grab; touch-action: none; z-index: 2;
+        ">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Collapsed dock: one line saying where to go next, then the action row.
+function renderDockCollapsedOrder(order, orderIsPickup, isLight) {
+  const isEncomienda = isOrderEncomienda(order);
+  const place = orderIsPickup
+    ? (order.isFavor
+        ? (isEncomienda ? (order.pickupAddress || order.originAddress || 'Dirección de retiro') : (order.comercioName || 'Comercio indicado'))
+        : (order.comercioName || order.originAddress || 'Comercio'))
+    : (order.deliveryAddress || order.address || order.destinationAddress || order.shippingAddress || 'Domicilio del cliente');
+  const who = orderIsPickup ? 'Retirá en' : `Entregá a ${order.userName || order.clientName || 'el cliente'}`;
+  const escape = (v) => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  return `
+    <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">
+      <div style="display:flex; align-items:center; gap:8px; padding:0 4px;">
+        <span style="display:inline-flex; flex-shrink:0; color:${orderIsPickup ? 'var(--driver-accent-text)' : (isLight ? '#059669' : '#34d399')};">${icon(orderIsPickup ? (isEncomienda ? 'package' : 'store') : 'mapPin', 16)}</span>
+        <div style="min-width:0; display:flex; flex-direction:column;">
+          <span style="font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; color:var(--driver-text-secondary);">${escape(who)}</span>
+          <span style="font-size:14px; font-weight:900; color:var(--driver-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(place)}</span>
+        </div>
+      </div>
+      ${renderDockActionRow(order, orderIsPickup, isLight)}
+    </div>
+  `;
+}
+
 export function renderBottomDockContent(user, activeOrders = []) {
   const isLight = getDriverMapTheme() === 'light';
   const hasActive = Array.isArray(activeOrders) && activeOrders.length > 0;
@@ -6791,79 +7110,14 @@ export function renderBottomDockContent(user, activeOrders = []) {
 
           </div>
 
-          <!-- PINNED BOTTOM PAYMENT SUMMARY & ACTION SLIDER FOR currentOrder (ALWAYS VISIBLE & STICKY!) -->
-          <div id="dock-pinned-action-slider-row" style="flex-shrink: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-            
-            <!-- PAYMENT SUMMARY -->
-            <div style="display:flex; align-items:center; justify-content:space-between; background:${paymentBg}; border:1px solid ${paymentBorder}; padding:7px 12px; border-radius:12px;">
-              <div style="display:flex; flex-direction:column;">
-                <span style="font-size:9.5px; font-weight:900; color:${paymentColor}; text-transform:uppercase; letter-spacing:0.4px; display:inline-flex; align-items:center; gap:4px;">
-                  <span style="display:inline-flex;">${paymentIcon}</span>${paymentLabel}
-                </span>
-                <strong style="font-size:15px; font-weight:950; color:${paymentColor};">
-                  $${Number(order.totalAmount || order.total || 0).toLocaleString('es-AR')}
-                </strong>
-              </div>
-
-              <button class="open-order-breakdown-btn" data-order-id="${order.id}" style="
-                background: ${isLight ? '#ffffff' : 'rgba(0,0,0,0.35)'};
-                border: 1px solid ${paymentBorder};
-                color: ${paymentColor};
-                padding: 5px 10px; border-radius: 9px;
-                font-size: 11px; font-weight: 800; cursor: pointer;
-                display: flex; align-items: center; gap: 4px;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
-              ">
-                <span style="display:inline-flex;">${icon('info', 13)}</span>
-                <span>Ver Desglose</span>
-              </button>
-            </div>
-
-            <!-- ACTION SLIDER -->
-            <div class="driver-swipe-slider" data-action="${orderIsPickup ? 'pickup' : 'deliver'}" data-id="${order.id}" data-codes="${order.verificationCode || ''}" style="
-              position: relative;
-              width: 100%;
-              height: 50px;
-              border-radius: 25px;
-              background: ${isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)'};
-              border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
-              overflow: hidden;
-              user-select: none;
-              touch-action: none;
-              box-shadow: 0 6px 20px ${isLight ? 'rgba(225, 29, 72, 0.12)' : 'rgba(0, 0, 0, 0.55)'};
-              display: flex; align-items: center;
-            ">
-              <div class="swipe-slider-fill" style="
-                position: absolute; top: 0; left: 0; height: 100%; width: 0%;
-                background: linear-gradient(90deg, #e11d48 0%, #be123c 100%);
-                border-radius: 25px; pointer-events: none;
-              "></div>
-
-              <div class="swipe-slider-label" style="
-                position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-                font-size: 13px; font-weight: 900; letter-spacing: 2px;
-                color: ${isLight ? '#9f1239' : '#ffffff'};
-                text-transform: uppercase; pointer-events: none; padding-left: 24px;
-                transition: opacity 0.15s ease;
-              ">
-                ${orderIsPickup ? 'RETIRADO › › ›' : 'ENTREGADO › › ›'}
-              </div>
-
-              <div class="swipe-slider-handle" style="
-                position: absolute; top: 3px; left: 3px; width: 44px; height: 44px;
-                background: #ffffff; border-radius: 50%;
-                box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4);
-                display: flex; align-items: center; justify-content: center;
-                cursor: grab; touch-action: none; z-index: 2;
-              ">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e11d48" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
-                  <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-              </div>
-            </div>
+          ${renderDockActionRow(order, orderIsPickup, isLight)}
           </div>
         `;
       })() : ''}
+
+      <!-- COLLAPSED CARD: where to go next + the action slider, so the main action never hides
+           behind "Detalles" (drivers didn't find it and reported the swipe as broken). -->
+      ${(hasActive && !isExpanded && currentOrder) ? renderDockCollapsedOrder(currentOrder, currentIsPickup, isLight) : ''}
 
       <!-- BOTTOM ROW: QUICK CONTROLS (ALWAYS VISIBLE & PINNED!) -->
       <div style="display:flex; align-items:center; gap:6px; padding-top:6px; border-top:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'}; flex-shrink: 0; margin-top: auto;">
@@ -7103,8 +7357,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
     window.driverDockExpanded = !window.driverDockExpanded;
     const bottomDock = document.getElementById('driver-footer-dock-container');
     if (bottomDock) {
-      bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
-      attachBottomDockListeners(latestUser, activeOrdersList);
+      refreshBottomDock(bottomDock, latestUser, activeOrdersList);
     }
   };
 
@@ -7116,8 +7369,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
     }
     const bottomDock = document.getElementById('driver-footer-dock-container');
     if (bottomDock) {
-      bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
-      attachBottomDockListeners(latestUser, activeOrdersList);
+      refreshBottomDock(bottomDock, latestUser, activeOrdersList);
     }
   };
 
@@ -7362,8 +7614,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
               showToast('Auto-Aceptar Desactivado ⏸️', 'info');
               const bottomDock = document.getElementById('driver-footer-dock-container');
               if (bottomDock) {
-                bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
-                attachBottomDockListeners(latestUser, activeOrdersList);
+                refreshBottomDock(bottomDock, latestUser, activeOrdersList);
               }
             };
           }
@@ -7393,8 +7644,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
               showToast(`⚡ Auto-Aceptar activo para: ${names.join(', ')}`, 'success');
               const bottomDock = document.getElementById('driver-footer-dock-container');
               if (bottomDock) {
-                bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
-                attachBottomDockListeners(latestUser, activeOrdersList);
+                refreshBottomDock(bottomDock, latestUser, activeOrdersList);
               }
             };
           }
@@ -7437,13 +7687,15 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       window.driverSelectedOrderIndex = idx;
       const bottomDock = document.getElementById('driver-footer-dock-container');
       if (bottomDock) {
-        bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
-        attachBottomDockListeners(latestUser, activeOrdersList);
+        refreshBottomDock(bottomDock, latestUser, activeOrdersList);
       }
     };
   });
 
   // ATTACH SLIDE-TO-ACTION (SWIPE GESTURE HANDLER)
+  // Pointer events + pointer capture: the whole track grabs the gesture (not only the 44px
+  // knob), the finger keeps driving it even if it drifts off the bar, and nothing is bound
+  // to window (the old version leaked 6 window listeners on every dock render).
   const sliders = document.querySelectorAll('.driver-swipe-slider');
   sliders.forEach(slider => {
     const handle = slider.querySelector('.swipe-slider-handle');
@@ -7451,59 +7703,98 @@ export function attachBottomDockListeners(user, activeOrders = []) {
     const label = slider.querySelector('.swipe-slider-label');
     if (!handle || !fill) return;
 
-    let isDragging = false;
+    const idleLabel = label ? label.textContent.trim() : '';
+    const easing = 'all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+    let activePointerId = null;
     let startX = 0;
     let maxSlide = 0;
+    let lastDelta = 0;
+    let busy = false;
 
-    const onStart = (e) => {
-      isDragging = true;
-      const touch = e.touches ? e.touches[0] : e;
-      startX = touch.clientX;
+    const paint = (deltaX) => {
+      handle.style.left = `${deltaX + 3}px`;
+      fill.style.width = `${((deltaX + 24) / slider.clientWidth) * 100}%`;
+      if (label) label.style.opacity = Math.max(0, 1 - (deltaX / (maxSlide * 0.6)));
+    };
+
+    const resetSlider = () => {
+      busy = false;
+      if (!slider.isConnected) return;
+      handle.style.transition = easing;
+      fill.style.transition = easing;
+      handle.style.left = '3px';
+      fill.style.width = '0%';
+      handle.style.cursor = 'grab';
+      if (label) {
+        label.textContent = idleLabel;
+        label.style.opacity = '1';
+      }
+    };
+
+    const endDrag = () => {
+      activePointerId = null;
+      window.__driverSliderDragging = false;
+      handle.style.cursor = 'grab';
+    };
+
+    const onDown = (e) => {
+      if (busy || activePointerId !== null) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      activePointerId = e.pointerId;
+      try { slider.setPointerCapture(e.pointerId); } catch (err) {}
+      window.__driverSliderDragging = true;
+      startX = e.clientX;
+      lastDelta = 0;
       maxSlide = Math.max(10, slider.clientWidth - handle.clientWidth - 6);
       handle.style.transition = 'none';
       fill.style.transition = 'none';
       handle.style.cursor = 'grabbing';
+      e.preventDefault();
     };
 
     const onMove = (e) => {
-      if (!isDragging) return;
-      const touch = e.touches ? e.touches[0] : e;
-      let deltaX = touch.clientX - startX;
-      if (deltaX < 0) deltaX = 0;
-      if (deltaX > maxSlide) deltaX = maxSlide;
-
-      handle.style.left = `${deltaX + 3}px`;
-      fill.style.width = `${((deltaX + 24) / slider.clientWidth) * 100}%`;
-      if (label) {
-        label.style.opacity = Math.max(0, 1 - (deltaX / (maxSlide * 0.6)));
-      }
+      if (e.pointerId !== activePointerId) return;
+      lastDelta = Math.min(maxSlide, Math.max(0, e.clientX - startX));
+      paint(lastDelta);
     };
 
-    const onEnd = async () => {
-      if (!isDragging) return;
-      isDragging = false;
-      handle.style.cursor = 'grab';
-      const currentLeft = (parseInt(handle.style.left) || 3) - 3;
+    const onCancel = (e) => {
+      if (e.pointerId !== activePointerId) return;
+      endDrag();
+      resetSlider();
+      flushPendingDockRefresh();
+    };
 
-      if (currentLeft >= maxSlide * 0.82) {
-        handle.style.transition = 'all 0.18s ease';
-        fill.style.transition = 'all 0.18s ease';
-        handle.style.left = `${maxSlide + 3}px`;
-        fill.style.width = '100%';
-        if (label) {
-          label.textContent = '¡CONFIRMADO!';
-          label.style.opacity = '1';
-        }
+    const onUp = (e) => {
+      if (e.pointerId !== activePointerId) return;
+      endDrag();
 
-        if (navigator.vibrate) {
-          try { navigator.vibrate([70, 30, 70]); } catch(e) {}
-        }
+      if (lastDelta < maxSlide * 0.8) {
+        resetSlider();
+        flushPendingDockRefresh();
+        return;
+      }
 
-        const action = slider.dataset.action;
-        const oId = slider.dataset.id;
-        const code = slider.dataset.codes;
+      busy = true;
+      handle.style.transition = 'all 0.18s ease';
+      fill.style.transition = 'all 0.18s ease';
+      handle.style.left = `${maxSlide + 3}px`;
+      fill.style.width = '100%';
+      if (label) {
+        label.textContent = '¡CONFIRMADO!';
+        label.style.opacity = '1';
+      }
 
-        setTimeout(async () => {
+      if (navigator.vibrate) {
+        try { navigator.vibrate([70, 30, 70]); } catch(err) {}
+      }
+
+      const action = slider.dataset.action;
+      const oId = slider.dataset.id;
+      const code = slider.dataset.codes;
+
+      setTimeout(async () => {
+        try {
           if (action === 'pickup' && oId) {
             const targetOrder = (activeOrdersList || []).find(o => o.id === oId);
             const isShoppingMandado = targetOrder && targetOrder.isFavor && !isOrderEncomienda(targetOrder);
@@ -7513,39 +7804,31 @@ export function attachBottomDockListeners(user, activeOrders = []) {
               openMandadoPurchaseModal({
                 order: targetOrder,
                 isEdit: false,
-                onCancel: () => {
-                  handle.style.transition = 'all 0.25s ease';
-                  fill.style.transition = 'all 0.25s ease';
-                  handle.style.left = '3px';
-                  fill.style.width = '0%';
-                  if (label) {
-                    label.textContent = 'RETIRADO › › ›';
-                    label.style.opacity = '1';
-                  }
-                },
+                onCancel: resetSlider,
                 onConfirm: async (purchaseTotal, stopsData, newTotal) => {
-                  await markAsPickedUp(oId, {
+                  const ok = await markAsPickedUp(oId, {
                     purchaseCost: purchaseTotal,
                     purchaseItemsTotal: purchaseTotal,
                     stopsPurchases: stopsData,
                     total: newTotal
                   });
+                  if (ok === false) resetSlider();
                 }
               });
             } else {
-              markAsPickedUp(oId);
+              markAsPickedUp(oId).then(ok => { if (ok === false) resetSlider(); });
             }
           } else if (action === 'deliver' && oId) {
             const ids = oId.split(',');
             const targetOrders = (activeOrdersList || []).filter(o => ids.includes(o.id));
             const isSim = ids.includes('sim_demo_order') || Boolean(window.mockSimulatedOrder);
             const isTripOrder = targetOrders.some(o => o.isTrip === true);
-            const noCodeRequired = isSim || isTripOrder || targetOrders.some(o => 
-              o.isManual === true || 
-              o.noCodeRequired === true || 
-              o.source === 'whatsapp_bot' || 
-              o.favorType === 'encomienda' || 
-              (o.isFavor && o.favorType === 'encomienda') || 
+            const noCodeRequired = isSim || isTripOrder || targetOrders.some(o =>
+              o.isManual === true ||
+              o.noCodeRequired === true ||
+              o.source === 'whatsapp_bot' ||
+              o.favorType === 'encomienda' ||
+              (o.isFavor && o.favorType === 'encomienda') ||
               o.serviceType === 'encomienda'
             );
 
@@ -7555,37 +7838,29 @@ export function attachBottomDockListeners(user, activeOrders = []) {
               codes: code ? [code] : targetOrders.map(o => o.verificationCode).filter(Boolean),
               ids,
               orders: activeOrdersList || [],
-              onCancel: () => {
-                handle.style.transition = 'all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                fill.style.transition = 'all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                handle.style.left = '3px';
-                fill.style.width = '0%';
-                if (label) {
-                  label.textContent = 'ENTREGADO › › ›';
-                  label.style.opacity = '1';
-                }
-              },
+              onCancel: resetSlider,
               onConfirm: async () => {
                 await markAsDelivered(ids);
               }
             });
+          } else {
+            resetSlider();
           }
-        }, 120);
-      } else {
-        handle.style.transition = 'all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-        fill.style.transition = 'all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-        handle.style.left = '3px';
-        fill.style.width = '0%';
-        if (label) label.style.opacity = '1';
-      }
+        } catch (err) {
+          console.error('[Slider] Action failed:', err);
+          showToast('No se pudo completar la acción. Probá de nuevo.', 'error');
+          resetSlider();
+        } finally {
+          flushPendingDockRefresh();
+        }
+      }, 120);
     };
 
-    handle.addEventListener('touchstart', onStart, { passive: true });
-    window.addEventListener('touchmove', onMove, { passive: true });
-    window.addEventListener('touchend', onEnd);
-    handle.addEventListener('mousedown', onStart);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onEnd);
+    slider.addEventListener('pointerdown', onDown);
+    slider.addEventListener('pointermove', onMove);
+    slider.addEventListener('pointerup', onUp);
+    slider.addEventListener('pointercancel', onCancel);
+    slider.addEventListener('lostpointercapture', onCancel);
   });
 
   const pickupBtns = document.querySelectorAll('.mark-picked-up-btn');
@@ -7650,8 +7925,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
               const currentUser = getState().user;
               const bottomDock = document.getElementById('driver-footer-dock-container');
               if (bottomDock) {
-                bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-                attachBottomDockListeners(currentUser, activeOrdersList);
+                refreshBottomDock(bottomDock, currentUser, activeOrdersList);
               }
             } catch(err) {
               console.error('Error updating mandado purchase cost:', err);
@@ -7867,8 +8141,7 @@ export async function startFullDriverSimulation() {
   // 2. Render bottom dock and top status bar with the live simulated order
   const bottomDock = document.getElementById('driver-footer-dock-container');
   if (bottomDock) {
-    bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-    attachBottomDockListeners(currentUser, activeOrdersList);
+    refreshBottomDock(bottomDock, currentUser, activeOrdersList);
   }
 
   const statusBar = document.getElementById('driver-top-status-bar');
@@ -8259,8 +8532,7 @@ function attachPerfilTabListeners(user, container) {
       }
       const bottomDock = document.getElementById('driver-footer-dock-container');
       if (bottomDock) {
-        bottomDock.innerHTML = renderBottomDockContent(latestUser, activeOrdersList);
-        attachBottomDockListeners(latestUser, activeOrdersList);
+        refreshBottomDock(bottomDock, latestUser, activeOrdersList);
       }
       const bottomNavContainer = document.getElementById('driver-bottom-nav-container');
       if (bottomNavContainer) {
@@ -8802,32 +9074,10 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
         }
         transaction.update(ref, updateFields);
 
-        // Bind new driver to chat channels
-        try {
-          const cdRef = doc(db, 'chats', `${o.id}_client-delivery`);
-          transaction.set(cdRef, {
-            orderId: o.id,
-            type: 'client-delivery',
-            driverId: user.uid,
-            driverName: user.displayName || user.name || 'Repartidor',
-            userId: o.userId || null,
-            participants: arrayUnion(...[user.uid, o.userId].filter(Boolean))
-          }, { merge: true });
-
-          if (o.comercioId) {
-            const comdRef = doc(db, 'chats', `${o.id}_commerce-delivery`);
-            transaction.set(comdRef, {
-              orderId: o.id,
-              type: 'commerce-delivery',
-              driverId: user.uid,
-              driverName: user.displayName || user.name || 'Repartidor',
-              comercioId: o.comercioId,
-              participants: arrayUnion(...[user.uid, o.comercioId].filter(Boolean))
-            }, { merge: true });
-          }
-        } catch (e) {
-          console.warn('[takeBatch] Error updating chat doc in transaction:', e);
-        }
+        // Chat binding happens AFTER the transaction (see bindDriverToOrderChats). Inside it, an
+        // already-existing chat (client opened it before a driver was assigned, or the order was
+        // reassigned) is rejected by the rules, because they check the order's driverId as it
+        // was BEFORE this transaction. That rejection aborted the whole acceptance.
 
         // Add real-time push/in-app notification to the client (if registered user)
         if (o.userId) {
@@ -8891,6 +9141,8 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
       setState('user', { ...getState().user, lastActivityAt: new Date(), lastTripAcceptedAt: new Date() });
     });
 
+    bindDriverToOrderChats(ordersToTake, user);
+
     // Send automated messages for Pago de Servicios orders
     for (const o of ordersToTake) {
       if (o.favorType === 'pagodeservicios') {
@@ -8912,23 +9164,17 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
       }
     }
 
+    // Taken from the list, the overlay or a notification button: the offer alarm is over.
+    stopExclusiveOfferAlert();
+    hideExclusiveOfferOverlay();
     window._animatePickupPill = true;
-    showToast('¡Pedido tomado! Abriendo mapa en vivo...', 'success');
+    showToast('¡Pedido tomado! Ya lo tenés en tu hoja de ruta.', 'success');
     // Automatically switch to active tab
     window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: 'active' }));
-
-    // Automatically open the Live GPS Tracking Map for the accepted order
-    if (ordersToTake && ordersToTake.length > 0) {
-      const targetOrder = ordersToTake[0];
-      setTimeout(() => {
-        if (typeof showDeliveryMapModal === 'function') {
-          showDeliveryMapModal(targetOrder, ordersToTake);
-        }
-      }, 350);
-    }
+    return true;
   } catch (err) {
     console.error('takeBatch error:', err);
-    showToast(err.toString(), 'error');
+    showToast(describeTakeBatchError(err), 'error');
     if (btn) {
       btn.disabled = false;
       if (btn.classList.contains('add-suggested-order-btn')) {
@@ -8940,6 +9186,47 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
   } finally {
     isCurrentlyTakingBatch = false;
   }
+  return false;
+}
+
+// Raw errors ("FirebaseError: Missing or insufficient permissions.") meant nothing to drivers.
+function describeTakeBatchError(err) {
+  if (typeof err === 'string') return err;
+  const code = err?.code || '';
+  if (code === 'permission-denied') return 'Tu cuenta no tiene permiso para tomar este pedido. Avisá a soporte.';
+  if (code === 'unavailable' || code === 'deadline-exceeded' || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    return 'Sin conexión: no se pudo tomar el pedido. Probá de nuevo.';
+  }
+  if (code === 'aborted' || code === 'failed-precondition') return 'El pedido cambió mientras lo tomabas. Probá de nuevo.';
+  return err?.message || 'No se pudo tomar el pedido.';
+}
+
+// Adds the driver to the order's chats once they own the order, so the chat rules (which
+// check the order's driverId) accept the write. Best effort: a chat problem must never undo
+// or block an accepted order.
+function bindDriverToOrderChats(orders, user) {
+  const driverName = user.displayName || user.name || 'Repartidor';
+  orders.forEach(o => {
+    setDoc(doc(db, 'chats', `${o.id}_client-delivery`), {
+      orderId: o.id,
+      type: 'client-delivery',
+      driverId: user.uid,
+      driverName,
+      userId: o.userId || null,
+      participants: arrayUnion(...[user.uid, o.userId].filter(Boolean))
+    }, { merge: true }).catch(e => console.warn('[takeBatch] Could not bind client chat:', e));
+
+    if (o.comercioId) {
+      setDoc(doc(db, 'chats', `${o.id}_commerce-delivery`), {
+        orderId: o.id,
+        type: 'commerce-delivery',
+        driverId: user.uid,
+        driverName,
+        comercioId: o.comercioId,
+        participants: arrayUnion(...[user.uid, o.comercioId].filter(Boolean))
+      }, { merge: true }).catch(e => console.warn('[takeBatch] Could not bind commerce chat:', e));
+    }
+  });
 }
 
 export const takeOrder = takeBatch;
@@ -8955,8 +9242,7 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
     const currentUser = getState().user;
     const bottomDock = document.getElementById('driver-footer-dock-container');
     if (bottomDock) {
-      bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-      attachBottomDockListeners(currentUser, activeOrdersList);
+      refreshBottomDock(bottomDock, currentUser, activeOrdersList);
     }
     NavigationVoice.speak('Pedido retirado. Dirigite a Calle Brenan 450', true);
     showToast('🛍️ Pedido retirado. ¡Yendo a entregar al cliente!', 'success');
@@ -8979,8 +9265,9 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
   // Optimistic UI response: Feedback is instant to the rider
   showToast(ids.length > 1 ? 'Pedidos retirados con éxito 🚴' : 'Pedido retirado con éxito 🚴', 'success');
 
-  // Asynchronous background execution (does not block UI)
-  (async () => {
+  // Resolves true once the server confirmed the pickup, false if it was rejected. Callers must
+  // not wait on it to give feedback: offline, the write is queued and only resolves later.
+  return (async () => {
     try {
       let lat = window.lastRiderPos?.lat || null;
       let lng = window.lastRiderPos?.lng || null;
@@ -9039,8 +9326,7 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
       const currentUser = getState().user;
       const bottomDock = document.getElementById('driver-footer-dock-container');
       if (bottomDock) {
-        bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-        attachBottomDockListeners(currentUser, activeOrdersList);
+        refreshBottomDock(bottomDock, currentUser, activeOrdersList);
       }
       
       // Background non-blocking notification to users
@@ -9067,8 +9353,12 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
           console.warn('Could not send pickup notification to user:', notifErr);
         }
       }));
+      return true;
     } catch (err) {
-      console.warn('Async pickup sync error:', err);
+      console.error('Async pickup sync error:', err);
+      showToast('⚠️ No se pudo marcar como retirado. Deslizá de nuevo.', 'error', 6000);
+      refreshBottomDock(document.getElementById('driver-footer-dock-container'), getState().user, activeOrdersList);
+      return false;
     }
   })();
 }
@@ -9347,9 +9637,16 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
     let startX = 0;
     let maxSlide = 0;
 
+    let activePointerId = null;
+
     const onStart = (e) => {
+      if (isDragging || isConfirmed) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       isDragging = true;
-      startX = (e.type === 'touchstart') ? e.touches[0].clientX : e.clientX;
+      activePointerId = e.pointerId;
+      try { containerEl.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+      startX = e.clientX;
       maxSlide = containerEl.clientWidth - handle.clientWidth - 8;
       handle.style.transition = 'none';
       bg.style.transition = 'none';
@@ -9357,8 +9654,8 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
     };
 
     const onMove = (e) => {
-      if (!isDragging) return;
-      const clientX = (e.type === 'touchmove') ? e.touches[0].clientX : e.clientX;
+      if (!isDragging || e.pointerId !== activePointerId) return;
+      const clientX = e.clientX;
       let deltaX = clientX - startX;
       if (deltaX < 0) deltaX = 0;
       if (deltaX > maxSlide) deltaX = maxSlide;
@@ -9368,13 +9665,14 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
       text.style.opacity = Math.max(0, 1 - (deltaX / (maxSlide * 0.6)));
     };
 
-    const onEnd = () => {
-      if (!isDragging) return;
+    const onEnd = (e) => {
+      if (!isDragging || (e && e.pointerId !== activePointerId)) return;
       isDragging = false;
+      activePointerId = null;
       handle.style.cursor = 'grab';
-      const currentLeft = parseInt(handle.style.left) - 4;
+      const currentLeft = (parseInt(handle.style.left) || 4) - 4;
 
-      if (currentLeft >= maxSlide * 0.9) {
+      if (e && e.type === 'pointerup' && currentLeft >= maxSlide * 0.85) {
         isConfirmed = true;
         handle.style.transition = 'all 0.2s ease';
         bg.style.transition = 'all 0.2s ease';
@@ -9399,13 +9697,11 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
       }
     };
 
-    handle.addEventListener('mousedown', onStart);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onEnd);
-
-    handle.addEventListener('touchstart', onStart, { passive: true });
-    window.addEventListener('touchmove', onMove, { passive: true });
-    window.addEventListener('touchend', onEnd);
+    containerEl.addEventListener('pointerdown', onStart);
+    containerEl.addEventListener('pointermove', onMove);
+    containerEl.addEventListener('pointerup', onEnd);
+    containerEl.addEventListener('pointercancel', onEnd);
+    containerEl.addEventListener('lostpointercapture', onEnd);
   }
 }
 
@@ -9435,8 +9731,7 @@ export async function markAsDelivered(orderIdOrIds) {
       const currentUser = getState().user;
       const bottomDock = document.getElementById('driver-footer-dock-container');
       if (bottomDock) {
-        bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-        attachBottomDockListeners(currentUser, activeOrdersList);
+        refreshBottomDock(bottomDock, currentUser, activeOrdersList);
       }
       const statusBar = document.getElementById('driver-top-status-bar');
       if (statusBar) {
@@ -9448,6 +9743,7 @@ export async function markAsDelivered(orderIdOrIds) {
   }
   
   // 0. Optimistic local update: remove delivered orders from route sheet immediately (0ms delay)
+  const ordersBeforeDelivery = [...(activeOrdersList || [])];
   activeOrdersList = (activeOrdersList || []).filter(o => !ids.includes(o.id));
   window.activeOrdersList = activeOrdersList;
   activeOrdersCount = activeOrdersList.length;
@@ -9464,26 +9760,43 @@ export async function markAsDelivered(orderIdOrIds) {
   }
   const currentBottomDock = document.getElementById('driver-footer-dock-container');
   if (currentBottomDock) {
-    currentBottomDock.innerHTML = renderBottomDockContent(currentLocalUser, activeOrdersList);
-    attachBottomDockListeners(currentLocalUser, activeOrdersList);
+    refreshBottomDock(currentBottomDock, currentLocalUser, activeOrdersList);
   }
   if (typeof updateDriverNavigationRoute === 'function') {
     updateDriverNavigationRoute(activeOrdersList);
   }
   
   try {
-    // 1. Update order documents to 'completed' FIRST to guarantee they leave active route sheet
-    const now = new Date();
-    for (const id of ids) {
-      try {
-        await updateDoc(doc(db, 'orders', id), {
-          status: 'completed',
-          deliveredAt: serverTimestamp(),
-          deliverySessionId: user?.currentSessionId || null
-        });
-      } catch (uErr) {
-        console.warn(`[markAsDelivered] Direct updateDoc notice for order ${id}:`, uErr);
-      }
+    // 1. Update order documents to 'completed' FIRST to guarantee they leave active route sheet.
+    // The writes land in the local cache at once; updateDoc only resolves on server ack, which
+    // with poor signal can take long (or never, offline — it syncs later). So wait a bounded
+    // time, and only treat an actual rejection as a failure. A rejection used to be swallowed:
+    // the celebration showed, the order silently stayed "delivering" and came back to the
+    // panel with its route still drawn.
+    const deliveryWrites = ids.map(id => updateDoc(doc(db, 'orders', id), {
+      status: 'completed',
+      deliveredAt: serverTimestamp(),
+      deliverySessionId: user?.currentSessionId || null
+    }).then(() => null, (uErr) => ({ id, uErr })));
+    const writeOutcome = await Promise.race([
+      Promise.all(deliveryWrites).then(results => results.filter(Boolean)),
+      new Promise(resolve => setTimeout(() => resolve(null), 6000))
+    ]);
+
+    if (Array.isArray(writeOutcome) && writeOutcome.length > 0) {
+      writeOutcome.forEach(f => console.error(`[markAsDelivered] Could not complete order ${f.id}:`, f.uErr));
+      const failedIds = writeOutcome.map(f => f.id);
+      activeOrdersList = [...activeOrdersList, ...ordersBeforeDelivery.filter(o => failedIds.includes(o.id))];
+      window.activeOrdersList = activeOrdersList;
+      activeOrdersCount = activeOrdersList.length;
+      window._lastActiveOrdersSignature = null;
+      syncDriverNavigationWithOrders(activeOrdersList);
+      refreshBottomDock(document.getElementById('driver-footer-dock-container'), getState().user, activeOrdersList);
+      showToast('⚠️ No se pudo registrar la entrega. Revisá tu conexión y deslizá de nuevo.', 'error', 7000);
+      return;
+    }
+    if (writeOutcome === null) {
+      showToast('📶 Señal débil: la entrega se sincroniza apenas vuelva la conexión.', 'warning', 5000);
     }
 
     // 2. Fetch the orders for rewards calculation & UI display
@@ -9558,8 +9871,7 @@ export function showCustomerRatingModal(orders, index = 0) {
     }
     const bottomDock = document.getElementById('driver-footer-dock-container');
     if (bottomDock) {
-      bottomDock.innerHTML = renderBottomDockContent(currentUser, activeOrdersList);
-      attachBottomDockListeners(currentUser, activeOrdersList);
+      refreshBottomDock(bottomDock, currentUser, activeOrdersList);
     }
     if (typeof updateDriverNavigationRoute === 'function') {
       updateDriverNavigationRoute(activeOrdersList);
@@ -9879,6 +10191,10 @@ export async function updateDispatchQueue(orderId) {
         queueTargetDriverId: nextDriverId || deleteField(),
         queueTargetDriverName: nextDriverName || deleteField(),
         queueOfferedAt: nextDriverId ? serverTimestamp() : deleteField(),
+        // onOrderStatusChange skips the push for offers made by serverSideDispatch (it pushes
+        // itself). Without overwriting the marker, a re-offer from here inherited 'server'
+        // and the next driver was never notified.
+        queueOfferedBy: 'client',
         queueOfferedDrivers: offeredDrivers,
         queueRejectedDrivers: rejectedList,
         manuallyRejectedDrivers: manualRejected,
