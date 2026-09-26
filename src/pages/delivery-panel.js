@@ -362,6 +362,104 @@ export function updateOfflineBannerUI() {
 // ----------------------------------------------------
 // 2. MULTI-STOP BATCH ROUTE SEQUENCER (FOOD COMMERCE PRIORITY & REAL-TIME GEO)
 // ----------------------------------------------------
+// ── Orden inteligente de paradas ─────────────────────────────────────────────
+// Con varios pedidos se prueban todos los órdenes válidos (cada retiro antes de su entrega;
+// un pasajero a bordo va directo a destino) y se elige el de menor costo:
+//   km recorridos + penalidad por llevar comida encima + penalidad por demorar a cada cliente.
+// Así, dos retiros cercanos se hacen juntos y después se reparten las entregas.
+// Para que la ruta no "salte" con cada GPS, solo se cambia el orden si el nuevo es claramente mejor.
+const ROUTE_FOOD_CARRY = 0.35;   // por km que viaja comida ya retirada (se enfría)
+const ROUTE_CUSTOMER_WAIT = 0.1; // por km acumulado hasta cada entrega (el cliente espera)
+const ROUTE_SWITCH_GAIN = 0.12;  // el orden nuevo tiene que ser 12 % mejor para reemplazar al actual
+let lastSmartRoute = null;       // { order: [stopKey] }
+
+function routeKm(a, b) {
+  const R = 6371, toRad = (x) => x * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h)) * 1.3; // calles, no línea recta
+}
+
+function smartStopOrder(stops, driverPos, parseCoords) {
+  const start = parseCoords(driverPos);
+  if (!start || stops.length > 8) return null;
+  if (!stops.every(s => Array.isArray(s.coords) && !isNaN(Number(s.coords[0])) && !isNaN(Number(s.coords[1])))) return null;
+
+  const pts = stops.map(s => ({ lat: Number(s.coords[1]), lng: Number(s.coords[0]) }));
+  const keyOf = (s) => `${s.orderId}:${s.type}`;
+  const hasPickup = new Set(stops.filter(s => s.type === 'pickup').map(s => s.orderId));
+  const isTripStop = (s) => Boolean(s.order && s.order.isTrip);
+  const carriesFood = (s) => Boolean(s.isFoodCommerce) && !isTripStop(s);
+
+  // Costo de un orden concreto (índices en stops) desde la posición actual
+  const costOf = (seq) => {
+    let pos = start, km = 0, cost = 0;
+    const onBoard = new Set(stops.filter(s => s.type === 'delivery' && !hasPickup.has(s.orderId) && carriesFood(s)).map(s => s.orderId));
+    for (const i of seq) {
+      const leg = routeKm(pos, pts[i]);
+      km += leg;
+      cost += leg + ROUTE_FOOD_CARRY * leg * onBoard.size;
+      const s = stops[i];
+      if (s.type === 'pickup' && carriesFood(s)) onBoard.add(s.orderId);
+      if (s.type === 'delivery') { onBoard.delete(s.orderId); cost += ROUTE_CUSTOMER_WAIT * km; }
+      pos = pts[i];
+    }
+    return cost;
+  };
+
+  const valid = (seq) => {
+    const seen = new Set();
+    for (let k = 0; k < seq.length; k++) {
+      const s = stops[seq[k]];
+      if (s.type === 'delivery' && hasPickup.has(s.orderId) && !seen.has(`${s.orderId}:pickup`)) return false;
+      // Con un pasajero a bordo no se hace ninguna otra parada en el medio
+      if (s.type === 'pickup' && isTripStop(s)) {
+        const next = stops[seq[k + 1]];
+        if (next && !(next.orderId === s.orderId && next.type === 'delivery')) return false;
+      }
+      seen.add(keyOf(s));
+    }
+    return true;
+  };
+
+  // Búsqueda completa con poda (con 4 pedidos son a lo sumo 2.520 órdenes válidos)
+  let best = null, bestCost = Infinity;
+  const n = stops.length, used = new Array(n).fill(false), seq = [];
+  const walk = (partialCost, pos, km, onBoard, pickedUp) => {
+    if (partialCost >= bestCost) return;
+    if (seq.length === n) { best = seq.slice(); bestCost = partialCost; return; }
+    const lastStop = seq.length ? stops[seq[seq.length - 1]] : null;
+    for (let i = 0; i < n; i++) {
+      if (used[i]) continue;
+      const s = stops[i];
+      if (s.type === 'delivery' && hasPickup.has(s.orderId) && !pickedUp.has(s.orderId)) continue;
+      if (lastStop && lastStop.type === 'pickup' && isTripStop(lastStop) && !(s.orderId === lastStop.orderId && s.type === 'delivery')) continue;
+      const leg = routeKm(pos, pts[i]);
+      const nkm = km + leg;
+      let c = partialCost + leg + ROUTE_FOOD_CARRY * leg * onBoard.size;
+      const board = new Set(onBoard);
+      const picked = new Set(pickedUp);
+      if (s.type === 'pickup') { picked.add(s.orderId); if (carriesFood(s)) board.add(s.orderId); }
+      else { board.delete(s.orderId); c += ROUTE_CUSTOMER_WAIT * nkm; }
+      used[i] = true; seq.push(i);
+      walk(c, pts[i], nkm, board, picked);
+      seq.pop(); used[i] = false;
+    }
+  };
+  const initialBoard = new Set(stops.filter(s => s.type === 'delivery' && !hasPickup.has(s.orderId) && carriesFood(s)).map(s => s.orderId));
+  walk(0, start, 0, initialBoard, new Set());
+  if (!best) return null;
+
+  // Estabilidad: si el orden anterior sigue siendo válido y no es claramente peor, se mantiene
+  // (también al completar una parada: el orden que quedaba sigue siendo el candidato)
+  if (lastSmartRoute) {
+    const prev = lastSmartRoute.order.map(k => stops.findIndex(s => keyOf(s) === k)).filter(i => i >= 0);
+    if (prev.length === n && valid(prev) && costOf(prev) <= bestCost * (1 + ROUTE_SWITCH_GAIN)) best = prev;
+  }
+  lastSmartRoute = { order: best.map(i => keyOf(stops[i])) };
+  return best.map(i => stops[i]);
+}
+
 export function calculateOptimalMultiStopSequence(driverPos, activeOrders = []) {
   if (!Array.isArray(activeOrders) || activeOrders.length === 0) return [];
 
@@ -480,6 +578,11 @@ export function calculateOptimalMultiStopSequence(driverPos, activeOrders = []) 
   });
 
   if (stops.length <= 1) return stops;
+
+  // Con coordenadas de todas las paradas: el mejor orden (ver smartStopOrder). Si falta alguna
+  // (mandado sin ubicación exacta) o son demasiadas, se usa el orden por llegada de siempre.
+  const smart = smartStopOrder(stops, driverPos, parseCoords);
+  if (smart) return smart;
 
   const pickedUpOrderIds = new Set();
   activeOrders.forEach(o => {
@@ -947,8 +1050,8 @@ export async function renderDeliveryPanel(containerArg) {
 
       const zoomWrapper = document.getElementById('driver-zoom-controls-wrapper') || document.querySelector('#driver-map-controls-group > div');
       if (zoomWrapper) {
-        zoomWrapper.style.background = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)';
-        zoomWrapper.style.border = `1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'}`;
+        zoomWrapper.style.background = isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)';
+        zoomWrapper.style.border = `1px solid ${isLight ? '#E5E7EB' : '#262B33'}`;
         zoomWrapper.style.boxShadow = isLight ? '0 8px 24px rgba(0,0,0,0.12)' : '0 8px 24px rgba(0,0,0,0.5)';
       }
 
@@ -973,11 +1076,10 @@ export async function renderDeliveryPanel(containerArg) {
 
       const speedPill = document.getElementById('driver-speedometer-pill');
       if (speedPill) {
-        speedPill.style.background = isLight ? 'rgba(255, 255, 255, 0.94)' : 'rgba(15, 23, 42, 0.92)';
-        speedPill.style.border = `1.5px solid ${isLight ? 'rgba(225,29,72,0.25)' : 'rgba(244,63,94,0.35)'}`;
-        speedPill.style.boxShadow = isLight ? '0 8px 24px rgba(0,0,0,0.1)' : '0 8px 24px rgba(0,0,0,0.5)';
+        speedPill.style.background = isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)';
+        speedPill.style.border = `1px solid ${isLight ? '#E5E7EB' : '#262B33'}`;
         const speedVal = document.getElementById('driver-speed-value');
-        if (speedVal) speedVal.style.color = 'var(--driver-text-primary)';
+        if (speedVal) speedVal.style.color = isLight ? '#0F172A' : '#F3F4F6';
       }
 
       const streetPill = document.getElementById('driver-current-street-pill');
@@ -990,9 +1092,9 @@ export async function renderDeliveryPanel(containerArg) {
 
       const recenterCompassBtn = document.getElementById('driver-recenter-compass-btn');
       if (recenterCompassBtn) {
-        recenterCompassBtn.style.background = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)';
-        recenterCompassBtn.style.border = `1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'}`;
-        recenterCompassBtn.style.color = isLight ? '#0f172a' : '#38bdf8';
+        recenterCompassBtn.style.background = isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)';
+        recenterCompassBtn.style.border = `1px solid ${isLight ? '#E5E7EB' : '#262B33'}`;
+        recenterCompassBtn.style.color = isLight ? '#0F172A' : '#F3F4F6';
         recenterCompassBtn.style.boxShadow = isLight ? '0 8px 24px rgba(0,0,0,0.12)' : '0 8px 24px rgba(0,0,0,0.5)';
       }
 
@@ -1337,137 +1439,56 @@ export async function renderDeliveryPanel(containerArg) {
       ${renderStatusBar(user)}
     </div>
 
-    <!-- LAYER 2.4: FLOATING TELEMETRY SPEEDOMETER -->
+    <!-- LAYER 2.4: VELOCIDAD, ZOOM Y RECENTRAR — arriba a la derecha, debajo del cartel:
+         esa zona del mapa siempre queda libre (abajo está el panel, que cambia de alto) -->
     ${isOnline ? (() => {
-      const hasActiveOrders = Array.isArray(activeOrdersList) && activeOrdersList.length > 0;
-      const isHidden = window.driverDockHidden === true;
-      const navH = DRIVER_NAV_BAR_HEIGHT;
-      const badgeBottom = isHidden
-        ? `calc(${navH}px + max(90px, calc(70px + env(safe-area-inset-bottom, 24px))))`
-        : (hasActiveOrders
-          ? `calc(${navH}px + max(330px, calc(310px + env(safe-area-inset-bottom, 24px))))`
-          : `calc(${navH}px + max(260px, calc(240px + env(safe-area-inset-bottom, 24px))))`);
+      const cardBg = isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)';
+      const cardBd = isLight ? '#E5E7EB' : '#262B33';
+      const txt = isLight ? '#0F172A' : '#F3F4F6';
+      const sub = isLight ? '#64748B' : '#8A929D';
+      const shadow = isLight ? '0 6px 16px rgba(15,23,42,0.1)' : '0 6px 16px rgba(0,0,0,0.4)';
       return `
-        <div id="driver-speedometer-pill" style="
-          position: fixed;
-          bottom: ${badgeBottom};
-          left: 16px;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: ${isLight ? 'rgba(255, 255, 255, 0.94)' : 'rgba(15, 23, 42, 0.92)'};
-          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-          border: 1.5px solid ${isLight ? 'rgba(225,29,72,0.25)' : 'rgba(244,63,94,0.35)'};
-          border-radius: 20px;
-          padding: 6px 12px;
-          z-index: 9990;
-          pointer-events: auto;
-          box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.5)'};
-          transition: bottom 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s ease;
-        ">
-          <span style="font-size: 13px;">⚡</span>
-          <span id="driver-speed-value" style="font-size: 14px; font-weight: 900; color: var(--driver-text-primary); font-family: monospace;">${window.currentDriverSpeedKmh || 0}</span>
-          <span style="font-size: 10px; font-weight: 700; color: var(--driver-text-secondary);">km/h</span>
-        </div>
-
-        <!-- LAYER 2.6: FLOATING CURRENT STREET PILL -->
-        <div id="driver-current-street-pill" style="
-          position: fixed;
-          bottom: ${badgeBottom};
-          right: 16px;
-          background: ${isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(9, 13, 22, 0.92)'};
-          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-          border: 1px solid ${isLight ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.15)'};
-          border-radius: 18px;
-          padding: 6px 14px;
-          font-size: 11.5px;
-          font-weight: 800;
-          color: var(--driver-text-primary-soft);
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          z-index: 9990;
-          pointer-events: none;
-          box-shadow: 0 8px 20px rgba(0,0,0,0.35);
-          white-space: nowrap;
-          max-width: calc(100vw - 150px);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          transition: bottom 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s ease;
-        ">
-          <span style="color:#e11d48; font-size:12px;">📍</span>
-          <span id="driver-street-name-text">${window.lastDriverManeuver?.currentStreet ? `Circulando por: ${window.lastDriverManeuver.currentStreet}` : 'Magdalena en tiempo real'}</span>
-        </div>
-
-        <!-- FLOATING DRIVER MAP CONTROLS (ZOOM & RECENTER) - PERMANENTLY VERTICALLY CENTERED -->
         <div id="driver-map-controls-group" style="
-          position: fixed;
-          right: 16px;
-          top: 50%;
-          transform: translateY(-50%);
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          z-index: 9990;
-          pointer-events: auto;
+          position: fixed; right: 12px;
+          top: calc(max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) + 96px);
+          display: flex; flex-direction: column; gap: 10px; z-index: 9990; pointer-events: auto;
         ">
-          <!-- Zoom In / Out Group -->
+          <div id="driver-speedometer-pill" style="
+            width: 44px; height: 44px; border-radius: 14px; background: ${cardBg}; border: 1px solid ${cardBd};
+            box-shadow: ${shadow}; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+          " aria-label="Velocidad">
+            <span id="driver-speed-value" style="font-family: var(--font-display, 'Outfit', sans-serif); font-size: 15px; font-weight: 700; color: ${txt};">${window.currentDriverSpeedKmh || 0}</span>
+            <span style="font-size: 9px; font-weight: 600; color: ${sub}; margin-top: 2px;">km/h</span>
+          </div>
           <div id="driver-zoom-controls-wrapper" style="
-            display: flex;
-            flex-direction: column;
-            background: ${isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)'};
-            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-            border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'};
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.5)'};
+            display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
+            background: ${cardBg}; border: 1px solid ${cardBd}; box-shadow: ${shadow};
           ">
-            <button type="button" id="driver-zoom-in-btn" aria-label="Acercar mapa" style="
-              width: 44px; height: 44px;
-              background: transparent; border: none;
-              border-bottom: 1px solid var(--driver-fill-subtle);
-              display: flex; align-items: center; justify-content: center;
-              cursor: pointer; color: var(--driver-text-primary);
-              transition: background 0.15s ease;
-            " title="Acercar mapa">
+            <button type="button" id="driver-zoom-in-btn" aria-label="Acercar mapa" title="Acercar mapa" style="
+              width: 44px; height: 44px; background: transparent; border: none; border-bottom: 1px solid ${cardBd};
+              display: flex; align-items: center; justify-content: center; cursor: pointer; color: ${txt};">
               ${icon('plus', 18)}
             </button>
-            <button type="button" id="driver-zoom-out-btn" aria-label="Alejar mapa" style="
-              width: 44px; height: 44px;
-              background: transparent; border: none;
-              display: flex; align-items: center; justify-content: center;
-              cursor: pointer; color: var(--driver-text-primary);
-              transition: background 0.15s ease;
-            " title="Alejar mapa">
+            <button type="button" id="driver-zoom-out-btn" aria-label="Alejar mapa" title="Alejar mapa" style="
+              width: 44px; height: 44px; background: transparent; border: none;
+              display: flex; align-items: center; justify-content: center; cursor: pointer; color: ${txt};">
               ${icon('minus', 18)}
             </button>
           </div>
-
-          <!-- Recenter Compass Target Button -->
-          <button id="driver-recenter-compass-btn" aria-label="Recentrar mi ubicación" style="
-            width: 44px; height: 44px; border-radius: 50%;
-            background: ${isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.94)'};
-            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-            border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.18)'};
-            color: ${isLight ? '#0f172a' : '#38bdf8'};
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer;
-            box-shadow: 0 8px 24px ${isLight ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.5)'};
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-          " title="Recentrar mi ubicación">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <button id="driver-recenter-compass-btn" aria-label="Recentrar mi ubicación" title="Recentrar mi ubicación" style="
+            width: 44px; height: 44px; border-radius: 14px; background: ${cardBg}; border: 1px solid ${cardBd};
+            color: ${txt}; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: ${shadow};">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="7.5"></circle>
-              <line x1="12" y1="2" x2="12" y2="4.5"></line>
-              <line x1="12" y1="19.5" x2="12" y2="22"></line>
-              <line x1="2" y1="12" x2="4.5" y2="12"></line>
-              <line x1="19.5" y1="12" x2="22" y2="12"></line>
+              <line x1="12" y1="2" x2="12" y2="4.5"></line><line x1="12" y1="19.5" x2="12" y2="22"></line>
+              <line x1="2" y1="12" x2="4.5" y2="12"></line><line x1="19.5" y1="12" x2="22" y2="12"></line>
               <circle cx="12" cy="12" r="2.2" fill="currentColor"></circle>
             </svg>
           </button>
         </div>
       `;
     })() : ''}
-    
+
     <!-- LAYER 3: CENTERED OFFLINE HERO (SHOWN WHEN OFFLINE) -->
     ${!isOnline ? `
       <div id="driver-offline-hero" style="position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(36px, calc(24px + env(safe-area-inset-top, 24px))) 24px calc(${DRIVER_NAV_BAR_HEIGHT}px + max(36px, calc(28px + env(safe-area-inset-bottom, 24px)))) 24px; box-sizing:border-box; z-index:900; pointer-events:auto; background:${isLight ? '#f8fafc' : '#04070d'};">
@@ -6310,13 +6331,17 @@ function renderStatusBar(user) {
     const isFavor = o.isFavor || o.favorType;
     const isGoCash = (o.favorType === 'gocash' || o.isGoCash || o.type === 'gocash');
     const isPagoServicios = (o.favorType === 'pagodeservicios' || o.isPagoServicios || o.type === 'pagodeservicios');
-    const isEncomienda = (o.favorType === 'encomienda' || o.isEncomienda || o.type === 'encomienda');
+    const isEncomienda = (o.favorType === 'encomienda' || o.isEncomienda || o.type === 'encomienda' || isOrderEncomienda(o));
     const isTrip = (o.isTrip || o.type === 'trip' || o.type === 'viaje' || o.favorType === 'viaje');
     const isMandado = (o.favorType === 'compra' || o.favorType === 'mandado' || (!isGoCash && !isPagoServicios && !isEncomienda && !isTrip && isFavor));
 
     let directiveLogo = '/go-bag.png?v=6';
     if (isPickupStage) {
-      if (isFavor) {
+      if (isTrip) {
+        // Antes caía en "Retirá el pedido en Local": un viaje no es un favor
+        directiveLogo = '/go-car.jpg';
+        destTitle = `Buscá a ${clientFullName} en ${o.originAddress || o.pickupAddress || 'el punto de inicio'}`;
+      } else if (isFavor) {
         if (isEncomienda) {
           directiveLogo = '/go-pickup-point.png?v=5';
           const pickupAddr = o.pickupAddress || o.originAddress || 'Dirección de Retiro';
@@ -6333,7 +6358,7 @@ function renderStatusBar(user) {
         } else {
           directiveLogo = '/go-bag.png?v=6';
           parsedMandado = parseMandadoDetails(o.description || o.itemsText || o.notes || o.details, o.comercioName || o.originAddress);
-          destTitle = `Retirá el pedido en ${parsedMandado.comercio}`;
+          destTitle = `Comprá en ${parsedMandado.comercio}`;
         }
       } else {
         const allComercios = getState().comercios || [];
@@ -6590,21 +6615,21 @@ function renderDockActionRow(order, orderIsPickup, isLight) {
     </div>`;
 }
 
-function dockContactRow(o, isPickup, isLight) {
+function dockContactRow(o, isPickup, isLight, withNav = true) {
   const t = driverTokens(isLight);
   const nav = dockNavUrl(o, isPickup);
   const wa = dockWhatsAppUrl(o);
   const phone = String(isPickup && !o.isTrip ? (o.comercioPhone || '') : (o.userPhone || o.clientPhone || o.phone || '')).replace(/[^\d+]/g, '');
-  const sq = `width:48px;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;cursor:pointer;padding:0`;
+  const sq = `${withNav ? 'width:48px;' : 'flex:1;'}height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;cursor:pointer;padding:0`;
   return `<div style="display:flex;gap:10px">
-    ${nav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer" style="flex:1;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">${dIcon('nav', 18, t.brandTx)}Navegar</a>` : '<span style="flex:1"></span>'}
+    ${nav && withNav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer" style="flex:1;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">${dIcon('nav', 18, t.brandTx)}Navegar</a>` : (withNav ? '<span style="flex:1"></span>' : '')}
     ${phone ? `<a href="tel:${esc(phone)}" aria-label="Llamar" title="Llamar" style="${sq}">${dIcon('phone', 20)}</a>` : ''}
     ${wa ? `<a href="${esc(wa)}" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp al cliente" title="WhatsApp" style="${sq};color:#25D366"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163A11.867 11.867 0 0 1 .157 11.89C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 0 1 8.413 3.488 11.82 11.82 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.82 9.82 0 0 0 1.746 5.634l-.999 3.648 3.742-.981z"/></svg></a>` : ''}
     <button class="driver-dock-chat-btn" data-order-id="${esc(o.id)}" data-customer-name="${esc(o.userName || o.clientName || 'Cliente')}" aria-label="Chat con el cliente" title="Chat" style="${sq}">${dIcon('chat', 20)}</button>
   </div>`;
 }
 
-function dockQuickRow(user, isLight, compact) {
+function dockQuickRow(user, isLight, compact, withSos = true) {
   const t = driverTokens(isLight);
   const isChofer = isDriverChoferApproved(user);
   const filters = window.autoAcceptFilters || getDriverAutoAcceptFilters(user);
@@ -6622,7 +6647,7 @@ function dockQuickRow(user, isLight, compact) {
     </button>
     ${iconBtn('driver-quick-support-btn', 'headset', 'Chat con soporte')}
     ${iconBtn('driver-quick-help-btn', 'help', 'Ayuda y preguntas frecuentes')}
-    ${iconBtn('driver-quick-sos-btn', 'shield', 'Centro de seguridad SOS', t.brandTx)}
+    ${withSos ? iconBtn('driver-quick-sos-btn', 'shield', 'Centro de seguridad SOS', t.brandTx) : ''}
   </div>`;
 }
 
@@ -6641,12 +6666,13 @@ export function renderBottomDockContent(user, activeOrders = []) {
   // Recorrido en orden (el mismo que dibuja el mapa) y la parada de ahora
   const route = hasActive ? calculateOptimalMultiStopSequence(window.lastRiderPos || null, activeOrders) : [];
   const nowStop = route[0] || null;
-  let selectedOrderIdx = (typeof window.driverSelectedOrderIndex === 'number' && window.driverSelectedOrderIndex >= 0 && window.driverSelectedOrderIndex < activeOrders.length)
-    ? window.driverSelectedOrderIndex
+  const pickedIdx = window.driverSelectedOrderId ? activeOrders.findIndex(o => o.id === window.driverSelectedOrderId) : -1;
+  const selectedOrderIdx = pickedIdx >= 0
+    ? pickedIdx
     : Math.max(0, nowStop ? activeOrders.findIndex(o => o.id === nowStop.orderId) : 0);
   const currentOrder = hasActive ? (activeOrders[selectedOrderIdx] || activeOrders[0]) : null;
   const currentIsPickup = currentOrder ? dockOrderStage(currentOrder) : false;
-  const stopIndex = currentOrder ? Math.max(0, route.findIndex(s => s.orderId === currentOrder.id && (s.type === 'pickup') === currentIsPickup)) : 0;
+  const stopIndex = currentOrder ? route.findIndex(s => s.orderId === currentOrder.id && (s.type === 'pickup') === currentIsPickup) : -1;
   const totalStops = route.length;
 
   // 1. Hoja escondida: una píldora con lo esencial
@@ -6706,23 +6732,30 @@ export function renderBottomDockContent(user, activeOrders = []) {
   const kind = orderKind(o, { isEncomienda: isOrderEncomienda(o) });
   const txt = dockStopText(o, currentIsPickup);
   const code = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
-  const meta = totalStops > 1 ? `${code} · parada ${stopIndex + 1} de ${totalStops}` : code;
+  const meta = totalStops > 1 && stopIndex >= 0 ? `${code} · parada ${stopIndex + 1} de ${totalStops}` : code;
 
   const expandBtn = `<button id="dock-expand-toggle-btn" aria-label="${isExpanded ? 'Ver menos' : 'Ver el detalle y el recorrido'}" title="${isExpanded ? 'Menos' : 'Detalle'}" style="height:36px;padding:0 10px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">${dIcon(isExpanded ? 'chevDown' : 'chevUp', 16)}${isExpanded ? 'Menos' : 'Detalle'}</button>`;
-  const header = handleRow(`<div style="display:flex;align-items:center;gap:8px;min-width:0">${kindTag(kind, isLight)}<span style="font-size:13px;color:${t.tx3};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(meta)}</span></div>`, expandBtn + hideBtn);
+  const sosBtn = `<button id="driver-quick-sos-btn" aria-label="Centro de seguridad SOS" title="SOS" style="width:36px;height:36px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">${dIcon('shield', 17, t.brandTx)}</button>`;
+  const header = handleRow(`<div style="display:flex;align-items:center;gap:8px;min-width:0">${kindTag(kind, isLight)}<span style="font-size:13px;color:${t.tx3};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(meta)}</span></div>`, sosBtn + expandBtn + hideBtn);
 
-  const stopBlock = `<div>
-      <div style="font-size:13px;color:${t.tx3};font-weight:600">${esc(txt.verb)}</div>
-      <div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:600;color:${t.tx};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(txt.title)}</div>
-      ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(txt.sub)}</div>` : ''}
+  const navUrl = dockNavUrl(o, currentIsPickup);
+  const stopBlock = `<div style="display:flex;align-items:center;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:${t.tx3};font-weight:600">${esc(txt.verb)}</div>
+        <div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:600;color:${t.tx};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(txt.title)}</div>
+        ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:${isExpanded ? 2 : 1};-webkit-box-orient:vertical;overflow:hidden">${esc(txt.sub)}</div>` : ''}
+      </div>
+      ${navUrl ? `<a href="${esc(navUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Navegar con Google Maps" title="Navegar" style="width:52px;height:52px;border-radius:26px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none">${dIcon('nav', 22, t.brandTx)}</a>` : ''}
     </div>`;
 
   // Lo que viene después (con varios pedidos)
   let nextChips = '';
-  if (!isExpanded && totalStops > 1) {
+  if (!isExpanded && activeOrders.length > 1 && totalStops > 1) {
     const rest = route.filter((s, i) => i !== stopIndex);
     const next = rest[0];
-    const nextName = next ? (next.type === 'pickup' ? (next.order?.comercioName || next.shortTitle || 'Retiro') : (next.order?.userName || next.shortTitle || 'Entrega')) : '';
+    const nextOrder = next ? (next.order || activeOrders.find(x => x.id === next.orderId) || {}) : null;
+    const nextTxt = nextOrder ? dockStopText(nextOrder, next.type === 'pickup') : null;
+    const nextName = nextTxt ? `${nextTxt.verb.charAt(0).toLowerCase()}${nextTxt.verb.slice(1)} ${nextTxt.title}` : '';
     const cashTotal = activeOrders.reduce((s, x) => s + (Number(x.totalAmount || x.total) || 0), 0);
     const chip = (text, fg, bg) => `<span style="height:30px;padding:0 12px;border-radius:15px;background:${bg};color:${fg};font-size:13px;font-weight:500;display:inline-flex;align-items:center;white-space:nowrap">${esc(text)}</span>`;
     nextChips = `<div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -6742,15 +6775,9 @@ export function renderBottomDockContent(user, activeOrders = []) {
       const isNow = so.id === o.id && (s.type === 'pickup') === currentIsPickup;
       return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : `Cobrá ${money(so.totalAmount || so.total)} ${isCashPayment(so) ? 'en efectivo' : 'por transferencia'}`, state: isNow ? 'now' : 'next', orderId: so.id };
     });
-    const all = [...doneStops, ...list];
-    const tabs = activeOrders.length > 1
-      ? `<div style="display:flex;flex-direction:column;gap:2px">${all.map((s) => {
-          const idx = activeOrders.findIndex(x => x.id === s.orderId);
-          return s.state === 'done' || idx < 0
-            ? `<div style="padding:4px 0">${stopsList([s], isLight)}</div>`
-            : `<button class="dock-order-tab-btn" data-index="${idx}" style="display:block;width:100%;text-align:left;background:${s.state === 'now' ? t.card : 'transparent'};border:0;border-radius:12px;padding:6px 8px;margin:0 -8px;cursor:pointer;font-family:inherit;color:inherit">${stopsList([s], isLight)}</button>`;
-        }).join('')}</div>`
-      : stopsList(all, isLight);
+    // Las paradas pendientes llevan el mismo número que en el mapa; con varios pedidos se pueden tocar
+    const all = [...doneStops, ...list.map((s, i) => ({ ...s, num: i + 1, tab: activeOrders.length > 1 ? { index: activeOrders.findIndex(x => x.id === s.orderId), orderId: s.orderId } : null }))];
+    const tabs = stopsList(all, isLight);
     const items = Array.isArray(o.items) ? o.items : (Array.isArray(o.products) ? o.products : []);
     const itemsHtml = items.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;color:${t.tx2}">
@@ -6773,9 +6800,9 @@ export function renderBottomDockContent(user, activeOrders = []) {
       ${nextChips}
       ${expanded}
       ${dockMoneyRow(o, currentIsPickup, isLight)}
-      ${dockContactRow(o, currentIsPickup, isLight)}
+      ${isExpanded ? dockContactRow(o, currentIsPickup, isLight, false) : ''}
       ${renderDockActionRow(o, currentIsPickup, isLight)}
-      ${dockQuickRow(user, isLight, true)}
+      ${isExpanded ? dockQuickRow(user, isLight, true, false) : ''}
     </div>`;
 }
 
@@ -7257,6 +7284,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       e.stopPropagation();
       const idx = parseInt(tab.dataset.index) || 0;
       window.driverSelectedOrderIndex = idx;
+      window.driverSelectedOrderId = tab.dataset.orderId || null;
       const bottomDock = document.getElementById('driver-footer-dock-container');
       if (bottomDock) {
         refreshBottomDock(bottomDock, latestUser, activeOrdersList);
@@ -7364,6 +7392,8 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       const action = slider.dataset.action;
       const oId = slider.dataset.id;
       const code = slider.dataset.codes;
+      window.driverSelectedOrderId = null;
+      window.driverSelectedOrderIndex = undefined;
 
       setTimeout(async () => {
         try {

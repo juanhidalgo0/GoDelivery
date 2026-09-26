@@ -85,26 +85,37 @@ export function countdownRing(secs, total, isLight, ids = {}) {
 }
 
 /**
- * Lista de paradas en orden: [{ kind: 'store'|'dest'|'pkg'|'person', title, sub, state: 'done'|'now'|'next' }]
+ * Recorrido en orden, con los mismos números que el mapa: rojo = retirar, blanco = entregar,
+ * tilde = hecho. La parada de ahora resaltada; las siguientes más tenues.
+ * items: [{ kind: 'store'|'pkg'|'person'|'dest', title, sub, state: 'done'|'now'|'next', num?, tab?: { index, orderId } }]
+ * Con `tab`, la fila es un botón (elegir esa parada).
  */
 export function stopsList(items, isLight) {
   const t = driverTokens(isLight);
+  let auto = 0;
   const n = items.length;
-  return `<div style="display:flex;flex-direction:column">${items.map((s, i) => {
-    const col = { store: t.brandTx, dest: t.tx, pkg: '#2DD4BF', person: '#38BDF8' }[s.kind] || t.tx;
+  return `<div style="display:flex;flex-direction:column;padding-left:4px">${items.map((s, i) => {
     const done = s.state === 'done';
-    const dotBg = done ? (isLight ? '#E5E7EB' : '#2A2F37') : (s.state === 'now' ? col : 'transparent');
-    const dotBd = done ? (isLight ? '#E5E7EB' : '#2A2F37') : col;
-    return `<div style="display:flex;gap:12px">
-      <div style="width:18px;display:flex;flex-direction:column;align-items:center">
-        <span style="width:18px;height:18px;border-radius:9px;background:${dotBg};border:2px solid ${dotBd};box-sizing:border-box;display:flex;align-items:center;justify-content:center;margin-top:2px">${done ? dIcon('check', 11, t.tx2, 3) : ''}</span>
-        ${i < n - 1 ? `<div style="width:2px;flex-grow:1;background:${t.line};margin:2px 0"></div>` : ''}
-      </div>
-      <div style="flex:1;min-width:0;padding-bottom:${i < n - 1 ? 12 : 0}px">
-        <div style="font-size:15px;font-weight:600;color:${done ? t.tx3 : t.tx};${done ? 'text-decoration:line-through;' : ''}overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)}</div>
-        ${s.sub ? `<div style="font-size:13px;color:${t.tx3};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(s.sub)}</div>` : ''}
-      </div>
-    </div>`;
+    const now = s.state === 'now';
+    const pickup = s.kind !== 'dest';
+    const num = done ? null : (s.num != null ? s.num : ++auto);
+    const badgeBg = done ? t.card : (pickup ? t.brand : (isLight ? '#0F172A' : '#F3F4F6'));
+    const badgeFg = done ? t.tx3 : (pickup ? '#FFFFFF' : (isLight ? '#FFFFFF' : '#0C0F13'));
+    const ring = now ? `box-shadow:0 0 0 3px ${t.sheet},0 0 0 5px ${pickup ? t.brand : (isLight ? '#0F172A' : '#F3F4F6')};` : '';
+    const badge = `<span style="width:26px;height:26px;border-radius:13px;background:${badgeBg};color:${badgeFg};${done ? `border:1px solid ${t.line};box-sizing:border-box;` : ''}${ring}
+      display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:var(--font-display,'Outfit',sans-serif);font-size:13px;font-weight:700">${done ? dIcon('check', 13, t.tx3, 3) : num}</span>`;
+    const line = i < n - 1 ? `<span style="width:2px;flex-grow:1;min-height:10px;background:${t.line};margin:4px 0"></span>` : '';
+    const titleColor = done ? t.tx3 : (now || s.state === undefined ? t.tx : t.tx2);
+    const body = `<span style="display:flex;gap:12px;text-align:left">
+      <span style="width:26px;display:flex;flex-direction:column;align-items:center;flex-shrink:0">${badge}${line}</span>
+      <span style="flex:1;min-width:0;padding:3px 0 ${i < n - 1 ? 12 : 0}px">
+        <span style="display:block;font-size:15px;font-weight:${now ? 700 : 600};color:${titleColor};${done ? 'text-decoration:line-through;' : ''}overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)}</span>
+        ${s.sub ? `<span style="display:-webkit-box;font-size:13px;color:${t.tx3};margin-top:2px;line-height:1.35;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(s.sub)}</span>` : ''}
+      </span>
+    </span>`;
+    return s.tab
+      ? `<button class="dock-order-tab-btn" data-index="${s.tab.index}" data-order-id="${esc(s.tab.orderId)}" aria-label="Ver ${esc(s.title)}" style="display:block;width:100%;background:transparent;border:0;padding:0;cursor:pointer;font-family:inherit;color:inherit">${body}</button>`
+      : `<div>${body}</div>`;
   }).join('')}</div>`;
 }
 

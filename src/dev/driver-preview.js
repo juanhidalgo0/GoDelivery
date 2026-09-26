@@ -80,6 +80,12 @@ const CASES = {
     { ...base.burger(2, 'Ana G.', 'Moreno 88', -35.0730, -57.5075, 'transferencia'), status: 'delivering', pickedUpAt: now() },
   ] }),
   '3 pedidos': () => ({ orders: [base.comercio(), base.mandado(), base.encomienda()] }),
+  '2 retiros cerca (orden inteligente)': () => {
+    const pizza = base.comercio();
+    const burger = { ...base.burger(3, 'Sofía R.', 'Av. del Sur 1500', -35.0985, -57.5230, 'efectivo'),
+      comercioName: 'Burger Centro', comercioCoords: { lat: -35.0822, lng: -57.5120 }, comercioCoordinates: { lat: -35.0822, lng: -57.5120 } };
+    return { orders: [{ ...pizza, deliveryAddress: 'Calle 25 n° 900', deliveryCoords: { lat: -35.0960, lng: -57.5260 } }, burger] };
+  },
   'Panel escondido': () => ({ orders: [base.comercio()], hidden: true }),
 };
 

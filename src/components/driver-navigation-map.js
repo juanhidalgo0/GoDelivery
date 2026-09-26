@@ -1674,7 +1674,7 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
     if (!pickupMarker) {
       const el = document.createElement('div');
       el.style.cssText = 'z-index:400; cursor:pointer; width:40px; height:40px; display:flex; align-items:center; justify-content:center;';
-      el.innerHTML = stopPinHtml(true, null);
+      el.innerHTML = stopPinHtml(true, 1);
       pickupMarker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(pLngLat).addTo(driverMap);
     } else {
       pickupMarker.setLngLat(pLngLat);
@@ -1686,10 +1686,13 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
 
   if (effectiveDropoff) {
     const dLngLat = [Number(effectiveDropoff.lng), Number(effectiveDropoff.lat)];
+    // Mismo número que en el panel: 2 si todavía falta retirar, 1 si ya se retiró
+    const dropLabel = (targetStage === 'pickup' && effectivePickup) ? 2 : 1;
+    if (dropoffMarker) dropoffMarker.getElement().innerHTML = stopPinHtml(false, dropLabel);
     if (!dropoffMarker) {
       const el = document.createElement('div');
       el.style.cssText = 'z-index:400; cursor:pointer; width:40px; height:40px; display:flex; align-items:center; justify-content:center;';
-      el.innerHTML = stopPinHtml(false, null);
+      el.innerHTML = stopPinHtml(false, dropLabel);
       dropoffMarker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(dLngLat).addTo(driverMap);
     } else {
       dropoffMarker.setLngLat(dLngLat);
