@@ -44,7 +44,9 @@ import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clea
 import { NavigationVoice } from '../utils/navigation-voice.js';
 import { driverTokens, orderKind, kindTag, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, pickupCoordsOf, dropoffCoordsOf, goCashInfo } from '../components/driver-ui.js';
 import { mandadoShoppingPlan, placeSearchQuery, categoryLabel, onPlacesChange, placeKm } from '../utils/mandado-places.js';
-import { loadMandadoPlaces, learnMandadoPlace, getVisitedStores, markStoreVisited } from '../utils/mandado-places-store.js';
+import { loadMandadoPlaces, learnMandadoPlace, getVisitedStores, markStoreVisited, lastStoreStepAt } from '../utils/mandado-places-store.js';
+import { isPlaceholderCoords, toLatLng } from '../utils/mandado-places.js';
+import { purchaseDwell } from '../utils/driver-dwell.js';
 
 // Set while the driver asked to disconnect and the server hasn't confirmed it yet,
 // so a write that never landed is re-sent instead of leaving the driver "online".
@@ -489,17 +491,73 @@ export function shoppingPlanOf(o, driverPos = window.lastRiderPos || null) {
   return mandadoShoppingPlan(shoppingSource(o), driverPos, getVisitedStores(o.id));
 }
 
+const tsMillis = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : (t && t.seconds ? t.seconds * 1000 : (t ? new Date(t).getTime() || 0 : 0)));
+
 /**
- * Aprende dónde queda el comercio donde el repartidor acaba de comprar. Si la app ya lo ubicaba
- * lejos de acá (desliza tarde, ya en camino), no se toma la visita.
+ * Aprende dónde queda el comercio donde el repartidor acaba de comprar. Se usa el lugar donde se
+ * quedó parado comprando (driver-dwell.js), no donde deslizó: si desliza tarde igual se toma el
+ * comercio, y si desliza antes de llegar no hubo parada y no se guarda nada.
  */
 function learnShoppingStore(o, store) {
   if (!o || !store || store.nearest) return;
   if (String(o.id || '').startsWith('sim_') || window.mockSimulatedOrder || isGpsSimulationRunning()) return; // GPS de prueba
+  // La parada tiene que ser después de aceptar el pedido (o de terminar el comercio anterior)
+  const since = Math.max(tsMillis(o.acceptedAt) || Date.now() - 45 * 60000, lastStoreStepAt(o.id));
+  const dwell = purchaseDwell({ since });
+  if (!dwell) return;
+  learnMandadoPlace({ name: store.store, position: dwell, uid: getState().user?.uid || null });
+}
+
+/** Dónde se retira este pedido, si se sabe con seguridad (para avisar si desliza lejos). */
+function pickupTargetOf(o) {
+  if (!o || isGoCashOrder(o)) return null;
+  if (isShoppingFavor(o)) {
+    const cur = shoppingPlanOf(o).current;
+    // Solo lugares seguros: "el más cercano" o un punto aproximado pueden no ser donde compró
+    return cur && cur.coords && !cur.approx && cur.resolvedBy !== 'cercano' ? { coords: cur.coords, name: cur.placeName || cur.store } : null;
+  }
+  let c = toLatLng(o.comercioCoords || o.comercioCoordinates);
+  if (!c && o.comercioId) {
+    const com = (getState().comercios || []).find(x => x.id === o.comercioId);
+    c = toLatLng(com && com.coords);
+  }
+  if (!c) {
+    const pc = o.pickupCoords || o.originCoords;
+    c = isPlaceholderCoords(pc) ? null : toLatLng(pc);
+  }
+  if (!c) return null;
+  const name = o.isTrip ? (o.userName || 'el pasajero') : (o.comercioName || o.pickupAddress || o.originAddress || 'el retiro');
+  return { coords: c, name };
+}
+
+const FAR_PICKUP_M = 300;
+
+/**
+ * Antes de marcar "retirado": si el repartidor está lejos del retiro, se le pregunta (evita marcarlo
+ * antes de llegar, y que el cliente vea "en camino" sin que lo hayan retirado). Devuelve null si
+ * cancela, o lo que se guarda en el pedido: a qué distancia deslizó.
+ */
+export function confirmPickupDistance(o, { preview = false } = {}) {
+  const target = pickupTargetOf(o);
   const pos = window.lastRiderPos;
-  if (!pos || (window.lastRiderPosAt && Date.now() - window.lastRiderPosAt > 60000)) return;
-  if (store.coords && (placeKm(pos, store.coords) ?? 0) > 1.3) return;
-  learnMandadoPlace({ name: store.store, position: pos, accuracy: window.lastRiderAccuracy ?? null, uid: getState().user?.uid || null });
+  const fresh = pos && (!window.lastRiderPosAt || Date.now() - window.lastRiderPosAt < 90000);
+  if (!target || !fresh || (!preview && (String(o.id || '').startsWith('sim_') || isGpsSimulationRunning()))) return Promise.resolve({});
+  const distM = Math.round(((placeKm(pos, target.coords) ?? 0) / 1.3) * 1000);
+  if (distM <= FAR_PICKUP_M) return Promise.resolve({ pickupDistanceM: distM });
+  const distTxt = distM >= 1000 ? `${(distM / 1000).toFixed(1).replace('.', ',')} km` : `${distM} m`;
+  const what = o.isTrip ? 'buscaste al pasajero' : (isShoppingFavor(o) ? (o.favorType === 'pagodeservicios' ? 'pagaste' : 'compraste') : 'retiraste el pedido');
+  return new Promise(resolve => {
+    let done = false;
+    showConfirm({
+      title: `Estás a ${distTxt} de ${esc(target.name)}`,
+      message: `¿Seguro que ya ${what}? El cliente va a ver que su pedido está en camino.`,
+      confirmText: 'Sí, ya lo hice',
+      cancelText: 'Todavía no',
+      // Se sigue cuando el aviso ya se cerró, para no chocar con lo que se abre después
+      onConfirm: () => { done = true; setTimeout(() => resolve({ pickupDistanceM: distM, pickupFarConfirmed: true }), 250); },
+      onCancel: () => { if (!done) resolve(null); },
+    });
+  });
 }
 
 // Al cargar o aprender lugares, se vuelve a dibujar lo que depende de ellos
@@ -6618,7 +6676,7 @@ function dockStopText(o, isPickup) {
       const step = plan.total > 1 ? ` · ${Math.min(plan.doneCount + 1, plan.total)} de ${plan.total}` : '';
       const verb = (isPago ? 'Pagar servicios en' : (cur && cur.nearest ? `Comprar en la ${categoryLabel(cur.nearest)} más cercana` : 'Comprar en')) + step;
       const title = cur ? (cur.placeName || cur.store) : (o.comercioName || 'Comercio indicado');
-      const where = cur && !cur.coords ? 'Ubicación a confirmar' : ((cur && cur.placeAddress) || '');
+      const where = cur && !cur.coords ? 'Ubicación a confirmar' : (cur && cur.approx ? 'Ubicación aproximada' : ((cur && cur.placeAddress) || ''));
       const items = cur && cur.items ? cur.items : (isPago ? '' : cleanMandadoText(o.description || o.itemsText || ''));
       return { verb, title, sub: [where, items].filter(Boolean).join(' · '), store: cur, plan };
     }
@@ -7509,9 +7567,11 @@ export function attachBottomDockListeners(user, activeOrders = []) {
           if (action === 'pickup' && oId) {
             const targetOrder = (activeOrdersList || []).find(o => o.id === oId);
             const isShoppingMandado = isShoppingFavor(targetOrder);
+            const pickupCheck = await confirmPickupDistance(targetOrder);
+            if (!pickupCheck) { resetSlider(); return; }
 
             if (isShoppingMandado) {
-              // Donde está ahora es el último comercio del mandado: se guarda su ubicación
+              // Se guarda dónde queda el último comercio del mandado (donde se quedó comprando)
               learnShoppingStore(targetOrder, shoppingPlanOf(targetOrder).current);
               const { openMandadoPurchaseModal } = await import('./delivery-panel/mandado.js');
               openMandadoPurchaseModal({
@@ -7520,6 +7580,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
                 onCancel: resetSlider,
                 onConfirm: async (purchaseTotal, stopsData, newTotal) => {
                   const ok = await markAsPickedUp(oId, {
+                    ...pickupCheck,
                     purchaseCost: purchaseTotal,
                     purchaseItemsTotal: purchaseTotal,
                     stopsPurchases: stopsData,
@@ -7529,7 +7590,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
                 }
               });
             } else {
-              markAsPickedUp(oId).then(ok => { if (ok === false) resetSlider(); });
+              markAsPickedUp(oId, pickupCheck).then(ok => { if (ok === false) resetSlider(); });
             }
           } else if (action === 'deliver' && oId) {
             const ids = oId.split(',');
@@ -7585,6 +7646,8 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       if (oId) {
         const targetOrder = (activeOrdersList || []).find(o => o.id === oId);
         const isShoppingMandado = isShoppingFavor(targetOrder);
+        const pickupCheck = await confirmPickupDistance(targetOrder);
+        if (!pickupCheck) return;
         if (isShoppingMandado) {
           learnShoppingStore(targetOrder, shoppingPlanOf(targetOrder).current);
           const { openMandadoPurchaseModal } = await import('./delivery-panel/mandado.js');
@@ -7593,6 +7656,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
             isEdit: false,
             onConfirm: async (purchaseTotal, stopsData, newTotal) => {
               await markAsPickedUp(oId, {
+                ...pickupCheck,
                 purchaseCost: purchaseTotal,
                 purchaseItemsTotal: purchaseTotal,
                 stopsPurchases: stopsData,
@@ -7601,7 +7665,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
             }
           });
         } else {
-          markAsPickedUp(oId);
+          markAsPickedUp(oId, pickupCheck);
         }
       }
     };
@@ -8994,6 +9058,12 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
       }
       if (extraData.total !== undefined) {
         updates.total = extraData.total;
+      }
+      if (typeof extraData.pickupDistanceM === 'number') {
+        updates.pickupDistanceM = extraData.pickupDistanceM;
+      }
+      if (extraData.pickupFarConfirmed) {
+        updates.pickupFarConfirmed = true;
       }
 
       if (lat !== null && lng !== null) {

@@ -1,7 +1,7 @@
 // SOLO DESARROLLO: vista previa del panel del repartidor con pedidos simulados.
 // Abrir con el servidor de desarrollo: /driver-preview.html (tamaño de celular).
 // No escribe nada en la base: aceptar, rechazar y deslizar solo avanzan el caso en pantalla.
-import { renderBottomDockContent, renderDriverStatusBarForPreview, calculateOptimalMultiStopSequence } from '../pages/delivery-panel.js';
+import { renderBottomDockContent, renderDriverStatusBarForPreview, calculateOptimalMultiStopSequence, confirmPickupDistance } from '../pages/delivery-panel.js';
 import { initDriverNavigationMap, updateDriverMapLocation, renderMultiStopRoute, clearDriverRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { showExclusiveOfferOverlay, hideExclusiveOfferOverlay, stopExclusiveOfferAlert } from '../components/exclusive-offer-modal.js';
 import { setState } from '../state.js';
@@ -174,11 +174,14 @@ function bindSlider(slider) {
     }
     handle.style.left = `${max + 3}px`; fill.style.width = '100%';
     if (label) { label.textContent = 'Confirmado'; label.style.opacity = '1'; }
-    setTimeout(() => {
+    setTimeout(async () => {
       const id = slider.dataset.id;
       if (slider.dataset.action === 'pickup') {
+        // Mismo aviso que en la app si el repartidor está lejos del retiro
+        const check = await confirmPickupDistance(orders.find((o) => o.id === id), { preview: true });
+        if (!check) { render(); return; }
         orders = orders.map((o) => (o.id === id ? { ...o, status: 'delivering', pickedUpAt: now() } : o));
-        showToast('Retirado (vista previa)', 'success');
+        showToast(check.pickupDistanceM != null ? `Retirado a ${check.pickupDistanceM} m (vista previa)` : 'Retirado (vista previa)', 'success');
       } else {
         orders = orders.filter((o) => o.id !== id);
         showToast('Entregado (vista previa)', 'success');

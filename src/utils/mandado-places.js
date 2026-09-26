@@ -146,6 +146,21 @@ export function clusterCenter(samples = []) {
   return { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, support: best.length };
 }
 
+/**
+ * Qué tan confiable es un lugar aprendido:
+ * - conflict: las visitas no coinciden (ningún grupo tiene mayoría) → "a revisar", la app no lo usa;
+ * - trusted: confirmado por el admin o al menos dos visitas que coinciden;
+ * - si no, es "aproximado" (una sola visita): se usa para el repartidor pero no se sugiere al cliente.
+ */
+export function placeConfidence(samples = [], verified = false) {
+  const n = Array.isArray(samples) ? samples.filter(s => toLatLng(s)).length : 0;
+  if (verified) return { support: n, conflict: false, trusted: true };
+  const c = clusterCenter(samples);
+  const support = c ? c.support : 0;
+  const conflict = n >= 2 && support * 2 <= n;
+  return { support, conflict, trusted: !conflict && support >= 2 };
+}
+
 // ── Catálogo en memoria (lo llena mandado-places-store.js) ─────────────────────
 
 let places = [];
@@ -179,12 +194,13 @@ export function onPlacesChange(fn) {
 export function placeFromComercio(c) {
   const ll = toLatLng(c.coords || c.coordinates || c.location);
   if (!ll || !c.name) return null;
-  return { name: c.name, slug: placeSlug(c.name), lat: ll.lat, lng: ll.lng, category: comercioCategory(c), address: c.address || '', source: 'comercio', comercioId: c.id || null, verified: true };
+  return { name: c.name, slug: placeSlug(c.name), lat: ll.lat, lng: ll.lng, category: comercioCategory(c), address: c.address || '', source: 'comercio', comercioId: c.id || null, verified: true, trusted: true };
 }
 
 // ── Búsqueda ─────────────────────────────────────────────────────────────────
 
-const rankOf = (p) => (p.source === 'comercio' ? 1000 : 0) + (p.verified ? 500 : 0) + (Number(p.visits) || 0);
+const rankOf = (p) => (p.source === 'comercio' ? 1000 : 0) + (p.verified ? 500 : 0) + (p.trusted ? 200 : 0) + (Number(p.visits) || 0);
+const isTrusted = (p) => p.source === 'comercio' || p.trusted === true;
 
 /**
  * El lugar al que se refiere un nombre escrito a mano, o null si no hay uno claro.
@@ -217,7 +233,8 @@ export function resolvePlaceByName(name, list = places) {
  * Sin repartidor, el más cercano al cliente.
  */
 export function nearestPlace(category, from, to, list = places) {
-  const pool = list.filter(p => p.category === category);
+  // Solo lugares seguros: mandar al repartidor a un punto dudoso es peor que dejarlo elegir
+  const pool = list.filter(p => p.category === category && isTrusted(p));
   if (!pool.length) return null;
   let best = null, bestKm = Infinity;
   for (const p of pool) {
@@ -234,6 +251,7 @@ export function suggestPlaces(text, list = places, max = 5) {
   const seen = new Set();
   const scored = [];
   for (const p of list) {
+    if (!isTrusted(p)) continue; // al cliente solo se le sugieren lugares seguros
     const n = normalizePlaceName(p.name);
     const key = `${n}|${Math.round(p.lat * 1000)}|${Math.round(p.lng * 1000)}`;
     if (seen.has(key)) continue;
@@ -311,7 +329,7 @@ export function resolveMandadoStores(order, driverPos = null, list = places) {
       return p ? { ...s, coords: toLatLng(p), placeName: p.name, placeAddress: p.address || '', resolvedBy: 'cercano' } : { ...s, coords: null, placeName: null, resolvedBy: null };
     }
     const p = resolvePlaceByName(s.store, list);
-    return p ? { ...s, coords: toLatLng(p), placeName: p.name, placeAddress: p.address || '', resolvedBy: p.source } : { ...s, coords: null, placeName: null, resolvedBy: null };
+    return p ? { ...s, coords: toLatLng(p), placeName: p.name, placeAddress: p.address || '', resolvedBy: p.source, approx: !isTrusted(p) } : { ...s, coords: null, placeName: null, resolvedBy: null };
   });
 }
 

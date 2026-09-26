@@ -376,6 +376,7 @@ service cloud.firestore {
       function validPlace() {
         let d = request.resource.data;
         return d.keys().hasOnly(['name', 'slug', 'category', 'lat', 'lng', 'samples', 'visits', 'verified',
+                                 'support', 'conflict',
                                  'lastDriverUid', 'updatedAt', 'createdAt', 'address', 'hidden', 'reviewedAt']) &&
           d.name is string && d.name.size() > 0 && d.name.size() <= 80 &&
           d.slug == placeId &&

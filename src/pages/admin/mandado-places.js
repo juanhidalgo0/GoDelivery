@@ -6,7 +6,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, serverTimestamp } from 
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
-import { categoryLabel, placeCategory, inPlaceBounds } from '../../utils/mandado-places.js';
+import { categoryLabel, placeCategory, inPlaceBounds, placeConfidence } from '../../utils/mandado-places.js';
 import { loadMandadoPlaces } from '../../utils/mandado-places-store.js';
 
 const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -52,7 +52,9 @@ export async function renderAdminMandadoPlaces() {
       const samples = Array.isArray(p.samples) ? p.samples.length : 0;
       const status = p.hidden ? ['Oculto', '#64748b', 'rgba(100,116,139,0.12)']
         : p.verified ? ['Confirmado', '#0d9488', 'rgba(13,148,136,0.12)']
-          : ['Sin revisar', '#b45309', 'rgba(245,158,11,0.14)'];
+          : p.conf.conflict ? ['A revisar: las visitas no coinciden', '#e11d48', 'rgba(225,29,72,0.1)']
+            : p.conf.trusted ? ['Seguro (visitas coinciden)', '#0d9488', 'rgba(13,148,136,0.08)']
+              : ['Aproximado (1 visita)', '#b45309', 'rgba(245,158,11,0.14)'];
       return `
         <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:18px; padding:14px; display:flex; flex-direction:column; gap:10px; ${p.hidden ? 'opacity:0.6;' : ''}">
           <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
@@ -66,6 +68,7 @@ export async function renderAdminMandadoPlaces() {
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <a href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener noreferrer" style="height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--color-border); color:var(--color-text); font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; text-decoration:none;">${icon('mapPin', 14)} Ver en el mapa</a>
+            ${samples > 1 ? `<a href="https://www.google.com/maps/dir/${p.samples.map(s => `${s.lat},${s.lng}`).join('/')}" target="_blank" rel="noopener noreferrer" style="height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--color-border); color:var(--color-text); font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; text-decoration:none;">Ver las ${samples} visitas</a>` : ''}
             ${p.verified ? '' : `<button data-act="verify" data-id="${escHtml(p.id)}" style="height:36px; padding:0 12px; border-radius:10px; border:none; background:#0d9488; color:white; font-size:13px; font-weight:800; cursor:pointer;">Confirmar</button>`}
             <button data-act="edit" data-id="${escHtml(p.id)}" style="height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--color-border); background:transparent; color:var(--color-text); font-size:13px; font-weight:700; cursor:pointer;">Corregir</button>
             <button data-act="hide" data-id="${escHtml(p.id)}" style="height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--color-border); background:transparent; color:var(--color-text-secondary); font-size:13px; font-weight:700; cursor:pointer;">${p.hidden ? 'Mostrar' : 'Ocultar'}</button>
@@ -78,8 +81,10 @@ export async function renderAdminMandadoPlaces() {
   const load = async () => {
     try {
       const snap = await getDocs(collection(db, 'mandadoPlaces'));
-      places = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => Number(a.verified === true) - Number(b.verified === true) || (b.visits || 0) - (a.visits || 0));
+      // Primero lo que necesita al admin: visitas que no coinciden, después lo aproximado
+      const weight = (p) => (p.verified ? 3 : p.conf.conflict ? 0 : p.conf.trusted ? 2 : 1);
+      places = snap.docs.map(d => { const x = { id: d.id, ...d.data() }; x.conf = placeConfidence(x.samples, x.verified === true); return x; })
+        .sort((a, b) => weight(a) - weight(b) || (b.visits || 0) - (a.visits || 0));
       render();
     } catch (e) {
       console.error(e);

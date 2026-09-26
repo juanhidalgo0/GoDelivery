@@ -425,7 +425,7 @@ await check('admin baja la deuda al liquidar',
 
 console.log('');
 console.log('=========== LUGARES DE MANDADOS ===========');
-const lugar = (extra = {}) => ({ name: 'Farmacia Pasteur', slug: 'farmacia-pasteur', category: 'farmacia', lat: -35.08, lng: -57.515, samples: [{ lat: -35.08, lng: -57.515, at: 1 }], visits: 1, verified: false, lastDriverUid: 'cadete1', ...extra });
+const lugar = (extra = {}) => ({ name: 'Farmacia Pasteur', slug: 'farmacia-pasteur', category: 'farmacia', lat: -35.08, lng: -57.515, samples: [{ lat: -35.08, lng: -57.515, at: 1 }], visits: 1, verified: false, lastDriverUid: 'cadete1', support: 1, conflict: false, ...extra });
 await check('cadete aprende un lugar nuevo',
   assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar())));
 await check('cadete suma una visita',

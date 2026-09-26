@@ -9,7 +9,7 @@ import { collection, getDocs, doc, runTransaction, serverTimestamp } from 'fireb
 import { withTimeout } from './firestore-cache.js';
 import {
   setPlaces, getPlaces, upsertPlace, placeFromComercio, placeSlug, placeCategory, nearestCategoryOf,
-  resolvePlaceByName, clusterCenter, inPlaceBounds, toLatLng,
+  resolvePlaceByName, clusterCenter, placeConfidence, inPlaceBounds, toLatLng,
 } from './mandado-places.js';
 
 const CACHE_KEY = 'go_mandado_places_v1';
@@ -61,7 +61,9 @@ export function loadMandadoPlaces({ force = false } = {}) {
     learnedSnap?.docs.forEach(d => {
       const x = d.data();
       if (x.hidden === true || !toLatLng(x)) return;
-      list.push({ name: x.name, slug: d.id, lat: x.lat, lng: x.lng, category: x.category || placeCategory(x.name), address: x.address || '', source: 'aprendido', visits: x.visits || 0, verified: x.verified === true });
+      const conf = placeConfidence(x.samples, x.verified === true);
+      if (conf.conflict) return; // las visitas no coinciden: queda para que lo revise el admin
+      list.push({ name: x.name, slug: d.id, lat: x.lat, lng: x.lng, category: x.category || placeCategory(x.name), address: x.address || '', source: 'aprendido', visits: x.visits || 0, verified: x.verified === true, trusted: conf.trusted });
     });
     loadedAt = Date.now();
     writeCache(list);
@@ -78,9 +80,9 @@ export function loadMandadoPlaces({ force = false } = {}) {
 const GENERIC_NAMES = /^(comercio|local|kiosco \/ comercio|kiosco|negocio|tienda|varios|m[uú]ltiples comercios.*)$/i;
 
 /**
- * Guarda dónde está un comercio a partir de la ubicación del repartidor al terminar de comprar.
- * No hace nada con los comercios adheridos (ya tienen su dirección), con "el más cercano",
- * con GPS impreciso o fuera de la zona. Nunca rechaza: si falla, el mandado sigue igual.
+ * Guarda dónde está un comercio. position es donde el repartidor se quedó comprando (ver
+ * driver-dwell.js), no donde deslizó. No hace nada con los comercios adheridos (ya tienen su
+ * dirección), con "el más cercano", con GPS impreciso o fuera de la zona. Nunca rechaza.
  */
 export async function learnMandadoPlace({ name, position, accuracy = null, uid = null }) {
   try {
@@ -101,6 +103,7 @@ export async function learnMandadoPlace({ name, position, accuracy = null, uid =
       const prev = snap.exists() ? snap.data() : null;
       const samples = [...(Array.isArray(prev?.samples) ? prev.samples : []), { lat: Math.round(pos.lat * 1e6) / 1e6, lng: Math.round(pos.lng * 1e6) / 1e6, at: Date.now() }].slice(-MAX_SAMPLES);
       const center = prev?.verified ? { lat: prev.lat, lng: prev.lng } : clusterCenter(samples);
+      const conf = placeConfidence(samples, prev?.verified === true);
       const data = {
         name: prev?.name || clean,
         slug,
@@ -109,6 +112,8 @@ export async function learnMandadoPlace({ name, position, accuracy = null, uid =
         lng: center.lng,
         samples,
         visits: (Number(prev?.visits) || 0) + 1,
+        support: conf.support,
+        conflict: conf.conflict,
         verified: prev?.verified === true,
         lastDriverUid: uid,
         updatedAt: serverTimestamp(),
@@ -117,7 +122,8 @@ export async function learnMandadoPlace({ name, position, accuracy = null, uid =
       tx.set(ref, data, { merge: true });
       return data;
     });
-    upsertPlace({ name: saved.name, slug, lat: saved.lat, lng: saved.lng, category: saved.category, source: 'aprendido', visits: saved.visits, verified: saved.verified });
+    if (saved.conflict) setPlaces(getPlaces().filter(p => !(p.slug === slug && p.source === 'aprendido')));
+    else upsertPlace({ name: saved.name, slug, lat: saved.lat, lng: saved.lng, category: saved.category, source: 'aprendido', visits: saved.visits, verified: saved.verified, trusted: saved.verified || (saved.support >= 2) });
     writeCache(getPlaces());
     return true;
   } catch (err) {
@@ -141,6 +147,12 @@ function readVisited() {
 export function getVisitedStores(orderId) {
   const e = orderId ? readVisited()[orderId] : null;
   return e && Array.isArray(e.done) ? e.done : [];
+}
+
+/** Cuándo terminó el último comercio de este mandado (las compras siguientes son después). */
+export function lastStoreStepAt(orderId) {
+  const e = orderId ? readVisited()[orderId] : null;
+  return e && e.at ? e.at : 0;
 }
 
 export function markStoreVisited(orderId, index) {
