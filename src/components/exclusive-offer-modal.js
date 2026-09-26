@@ -387,15 +387,16 @@ export function showExclusiveOfferOverlay(batch, user) {
       const buy = Number(orderObj.purchaseCost ?? orderObj.purchaseItemsTotal ?? batch.subtotal ?? 0);
       rows.push(moneyRow({ label: 'Adelantás la compra', amount: buy > 0 ? `~ ${money(buy)}` : '', sub: 'Te la devuelve el cliente al entregar', tone: 'amber', icon: 'bag' }, isLight));
     }
+    // Siempre se cobra al entregar: en efectivo o por transferencia al alias del repartidor
     if (batch.isBundle) {
-      const cashOrders = batch.orders.filter(isCashPayment);
-      rows.push(cashOrders.length
-        ? moneyRow({ label: 'Cobrás en efectivo', amount: money(cashOrders.reduce((s, o) => s + (Number(o.totalAmount || o.total) || 0), 0)), sub: `${cashOrders.length} de ${batch.orders.length} pedidos`, tone: 'amber' }, isLight)
-        : moneyRow({ label: 'Ya está pagado', sub: 'Por transferencia · no cobrás nada', tone: 'green', icon: 'check' }, isLight));
+      const sum = (list) => list.reduce((s, o) => s + (Number(o.totalAmount || o.total) || 0), 0);
+      const cash = batch.orders.filter(isCashPayment), transfer = batch.orders.filter(o => !isCashPayment(o));
+      const parts = [cash.length ? `${money(sum(cash))} en efectivo` : '', transfer.length ? `${money(sum(transfer))} por transferencia` : ''].filter(Boolean);
+      rows.push(moneyRow({ label: 'Cobrás al entregar', amount: money(sum(batch.orders)), sub: parts.join(' · '), tone: 'amber' }, isLight));
     } else if (isCashPayment(orderObj)) {
       rows.push(moneyRow({ label: isTrip ? 'Cobrás al terminar' : 'Cobrás en efectivo', amount: money(orderTotal), sub: isTrip ? 'En efectivo' : 'El cliente paga al recibir', tone: 'amber' }, isLight));
-    } else if (!isMandado) {
-      rows.push(moneyRow({ label: 'Ya está pagado', sub: 'Por transferencia · no cobrás nada', tone: 'green', icon: 'check' }, isLight));
+    } else {
+      rows.push(moneyRow({ label: isTrip ? 'Cobrás al terminar' : 'Cobrás por transferencia', amount: money(orderTotal), sub: 'A tu alias, cuando recibe el pedido', tone: 'amber', icon: 'swap' }, isLight));
     }
   }
   if (orderObj.isScheduled) {

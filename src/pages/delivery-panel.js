@@ -6561,7 +6561,9 @@ function dockMoneyRow(o, isPickup, isLight) {
     if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'En efectivo', tone: 'amber', action: breakdownBtn }, isLight);
     return moneyRow({ label: isPickup ? 'Al entregar cobrás en efectivo' : 'Cobrá en efectivo', amount: money(total), sub: o.cashChangeFor ? `Tené cambio: paga con ${money(o.cashChangeFor)}` : '', tone: 'amber', action: breakdownBtn }, isLight);
   }
-  return moneyRow({ label: 'Ya está pagado', amount: '', sub: 'Por transferencia · no cobrás nada', tone: 'green', icon: 'check', action: breakdownBtn }, isLight);
+  // Transferencia: el cliente le transfiere al alias del repartidor al recibir (nunca se paga antes)
+  if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'Por transferencia a tu alias', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight);
+  return moneyRow({ label: isPickup ? 'Al entregar cobrás por transferencia' : 'Cobrá por transferencia', amount: money(total), sub: 'A tu alias, cuando recibe el pedido', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight);
 }
 
 function renderDockActionRow(order, orderIsPickup, isLight) {
@@ -6721,12 +6723,12 @@ export function renderBottomDockContent(user, activeOrders = []) {
     const rest = route.filter((s, i) => i !== stopIndex);
     const next = rest[0];
     const nextName = next ? (next.type === 'pickup' ? (next.order?.comercioName || next.shortTitle || 'Retiro') : (next.order?.userName || next.shortTitle || 'Entrega')) : '';
-    const cashTotal = activeOrders.filter(isCashPayment).reduce((s, x) => s + (Number(x.totalAmount || x.total) || 0), 0);
+    const cashTotal = activeOrders.reduce((s, x) => s + (Number(x.totalAmount || x.total) || 0), 0);
     const chip = (text, fg, bg) => `<span style="height:30px;padding:0 12px;border-radius:15px;background:${bg};color:${fg};font-size:13px;font-weight:500;display:inline-flex;align-items:center;white-space:nowrap">${esc(text)}</span>`;
     nextChips = `<div style="display:flex;gap:8px;flex-wrap:wrap">
       ${next ? chip(`Después: ${nextName}`, t.tx2, t.card) : ''}
       ${rest.length > 1 ? chip(`+${rest.length - 1} parada${rest.length - 1 === 1 ? '' : 's'}`, t.tx2, t.card) : ''}
-      ${cashTotal > 0 ? chip(`Cobrás ${money(cashTotal)} en total`, t.amberTx, t.amberBg) : ''}
+      ${activeOrders.length > 1 && cashTotal > 0 ? chip(`Cobrás ${money(cashTotal)} en total`, t.amberTx, t.amberBg) : ''}
     </div>`;
   }
 
@@ -6738,7 +6740,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
       const so = s.order || activeOrders.find(x => x.id === s.orderId) || {};
       const st = dockStopText(so, s.type === 'pickup');
       const isNow = so.id === o.id && (s.type === 'pickup') === currentIsPickup;
-      return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : (isCashPayment(so) ? `Cobrá ${money(so.totalAmount || so.total)} en efectivo` : 'Pagado por transferencia'), state: isNow ? 'now' : 'next', orderId: so.id };
+      return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : `Cobrá ${money(so.totalAmount || so.total)} ${isCashPayment(so) ? 'en efectivo' : 'por transferencia'}`, state: isNow ? 'now' : 'next', orderId: so.id };
     });
     const all = [...doneStops, ...list];
     const tabs = activeOrders.length > 1
