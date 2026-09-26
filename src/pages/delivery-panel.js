@@ -42,6 +42,7 @@ export function getOrderDriverEarnings(o) {
 }
 import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clearDriverRoute, setMap3DPerspective, recenterOnDriver, zoomInDriverMap, zoomOutDriverMap, getDriverMapTheme, setDriverMapTheme, getDriverThemeMode, setDriverThemeMode, renderDemandHotspots, checkAutoSolarTheme, startGpsRouteSimulation, stopGpsRouteSimulation, isGpsSimulationRunning, renderMultiStopRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { NavigationVoice } from '../utils/navigation-voice.js';
+import { driverTokens, orderKind, kindTag, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, pickupCoordsOf, dropoffCoordsOf } from '../components/driver-ui.js';
 
 // Set while the driver asked to disconnect and the server hasn't confirmed it yet,
 // so a write that never landed is re-sent instead of leaving the driver "online".
@@ -6206,6 +6207,13 @@ if (typeof document !== 'undefined' && !window._driverWakeLockVisibilityBound) {
   });
 }
 
+// Solo para la página de prueba del diseño (driver-preview.html): arma la barra de arriba con estos pedidos
+export function renderDriverStatusBarForPreview(user, orders = []) {
+  activeOrdersList = orders;
+  activeOrdersCount = orders.length;
+  return renderStatusBar(user);
+}
+
 function renderStatusBar(user) {
   // Always use fresh state for rendering styles
   const latestUser = getState().user || user;
@@ -6336,7 +6344,7 @@ function renderStatusBar(user) {
     } else {
       directiveLogo = clientPhoto || '/go-bag.png?v=6';
       const cleanDestAddr = o.deliveryAddress || o.address || o.destinationAddress || clientFullName || 'el domicilio';
-      destTitle = `Entregá el pedido en ${cleanDestAddr}`;
+      destTitle = isTrip ? `Llevá a ${clientFullName} a ${cleanDestAddr}` : (isGoCash ? `Entregá el efectivo en ${cleanDestAddr}` : (isEncomienda ? `Entregá la encomienda en ${cleanDestAddr}` : `Entregá el pedido en ${cleanDestAddr}`));
     }
 
     // With several BATCHED ORDERS, the header shows contact info for whichever one is
@@ -6391,266 +6399,59 @@ function renderStatusBar(user) {
       }, 1800);
     }
 
+    // Un solo cartel arriba: qué hacer, dónde, la próxima indicación y la llegada
+    const tk = driverTokens(isLight);
+    const stepTotal = optimalSequence.length;
+    const orderCode = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
+    const stepLabel = stepTotal > 1 ? `Parada 1 de ${stepTotal} · Pedido ${orderCode}` : `Pedido ${orderCode}`;
+    const noGpsMandado = isFavor && isPickupStage && !isEncomienda && !isTrip && !isGoCash && !isPagoServicios;
+    const m = window.lastDriverManeuver || {};
+    const mDist = m.distanceMeters ? (m.distanceMeters > 999 ? (m.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km' : m.distanceMeters + ' m') : '';
     return `
       <style>
-        @keyframes heroicExpansionPill {
-          0% {
-            transform: scale(1.16) translateY(14px);
-            opacity: 0.1;
-            filter: brightness(1.3);
-            box-shadow: 0 0 45px rgba(225, 29, 72, 0.95), 0 0 0 3px #e11d48;
-          }
-          40% {
-            transform: scale(1.06) translateY(-4px);
-            opacity: 1;
-            filter: brightness(1.15);
-            box-shadow: 0 0 55px rgba(225, 29, 72, 1), 0 0 0 3px #f43f5e;
-          }
-          70% {
-            transform: scale(0.98) translateY(1px);
-          }
-          100% {
-            transform: scale(1) translateY(0);
-            filter: brightness(1);
-          }
-        }
-        @keyframes activePillPulseGlow {
-          0%, 100% {
-            box-shadow: 0 10px 28px ${isLight ? 'rgba(225,29,72,0.12)' : 'rgba(0,0,0,0.7)'}, 0 0 0 1.5px ${isLight ? 'rgba(225, 29, 72, 0.45)' : 'rgba(244, 63, 94, 0.55)'};
-          }
-          50% {
-            box-shadow: 0 12px 34px ${isLight ? 'rgba(225,29,72,0.25)' : 'rgba(225,29,72,0.5)'}, 0 0 0 2.5px ${isLight ? 'rgba(225, 29, 72, 0.85)' : 'rgba(244, 63, 94, 0.95)'};
-          }
-        }
-        @keyframes targetBeaconPulse {
-          0% { transform: scale(0.9); opacity: 1; }
-          50% { transform: scale(1.35); opacity: 0.5; }
-          100% { transform: scale(0.9); opacity: 1; }
-        }
+        @keyframes goBannerIn { from { transform: translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+        #driver-maneuver-hud-card.imminent-turn-pulse { box-shadow: 0 0 0 2px #E11D48, 0 12px 28px rgba(0,0,0,.35) !important; }
       </style>
-
-      <!-- 1. TOP HEADER: REAL CLIENT PHOTO & FULL NAME + INTEGRATED HAMBURGER -->
-      <div style="width: 100%;">
-        <div id="session-status-bar" style="
-          width: 100%;
-          display: flex; align-items: center; justify-content: space-between;
-          gap: 8px;
-          background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9, 13, 22, 0.95)'};
-          backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-          padding: 8px 10px;
-          border-radius: 24px;
-          border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(225, 29, 72, 0.4)'};
-          box-shadow: 0 10px 30px ${isLight ? 'rgba(225,29,72,0.08)' : 'rgba(0,0,0,0.65)'};
-          box-sizing: border-box;
-        ">
-          <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
-            <div style="position:relative; flex-shrink:0;">
-              ${clientPhoto ? `
-                <img src="${clientPhoto}" style="width:38px; height:38px; border-radius:50%; object-fit:cover; border:2px solid #e11d48; box-shadow:0 0 12px rgba(225,29,72,0.4);" />
-              ` : `
-                <div style="
-                  width: 38px; height: 38px; border-radius: 50%;
-                  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-                  border: 2px solid rgba(225, 29, 72, 0.6);
-                  display: flex; align-items: center; justify-content: center;
-                  font-size: 15px; font-weight: 900; color: white;
-                  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.45);
-                ">
-                  ${clientFullName.charAt(0).toUpperCase()}
-                </div>
-              `}
-              <div style="
-                position: absolute; bottom: -1px; right: -1px;
-                width: 10px; height: 10px; border-radius: 50%;
-                background: #22c55e; border: 2px solid ${isLight ? '#ffffff' : '#0f172a'};
-              "></div>
-            </div>
-
-            <div style="min-width:0; flex:1;">
-              <div style="font-size:13px; font-weight:900; color:var(--driver-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
-                ${clientFullName}
-              </div>
-              <div style="font-size:10.5px; font-weight:700; color:var(--driver-accent-text); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${stopPositionLabel}Pedido #${o.orderId || o.id.slice(0, 6)} • ${isEncomienda ? 'Encomienda' : (o.isFavor ? 'Mandado' : (o.favorTypeLabel || o.comercioName || 'En curso'))}
-              </div>
-            </div>
-          </div>
-
-          <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
-            ${waUrl ? `
-              <a href="${waUrl}" target="_blank" rel="noopener noreferrer" title="Abrir WhatsApp" style="
-                width: 36px; height: 36px; border-radius: 50%;
-                background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-                border: none; color: white;
-                display: flex; align-items: center; justify-content: center; text-decoration: none;
-                box-shadow: 0 4px 14px rgba(37, 211, 102, 0.4);
-                flex-shrink: 0;
-              ">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
-                </svg>
-              </a>
-            ` : ''}
-
-            <button id="driver-bar-chat-btn" data-order-id="${o.id}" title="Chat con el cliente" style="
-              width: 36px; height: 36px; border-radius: 50%;
-              background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-              border: none; color: white;
-              display: flex; align-items: center; justify-content: center; cursor: pointer;
-              box-shadow: 0 4px 14px rgba(225, 29, 72, 0.45);
-              flex-shrink: 0;
-            ">
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. FLOATING DIRECTIVE INSTRUCTION PILL (WHERE TO GO) - MINIMALIST & MODERN -->
-      <div id="driver-instruction-floating-pill" style="
-        width: 100%;
-        margin-top: 5px;
-        background: ${isLight ? 'rgba(255, 255, 255, 0.98)' : 'rgba(11, 16, 28, 0.96)'};
-        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-        border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.4)' : 'rgba(244, 63, 94, 0.55)'};
-        border-radius: 18px;
-        padding: 8px 12px;
-        display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        animation: ${shouldAnimateEntrance ? 'heroicExpansionPill 1.1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none'};
-        box-sizing: border-box;
-      ">
-        <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
-          <!-- MODERN PIN OR SERVICE LOGO BADGE -->
-          ${isPickupStage ? `
-            <div style="
-              width: 36px; height: 36px; border-radius: 12px;
-              background: ${isLight ? '#f8fafc' : 'rgba(255,255,255,0.06)'};
-              border: 1.5px solid ${isLight ? 'rgba(225,29,72,0.3)' : 'rgba(244,63,94,0.45)'};
-              display: flex; align-items: center; justify-content: center;
-              flex-shrink: 0; overflow: hidden;
-              box-shadow: 0 4px 12px ${isLight ? 'rgba(225,29,72,0.15)' : 'rgba(0,0,0,0.5)'};
-            ">
-              <img src="${directiveLogo}" style="width: 100%; height: 100%; object-fit: contain; display: block;" alt="Destino" />
-            </div>
-          ` : `
-            <div style="
-              width: 36px; height: 36px; border-radius: 12px;
-              background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-              border: 1.5px solid rgba(225, 29, 72, 0.4);
-              display: flex; align-items: center; justify-content: center;
-              flex-shrink: 0; overflow: hidden;
-              box-shadow: 0 4px 12px rgba(225, 29, 72, 0.35);
-              color: white;
-            ">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                <circle cx="12" cy="10" r="3"></circle>
-              </svg>
-            </div>
-          `}
-
-          <div style="min-width:0; flex:1; display:flex; flex-direction:column; gap:1px;">
-            <!-- DIRECTIVE ACTION BANNER -->
-            <div style="display:flex; align-items:center; gap:5px;">
-              <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#e11d48; animation:targetBeaconPulse 1.5s infinite; flex-shrink:0;"></span>
-              <span style="font-size:13.5px; font-weight:900; color:var(--driver-accent-text); line-height:1.2; letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${destTitle}
-              </span>
-            </div>
-
-            ${(isFavor && isPickupStage) ? (isEncomienda ? `
-              <div style="font-size:11.5px; color:${isLight ? '#334155' : '#e2e8f0'}; font-weight:750; line-height:1.2; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
-                <span style="display:inline-flex; flex-shrink:0;">${icon('package', 12)}</span> ${cleanMandadoText(o.details || o.description || o.itemsText || 'Entrega de encomienda')}
-              </div>
-            ` : (parsedMandado ? `
-              <div style="font-size:11.5px; color:${isLight ? '#334155' : '#e2e8f0'}; font-weight:750; line-height:1.2; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
-                <span style="display:inline-flex; flex-shrink:0;">${icon('package', 12)}</span> ${parsedMandado.items}
-              </div>
-            ` : '')) : (isPickupStage ? `
-              <div style="font-size:11.5px; font-weight:700; color:var(--driver-text-label); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
-                <span style="display:inline-flex; flex-shrink:0;">${icon('mapPin', 12)}</span> ${o.pickupAddress || o.originAddress || o.comercioAddress || 'Magdalena'}
-              </div>
-            ` : (o.addressNotes || o.notes) ? `
-              <div style="font-size:11.5px; font-weight:800; color:${isLight ? '#334155' : '#e2e8f0'}; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">
-                <span style="display:inline-flex; flex-shrink:0;">${icon('edit', 12)}</span> <span style="color:#e11d48;">"${cleanMandadoText(o.addressNotes || o.notes)}"</span>
-              </div>
-            ` : '')}
-          </div>
-        </div>
-
-        ${((!isFavor || isEncomienda || !isPickupStage) && targetCoords) ? `
-          <a href="https://www.google.com/maps/dir/?api=1&destination=${targetCoords.lat},${targetCoords.lng}&travelmode=driving" target="_blank" rel="noopener noreferrer" style="
-            flex-shrink: 0;
-            display: flex; align-items: center; gap: 5px;
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: #ffffff;
-            font-size: 11px; font-weight: 900;
-            padding: 6px 11px; border-radius: 12px;
-            text-decoration: none;
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
-            transition: transform 0.15s ease;
-          ">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="3 11 22 2 13 21 11 13 3 11"></polygon>
-            </svg>
-            <span>Maps</span>
-          </a>
-        ` : ''}
-      </div>
-
-      <!-- 3. SUBTLE FLOATING MANEUVER PILL (FULL WIDTH MATCHING HEADER) -->
       <div id="driver-maneuver-hud-card" style="
-        display: ${(isFavor && isPickupStage) ? 'none' : 'flex'};
-        width: 100%;
-        margin-top: 5px;
-        background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9, 13, 22, 0.92)'};
-        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-        border: 1px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(244, 63, 94, 0.35)'};
-        border-radius: 18px;
-        padding: 6px 12px;
-        align-items: center;
-        gap: 8px;
-        box-shadow: 0 6px 18px ${isLight ? 'rgba(225,29,72,0.1)' : 'rgba(0,0,0,0.5)'};
-        box-sizing: border-box;
+        width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 12px;
+        padding: 12px 14px; border-radius: 18px; background: ${tk.sheet}; border: 1px solid ${tk.line};
+        box-shadow: ${isLight ? '0 12px 28px rgba(15,23,42,.14)' : '0 12px 28px rgba(0,0,0,.4)'}; pointer-events: auto;
+        font-family: 'Inter', system-ui, sans-serif;
+        animation: ${shouldAnimateEntrance ? 'goBannerIn .35s cubic-bezier(.16,1,.3,1)' : 'none'};
       ">
-        <div id="driver-maneuver-icon" style="width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg, #e11d48, #be123c); color:white; font-size:14px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 8px rgba(225,29,72,0.4);">
-          ${window.lastDriverManeuver?.icon || '⬆'}
+        <div id="driver-maneuver-icon" style="width: 44px; height: 44px; border-radius: 14px; background: ${tk.brand}; color: #FFFFFF;
+          display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; flex-shrink: 0;">
+          ${noGpsMandado ? dIcon('bag', 22, '#FFFFFF') : (m.icon || dIcon('nav', 22, '#FFFFFF'))}
         </div>
-        <div style="min-width:0; display:flex; align-items:center; gap:6px; flex:1;">
-          <span id="driver-maneuver-subtext" style="font-size:11.5px; font-weight:900; color:var(--driver-accent-text); white-space:nowrap;">
-            ${window.lastDriverManeuver?.distanceMeters ? `${window.lastDriverManeuver.distanceMeters > 999 ? (window.lastDriverManeuver.distanceMeters / 1000).toFixed(1) + ' km' : window.lastDriverManeuver.distanceMeters + ' m'}` : 'Ruta'}
-          </span>
-          <span style="opacity:0.4;">•</span>
-          <span id="driver-maneuver-text" style="font-size:11.5px; font-weight:800; color:var(--driver-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">
-            ${window.lastDriverManeuver?.instruction || 'En curso'}
-          </span>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 12px; font-weight: 600; color: ${tk.tx3}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(stepLabel)}</div>
+          <div style="font-size: 15.5px; font-weight: 600; color: ${tk.tx}; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(destTitle)}</div>
+          <div style="font-size: 12.5px; color: ${tk.tx2}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;">
+            ${noGpsMandado
+              ? 'Andá al comercio que indicó el cliente'
+              : `<span id="driver-maneuver-subtext" style="font-weight:600;color:${tk.tx}">${mDist || 'Ruta'}</span> · <span id="driver-maneuver-text">${esc(m.instruction || 'Seguí la línea del mapa')}</span>`}
+          </div>
         </div>
-        <div id="driver-eta-time" style="font-size:11px; font-weight:900; color:var(--driver-text-secondary); margin-left:auto; padding-left:4px; flex-shrink:0;">
-          ${window.lastDriverManeuver?.etaMinutes || 1} min
-        </div>
+        ${noGpsMandado ? '' : `
+        <div style="text-align: right; flex-shrink: 0;">
+          <div id="driver-eta-time" style="font-family: var(--font-display, 'Outfit', sans-serif); font-size: 18px; font-weight: 700; color: ${tk.tx};">${m.etaMinutes || 1} min</div>
+          <div style="font-size: 11.5px; color: ${tk.tx3};">llegada</div>
+        </div>`}
       </div>
     `;
   } else {
     centerBadgeHtml = `
       <!-- CENTER: MINIMALIST JORNADA DE HOY PILL -->
-      <div id="status-today-pill" onclick="window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: 'finances' }));" style="
-        background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9,13,22,0.85)'};
-        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-        padding: 6px 14px;
-        border-radius: 20px;
-        border: 1px solid ${isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255,255,255,0.12)'};
-        font-size: 11px; font-weight: 800; color: var(--driver-text-primary);
-        display: flex; align-items: center; gap: 5px;
-        cursor: pointer; user-select: none;
+      <button id="status-today-pill" onclick="window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: 'finances' }));" aria-label="Ver mis ganancias de hoy" style="
+        height: 40px; padding: 0 14px; border-radius: 20px;
+        background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'};
+        border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
+        display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-family: inherit;
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};
       ">
-        <span style="color:var(--driver-text-secondary-b); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em;">Jornada:</span>
-        <strong style="color:${isLight ? '#16a34a' : '#22c55e'}; font-weight:900; font-size:12px;">${formatPrice(todayEarn)}</strong>
-        <span style="color:var(--driver-text-secondary-b); font-size:10px; font-weight:700;">(${todayCount} ped.)</span>
-      </div>
+        <strong style="font-family: var(--font-display, 'Outfit', sans-serif); color: ${isLight ? '#0F172A' : '#F3F4F6'}; font-weight: 700; font-size: 16px;">${formatPrice(todayEarn)}</strong>
+        <span style="color: ${isLight ? '#64748B' : '#8A929D'}; font-size: 12px;">hoy · ${todayCount} ${todayCount === 1 ? 'pedido' : 'pedidos'}</span>
+      </button>
     `;
   }
 
@@ -6661,15 +6462,13 @@ function renderStatusBar(user) {
       gap: 8px;
     ">
       <!-- LEFT: STATUS BADGE -->
-      <div style="display:flex; align-items:center; gap:6px; background:${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9,13,22,0.85)'}; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); padding:6px 12px; border-radius:20px; border:1px solid ${isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255,255,255,0.12)'}; box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};">
-        <div class="${finalIsOnline ? 'status-dot-active' : ''}" style="
-          width: 8px; height: 8px; border-radius: 50%;
-          background: ${finalIsOnline ? '#22c55e' : (isLight ? '#94a3b8' : '#64748b')};
-          box-shadow: ${finalIsOnline ? '0 0 10px #22c55e' : 'none'};
-          flex-shrink: 0;
-        "></div>
-        <span style="font-size: 11px; font-weight: 900; color: ${finalIsOnline ? '#16a34a' : (isLight ? '#64748b' : '#94a3b8')}; text-transform: uppercase; letter-spacing: 0.5px;">
-          ${finalIsOnline ? 'EN LÍNEA' : 'DESCONECTADO'}
+      <div style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 20px;
+        background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'}; border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
+        box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};">
+        <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+          background: ${finalIsOnline ? (isLight ? '#059669' : '#34D399') : (isLight ? '#94a3b8' : '#64748b')};"></div>
+        <span style="font-size: 14px; font-weight: 600; color: ${isLight ? '#0F172A' : '#F3F4F6'};">
+          ${finalIsOnline ? 'En línea' : 'Desconectado'}
         </span>
       </div>
 
@@ -6696,551 +6495,286 @@ function renderStatusBar(user) {
 // Payment summary + slide-to-confirm for the order in progress. Shared by the collapsed and
 // the expanded dock so the action sits in the same place, at the bottom, in both.
 // Red = go pick it up, green = hand it over: the step is readable at a glance.
-function renderDockActionRow(order, orderIsPickup, isLight) {
-  const isCash = order.paymentMethod === 'efectivo' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('efect'));
-  const paymentLabel = isCash ? 'PAGA EN EFECTIVO:' : 'PAGA CON TRANSFERENCIA:';
-  const paymentIcon = icon(isCash ? 'dollarSign' : 'creditCard', 11);
-  const paymentColor = isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#be123c' : '#fb7185');
-  const paymentBg = isCash ? (isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') : (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)');
-  const paymentBorder = isCash ? '#fde68a' : (isLight ? '#fecaca' : 'rgba(225, 29, 72, 0.35)');
+// ── Panel inferior del repartidor ───────────────────────────────────────────
+// Una hoja sobre el mapa: la parada de ahora, qué pasa con la plata, contacto y el
+// deslizador de la acción. Con varios pedidos, el recorrido en orden (el mismo que el mapa).
 
-  const accent = orderIsPickup ? '#e11d48' : '#059669';
-  const accentDark = orderIsPickup ? '#be123c' : '#047857';
-  const trackBg = orderIsPickup
-    ? (isLight ? '#fff1f2' : 'rgba(15, 23, 42, 0.94)')
-    : (isLight ? '#ecfdf5' : 'rgba(15, 23, 42, 0.94)');
-  const trackBorder = orderIsPickup
-    ? (isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)')
-    : (isLight ? 'rgba(5, 150, 105, 0.4)' : 'rgba(16, 185, 129, 0.5)');
-  const labelColor = isLight ? (orderIsPickup ? '#9f1239' : '#065f46') : '#ffffff';
-
-  return `
-    <div id="dock-pinned-action-slider-row" style="flex-shrink: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; background:${paymentBg}; border:1px solid ${paymentBorder}; padding:7px 12px; border-radius:12px;">
-        <div style="display:flex; flex-direction:column;">
-          <span style="font-size:9.5px; font-weight:900; color:${paymentColor}; text-transform:uppercase; letter-spacing:0.4px; display:inline-flex; align-items:center; gap:4px;">
-            <span style="display:inline-flex;">${paymentIcon}</span>${paymentLabel}
-          </span>
-          <strong style="font-size:15px; font-weight:950; color:${paymentColor};">
-            $${Number(order.totalAmount || order.total || 0).toLocaleString('es-AR')}
-          </strong>
-        </div>
-
-        <button class="open-order-breakdown-btn" data-order-id="${order.id}" style="
-          background: ${isLight ? '#ffffff' : 'rgba(0,0,0,0.35)'};
-          border: 1px solid ${paymentBorder};
-          color: ${paymentColor};
-          padding: 5px 10px; border-radius: 9px;
-          font-size: 11px; font-weight: 800; cursor: pointer;
-          display: flex; align-items: center; gap: 4px;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;
-        ">
-          <span style="display:inline-flex;">${icon('info', 13)}</span>
-          <span>Ver Desglose</span>
-        </button>
-      </div>
-
-      <div class="driver-swipe-slider" data-action="${orderIsPickup ? 'pickup' : 'deliver'}" data-id="${order.id}" data-codes="${order.verificationCode || ''}" role="slider" aria-label="${orderIsPickup ? 'Deslizá para marcar el pedido como retirado' : 'Deslizá para marcar el pedido como entregado'}" style="
-        position: relative;
-        width: 100%;
-        height: 54px;
-        border-radius: 27px;
-        background: ${trackBg};
-        border: 1.5px solid ${trackBorder};
-        overflow: hidden;
-        user-select: none;
-        touch-action: none;
-        box-shadow: 0 6px 20px ${isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(0, 0, 0, 0.55)'};
-        display: flex; align-items: center;
-      ">
-        <div class="swipe-slider-fill" style="
-          position: absolute; top: 0; left: 0; height: 100%; width: 0%;
-          background: linear-gradient(90deg, ${accent} 0%, ${accentDark} 100%);
-          border-radius: 27px; pointer-events: none;
-        "></div>
-
-        <div class="swipe-slider-label" style="
-          position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-          font-size: 13px; font-weight: 900; letter-spacing: 1.5px;
-          color: ${labelColor};
-          text-transform: uppercase; pointer-events: none; padding-left: 28px;
-          transition: opacity 0.15s ease;
-        ">
-          ${orderIsPickup ? 'DESLIZÁ › RETIRADO' : 'DESLIZÁ › ENTREGADO'}
-        </div>
-
-        <div class="swipe-slider-handle" style="
-          position: absolute; top: 4px; left: 3px; width: 46px; height: 46px;
-          background: #ffffff; border-radius: 50%;
-          box-shadow: 0 4px 14px ${orderIsPickup ? 'rgba(225, 29, 72, 0.45)' : 'rgba(5, 150, 105, 0.45)'};
-          display: flex; align-items: center; justify-content: center;
-          cursor: grab; touch-action: none; z-index: 2;
-        ">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; transform: translateX(1px); display: block;">
-            <polyline points="9 18 15 12 9 6"></polyline>
-          </svg>
-        </div>
-      </div>
-    </div>
-  `;
+function dockOrderStage(o) {
+  return (o.status === 'pending' || o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || (!o.pickedUpAt && o.status !== 'delivering'));
 }
 
-// Collapsed dock: one line saying where to go next, then the action row.
-function renderDockCollapsedOrder(order, orderIsPickup, isLight) {
-  const isEncomienda = isOrderEncomienda(order);
-  const place = orderIsPickup
-    ? (order.isFavor
-        ? (isEncomienda ? (order.pickupAddress || order.originAddress || 'Dirección de retiro') : (order.comercioName || 'Comercio indicado'))
-        : (order.comercioName || order.originAddress || 'Comercio'))
-    : (order.deliveryAddress || order.address || order.destinationAddress || order.shippingAddress || 'Domicilio del cliente');
-  const who = orderIsPickup ? 'Retirá en' : `Entregá a ${order.userName || order.clientName || 'el cliente'}`;
-  const escape = (v) => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function dockStopKind(o, isPickup) {
+  if (!isPickup) return 'dest';
+  if (o.isTrip) return 'person';
+  return isOrderEncomienda(o) ? 'pkg' : 'store';
+}
 
+/** Texto de la parada: qué hacer y dónde, con las palabras de cada tipo de pedido. */
+function dockStopText(o, isPickup) {
+  const client = o.userName || o.clientName || 'el cliente';
+  if (o.isTrip) {
+    return isPickup
+      ? { verb: 'Buscar a', title: client, sub: o.originAddress || o.pickupAddress || '' }
+      : { verb: 'Llevar a', title: o.destinationAddress || o.deliveryAddress || 'Destino', sub: `Viaje con ${client}` };
+  }
+  if (isPickup) {
+    if (isOrderEncomienda(o)) return { verb: 'Retirar encomienda', title: o.pickupAddress || o.originAddress || 'Dirección de retiro', sub: cleanMandadoText(o.details || o.description || o.itemsText || 'Paquete') };
+    if (o.isFavor) {
+      const parsed = parseMandadoDetails(o.description || o.itemsText || o.notes || o.details, o.comercioName || o.originAddress);
+      return { verb: 'Comprar en', title: parsed.comercio || o.comercioName || 'Comercio indicado', sub: parsed.items || cleanMandadoText(o.description || o.itemsText || '') };
+    }
+    return { verb: 'Retirar en', title: o.comercioName || o.originAddress || 'Comercio', sub: o.pickupAddress || o.comercioAddress || o.originAddress || '' };
+  }
+  return { verb: 'Entregar a', title: client, sub: o.deliveryAddress || o.address || o.destinationAddress || o.shippingAddress || '' };
+}
+
+function dockWhatsAppUrl(o) {
+  const phone = String(o.userPhone || o.clientPhone || o.phone || '').replace(/\D/g, '');
+  if (phone.length < 8) return '';
+  const full = phone.startsWith('54') ? phone : (phone.startsWith('9') ? `54${phone}` : `549${phone}`);
+  return `https://wa.me/${full}?text=${encodeURIComponent(`¡Hola ${o.userName || ''}! Soy el repartidor de GO Delivery con tu pedido #${o.orderId || (o.id ? o.id.slice(-4) : '')}.`)}`;
+}
+
+function dockNavUrl(o, isPickup) {
+  const c = isPickup ? pickupCoordsOf(o) : dropoffCoordsOf(o);
+  const lat = c && Number(c.lat ?? c.latitude), lng = c && Number(c.lng ?? c.longitude);
+  if (c && !isNaN(lat) && !isNaN(lng)) return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+  const addr = isPickup ? (o.pickupAddress || o.comercioAddress || o.originAddress) : (o.deliveryAddress || o.address || o.destinationAddress);
+  return addr ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr + ', Magdalena, Buenos Aires')}&travelmode=driving` : '';
+}
+
+/** Qué pasa con la plata en esta parada (una sola fila). */
+function dockMoneyRow(o, isPickup, isLight) {
+  const t = driverTokens(isLight);
+  const breakdownBtn = `<button class="open-order-breakdown-btn" data-order-id="${esc(o.id)}" style="height:36px;padding:0 10px;border-radius:10px;background:transparent;border:1px solid ${t.line};color:${t.tx2};font-size:12.5px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:inherit">Desglose</button>`;
+  const favorType = String(o.favorType || '').toLowerCase();
+  const total = Number(o.totalAmount || o.total || 0);
+  if (favorType === 'gocash' || o.isGoCash) {
+    return moneyRow({ label: 'Llevás en efectivo', amount: money(o.amount || o.cashAmount || total), sub: 'Confirmá la transferencia antes de entregar', tone: 'violet', icon: 'swap', action: breakdownBtn }, isLight);
+  }
+  if (isPickup && o.isFavor && !isOrderEncomienda(o) && !o.isTrip) {
+    const buy = (o.purchaseCost !== undefined) ? o.purchaseCost : (o.purchaseItemsTotal || 0);
+    const edit = `<button class="edit-mandado-purchase-btn" data-order-id="${esc(o.id)}" style="height:36px;padding:0 12px;border-radius:10px;background:${t.brand};border:0;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:inherit">Cargar monto</button>`;
+    return moneyRow({ label: 'Valor de la compra', amount: buy > 0 ? money(buy) : '', sub: 'Lo adelantás y te lo devuelve el cliente', tone: 'amber', icon: 'bag', action: edit }, isLight);
+  }
+  if (isCashPayment(o)) {
+    if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'En efectivo', tone: 'amber', action: breakdownBtn }, isLight);
+    return moneyRow({ label: isPickup ? 'Al entregar cobrás en efectivo' : 'Cobrá en efectivo', amount: money(total), sub: o.cashChangeFor ? `Tené cambio: paga con ${money(o.cashChangeFor)}` : '', tone: 'amber', action: breakdownBtn }, isLight);
+  }
+  return moneyRow({ label: 'Ya está pagado', amount: '', sub: 'Por transferencia · no cobrás nada', tone: 'green', icon: 'check', action: breakdownBtn }, isLight);
+}
+
+function renderDockActionRow(order, orderIsPickup, isLight) {
+  const t = driverTokens(isLight);
+  const color = orderIsPickup ? t.brand : t.green;
+  const label = order.isTrip
+    ? (orderIsPickup ? 'Deslizá: pasajero a bordo' : 'Deslizá: terminar viaje')
+    : (orderIsPickup
+      ? (isOrderEncomienda(order) ? 'Deslizá: retiré la encomienda' : (order.isFavor ? 'Deslizá: ya compré' : 'Deslizá: retiré el pedido'))
+      : 'Deslizá: entregado');
   return `
-    <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">
-      <div style="display:flex; align-items:center; gap:8px; padding:0 4px;">
-        <span style="display:inline-flex; flex-shrink:0; color:${orderIsPickup ? 'var(--driver-accent-text)' : (isLight ? '#059669' : '#34d399')};">${icon(orderIsPickup ? (isEncomienda ? 'package' : 'store') : 'mapPin', 16)}</span>
-        <div style="min-width:0; display:flex; flex-direction:column;">
-          <span style="font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; color:var(--driver-text-secondary);">${escape(who)}</span>
-          <span style="font-size:14px; font-weight:900; color:var(--driver-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(place)}</span>
+    <div id="dock-pinned-action-slider-row" style="flex-shrink:0;width:100%">
+      <div class="driver-swipe-slider" data-action="${orderIsPickup ? 'pickup' : 'deliver'}" data-id="${esc(order.id)}" data-codes="${esc(order.verificationCode || '')}" role="slider" aria-label="${esc(label)}" style="
+        position:relative;width:100%;height:56px;border-radius:28px;background:${color};overflow:hidden;
+        user-select:none;touch-action:none;display:flex;align-items:center;">
+        <div class="swipe-slider-fill" style="position:absolute;top:0;left:0;height:100%;width:0%;background:rgba(0,0,0,.2);border-radius:28px;pointer-events:none;"></div>
+        <div class="swipe-slider-label" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding-left:44px;
+          font-family:var(--font-display,'Outfit',sans-serif);font-size:16.5px;font-weight:600;color:#fff;pointer-events:none;transition:opacity .15s ease;">${esc(label)}</div>
+        <div class="swipe-slider-handle" style="position:absolute;top:4px;left:3px;width:48px;height:48px;background:#fff;border-radius:50%;
+          display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;z-index:2;box-shadow:0 2px 8px rgba(0,0,0,.25);">
+          ${dIcon('chev', 22, color, 3)}
         </div>
       </div>
-      ${renderDockActionRow(order, orderIsPickup, isLight)}
-    </div>
-  `;
+    </div>`;
+}
+
+function dockContactRow(o, isPickup, isLight) {
+  const t = driverTokens(isLight);
+  const nav = dockNavUrl(o, isPickup);
+  const wa = dockWhatsAppUrl(o);
+  const phone = String(isPickup && !o.isTrip ? (o.comercioPhone || '') : (o.userPhone || o.clientPhone || o.phone || '')).replace(/[^\d+]/g, '');
+  const sq = `width:48px;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;cursor:pointer;padding:0`;
+  return `<div style="display:flex;gap:10px">
+    ${nav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer" style="flex:1;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">${dIcon('nav', 18, t.brandTx)}Navegar</a>` : '<span style="flex:1"></span>'}
+    ${phone ? `<a href="tel:${esc(phone)}" aria-label="Llamar" title="Llamar" style="${sq}">${dIcon('phone', 20)}</a>` : ''}
+    ${wa ? `<a href="${esc(wa)}" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp al cliente" title="WhatsApp" style="${sq};color:#25D366"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163A11.867 11.867 0 0 1 .157 11.89C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 0 1 8.413 3.488 11.82 11.82 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.82 9.82 0 0 0 1.746 5.634l-.999 3.648 3.742-.981z"/></svg></a>` : ''}
+    <button class="driver-dock-chat-btn" data-order-id="${esc(o.id)}" data-customer-name="${esc(o.userName || o.clientName || 'Cliente')}" aria-label="Chat con el cliente" title="Chat" style="${sq}">${dIcon('chat', 20)}</button>
+  </div>`;
+}
+
+function dockQuickRow(user, isLight, compact) {
+  const t = driverTokens(isLight);
+  const isChofer = isDriverChoferApproved(user);
+  const filters = window.autoAcceptFilters || getDriverAutoAcceptFilters(user);
+  const maxCat = isChofer ? 3 : 2;
+  const activeCount = (filters.comercios ? 1 : 0) + (filters.mandados ? 1 : 0) + (isChofer && filters.viajes ? 1 : 0);
+  const on = window.autoAcceptEnabled === true;
+  const iconBtn = (id, name, label, color) => `<button id="${id}" aria-label="${label}" title="${label}" style="width:${compact ? 40 : 44}px;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${color || t.tx2};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;padding:0">${dIcon(name, 19, color || t.tx2)}</button>`;
+  return `<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+    <button id="driver-quick-auto-accept-btn" aria-label="Aceptar pedidos automáticamente" style="flex:1;min-width:0;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;cursor:pointer;font-family:inherit">
+      ${dIcon('zap', 17, on ? t.amberTx : t.tx3)}
+      <span style="flex:1;min-width:0;text-align:left;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Auto-aceptar${on ? ` · ${activeCount}/${maxCat}` : ''}</span>
+      <span style="width:38px;height:22px;border-radius:11px;background:${on ? t.green : (isLight ? '#CBD5E1' : '#3A404A')};position:relative;flex-shrink:0">
+        <span style="position:absolute;top:3px;left:${on ? 19 : 3}px;width:16px;height:16px;border-radius:8px;background:#fff;transition:left .2s ease"></span>
+      </span>
+    </button>
+    ${iconBtn('driver-quick-support-btn', 'headset', 'Chat con soporte')}
+    ${iconBtn('driver-quick-help-btn', 'help', 'Ayuda y preguntas frecuentes')}
+    ${iconBtn('driver-quick-sos-btn', 'shield', 'Centro de seguridad SOS', t.brandTx)}
+  </div>`;
+}
+
+// Hoja reducida (se mantiene el nombre por las llamadas existentes)
+function renderDockCollapsedOrder(order, orderIsPickup, isLight) {
+  return renderDockActionRow(order, orderIsPickup, isLight);
 }
 
 export function renderBottomDockContent(user, activeOrders = []) {
   const isLight = getDriverMapTheme() === 'light';
+  const t = driverTokens(isLight);
   const hasActive = Array.isArray(activeOrders) && activeOrders.length > 0;
   const isExpanded = window.driverDockExpanded === true;
   const isHidden = window.driverDockHidden === true;
 
-  // Selected order index for multi-order tabs
-  let selectedOrderIdx = (typeof window.driverSelectedOrderIndex === 'number' && window.driverSelectedOrderIndex < activeOrders.length && window.driverSelectedOrderIndex >= 0)
+  // Recorrido en orden (el mismo que dibuja el mapa) y la parada de ahora
+  const route = hasActive ? calculateOptimalMultiStopSequence(window.lastRiderPos || null, activeOrders) : [];
+  const nowStop = route[0] || null;
+  let selectedOrderIdx = (typeof window.driverSelectedOrderIndex === 'number' && window.driverSelectedOrderIndex >= 0 && window.driverSelectedOrderIndex < activeOrders.length)
     ? window.driverSelectedOrderIndex
-    : 0;
-  if (selectedOrderIdx >= activeOrders.length) selectedOrderIdx = 0;
+    : Math.max(0, nowStop ? activeOrders.findIndex(o => o.id === nowStop.orderId) : 0);
   const currentOrder = hasActive ? (activeOrders[selectedOrderIdx] || activeOrders[0]) : null;
-  const currentIsPickup = currentOrder 
-    ? (currentOrder.status === 'pending' || currentOrder.status === 'accepted' || currentOrder.status === 'preparing' || currentOrder.status === 'ready' || (!currentOrder.pickedUpAt && currentOrder.status !== 'delivering')) 
-    : false;
+  const currentIsPickup = currentOrder ? dockOrderStage(currentOrder) : false;
+  const stopIndex = currentOrder ? Math.max(0, route.findIndex(s => s.orderId === currentOrder.id && (s.type === 'pickup') === currentIsPickup)) : 0;
+  const totalStops = route.length;
 
-  // 1. MINIMIZED COLLAPSIBLE DOCK CARD PILL (WHEN HIDDEN)
+  // 1. Hoja escondida: una píldora con lo esencial
   if (isHidden) {
+    const txt = currentOrder ? dockStopText(currentOrder, currentIsPickup) : null;
     return `
-      <div id="driver-bottom-sheet-card" class="dock-minimized" style="
-        background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(15, 23, 42, 0.95)'};
-        backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-        border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.35)' : 'rgba(225, 29, 72, 0.45)'};
-        border-radius: 26px;
-        padding: 8px 14px;
-        display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        box-shadow: 0 10px 30px ${isLight ? 'rgba(225,29,72,0.14)' : 'rgba(0,0,0,0.7)'};
-        max-width: 480px; margin: 0 auto;
-        cursor: pointer; user-select: none;
-        pointer-events: auto;
-        animation: dockCardSpring 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      ">
-        <div style="display:flex; align-items:center; gap:8px; min-width:0;">
-          <span style="display:inline-flex; flex-shrink:0; color:var(--driver-text-primary);">${icon('motorcycle', 16)}</span>
-          <div style="font-size:13px; font-weight:900; color:var(--driver-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-            ${hasActive ? (activeOrders.length === 1 ? '1 Pedido en Curso' : `${activeOrders.length} Pedidos en Cola`) : 'Buscando Pedidos'}
-          </div>
-          ${(hasActive && currentOrder) ? `
-            <span style="font-size:12px; font-weight:900; color:${isLight ? '#16a34a' : '#22c55e'}; background:${isLight ? '#dcfce7' : 'rgba(34,197,94,0.15)'}; padding:2px 8px; border-radius:8px; flex-shrink:0;">
-              $${Number(currentOrder.totalAmount || currentOrder.total || 0).toLocaleString('es-AR')}
-            </span>
-          ` : ''}
+      <div id="driver-bottom-sheet-card" class="dock-minimized" style="background:${t.sheet};border:1px solid ${t.line};border-radius:24px;padding:8px 8px 8px 16px;
+        display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:${t.shadow};max-width:480px;margin:0 auto;cursor:pointer;user-select:none;pointer-events:auto;
+        animation:dockCardSpring .3s cubic-bezier(.16,1,.3,1);">
+        <div style="min-width:0">
+          <div style="font-size:12px;color:${t.tx3};font-weight:600">${hasActive ? (activeOrders.length === 1 ? '1 pedido en curso' : `${activeOrders.length} pedidos en curso`) : 'Buscando pedidos'}</div>
+          <div style="font-size:14.5px;font-weight:600;color:${t.tx};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${txt ? `${esc(txt.verb)} ${esc(txt.title)}` : 'Esperando ofertas'}</div>
         </div>
-
-        <button id="dock-unhide-btn" aria-label="Mostrar tarjeta de pedido" style="
-          background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-          color: white; border: none; border-radius: 14px;
-          font-size: 11.5px; font-weight: 900;
-          padding: 6px 12px; min-height:36px; display: flex; align-items: center; gap: 5px;
-          cursor: pointer; box-shadow: 0 3px 10px rgba(225,29,72,0.4);
-          flex-shrink: 0;
-        ">
-          <span>▲</span>
-          <span>Mostrar</span>
+        <button id="dock-unhide-btn" aria-label="Mostrar el panel" style="height:40px;padding:0 14px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx};font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer;flex-shrink:0;font-family:inherit">
+          ${dIcon('chevUp', 16)}Mostrar
         </button>
-      </div>
-    `;
+      </div>`;
   }
 
-  return `
-    <div id="driver-bottom-sheet-card" style="
-      background: ${isLight ? 'rgba(255, 255, 255, 0.98)' : 'rgba(15, 23, 42, 0.96)'};
-      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-      border: 1.5px solid ${isLight ? 'rgba(225, 29, 72, 0.25)' : 'rgba(225, 29, 72, 0.35)'};
-      border-top-left-radius: 28px; border-top-right-radius: 28px;
-      border-bottom-left-radius: ${isExpanded ? '0' : '28px'};
-      border-bottom-right-radius: ${isExpanded ? '0' : '28px'};
-      padding: 10px 16px 14px 16px;
-      display: flex; flex-direction: column; gap: 8px;
-      box-shadow: 0 -12px 40px ${isLight ? 'rgba(225,29,72,0.1)' : 'rgba(0,0,0,0.75)'};
-      max-width: 480px; margin: 0 auto;
-      max-height: ${isExpanded ? 'min(84vh, 640px)' : 'auto'};
-      overflow: hidden;
-      transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.25s ease, box-shadow 0.3s ease;
-      animation: dockCardSpring 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      pointer-events: auto;
-    ">
-      
-      <!-- DRAG HANDLE & TOGGLE HEADER -->
-      <div id="dock-drag-handle" style="display:flex; flex-direction:column; align-items:center; cursor:pointer; user-select:none; padding:4px 0 2px 0; flex-shrink: 0;">
-        <div style="width: 44px; height: 5px; border-radius: 3px; background: ${isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.3)'}; margin-bottom: 6px;"></div>
-        
-        <div style="width:100%; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span style="display:inline-flex; color:var(--driver-text-primary-soft);">${icon('motorcycle', 14)}</span>
-            <span style="font-size:13px; font-weight:900; color:var(--driver-text-primary-soft);">
-              ${hasActive ? (activeOrders.length === 1 ? '1 Pedido en Curso' : `${activeOrders.length} Pedidos en Curso`) : 'Buscando Pedidos'}
-            </span>
-          </div>
+  const sheetOpen = `
+    <div id="driver-bottom-sheet-card" style="background:${t.sheet};border:1px solid ${t.line};border-radius:24px;padding:8px 16px 14px;
+      display:flex;flex-direction:column;gap:14px;box-shadow:${t.shadow};max-width:480px;margin:0 auto;color:${t.tx};
+      max-height:${isExpanded ? 'min(84vh, 680px)' : 'none'};overflow:hidden;pointer-events:auto;
+      animation:dockCardSpring .3s cubic-bezier(.16,1,.3,1);font-family:'Inter',system-ui,sans-serif;">`;
 
-          <div style="display:flex; align-items:center; gap:6px;">
-            ${hasActive ? `
-              <button id="dock-expand-toggle-btn" aria-label="${isExpanded ? 'Ver menos detalles del pedido' : 'Ver más detalles del pedido'}" style="background:${isExpanded ? (isLight ? '#f1f5f9' : 'rgba(255,255,255,0.08)') : (isLight ? '#fff1f2' : 'rgba(225,29,72,0.18)')}; border:1.5px solid ${isExpanded ? (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.12)') : (isLight ? '#fecaca' : 'rgba(225,29,72,0.35)')}; color:var(--driver-accent-text); font-size:11.5px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; padding:5px 10px; min-height:36px; border-radius:10px; transition: transform 0.2s ease;">
-                <span>${isExpanded ? '▼ Menos' : '▲ Detalles'}</span>
-              </button>
-            ` : ''}
+  const handleRow = (left, right) => `
+      <div id="dock-drag-handle" style="display:flex;flex-direction:column;gap:8px;cursor:pointer;user-select:none;flex-shrink:0">
+        <div style="width:40px;height:4px;border-radius:2px;background:${t.handle};align-self:center"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">${left}<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${right}</div></div>
+      </div>`;
+  const hideBtn = `<button id="dock-hide-card-btn" aria-label="Esconder el panel" title="Esconder" style="width:36px;height:36px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">${dIcon('chevDown', 18)}</button>`;
 
-            <!-- MINIMIZE / HIDE CARD BUTTON -->
-            <button id="dock-hide-card-btn" title="Ocultar Card temporalmente" aria-label="Ocultar tarjeta de pedido temporalmente" style="background:var(--driver-fill-subtle-b); border:1px solid var(--driver-border-b); color:var(--driver-text-secondary); font-size:11px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:4px; padding:5px 9px; min-height:36px; border-radius:10px;">
-              <span>▼</span>
-              <span>Ocultar</span>
-            </button>
+  // 2. Sin pedidos: buscando
+  if (!hasActive) {
+    const hotspots = window.currentDemandHotspots || [];
+    const totalPrep = hotspots.reduce((acc, h) => acc + h.count, 0);
+    return `${sheetOpen}
+      ${handleRow(`<div style="min-width:0">
+          <div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:600;color:${t.tx}">Buscando pedidos</div>
+          <div style="font-size:13.5px;color:${t.tx2};margin-top:2px;display:flex;align-items:center;gap:6px">
+            <span style="width:8px;height:8px;border-radius:4px;background:${t.greenTx};box-shadow:0 0 0 4px ${t.greenBg}"></span>
+            En línea hace <span id="driver-live-timer-text">0m</span>
           </div>
-        </div>
+        </div>`, hideBtn)}
+      <div id="driver-live-demand-pill" style="display:${totalPrep > 0 ? 'flex' : 'none'};align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:${t.card};color:${t.tx2};font-size:14px;font-weight:500">
+        ${dIcon('store', 18, t.brandTx)}<span><b style="color:${t.tx};font-weight:600">${totalPrep} pedido${totalPrep === 1 ? '' : 's'}</b> preparándose en ${hotspots.length} local${hotspots.length === 1 ? '' : 'es'} cerca</span>
       </div>
-
-      <!-- IDLE RADAR STATUS & PREDICTIVE DEMAND (IF NO ACTIVE ORDERS) -->
-      ${!hasActive ? `
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <div class="status-dot-active" style="width:9px; height:9px; border-radius:50%; background:#22c55e; box-shadow:0 0 10px #22c55e; flex-shrink:0;"></div>
-              <div style="font-size:12.5px; font-weight:700; color:var(--driver-text-secondary);">Magdalena en tiempo real</div>
-            </div>
-            <div style="background:var(--driver-fill-subtle-b); border:1px solid var(--driver-border-soft); padding:4px 10px; border-radius:12px; font-size:11px; font-weight:800; color:var(--driver-accent-text); display:flex; align-items:center; gap:5px;">
-              <span style="display:inline-flex;">${icon('clock', 12)}</span> <span id="driver-live-timer-text">0m</span>
-            </div>
-          </div>
-
-          <!-- PREDICTIVE DEMAND RADAR BADGE -->
-          ${(() => {
-            const hotspots = window.currentDemandHotspots || [];
-            const totalPrep = hotspots.reduce((acc, h) => acc + h.count, 0);
-            return `
-              <div id="driver-live-demand-pill" style="
-                display: ${totalPrep > 0 ? 'flex' : 'none'}; align-items: center; justify-content: space-between;
-                padding: 8px 12px; border-radius: 14px;
-                background: ${isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)'};
-                border: 1.5px solid ${isLight ? '#fecaca' : 'rgba(225, 29, 72, 0.35)'};
-                color: ${isLight ? '#be123c' : '#fb7185'}; font-size: 11.5px; font-weight: 800;
-              ">
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span style="display:inline-flex;">${icon('flame', 14)}</span>
-                  <span><strong>Radar de Cocina:</strong> ${totalPrep} pedido${totalPrep > 1 ? 's' : ''} preparándose en ${hotspots.length} local${hotspots.length > 1 ? 'es' : ''}</span>
-                </div>
-                <span style="font-size:10px; background:#e11d48; color:white; padding:2px 7px; border-radius:8px; font-weight:900;">EN VIVO</span>
-              </div>
-            `;
-          })()}
-
-          <!-- CALM "NO HAY PEDIDOS CERCA" REASSURANCE (shown by updateLiveTimer after a few idle minutes with no cocina activity) -->
-          <div id="driver-idle-empty-state" style="
-            display: none; align-items: center; gap: 10px;
-            padding: 10px 12px; border-radius: 14px;
-            background: var(--driver-fill-faint);
-            border: 1px solid var(--driver-border);
-            color: var(--driver-text-secondary-b); font-size: 11.5px; font-weight: 600; line-height: 1.4;
-          ">
-            <span style="display:inline-flex; flex-shrink:0; color:var(--driver-text-secondary);">${icon('search', 16)}</span>
-            <span><strong style="color:${isLight ? '#0f172a' : '#e2e8f0'};">Zona tranquila por ahora.</strong> Los pedidos suelen repuntar en los próximos minutos. Podés revisar tus Ganancias mientras esperás.</span>
-          </div>
-        </div>
-      ` : ''}
-
-      <!-- HORIZONTAL ORDER SELECTOR TABS (ONLY WHEN EXPANDED AND MULTIPLE ORDERS) -->
-      ${(hasActive && isExpanded && activeOrders.length > 1) ? `
-        <div id="dock-order-tabs-scroll" style="display:flex; gap:8px; overflow-x:auto; padding:2px 2px 6px 2px; -webkit-overflow-scrolling:touch; flex-shrink:0; animation: dockContentFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
-          ${activeOrders.map((o, idx) => {
-            const isSelected = idx === selectedOrderIdx;
-            const oIsPickup = (o.status === 'pending' || o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || (!o.pickedUpAt && o.status !== 'delivering'));
-            const isEncomienda = isOrderEncomienda(o);
-            const typeIcon = icon(oIsPickup ? (isEncomienda ? 'package' : (o.isFavor ? 'shoppingBag' : 'store')) : 'mapPin', 12);
-            const typeLabel = oIsPickup ? (isEncomienda ? 'Encomienda' : (o.isFavor ? 'Mandado' : 'Retiro')) : 'Entrega';
-            const clientOrStore = oIsPickup 
-              ? (isEncomienda ? (o.pickupAddress || 'Retiro') : (o.comercioName || o.originAddress || 'Comercio'))
-              : (o.userName || o.clientName || 'Cliente');
-
-            return `
-              <button class="dock-order-tab-btn" data-index="${idx}" style="
-                flex-shrink:0; display:flex; align-items:center; gap:6px; padding:7px 12px; border-radius:14px;
-                background: ${isSelected ? 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)' : (isLight ? '#f1f5f9' : 'rgba(255,255,255,0.06)')};
-                border: 1.5px solid ${isSelected ? '#e11d48' : (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)')};
-                color: ${isSelected ? '#ffffff' : (isLight ? '#0f172a' : '#cbd5e1')};
-                font-family: var(--font-display, sans-serif); font-size: 11.5px; font-weight: 900; cursor: pointer;
-                box-shadow: ${isSelected ? '0 4px 12px rgba(225,29,72,0.35)' : 'none'};
-                transition: all 0.2s ease;
-              ">
-                <span style="display:inline-flex;">${typeIcon}</span>
-                <span>#${o.orderId || (o.id ? o.id.slice(-4) : '')} • ${typeLabel} (${clientOrStore.slice(0, 10)})</span>
-              </button>
-            `;
-          }).join('')}
-        </div>
-      ` : ''}
-
-      <!-- EXPANDED DETAILED ORDER VIEW FOR currentOrder (SCROLLABLE CONTENT AREA) -->
-      ${(hasActive && isExpanded && currentOrder) ? (() => {
-        const order = currentOrder;
-        const orderIsPickup = currentIsPickup;
-        const itemsList = Array.isArray(order.items) ? order.items : (Array.isArray(order.products) ? order.products : []);
-
-        const isEncomienda = isOrderEncomienda(order);
-        const parsedOrderMandado = (order.isFavor && !isEncomienda) ? parseMandadoDetails(order.description || order.itemsText || order.notes || order.details, order.comercioName || order.originAddress) : null;
-        const displayComercioTitle = order.isFavor 
-          ? (isEncomienda ? (order.pickupAddress || order.originAddress || 'Dirección de Retiro') : (parsedOrderMandado?.comercio || order.comercioName || 'Comercio indicado')) 
-          : (order.comercioName || order.originAddress || 'Comercio / Local');
-        
-        const isCash = order.paymentMethod === 'efectivo' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('efect'));
-        const paymentLabel = isCash ? 'PAGA EN EFECTIVO:' : 'PAGA CON TRANSFERENCIA:';
-        const paymentIcon = icon(isCash ? 'dollarSign' : 'creditCard', 11);
-        const paymentColor = isCash ? (isLight ? '#b45309' : '#f59e0b') : (isLight ? '#be123c' : '#fb7185');
-        const paymentBg = isCash ? (isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') : (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)');
-        const paymentBorder = isCash ? '#fde68a' : (isLight ? '#fecaca' : 'rgba(225, 29, 72, 0.35)');
-
-        const clientPhone = order.userPhone || order.clientPhone || order.phone || '';
-        let orderWaUrl = '';
-        if (clientPhone) {
-          const cleanPhone = clientPhone.replace(/\D/g, '');
-          if (cleanPhone.length >= 8) {
-            const fullPhone = cleanPhone.startsWith('54') ? cleanPhone : (cleanPhone.startsWith('9') ? `54${cleanPhone}` : `549${cleanPhone}`);
-            orderWaUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(`¡Hola ${order.userName || 'Cliente'}! Soy el repartidor de GO Delivery con tu pedido #${order.orderId || (order.id ? order.id.slice(-4) : '')}.`)}`;
-          }
-        }
-
-        return `
-          <div id="dock-expanded-selected-order-body" style="display:flex; flex-direction:column; gap:8px; flex: 1; min-height: 0; max-height: min(38vh, 280px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; padding-bottom: 2px; animation: dockContentFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);">
-            
-            <!-- ORDER TOP HEADER: plain text, no heavy gradient pill -->
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding: 2px 4px 4px 4px; border-bottom:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.07)'};">
-              <span style="font-size:12.5px; font-weight:900; color:var(--driver-accent-text); display:inline-flex; align-items:center; gap:5px;">
-                <span style="display:inline-flex;">${icon(orderIsPickup ? (isEncomienda ? 'package' : 'shoppingBag') : 'mapPin', 13)}</span>
-                ${activeOrders.length > 1 ? `Parada #${selectedOrderIdx + 1} · ` : ''}${orderIsPickup ? (isEncomienda ? 'Realizar Encomienda' : (order.isFavor ? 'Realizar Mandado' : 'Retirar en Local')) : 'Entregar al Cliente'}
-              </span>
-              <span style="font-size:11px; font-weight:700; color:var(--driver-text-secondary);">
-                #${order.orderId || (order.id ? order.id.slice(-4) : '')}
-              </span>
-            </div>
-
-            <!-- 1. RETIRO / MANDADO — plain typographic hierarchy, one accent per section instead of boxes nested in boxes -->
-            <div style="display:flex; flex-direction:column; gap:5px; padding:4px;">
-              <div style="font-size:10px; font-weight:800; color:var(--driver-text-secondary); text-transform:uppercase; letter-spacing:0.03em;">
-                ${isEncomienda ? 'Encomienda a realizar' : (order.isFavor ? 'Mandado / compra a realizar' : 'Punto de retiro')}
-              </div>
-              <div style="font-size:14.5px; font-weight:900; color:var(--driver-text-primary); line-height:1.3;">
-                ${displayComercioTitle}
-              </div>
-              ${isEncomienda ? `
-                <div style="font-size:12px; color:var(--driver-text-label); font-weight:600; line-height:1.4;">
-                  ${cleanMandadoText(order.details || order.description || order.itemsText || 'Paquete')}
-                </div>
-              ` : (order.isFavor ? `
-                <div style="font-size:12px; color:var(--driver-text-label); font-weight:600; line-height:1.4;">
-                  ${parsedOrderMandado?.items || cleanMandadoText(order.description || order.itemsText || order.notes || order.details || 'Realizar compra o trámite')}
-                </div>
-              ` : `
-                <div style="font-size:12px; color:var(--driver-text-label); font-weight:600; display:flex; align-items:center; gap:4px;">
-                  <span style="display:inline-flex;">${icon('mapPin', 12)}</span> ${order.pickupAddress || order.originAddress || order.comercioAddress || 'Magdalena'}
-                </div>
-              `)}
-
-              <!-- PRODUCT ITEMS BREAKDOWN -->
-              ${itemsList.length > 0 ? `
-                <div style="margin-top:2px; font-size:12px;">
-                  ${itemsList.map(it => `
-                    <div style="display:flex; justify-content:space-between; color:var(--driver-text-label); font-weight:700; padding:2px 0;">
-                      <span>${it.quantity || it.cant || 1}x ${it.name || it.title || 'Producto'}</span>
-                      ${it.price ? `<span style="font-weight:800; color:var(--driver-text-primary);">$${(it.price * (it.quantity || 1)).toLocaleString('es-AR')}</span>` : ''}
-                    </div>
-                  `).join('')}
-                </div>
-              ` : ''}
-
-              <!-- MANDADO PURCHASE COST — the one thing here the driver actually has to act on, kept highlighted -->
-              ${(order.isFavor && !isEncomienda) ? `
-                <div style="
-                  margin-top: 4px; padding: 9px 12px; border-radius: 12px;
-                  background: ${isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.1)'};
-                  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-                ">
-                  <div style="display:flex; flex-direction:column; gap:1px;">
-                    <div style="font-size:9.5px; font-weight:900; color:${isLight ? '#b45309' : '#f59e0b'}; text-transform:uppercase; letter-spacing:0.4px;">
-                      Valor de compra
-                    </div>
-                    <div style="font-size:14.5px; font-weight:900; color:${isLight ? '#78350f' : '#fef08a'};">
-                      $${((order.purchaseCost !== undefined) ? order.purchaseCost : (order.purchaseItemsTotal || 0)).toLocaleString('es-AR')}
-                    </div>
-                  </div>
-                  <button class="edit-mandado-purchase-btn" data-order-id="${order.id}" style="
-                    background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-                    color: white; border: none; padding: 7px 12px; border-radius: 10px;
-                    font-size: 11.5px; font-weight: 900; cursor: pointer; display: flex; align-items: center; gap: 5px;
-                    box-shadow: 0 3px 10px rgba(225,29,72,0.35); flex-shrink: 0;
-                  ">
-                    <span style="display:inline-flex;">${icon('edit', 13)}</span>
-                    <span>Modificar</span>
-                  </button>
-                </div>
-              ` : ''}
-            </div>
-
-            <!-- 2. ENTREGA (CLIENTE) -->
-            <div style="display:flex; flex-direction:column; gap:5px; padding:10px 4px 4px 4px; border-top:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.07)'};">
-              <div style="font-size:10px; font-weight:800; color:var(--driver-text-secondary); text-transform:uppercase; letter-spacing:0.03em;">
-                Punto de entrega
-              </div>
-              <div style="font-size:14px; font-weight:900; color:var(--driver-text-primary);">
-                ${order.userName || order.clientName || 'Cliente'}
-              </div>
-              <div style="font-size:12px; color:var(--driver-text-label); font-weight:600; display:flex; align-items:center; gap:4px;">
-                <span style="display:inline-flex;">${icon('mapPin', 12)}</span> ${order.deliveryAddress || order.address || 'Magdalena'}
-              </div>
-              ${(order.addressNotes || order.notes) ? `
-                <div style="font-size:11.5px; color:var(--driver-accent-text); font-weight:700; display:flex; align-items:center; gap:4px;">
-                  <span style="display:inline-flex;">${icon('edit', 11)}</span> "${order.addressNotes || order.notes}"
-                </div>
-              ` : ''}
-
-              <!-- DIRECT CUSTOMER CONTACT ACTIONS — plain inline row, no extra wrapping box -->
-              <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
-                ${orderWaUrl ? `
-                  <a href="${orderWaUrl}" target="_blank" rel="noopener noreferrer" title="WhatsApp con ${order.userName || 'Cliente'}" style="
-                    display: inline-flex; align-items: center; gap: 5px;
-                    color: #25D366; font-size: 12px; font-weight: 800; text-decoration: none;
-                  ">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
-                      <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
-                    </svg>
-                    <span>WhatsApp</span>
-                  </a>
-                ` : ''}
-
-                <button class="driver-dock-chat-btn" data-order-id="${order.id}" data-customer-name="${order.userName || order.clientName || 'Cliente'}" title="Chat en la App" style="
-                  display: inline-flex; align-items: center; gap: 5px;
-                  background: none; border: none; padding: 0;
-                  color: var(--driver-accent-text); font-size: 12px; font-weight: 800; cursor: pointer;
-                ">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-                  </svg>
-                  <span>Chat en la app</span>
-                </button>
-              </div>
-            </div>
-
-          </div>
-
-          ${renderDockActionRow(order, orderIsPickup, isLight)}
-          </div>
-        `;
-      })() : ''}
-
-      <!-- COLLAPSED CARD: where to go next + the action slider, so the main action never hides
-           behind "Detalles" (drivers didn't find it and reported the swipe as broken). -->
-      ${(hasActive && !isExpanded && currentOrder) ? renderDockCollapsedOrder(currentOrder, currentIsPickup, isLight) : ''}
-
-      <!-- BOTTOM ROW: QUICK CONTROLS (ALWAYS VISIBLE & PINNED!) -->
-      <div style="display:flex; align-items:center; gap:6px; padding-top:6px; border-top:1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'}; flex-shrink: 0; margin-top: auto;">
-        <!-- AUTO ACCEPT TOGGLE SWITCH WITH FILTER INDICATOR -->
-        ${(() => {
-          const isChofer = isDriverChoferApproved(user);
-          const autoFilters = window.autoAcceptFilters || getDriverAutoAcceptFilters(user);
-          const maxCategories = isChofer ? 3 : 2;
-          const activeFilterCount = (autoFilters.comercios ? 1 : 0) + (autoFilters.mandados ? 1 : 0) + (isChofer && autoFilters.viajes ? 1 : 0);
-          return `
-            <button id="driver-quick-auto-accept-btn" title="Configurar y Filtrar Auto-Aceptar" aria-label="Configurar auto-aceptar pedidos" style="
-              flex: 1; height: 38px; border-radius: 12px;
-              background: ${window.autoAcceptEnabled ? (isLight ? '#dcfce7' : 'rgba(34, 197, 94, 0.15)') : (isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.06)')};
-              border: 1px solid ${window.autoAcceptEnabled ? (isLight ? '#86efac' : 'rgba(34, 197, 94, 0.4)') : (isLight ? '#cbd5e1' : 'rgba(255, 255, 255, 0.1)')};
-              color: ${window.autoAcceptEnabled ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#475569' : '#94a3b8')};
-              font-size: 11px; font-weight: 800;
-              display: flex; align-items: center; justify-content: space-between; padding: 0 8px;
-              cursor: pointer; transition: all 0.2s ease;
-            ">
-              <span style="display:flex; align-items:center; gap:3px;">
-                <span style="display:inline-flex;">${icon('zap', 13)}</span>
-                <span>${window.autoAcceptEnabled ? `Auto (${activeFilterCount}/${maxCategories})` : 'Auto'}</span>
-              </span>
-              <!-- Switch Graphic -->
-              <div style="
-                width: 30px; height: 18px; border-radius: 9px;
-                background: ${window.autoAcceptEnabled ? '#22c55e' : (isLight ? '#cbd5e1' : 'rgba(255,255,255,0.2)')};
-                position: relative; transition: background 0.25s ease;
-              ">
-                <div style="
-                  width: 14px; height: 14px; border-radius: 50%; background: white;
-                  position: absolute; top: 2px;
-                  left: ${window.autoAcceptEnabled ? '14px' : '2px'};
-                  transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-                  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-                "></div>
-              </div>
-            </button>
-          `;
-        })()}
-
-        <!-- SOS EMERGENCY BUTTON -->
-        <button id="driver-quick-sos-btn" title="Centro de Seguridad SOS" aria-label="Abrir centro de seguridad SOS" style="
-          height: 38px; padding: 0 10px; border-radius: 12px;
-          background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-          border: 1px solid #b91c1c;
-          color: white; font-size: 11px; font-weight: 900;
-          display: flex; align-items: center; justify-content: center; gap: 4px;
-          cursor: pointer; transition: all 0.2s ease; box-shadow: 0 3px 10px rgba(239,68,68,0.3);
-        ">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
-          <span>SOS</span>
-        </button>
-
-        <!-- DIRECT LIVE SUPPORT CHAT BUTTON -->
-        <button id="driver-quick-support-btn" title="Chat Directo con Soporte" aria-label="Abrir chat directo con soporte" style="
-          height: 38px; padding: 0 10px; border-radius: 12px;
-          background: ${isLight ? '#e0f2fe' : 'rgba(2, 132, 199, 0.18)'};
-          border: 1px solid ${isLight ? '#bae6fd' : 'rgba(56, 189, 248, 0.35)'};
-          color: ${isLight ? '#0284c7' : '#38bdf8'}; font-size: 11px; font-weight: 900;
-          display: flex; align-items: center; justify-content: center; gap: 4px;
-          cursor: pointer; flex-shrink: 0; transition: all 0.2s ease;
-        ">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
-            <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
-          </svg>
-          <span>Soporte</span>
-        </button>
-
-        <!-- HELP / FAQ GUIDE BUTTON -->
-        <button id="driver-quick-help-btn" title="Preguntas Frecuentes y Guía" aria-label="Abrir preguntas frecuentes y guía" style="
-          height: 38px; padding: 0 10px; border-radius: 12px;
-          background: ${isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.08)'};
-          border: 1px solid ${isLight ? '#cbd5e1' : 'rgba(255, 255, 255, 0.12)'};
-          color: var(--driver-text-label); font-size: 11px; font-weight: 800;
-          display: flex; align-items: center; justify-content: center; gap: 4px;
-          cursor: pointer; flex-shrink: 0; transition: all 0.2s ease;
-        ">
-          <span style="display:inline-flex;">${icon('helpCircle', 13)}</span>
-          <span>Ayuda</span>
-        </button>
+      <div id="driver-idle-empty-state" style="display:none;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:${t.card};color:${t.tx2};font-size:14px;line-height:1.4">
+        ${dIcon('clock', 18, t.tx3)}<span><b style="color:${t.tx};font-weight:600">Zona tranquila por ahora.</b> Los pedidos suelen repuntar en unos minutos.</span>
       </div>
-    </div>
-  `;
+      ${dockQuickRow(user, isLight, false)}
+    </div>`;
+  }
+
+  // 3. Con pedidos
+  const o = currentOrder;
+  const kind = orderKind(o, { isEncomienda: isOrderEncomienda(o) });
+  const txt = dockStopText(o, currentIsPickup);
+  const code = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
+  const meta = totalStops > 1 ? `${code} · parada ${stopIndex + 1} de ${totalStops}` : code;
+
+  const expandBtn = `<button id="dock-expand-toggle-btn" aria-label="${isExpanded ? 'Ver menos' : 'Ver el detalle y el recorrido'}" title="${isExpanded ? 'Menos' : 'Detalle'}" style="height:36px;padding:0 10px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">${dIcon(isExpanded ? 'chevDown' : 'chevUp', 16)}${isExpanded ? 'Menos' : 'Detalle'}</button>`;
+  const header = handleRow(`<div style="display:flex;align-items:center;gap:8px;min-width:0">${kindTag(kind, isLight)}<span style="font-size:13px;color:${t.tx3};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(meta)}</span></div>`, expandBtn + hideBtn);
+
+  const stopBlock = `<div>
+      <div style="font-size:13px;color:${t.tx3};font-weight:600">${esc(txt.verb)}</div>
+      <div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:600;color:${t.tx};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(txt.title)}</div>
+      ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(txt.sub)}</div>` : ''}
+    </div>`;
+
+  // Lo que viene después (con varios pedidos)
+  let nextChips = '';
+  if (!isExpanded && totalStops > 1) {
+    const rest = route.filter((s, i) => i !== stopIndex);
+    const next = rest[0];
+    const nextName = next ? (next.type === 'pickup' ? (next.order?.comercioName || next.shortTitle || 'Retiro') : (next.order?.userName || next.shortTitle || 'Entrega')) : '';
+    const cashTotal = activeOrders.filter(isCashPayment).reduce((s, x) => s + (Number(x.totalAmount || x.total) || 0), 0);
+    const chip = (text, fg, bg) => `<span style="height:30px;padding:0 12px;border-radius:15px;background:${bg};color:${fg};font-size:13px;font-weight:500;display:inline-flex;align-items:center;white-space:nowrap">${esc(text)}</span>`;
+    nextChips = `<div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${next ? chip(`Después: ${nextName}`, t.tx2, t.card) : ''}
+      ${rest.length > 1 ? chip(`+${rest.length - 1} parada${rest.length - 1 === 1 ? '' : 's'}`, t.tx2, t.card) : ''}
+      ${cashTotal > 0 ? chip(`Cobrás ${money(cashTotal)} en total`, t.amberTx, t.amberBg) : ''}
+    </div>`;
+  }
+
+  // Vista ampliada: recorrido completo (tocás una parada para verla) + detalle del pedido
+  let expanded = '';
+  if (isExpanded) {
+    const doneStops = activeOrders.filter(x => !dockOrderStage(x)).map(x => ({ kind: dockStopKind(x, true), title: `${x.isTrip ? 'Buscaste a' : 'Retiraste en'} ${dockStopText(x, true).title}`, sub: '', state: 'done', orderId: x.id }));
+    const list = route.map((s, i) => {
+      const so = s.order || activeOrders.find(x => x.id === s.orderId) || {};
+      const st = dockStopText(so, s.type === 'pickup');
+      const isNow = so.id === o.id && (s.type === 'pickup') === currentIsPickup;
+      return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : (isCashPayment(so) ? `Cobrá ${money(so.totalAmount || so.total)} en efectivo` : 'Pagado por transferencia'), state: isNow ? 'now' : 'next', orderId: so.id };
+    });
+    const all = [...doneStops, ...list];
+    const tabs = activeOrders.length > 1
+      ? `<div style="display:flex;flex-direction:column;gap:2px">${all.map((s) => {
+          const idx = activeOrders.findIndex(x => x.id === s.orderId);
+          return s.state === 'done' || idx < 0
+            ? `<div style="padding:4px 0">${stopsList([s], isLight)}</div>`
+            : `<button class="dock-order-tab-btn" data-index="${idx}" style="display:block;width:100%;text-align:left;background:${s.state === 'now' ? t.card : 'transparent'};border:0;border-radius:12px;padding:6px 8px;margin:0 -8px;cursor:pointer;font-family:inherit;color:inherit">${stopsList([s], isLight)}</button>`;
+        }).join('')}</div>`
+      : stopsList(all, isLight);
+    const items = Array.isArray(o.items) ? o.items : (Array.isArray(o.products) ? o.products : []);
+    const itemsHtml = items.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;color:${t.tx2}">
+          <span>${esc(it.quantity || it.cant || 1)}× ${esc(it.name || it.title || 'Producto')}</span>
+          ${it.price ? `<span style="color:${t.tx};font-weight:600;white-space:nowrap">${money(it.price * (it.quantity || 1))}</span>` : ''}
+        </div>`).join('')}</div>` : '';
+    const notes = o.addressNotes || o.notes || o.clientNotes;
+    expanded = `
+      <div id="dock-expanded-selected-order-body" style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;max-height:min(40vh,300px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:${t.handle} transparent;-webkit-overflow-scrolling:touch;animation:dockContentFadeIn .3s cubic-bezier(.16,1,.3,1)">
+        ${tabs}
+        ${itemsHtml}
+        ${notes ? infoRow('note', `“${notes}”`, isLight) : ''}
+        ${!currentIsPickup && o.verificationCode ? infoRow('key', 'Pedile al cliente el código de entrega', isLight) : ''}
+      </div>`;
+  }
+
+  return `${sheetOpen}
+      ${header}
+      ${stopBlock}
+      ${nextChips}
+      ${expanded}
+      ${dockMoneyRow(o, currentIsPickup, isLight)}
+      ${dockContactRow(o, currentIsPickup, isLight)}
+      ${renderDockActionRow(o, currentIsPickup, isLight)}
+      ${dockQuickRow(user, isLight, true)}
+    </div>`;
 }
 
 export function syncDriverNavigationWithOrders(activeOrders = []) {
@@ -7817,7 +7351,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       handle.style.left = `${maxSlide + 3}px`;
       fill.style.width = '100%';
       if (label) {
-        label.textContent = '¡CONFIRMADO!';
+        label.textContent = 'Confirmado';
         label.style.opacity = '1';
       }
 

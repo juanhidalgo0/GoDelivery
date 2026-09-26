@@ -33,6 +33,48 @@ export { MAPTILER_API_KEY };
 export const LIGHT_MAP_STYLE = MAPTILER_STREETS;
 export const DARK_MAP_STYLE = MAPTILER_OLED_DARK;
 
+// Paleta GO sobre el estilo oscuro de MapTiler: fondo gris azulado, calles legibles,
+// agua y parques apenas distintos y etiquetas suaves (el "darkmatter" original es casi negro).
+export function applyGoMapLook(map) {
+  if (!map || getDriverMapTheme() === 'light') return;
+  let layers = [];
+  try { layers = map.getStyle().layers || []; } catch (e) { return; }
+  const set = (id, prop, val) => { try { map.setPaintProperty(id, prop, val); } catch (e) {} };
+  layers.forEach((l) => {
+    const id = String(l.id || '').toLowerCase();
+    if (l.type === 'background') set(l.id, 'background-color', '#11151B');
+    else if (l.type === 'fill') {
+      if (/water|ocean|river|lake/.test(id)) set(l.id, 'fill-color', '#0A1620');
+      else if (/park|grass|wood|forest|green|landcover|pitch/.test(id)) set(l.id, 'fill-color', '#0F1714');
+      else if (/building/.test(id)) set(l.id, 'fill-color', '#181E26');
+      else if (/landuse|residential|place/.test(id)) set(l.id, 'fill-color', '#131820');
+    } else if (l.type === 'line') {
+      if (/water|river|stream|canal/.test(id)) set(l.id, 'line-color', '#0F2230');
+      else if (/motorway|trunk|primary|highway/.test(id)) set(l.id, 'line-color', '#36404F');
+      else if (/road|street|secondary|tertiary|minor|service|bridge|tunnel|path|track/.test(id)) set(l.id, 'line-color', '#29313D');
+      else if (/boundary|admin/.test(id)) set(l.id, 'line-color', '#262B33');
+    } else if (l.type === 'symbol') {
+      set(l.id, 'text-color', '#9AA2AD');
+      set(l.id, 'text-halo-color', '#11151B');
+    }
+  });
+}
+
+/** Círculo de parada: rojo para retirar, blanco para entregar; con número o con ícono. */
+function stopPinHtml(isPickup, label) {
+  const isLight = getDriverMapTheme() === 'light';
+  const bg = isPickup ? '#E11D48' : (isLight ? '#0F172A' : '#F3F4F6');
+  const fg = isPickup ? '#FFFFFF' : (isLight ? '#FFFFFF' : '#0C0F13');
+  const ring = isLight ? '#FFFFFF' : '#0C0F13';
+  const glyph = label != null
+    ? `<span style="font-family: var(--font-display, sans-serif); font-size: 15px; font-weight: 700; line-height: 1;">${label}</span>`
+    : (isPickup
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l1 13H5z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>');
+  return `<div style="width:34px; height:34px; border-radius:50%; background:${bg}; color:${fg}; border:3px solid ${ring};
+    display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(0,0,0,0.45);">${glyph}</div>`;
+}
+
 export function add3dBuildingsLayer(map, isDark = true) {
   if (!map || !map.isStyleLoaded()) return;
   try {
@@ -503,6 +545,8 @@ export async function initDriverNavigationMap(container) {
     });
 
     console.log('[DriverMap] Successfully created MapLibre GL instance on #driver-fullscreen-map');
+    // Cada vez que carga un estilo (al abrir y al cambiar de tema) se aplica la paleta GO
+    driverMap.on('style.load', () => applyGoMapLook(driverMap));
 
     // User touch / pan / zoom interaction tracking (pauses auto-follow for 7 seconds)
     const onUserInteract = () => {
@@ -1015,28 +1059,15 @@ export function updateDriverMapLocation(coords, heading = 0) {
     el.style.cssText = 'width:80px; height:80px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:500;';
     el.innerHTML = `
       <div style="position:relative; width:80px; height:80px; display:flex; align-items:center; justify-content:center;">
-        <!-- Brand Red Radar Vision Cone -->
-        <div class="driver-radar-cone" style="
-          position: absolute;
-          top: -24px;
-          width: 54px;
-          height: 54px;
-          background: radial-gradient(circle at 50% 100%, ${isLight ? 'rgba(225, 29, 72, 0.45)' : 'rgba(244, 63, 94, 0.55)'} 0%, rgba(225, 29, 72, 0) 75%);
-          clip-path: polygon(50% 100%, 0% 0%, 100% 0%);
-          transform-origin: 50% 100%;
-          transform: rotate(${arrowAngle}deg);
-          pointer-events: none;
-        "></div>
-        <div class="driver-pulse-ring" style="border: 2.5px solid ${isLight ? '#e11d48' : '#f43f5e'};"></div>
+        <div style="position:absolute; width:64px; height:64px; border-radius:50%; background:rgba(56,189,248,0.16);"></div>
         <div class="driver-marker-arrow" style="
-          width: 44px; height: 44px; border-radius: 50%;
-          background: ${isLight ? 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)' : 'linear-gradient(135deg, #e11d48 0%, #9f1239 100%)'};
-          border: 3px solid #ffffff;
-          box-shadow: 0 0 20px ${isLight ? 'rgba(225, 29, 72, 0.9)' : 'rgba(244, 63, 94, 0.85)'}, 0 4px 12px rgba(0,0,0,0.5);
+          position: relative; width: 30px; height: 30px; border-radius: 50%;
+          background: #ffffff; border: 3px solid ${isLight ? '#0F172A' : '#0C0F13'};
+          box-shadow: 0 4px 14px rgba(0,0,0,0.45);
           display: flex; align-items: center; justify-content: center;
           transform: rotate(${arrowAngle}deg);
         ">
-          <span style="color:#ffffff; font-size:19px; font-weight:900; line-height:1; filter:drop-shadow(0 0 4px rgba(0,0,0,0.5));">▲</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L20 21 L12 16 L4 21 Z" fill="#0C0F13"/></svg>
         </div>
       </div>
     `;
@@ -1152,10 +1183,10 @@ function ensureWebGlRouteLayers() {
       source: 'driver-route-source',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
-        'line-color': '#e11d48',
-        'line-width': 18,
-        'line-opacity': isLight ? 0.28 : 0.35,
-        'line-blur': 5
+        'line-color': '#E11D48',
+        'line-width': 14,
+        'line-opacity': isLight ? 0.2 : 0.25,
+        'line-blur': 1
       }
     });
   }
@@ -1170,7 +1201,7 @@ function ensureWebGlRouteLayers() {
       paint: {
         'line-color': isLight ? '#be123c' : '#4c0519',
         'line-width': 9,
-        'line-opacity': 0.95
+        'line-opacity': 0
       }
     });
   }
@@ -1183,8 +1214,8 @@ function ensureWebGlRouteLayers() {
       source: 'driver-route-source',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
-        'line-color': isLight ? '#e11d48' : '#ff2a5f',
-        'line-width': 5.5,
+        'line-color': isLight ? '#E11D48' : '#F43F5E',
+        'line-width': 5,
         'line-opacity': 1.0
       }
     });
@@ -1200,7 +1231,7 @@ function ensureWebGlRouteLayers() {
       paint: {
         'line-color': '#ffffff',
         'line-width': 1.8,
-        'line-opacity': 0.92
+        'line-opacity': 0
       }
     });
   }
@@ -1257,7 +1288,7 @@ function ensureWebGlRouteLayers() {
         'icon-keep-upright': false
       },
       paint: {
-        'icon-opacity': 1.0
+        'icon-opacity': 0
       }
     });
   }
@@ -1642,16 +1673,8 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
     const pLngLat = [Number(effectivePickup.lng), Number(effectivePickup.lat)];
     if (!pickupMarker) {
       const el = document.createElement('div');
-      el.style.cssText = 'z-index:400; cursor:pointer; width:60px; height:60px; display:flex; align-items:center; justify-content:center;';
-      el.innerHTML = `
-        <div class="target-beacon-wrapper target-beacon-pickup">
-          <div class="target-beacon-beam"></div>
-          <div class="target-beacon-wave" style="background: radial-gradient(circle, rgba(225,29,72,0.45) 0%, rgba(0,0,0,0) 70%); border: 1.5px solid rgba(225,29,72,0.8);"></div>
-          <div style="width:44px; height:44px; border-radius:50%; background:linear-gradient(135deg, #e11d48 0%, #9f1239 100%); border:3px solid white; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 24px rgba(225,29,72,0.85); font-size:21px; position:relative; z-index:2;">
-            🛍️
-          </div>
-        </div>
-      `;
+      el.style.cssText = 'z-index:400; cursor:pointer; width:40px; height:40px; display:flex; align-items:center; justify-content:center;';
+      el.innerHTML = stopPinHtml(true, null);
       pickupMarker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(pLngLat).addTo(driverMap);
     } else {
       pickupMarker.setLngLat(pLngLat);
@@ -1665,16 +1688,8 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
     const dLngLat = [Number(effectiveDropoff.lng), Number(effectiveDropoff.lat)];
     if (!dropoffMarker) {
       const el = document.createElement('div');
-      el.style.cssText = 'z-index:400; cursor:pointer; width:60px; height:60px; display:flex; align-items:center; justify-content:center;';
-      el.innerHTML = `
-        <div class="target-beacon-wrapper target-beacon-dropoff">
-          <div class="target-beacon-beam"></div>
-          <div class="target-beacon-wave" style="background: radial-gradient(circle, rgba(16,185,129,0.45) 0%, rgba(0,0,0,0) 70%); border: 1.5px solid rgba(16,185,129,0.8);"></div>
-          <div style="width:44px; height:44px; border-radius:50%; background:linear-gradient(135deg, #10b981 0%, #047857 100%); border:3px solid white; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 24px rgba(16,185,129,0.85); font-size:21px; position:relative; z-index:2;">
-            📍
-          </div>
-        </div>
-      `;
+      el.style.cssText = 'z-index:400; cursor:pointer; width:40px; height:40px; display:flex; align-items:center; justify-content:center;';
+      el.innerHTML = stopPinHtml(false, null);
       dropoffMarker = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(dLngLat).addTo(driverMap);
     } else {
       dropoffMarker.setLngLat(dLngLat);
@@ -1732,24 +1747,7 @@ export async function renderMultiStopRoute(stops = [], driverPos = null) {
     `;
     el.title = `${stopNumber}. ${stop.title} (${stop.address || ''})`;
 
-    const bgColor = isPickup 
-      ? 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)' 
-      : 'linear-gradient(135deg, #10b981 0%, #047857 100%)';
-    const shadowColor = isPickup ? 'rgba(225, 29, 72, 0.45)' : 'rgba(16, 185, 129, 0.45)';
-
-    el.innerHTML = `
-      <div style="
-        display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 20px;
-        background: ${bgColor}; color: white; font-weight: 900; font-size: 11px;
-        border: 2px solid white; box-shadow: 0 4px 12px ${shadowColor};
-        font-family: var(--font-display, sans-serif); white-space: nowrap;
-      ">
-        <span style="font-size: 12px;">${isPickup ? '🛍️' : '📍'}</span>
-        <span>#${stopNumber}</span>
-        <span style="font-size: 9.5px; opacity: 0.9; max-width: 90px; overflow: hidden; text-overflow: ellipsis;">${stop.shortTitle || (isPickup ? 'Retiro' : 'Entrega')}</span>
-      </div>
-      <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid ${isPickup ? '#be123c' : '#047857'}; margin-top: -1px;"></div>
-    `;
+    el.innerHTML = stopPinHtml(isPickup, stopNumber);
 
     el.onclick = (e) => {
       e.stopPropagation();
@@ -1759,7 +1757,7 @@ export async function renderMultiStopRoute(stops = [], driverPos = null) {
       });
     };
 
-    const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+    const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
       .setLngLat(lngLat)
       .addTo(driverMap);
 

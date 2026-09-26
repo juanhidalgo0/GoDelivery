@@ -5,6 +5,7 @@ import { AudioManager } from '../utils/audio-manager.js';
 import { showToast } from '../components/toast.js';
 import { db } from '../firebase.js';
 import { doc, getDoc, getDocs, collection, runTransaction } from 'firebase/firestore';
+import { driverTokens, orderKind, kindTag, countdownRing, RING_C, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, kmBetween, kmLabel, pickupCoordsOf, dropoffCoordsOf } from './driver-ui.js';
 
 export function isOrderEncomienda(order) {
   if (!order) return false;
@@ -332,8 +333,11 @@ export function showExclusiveOfferOverlay(batch, user) {
     originSubtitle = itemsList.length > 0 ? itemsList.map(it => `${it.quantity || it.cant || 1}x ${it.name || it.title}`).join(', ') : (orderObj.comercioAddress || 'Pedido en local');
   }
 
-  let destAddress = batch.isBundle ? batch.orders.map(o => o.destinationAddress || o.address || o.deliveryAddress).join(' • ') : (orderObj.destinationAddress || orderObj.address || orderObj.deliveryAddress || 'Dirección de entrega');
-  let driverEarnings = getOrderDriverEarnings(batch.order || orderObj || batch);
+  const destAddress = batch.isBundle ? batch.orders.map(o => o.destinationAddress || o.address || o.deliveryAddress).join(' • ') : (orderObj.destinationAddress || orderObj.address || orderObj.deliveryAddress || 'Dirección de entrega');
+  // En un lote se gana por cada pedido: se suman (antes se mostraba solo el primero)
+  const driverEarnings = batch.isBundle && Array.isArray(batch.orders)
+    ? batch.orders.reduce((sum, o) => sum + (Number(getOrderDriverEarnings(o)) || 0), 0)
+    : getOrderDriverEarnings(batch.order || orderObj || batch);
 
   const TOTAL_DURATION = 60;
   const calcRemaining = () => {
@@ -342,149 +346,120 @@ export function showExclusiveOfferOverlay(batch, user) {
     return Math.max(0, TOTAL_DURATION - elapsed);
   };
 
+  // ── Oferta: hoja inferior sobre el mapa. Ganancia, paradas en orden, qué pasa con la plata
+  // y las dos acciones siempre visibles. ──
+  const t = driverTokens(isLight);
+  const kind = orderKind(orderObj, { isTrip, isFavor: isMandado, isEncomienda, favorType: isGoCash ? 'gocash' : (isPagoServicios ? 'pagodeservicios' : favorType) });
+  const kindLabel = batch.isBundle ? `Lote · ${batch.orders.length} pedidos` : kind.label;
+  const clientName = orderObj.userName || orderObj.clientName || '';
+
+  const stops = [];
+  if (isTrip) {
+    stops.push({ kind: 'person', title: `Buscás a ${clientName || 'tu pasajero'}`, sub: orderObj.originAddress || orderObj.pickupAddress || '', state: 'next' });
+    stops.push({ kind: 'dest', title: destAddress, sub: 'Destino del viaje', state: 'next' });
+  } else if (batch.isBundle) {
+    stops.push({ kind: 'store', title: batch.comercioName || orderObj.comercioName || 'Comercio', sub: `Retirás ${batch.orders.length} pedidos`, state: 'next' });
+    batch.orders.forEach(o => stops.push({ kind: 'dest', title: o.destinationAddress || o.address || o.deliveryAddress || 'Entrega', sub: o.userName ? `Entrega a ${o.userName}` : '', state: 'next' }));
+  } else {
+    if (!(isGoCash && !orderObj.pickupAddress && !orderObj.originAddress)) {
+      stops.push({ kind: isEncomienda ? 'pkg' : 'store', title: originTitle, sub: originSubtitle, state: 'next' });
+    }
+    stops.push({ kind: 'dest', title: destAddress, sub: clientName ? `Entrega a ${clientName}` : '', state: 'next' });
+  }
+
+  // Distancia aproximada: de donde está el repartidor al retiro, y del retiro a la entrega
+  const pc = pickupCoordsOf(orderObj), dc = dropoffCoordsOf(orderObj);
+  let km = 0, haveKm = false;
+  const leg1 = kmBetween(window.lastRiderPos, pc || dc);
+  if (leg1 != null) { km += leg1; haveKm = true; }
+  if (pc && dc) { const leg2 = kmBetween(pc, dc); if (leg2 != null) { km += leg2; haveKm = true; } }
+  const metaLines = [];
+  if (batch.isBundle) metaLines.push(`${batch.orders.length} entregas`);
+  if (haveKm) { metaLines.push(kmLabel(km)); metaLines.push(`~${Math.max(3, Math.round(km * 2.6))} min`); }
+
+  // Qué pasa con la plata en este tipo de pedido
+  const orderTotal = batch.isBundle ? batch.total : (orderObj.totalAmount || orderObj.total || batch.total || 0);
+  const rows = [];
+  if (isGoCash) {
+    rows.push(moneyRow({ label: 'Llevás en efectivo', amount: money(orderObj.amount || orderObj.cashAmount || orderObj.totalAmount || 0), sub: 'El cliente te lo paga por transferencia', tone: 'violet', icon: 'swap' }, isLight));
+  } else {
+    if (isMandado) {
+      const buy = Number(orderObj.purchaseCost ?? orderObj.purchaseItemsTotal ?? batch.subtotal ?? 0);
+      rows.push(moneyRow({ label: 'Adelantás la compra', amount: buy > 0 ? `~ ${money(buy)}` : '', sub: 'Te la devuelve el cliente al entregar', tone: 'amber', icon: 'bag' }, isLight));
+    }
+    if (batch.isBundle) {
+      const cashOrders = batch.orders.filter(isCashPayment);
+      rows.push(cashOrders.length
+        ? moneyRow({ label: 'Cobrás en efectivo', amount: money(cashOrders.reduce((s, o) => s + (Number(o.totalAmount || o.total) || 0), 0)), sub: `${cashOrders.length} de ${batch.orders.length} pedidos`, tone: 'amber' }, isLight)
+        : moneyRow({ label: 'Ya está pagado', sub: 'Por transferencia · no cobrás nada', tone: 'green', icon: 'check' }, isLight));
+    } else if (isCashPayment(orderObj)) {
+      rows.push(moneyRow({ label: isTrip ? 'Cobrás al terminar' : 'Cobrás en efectivo', amount: money(orderTotal), sub: isTrip ? 'En efectivo' : 'El cliente paga al recibir', tone: 'amber' }, isLight));
+    } else if (!isMandado) {
+      rows.push(moneyRow({ label: 'Ya está pagado', sub: 'Por transferencia · no cobrás nada', tone: 'green', icon: 'check' }, isLight));
+    }
+  }
+  if (orderObj.isScheduled) {
+    rows.push(infoRow('calendar', `Programado: ${orderObj.scheduledDate || ''} a las ${orderObj.scheduledTime || ''} hs`, isLight, 'brand'));
+  }
+
+  if (!document.getElementById('go-offer-sheet-styles')) {
+    const st = document.createElement('style');
+    st.id = 'go-offer-sheet-styles';
+    st.textContent = `
+      @keyframes goOfferUp { from { transform: translateY(100%); } to { transform: none; } }
+      @keyframes goOfferFade { from { opacity: 0; } to { opacity: 1; } }
+      #exclusive-offer-fullscreen-overlay button:active { transform: scale(0.98); }
+      @media (prefers-reduced-motion: reduce) { #exclusive-offer-fullscreen-overlay, #exclusive-offer-fullscreen-overlay .exclusive-offer-card { animation: none !important; } }
+    `;
+    document.head.appendChild(st);
+  }
+
   const overlay = document.createElement('div');
   overlay.id = 'exclusive-offer-fullscreen-overlay';
   overlay.dataset.orderId = currentOrderId;
   overlay.dataset.offerKey = currentOfferKey;
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'Nueva oferta de pedido');
   overlay.style.cssText = `
-    position: fixed;
-    inset: 0;
-    z-index: 999999;
-    background: rgba(0, 0, 0, 0.72);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    box-sizing: border-box;
-    overflow-y: auto;
-    touch-action: none;
+    position: fixed; inset: 0; z-index: 999999;
+    background: ${t.scrim};
+    display: flex; align-items: flex-end; justify-content: center;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    box-sizing: border-box; touch-action: none;
+    animation: goOfferFade 0.2s ease-out;
   `;
 
+  const acceptLabel = batch.isBundle ? `Aceptar los ${batch.orders.length}` : 'Aceptar';
   overlay.innerHTML = `
-    <!-- Floating Badge Modal Card -->
     <div class="exclusive-offer-card" style="
-      max-width: 420px;
-      width: 100%;
-      background: ${isLight ? '#ffffff' : '#080C14'};
-      border: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.14)'};
-      border-radius: 32px;
-      padding: 22px 20px;
-      box-shadow: ${isLight ? '0 25px 70px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.04)' : '0 25px 70px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.05)'};
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      box-sizing: border-box;
-      position: relative;
-      animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 480px; width: 100%; box-sizing: border-box; position: relative;
+      background: ${t.sheet}; border-top: 1px solid ${t.line}; border-radius: 24px 24px 0 0;
+      padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 16px; box-shadow: ${t.shadow};
+      max-height: 92vh; overflow-y: auto; color: ${t.tx};
+      animation: goOfferUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
     ">
-      <!-- Top Header -->
-      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-        <div style="display: flex; align-items: center; gap: 7px; background: ${isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)'}; border: 1.5px solid ${isLight ? '#fecdd3' : 'rgba(225, 29, 72, 0.35)'}; padding: 7px 13px; border-radius: 99px;">
-          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; box-shadow: 0 0 10px #e11d48;"></span>
-          <span style="font-size: 11px; font-weight: 900; color: #e11d48; text-transform: uppercase; letter-spacing: 0.04em;">🚨 NUEVO PEDIDO EXCLUSIVO</span>
+      <div style="width: 40px; height: 4px; border-radius: 2px; background: ${t.handle}; align-self: center;"></div>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          ${kindTag(kind, isLight, kindLabel)}
+          <span style="font-size: 13px; font-weight: 600; color: ${t.tx3};">Nuevo pedido para vos</span>
         </div>
-        
-        <div style="background: ${isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.08)'}; color: ${isLight ? '#0f172a' : 'white'}; border: 1px solid ${isLight ? '#cbd5e1' : 'rgba(255, 255, 255, 0.14)'}; padding: 6px 13px; border-radius: 99px; font-weight: 900; font-size: 13.5px; font-variant-numeric: tabular-nums;">
-          ⏳ <span id="exclusive-modal-countdown">${calcRemaining()}</span>s
-        </div>
+        ${countdownRing(calcRemaining(), TOTAL_DURATION, isLight, { ring: 'exclusive-modal-ring', num: 'exclusive-modal-countdown' })}
       </div>
-
-      <!-- EXPLICIT ORDER TYPE BADGE -->
-      <div style="
-        display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        background: ${typeBadgeBg};
-        border: 1.5px solid ${typeBadgeBorder};
-        padding: 10px 14px;
-        border-radius: 20px;
-        box-shadow: ${isLight ? '0 2px 8px rgba(0,0,0,0.04)' : '0 4px 16px rgba(0, 0, 0, 0.4)'};
-      ">
-        <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
-          <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-            ${typeBadgeIcon}
-          </div>
-          <div style="min-width: 0; flex: 1;">
-            <div style="font-size: 14px; font-weight: 950; color: ${typeBadgeColor}; text-transform: uppercase; letter-spacing: 0.05em;">
-              PEDIDO: ${typeBadgeLabel}
-            </div>
-            ${typeBadgeSub ? `
-              <div style="font-size: 11.5px; font-weight: 700; color: ${isLight ? '#475569' : '#cbd5e1'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">
-                ${typeBadgeSub}
-              </div>
-            ` : ''}
-          </div>
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: -4px;">
+        <div>
+          <div style="font-size: 13px; color: ${t.tx3};">Tu ganancia</div>
+          <div style="font-family: var(--font-display, 'Outfit', sans-serif); font-size: 40px; font-weight: 700; line-height: 1.05; letter-spacing: -0.01em; color: ${t.tx};">${esc(formatPrice(driverEarnings))}</div>
         </div>
-        <div style="background: ${isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.12)'}; border: 1px solid ${isLight ? '#e2e8f0' : 'transparent'}; padding: 4px 8px; border-radius: 8px; font-size: 10px; font-weight: 900; color: ${isLight ? '#334155' : 'white'}; text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;">
-          ASIGNADO
-        </div>
+        ${metaLines.length ? `<div style="text-align: right; font-size: 14px; color: ${t.tx2}; line-height: 1.5;">${metaLines.map(esc).join('<br>')}</div>` : ''}
       </div>
-
-      <!-- PROGRESS BAR LINE -->
-      <div style="width: 100%; height: 5px; background: ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'}; border-radius: 99px; overflow: hidden; margin-top: -2px; margin-bottom: 2px;">
-        <div id="exclusive-modal-progress-bar" style="
-          width: ${(calcRemaining() / TOTAL_DURATION) * 100}%;
-          height: 100%;
-          background: linear-gradient(90deg, #10B981 0%, #22C55E 70%, #E11D48 100%);
-          border-radius: 99px;
-          transition: width 1s linear;
-          box-shadow: 0 0 10px rgba(34, 197, 94, 0.6);
-        "></div>
-      </div>
-
-      <!-- Earnings Card -->
-      <div style="
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-        border-radius: 24px;
-        padding: 18px 16px;
-        text-align: center;
-        color: white;
-        box-shadow: 0 12px 30px rgba(16, 185, 129, 0.38), inset 0 1px 1px rgba(255,255,255,0.4);
-        position: relative;
-        overflow: hidden;
-      ">
-        <div style="position:absolute; top:-30px; left:-30px; width:120px; height:120px; background:radial-gradient(circle, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 70%); pointer-events:none;"></div>
-        <div style="font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.95; margin-bottom: 2px;">Tu Ganancia Estimada</div>
-        <div style="font-size: 42px; font-weight: 950; letter-spacing: -1.5px; text-shadow: 0 2px 10px rgba(0,0,0,0.2);">${formatPrice(driverEarnings)}</div>
-      </div>
-
-      <!-- Route Info Card -->
-      <div style="background: ${isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.035)'}; border: 1px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'}; border-radius: 22px; padding: 16px 14px; color: ${isLight ? '#0f172a' : 'white'}; display: flex; flex-direction: column; gap: 12px;">
-        <!-- Origin -->
-        <div style="display: flex; gap: 12px; align-items: flex-start;">
-          <div style="background: ${isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.16)'}; border: 1px solid ${isLight ? '#fecdd3' : 'rgba(225, 29, 72, 0.35)'}; border-radius: 14px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; overflow: hidden;">
-            ${originIcon}
-          </div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 10px; font-weight: 850; color: ${isLight ? '#64748b' : '#94a3b8'}; text-transform: uppercase; letter-spacing: 0.05em;">Retiro (Origen)</div>
-            <div style="font-size: 15.5px; font-weight: 900; color: ${isLight ? '#0f172a' : '#f8fafc'}; margin-top: 2px; line-height: 1.25; word-break: break-word;">${originTitle}</div>
-            ${originSubtitle ? `<div style="font-size: 11.5px; font-weight: 700; color: ${isLight ? '#475569' : '#cbd5e1'}; margin-top: 2px; line-height: 1.3;">${originSubtitle}</div>` : ''}
-          </div>
-        </div>
-
-        <div style="width: 100%; height: 1px; background: ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'};"></div>
-
-        <!-- Destination -->
-        <div style="display: flex; gap: 12px; align-items: flex-start;">
-          <div style="background: ${isLight ? '#ecfdf5' : 'rgba(34, 197, 94, 0.16)'}; border: 1px solid ${isLight ? '#a7f3d0' : 'rgba(34, 197, 94, 0.35)'}; border-radius: 14px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">📍</div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 10px; font-weight: 850; color: ${isLight ? '#64748b' : '#94a3b8'}; text-transform: uppercase; letter-spacing: 0.05em;">Entrega (Destino)</div>
-            <div style="font-size: 14.5px; font-weight: 800; color: ${isLight ? '#0f172a' : '#e2e8f0'}; margin-top: 2px; line-height: 1.35; word-break: break-word;">${destAddress}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bottom Actions -->
-      <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 4px;">
-        <button id="fullscreen-accept-offer-btn" style="width: 100%; height: 58px; border-radius: 20px; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; font-size: 16.5px; font-weight: 950; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4); letter-spacing: 0.03em; text-transform: uppercase; transition: transform 0.15s ease;">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="2" y="6" width="20" height="12" rx="3"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/></svg>
-          <span>ACEPTAR ${typeBadgeLabel} AHORA</span>
-        </button>
-        
-        <button id="fullscreen-reject-offer-btn" style="width: 100%; height: 48px; border-radius: 16px; background: ${isLight ? '#fff1f2' : 'rgba(239, 68, 68, 0.12)'}; color: ${isLight ? '#be123c' : '#f43f5e'}; font-size: 13.5px; font-weight: 900; border: 1.5px solid ${isLight ? '#fecdd3' : 'rgba(239, 68, 68, 0.3)'}; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; text-transform: uppercase; transition: all 0.15s ease;">
-          ✕ RECHAZAR PEDIDO
-        </button>
+      ${stopsList(stops, isLight)}
+      ${rows.join('')}
+      <div style="display: flex; gap: 10px;">
+        <button id="fullscreen-reject-offer-btn" style="height: 56px; padding: 0 18px; border-radius: 16px; background: ${t.card}; border: 1px solid ${t.line}; color: ${t.tx2}; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;">Rechazar</button>
+        <button id="fullscreen-accept-offer-btn" style="flex: 1; height: 56px; border-radius: 16px; background: ${t.brand}; color: #FFFFFF; border: 0; font-family: var(--font-display, 'Outfit', sans-serif); font-size: 18px; font-weight: 600; cursor: pointer;">${esc(acceptLabel)}</button>
       </div>
     </div>
   `;
@@ -496,16 +471,12 @@ export function showExclusiveOfferOverlay(batch, user) {
   exclusiveModalCountdownInterval = setInterval(() => {
     const rem = calcRemaining();
     const cdEl = document.getElementById('exclusive-modal-countdown');
-    const barEl = document.getElementById('exclusive-modal-progress-bar');
-    if (cdEl) cdEl.textContent = rem;
-    if (barEl) {
-      const pct = Math.max(0, Math.min(100, (rem / TOTAL_DURATION) * 100));
-      barEl.style.width = pct + '%';
-      if (rem <= 8) {
-        barEl.style.background = '#F43F5E';
-        barEl.style.boxShadow = '0 0 12px rgba(244, 63, 94, 0.9)';
-      }
+    const ringEl = document.getElementById('exclusive-modal-ring');
+    if (cdEl) {
+      cdEl.textContent = rem;
+      if (rem <= 10) cdEl.style.color = '#F43F5E';
     }
+    if (ringEl) ringEl.style.strokeDashoffset = (RING_C * (1 - Math.max(0, Math.min(1, rem / TOTAL_DURATION)))).toFixed(1);
     if (rem <= 0) {
       const orderIdToRotate = orderObj.id || batch.id;
       hideExclusiveOfferOverlay();
@@ -527,10 +498,8 @@ export function showExclusiveOfferOverlay(batch, user) {
         loader.style.cssText = `
           position: absolute;
           inset: 0;
-          background: rgba(9, 13, 22, 0.96);
-          backdrop-filter: blur(14px);
-          -webkit-backdrop-filter: blur(14px);
-          border-radius: 32px;
+          background: ${t.sheet};
+          border-radius: 24px 24px 0 0;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -540,9 +509,9 @@ export function showExclusiveOfferOverlay(batch, user) {
           text-align: center;
         `;
         loader.innerHTML = `
-          <div style="width: 54px; height: 54px; border: 4px solid rgba(255,255,255,0.1); border-top-color: #22C55E; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 18px;"></div>
-          <h3 style="font-size: 20px; font-weight: 950; color: white; margin: 0 0 6px 0;">¡Asignando Pedido!</h3>
-          <p style="font-size: 13.5px; color: #94a3b8; margin: 0; font-weight: 600;">Cargando tu hoja de ruta y mapa de entrega...</p>
+          <div style="width: 48px; height: 48px; border: 4px solid ${t.line}; border-top-color: ${t.brand}; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px;"></div>
+          <h3 style="font-family: var(--font-display, 'Outfit', sans-serif); font-size: 20px; font-weight: 600; color: ${t.tx}; margin: 0 0 4px 0;">Pedido aceptado</h3>
+          <p style="font-size: 14px; color: ${t.tx2}; margin: 0;">Preparando tu recorrido…</p>
         `;
         modalBox.appendChild(loader);
       }
