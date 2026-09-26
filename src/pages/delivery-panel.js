@@ -1126,7 +1126,10 @@ export async function renderDeliveryPanel(containerArg) {
   }
 
   if (currentHash.includes('action=renew_session')) {
+    // Strip it so the panel's frequent re-renders don't renew again and again.
+    window.history.replaceState(null, '', window.location.pathname + currentHash.split('?')[0]);
     setTimeout(async () => {
+      if (getState().user?.isOnline !== true) return;
       try {
         const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
         const { db } = await import('../firebase.js');
@@ -1976,7 +1979,8 @@ export async function renderDeliveryPanel(containerArg) {
       lastServerOnline = serverOnline;
 
       const intentTs = Number(localStorage.getItem(DRIVER_OFFLINE_INTENT_KEY) || 0);
-      const wantsOffline = intentTs > 0 && Date.now() - intentTs < 24 * 60 * 60 * 1000;
+      // Short window: an old intent must never undo a later reconnection (it used to last 24h).
+      const wantsOffline = intentTs > 0 && Date.now() - intentTs < 15 * 60 * 1000;
       const selfInitiated = intentTs > 0 && Date.now() - intentTs < 60 * 1000;
 
       if (!serverOnline) {
@@ -1989,12 +1993,20 @@ export async function renderDeliveryPanel(containerArg) {
           stopExclusiveOfferAlert();
           showToast(
             serverData.disconnectedReason === 'inactivity'
-              ? 'Te desconectamos por 2 horas sin actividad. Volvé a conectarte cuando quieras.'
+              ? 'Te desconectamos porque no respondiste el aviso de inactividad. Volvé a conectarte cuando quieras.'
               : 'Tu sesión fue cerrada.',
             'info'
           );
           renderDeliveryPanel();
         }
+        return;
+      }
+
+      // Reconnected AFTER pressing "Desconectarme" (by an admin, or from another device):
+      // that's a newer decision, so drop the old intent instead of disconnecting again.
+      const reconnectedMs = serverData.lastTripAcceptedAt?.toMillis?.() || 0;
+      if (wantsOffline && reconnectedMs > intentTs) {
+        localStorage.removeItem(DRIVER_OFFLINE_INTENT_KEY);
         return;
       }
 
@@ -2006,7 +2018,7 @@ export async function renderDeliveryPanel(containerArg) {
           stopHeartbeat();
           renderDeliveryPanel();
         }
-        writeWithRetry(() => updateDoc(doc(db, 'users', user.uid), { isOnline: false, currentSessionId: null, lastActivityAt: null }))
+        writeWithRetry(() => updateDoc(doc(db, 'users', user.uid), { isOnline: false, currentSessionId: null, lastActivityAt: null, disconnectedReason: 'offline_intent_reapplied' }))
           .catch(err => console.error('[Driver] Could not re-apply disconnect:', err));
       }
     }, (err) => console.warn('[Driver] User doc listener error:', err));
@@ -5939,25 +5951,25 @@ async function startSession(user) {
 
   try {
     showBlockingLoading('Iniciando sesión...');
-    const { addDoc, collection, doc, updateDoc, serverTimestamp, deleteField } = await import('firebase/firestore');
-    
-    let sessionRef = null;
-    try {
-      sessionRef = await addDoc(collection(db, 'deliverySessions'), {
-        driverId: latestUser.uid,
-        startTime: serverTimestamp(),
-        endTime: null,
-        totalEarned: 0,
-        ordersCount: 0
-      });
-    } catch(e) {
-      console.warn('Failed to create deliverySession doc:', e);
-    }
+    const { setDoc, collection, doc, updateDoc, serverTimestamp, deleteField } = await import('firebase/firestore');
+
+    // Firestore writes only resolve once the SERVER acknowledges them. With weak signal
+    // they stay pending (they don't fail), and awaiting them here left drivers stuck on
+    // "Iniciando sesión..." forever. The id is generated locally and both writes run in
+    // the background; they land in the local cache now and sync when the signal allows.
+    const sessionRef = doc(collection(db, 'deliverySessions'));
+    setDoc(sessionRef, {
+      driverId: latestUser.uid,
+      startTime: serverTimestamp(),
+      endTime: null,
+      totalEarned: 0,
+      ordersCount: 0
+    }).catch(e => console.warn('Failed to create deliverySession doc:', e));
 
     localStorage.removeItem(DRIVER_OFFLINE_INTENT_KEY);
     // Going online is when a missing push token matters most: re-register it now, not in 10 min.
     checkDriverPushHealth(true);
-    const sessionId = sessionRef ? sessionRef.id : 'session_' + Date.now();
+    const sessionId = sessionRef.id;
     const updatedUser = {
       ...getState().user, 
       ...latestUser,
@@ -5971,22 +5983,45 @@ async function startSession(user) {
     setState('user', updatedUser);
 
     // Update Firestore in background
-    try {
-      await updateDoc(doc(db, 'users', latestUser.uid), {
-        isOnline: true,
-        currentSessionId: sessionId,
-        lastActivityAt: serverTimestamp(),
-        lastTripAcceptedAt: serverTimestamp(),
-        missedOffersCount: 0,
-        cooldownUntil: deleteField(),
-        disconnectedReason: deleteField()
-      });
-    } catch (err) {
-      console.warn('Firestore user update non-fatal error:', err);
-    }
+    const onlineWrite = updateDoc(doc(db, 'users', latestUser.uid), {
+      isOnline: true,
+      currentSessionId: sessionId,
+      lastActivityAt: serverTimestamp(),
+      lastTripAcceptedAt: serverTimestamp(),
+      inactivityWarningSentAt: null,
+      missedOffersCount: 0,
+      cooldownUntil: deleteField(),
+      disconnectedReason: deleteField()
+    });
+
+    const confirmedInTime = await Promise.race([
+      onlineWrite.then(() => true, (err) => { console.warn('Firestore user update error:', err); return false; }),
+      new Promise(resolve => setTimeout(() => resolve(null), 4000))
+    ]);
 
     hideBlockingLoading();
-    showToast('⚡ ¡En línea! Buscando pedidos en la zona...', 'success');
+
+    if (confirmedInTime === false) {
+      // Rejected by the server (not just slow): the driver is NOT online, don't pretend.
+      setState('user', { ...getState().user, isOnline: false, currentSessionId: null });
+      showToast('⚠️ No se pudo iniciar la sesión. Intentá nuevamente.', 'danger');
+      await renderDeliveryPanel();
+      return;
+    }
+
+    if (confirmedInTime === null) {
+      showToast('📶 Señal débil: te conectamos, se confirmará apenas vuelva la conexión.', 'warning', 6000);
+      onlineWrite.then(
+        () => showToast('✅ Conexión confirmada. Buscando pedidos en la zona...', 'success'),
+        () => {
+          setState('user', { ...getState().user, isOnline: false, currentSessionId: null });
+          showToast('⚠️ No se pudo iniciar la sesión. Intentá nuevamente.', 'danger');
+          renderDeliveryPanel();
+        }
+      );
+    } else {
+      showToast('⚡ ¡En línea! Buscando pedidos en la zona...', 'success');
+    }
 
     // Re-render driver panel immediately
     await renderDeliveryPanel();
@@ -6019,7 +6054,8 @@ async function endSession(user) {
   const disconnectWrite = writeWithRetry(() => updateDoc(doc(db, 'users', user.uid), {
     isOnline: false,
     currentSessionId: null,
-    lastActivityAt: null
+    lastActivityAt: null,
+    disconnectedReason: 'driver_button'
   }));
   disconnectWrite.catch(() => {});
 
@@ -8708,11 +8744,10 @@ export async function promptStartSession(user) {
   }
 
   // 3. Canon Daily Fee check
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
+  // The charge itself happens on the server (chargeDailyCanonOnConnect) when isOnline flips to
+  // true; this only decides what the confirmation says. Same Argentina day as the server.
+  const { argentinaDateStr } = await import('../utils/canon.js');
+  const todayStr = argentinaDateStr();
 
   const isExempt = currentUser.isCanonExempt === true || currentUser.role === 'admin' || currentUser.isAdmin === true;
   const isFirstConnectionToday = !isExempt && currentUser.lastCanonChargeDate !== todayStr;
@@ -8720,7 +8755,7 @@ export async function promptStartSession(user) {
 
   const modalMessage = isFirstConnectionToday
     ? `Comenzarás a recibir pedidos en tu zona.<br><br>🛵 <b>Canon diario:</b> Al ser tu primera conexión de hoy, se registrarán <b>$${configuredCanonAmount.toLocaleString('es-AR')}</b> de canon diario en tu saldo de comisiones.<br><br>💡 Si te desconectás y volvés a conectar más tarde en el día, <b>NO se te volverá a cobrar</b>.`
-    : `Comenzarás a recibir pedidos en tu zona.<br><br>✅ <b>Cuota del día activa:</b> Ya abonaste el canon diario de hoy, por lo que <b>NO se generará ningún cargo extra</b> al conectarte.`;
+    : `Comenzarás a recibir pedidos en tu zona.<br><br>✅ <b>Cuota del día ya registrada:</b> la cuota de hoy ya está en tu saldo, así que <b>NO se generará ningún cargo extra</b> al conectarte.`;
 
   showConfirm({
     title: '¿Iniciar Jornada de Trabajo?',
@@ -8752,44 +8787,6 @@ export async function promptStartSession(user) {
             headerTextColor: 'white'
           });
           return;
-        }
-
-        if (isFirstConnectionToday) {
-          try {
-            const { doc, setDoc, updateDoc, increment, serverTimestamp, collection, getDoc } = await import('firebase/firestore');
-            const { db } = await import('../firebase.js');
-
-            const canonDocRef = doc(db, 'delivery_canon_payments', `${currentUser.uid}_${todayStr}`);
-            const canonSnap = await getDoc(canonDocRef);
-            if (!canonSnap.exists() || canonSnap.data().amount <= 0) {
-              await setDoc(canonDocRef, {
-                driverId: currentUser.uid,
-                driverName: currentUser.displayName || currentUser.name || 'Repartidor',
-                dateStr: todayStr,
-                amount: configuredCanonAmount,
-                settled: false,
-                createdAt: serverTimestamp()
-              }, { merge: true });
-
-              const transRef = doc(collection(db, 'delivery_transactions'));
-              await setDoc(transRef, {
-                driverId: currentUser.uid,
-                type: 'canon_charge',
-                amount: configuredCanonAmount,
-                description: `Canon Diario Jornada (${todayStr})`,
-                createdAt: serverTimestamp()
-              });
-
-              await updateDoc(doc(db, 'users', currentUser.uid), {
-                deliveryDebt: increment(configuredCanonAmount),
-                lastCanonChargeDate: todayStr
-              });
-
-              showToast(`🛵 Se registraron +$${configuredCanonAmount.toLocaleString('es-AR')} de canon diario.`, 'info');
-            }
-          } catch (canonErr) {
-            console.warn('Canon charge registration non-fatal error:', canonErr);
-          }
         }
 
         await startSession(currentUser);
@@ -9305,30 +9302,58 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
         updates.driverLocation = { lat, lng, updatedAt: serverTimestamp() };
       }
 
+      // Snapshot to roll back to if the server rejects the pickup.
+      const ordersBeforePickup = (activeOrdersList || []).map(o => ({ ...o }));
+
       const batch = writeBatch(db);
       ids.forEach(id => {
         batch.update(doc(db, 'orders', id), updates);
       });
-      await batch.commit();
+      const commitPromise = batch.commit();
 
-      // Update in-memory active orders immediately
+      // Update the screen NOW. batch.commit() only resolves once the server acknowledges, so
+      // with weak signal the rider marked "retirado", typed the price and saw nothing change.
       (activeOrdersList || []).forEach(o => {
         if (ids.includes(o.id)) {
           o.status = 'delivering';
           o.pickedUpAt = new Date();
-          if (extraData.purchaseCost !== undefined) o.purchaseCost = extraData.purchaseCost;
-          if (extraData.purchaseItemsTotal !== undefined) o.purchaseItemsTotal = extraData.purchaseCost;
+          if (extraData.purchaseCost !== undefined) {
+            o.purchaseCost = extraData.purchaseCost;
+            o.purchaseItemsTotal = extraData.purchaseCost;
+          }
           if (extraData.stopsPurchases) o.stopsPurchases = extraData.stopsPurchases;
           if (extraData.total !== undefined) o.total = extraData.total;
         }
       });
+      window.activeOrdersList = activeOrdersList;
+      window._lastActiveOrdersSignature = null;
+      syncDriverNavigationWithOrders(activeOrdersList);
+      refreshBottomDock(document.getElementById('driver-footer-dock-container'), getState().user, activeOrdersList);
 
-      const currentUser = getState().user;
-      const bottomDock = document.getElementById('driver-footer-dock-container');
-      if (bottomDock) {
-        refreshBottomDock(bottomDock, currentUser, activeOrdersList);
+      // Only an actual rejection is a failure; slow = still syncing in the background.
+      const commitOutcome = await Promise.race([
+        commitPromise.then(() => 'ok', (err) => err),
+        new Promise(resolve => setTimeout(() => resolve('slow'), 6000))
+      ]);
+      if (commitOutcome === 'slow') {
+        showToast('📶 Señal débil: el retiro y el precio se guardaron en tu teléfono y se enviarán apenas vuelva la conexión.', 'warning', 6000);
+        commitPromise.catch(err => {
+          console.error('Pickup rejected after sync:', err);
+          activeOrdersList = ordersBeforePickup;
+          window.activeOrdersList = activeOrdersList;
+          window._lastActiveOrdersSignature = null;
+          syncDriverNavigationWithOrders(activeOrdersList);
+          refreshBottomDock(document.getElementById('driver-footer-dock-container'), getState().user, activeOrdersList);
+          showToast('⚠️ No se pudo marcar como retirado. Deslizá de nuevo.', 'error', 6000);
+        });
+      } else if (commitOutcome !== 'ok') {
+        activeOrdersList = ordersBeforePickup;
+        window.activeOrdersList = activeOrdersList;
+        window._lastActiveOrdersSignature = null;
+        syncDriverNavigationWithOrders(activeOrdersList);
+        throw commitOutcome;
       }
-      
+
       // Background non-blocking notification to users
       Promise.all(ids.map(async id => {
         try {
@@ -10397,9 +10422,11 @@ export function showPausedSessionModal(user) {
         await updateDoc(doc(db, 'users', user.uid), {
           isOnline: true,
           missedOffersCount: 0,
-          disconnectedReason: null
+          disconnectedReason: null,
+          lastTripAcceptedAt: serverTimestamp(),
+          inactivityWarningSentAt: null
         });
-        setState('user', { ...getState().user, isOnline: true, missedOffersCount: 0, disconnectedReason: null });
+        setState('user', { ...getState().user, isOnline: true, missedOffersCount: 0, disconnectedReason: null, lastTripAcceptedAt: new Date() });
         overlay.remove();
         showToast('¡Sesión reanudada con éxito!', 'success');
       } catch (err) {

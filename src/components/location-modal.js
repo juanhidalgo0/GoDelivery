@@ -105,13 +105,8 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
 
         if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Geocoder) {
           try {
-            const geocoder = new window.google.maps.Geocoder();
-            const gResult = await new Promise((resolve, reject) => {
-              geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-                if (status === 'OK' && results && results[0]) resolve(results[0]);
-                else reject(new Error('Status: ' + status));
-              });
-            });
+            const { reverseGeocodeGoogle } = await import('../utils/geo.js');
+            const gResult = await reverseGeocodeGoogle(lat, lng);
             if (gResult) {
               let street = '';
               let number = '';

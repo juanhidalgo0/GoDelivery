@@ -249,8 +249,10 @@ export async function showBalanceManagementModal(user, debt) {
   }
 
   const totalCouponsCredit = pendingCouponOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
-  const grossDebt = debt || 0;
-  const netDebt = Math.max(0, grossDebt - totalCouponsCredit);
+  // deliveryDebt already has coupon credits subtracted (the server does it when each order
+  // completes), so it is the net amount; the gross figure adds them back for display.
+  const netDebt = Math.max(0, debt || 0);
+  const grossDebt = netDebt + totalCouponsCredit;
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = `padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)) 20px; background:var(--driver-bg-panel); height:100%; display:flex; flex-direction:column; overflow:hidden; justify-content:space-between;`;
@@ -962,7 +964,8 @@ export async function showBalanceHistoryModal(driverId) {
       }));
 
     const totalCouponsCredit = pendingCouponOrdersList.reduce((sum, c) => sum + (c.rawDiscount || 0), 0);
-    const netDebt = Math.max(0, actualDebt - totalCouponsCredit);
+    // actualDebt is already net of coupons (subtracted server-side on completion).
+    const netDebt = Math.max(0, actualDebt);
 
     // Build unique Canon charges list from both collections (deduplicated by date)
     const canonChargesMap = new Map();

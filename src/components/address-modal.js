@@ -719,16 +719,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
     // 1. Google Maps Geocoder (Fastest, zero rate limits, rooftop precision)
     if (typeof window !== 'undefined' && window.google && window.google.maps && window.google.maps.Geocoder) {
       try {
-        const geocoder = new window.google.maps.Geocoder();
-        const gResult = await new Promise((resolve, reject) => {
-          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-            if (status === 'OK' && results && results[0]) {
-              resolve(results[0]);
-            } else {
-              reject(new Error('Google Geocoder status: ' + status));
-            }
-          });
-        });
+        const { reverseGeocodeGoogle } = await import('../utils/geo.js');
+        const gResult = await reverseGeocodeGoogle(lat, lng);
 
         if (gResult) {
           isGeocoding = false;
@@ -883,7 +875,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
         const query = e.target.value;
         const openMapBtn = document.getElementById('btn-open-map-direct');
         const savedWrapper = document.getElementById('saved-addresses-wrapper');
-        if (!query || query.trim().length < 2) {
+        if (!query || query.trim().length < 3) {
           if (suggestionsBox) {
             suggestionsBox.style.display = 'none';
             suggestionsBox.innerHTML = '';
@@ -901,7 +893,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
           } catch (err) {
             console.error('Error fetching search suggestions:', err);
           }
-        }, 50);
+        // Each search is a paid Google call: wait until the user pauses instead of firing per letter.
+        }, 400);
       };
 
       searchInput.addEventListener('keydown', (e) => {
@@ -955,7 +948,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
     suggestionsBox.style.flexDirection = 'column';
     
     let html = suggestions.map((s, idx) => `
-      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-addr="${s.address}" style="width:100%; box-sizing:border-box; padding:12px 14px; display:flex; flex-direction:row; align-items:center; gap:12px; cursor:pointer; ${idx < suggestions.length - 1 ? 'border-bottom:1px solid var(--color-border-light);' : ''} background:transparent; transition:background 0.15s ease;">
+      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="width:100%; box-sizing:border-box; padding:12px 14px; display:flex; flex-direction:row; align-items:center; gap:12px; cursor:pointer; ${idx < suggestions.length - 1 ? 'border-bottom:1px solid var(--color-border-light);' : ''} background:transparent; transition:background 0.15s ease;">
         <div style="width:34px; height:34px; border-radius:50%; background:rgba(225, 29, 72, 0.09); color:#E11D48; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
           ${icon('mapPin', 16)}
         </div>
@@ -972,12 +965,25 @@ export function showAddressPrompt(onSuccess, config = {}) {
     suggestionsBox.innerHTML = html;
 
     suggestionsBox.querySelectorAll('.suggestion-item').forEach(item => {
-      item.onclick = (e) => {
+      item.onclick = async (e) => {
         e.stopPropagation();
         const addr = item.dataset.addr;
-        const lat = parseFloat(item.dataset.lat);
-        const lng = parseFloat(item.dataset.lng);
-        
+        let lat = parseFloat(item.dataset.lat);
+        let lng = parseFloat(item.dataset.lng);
+
+        // Google suggestions come without coordinates; only the chosen one is resolved.
+        if ((isNaN(lat) || isNaN(lng)) && item.dataset.placeid) {
+          item.style.opacity = '0.6';
+          const { geocodePlaceId } = await import('../utils/geo.js');
+          const coords = await geocodePlaceId(item.dataset.placeid);
+          item.style.opacity = '';
+          if (!coords) {
+            showToast('No pudimos ubicar esa dirección, probá marcarla en el mapa', 'error');
+            return;
+          }
+          lat = coords.lat;
+          lng = coords.lng;
+        }
         if (isNaN(lat) || isNaN(lng)) return;
 
         isUserDraggingMap = false;

@@ -2117,6 +2117,8 @@ export async function openReleaseDriverModal(idOrOrder) {
             assignedAt: serverTimestamp(),
             acceptedAt: serverTimestamp(),
             driverAssignedAt: serverTimestamp(),
+            // The server pushes "pedido asignado" to the driver when this changes.
+            adminAssignedAt: serverTimestamp(),
             status: (o.isFavor || o.isTrip) ? 'confirmed' : 'accepted',
             queueTargetDriverId: null,
             queueTargetDriverName: null,
@@ -2163,7 +2165,7 @@ export async function openReleaseDriverModal(idOrOrder) {
             console.warn('[Admin Assign Direct] Chat update error:', e);
           }
 
-          // Trigger MAXIMUM PRIORITY push notification for target driver
+          // The push itself is sent by the server (onOrderStatusChange, on adminAssignedAt).
           try {
             const orderNum = o.orderId || o.orderNumber || o.id.slice(-6).toUpperCase();
             
@@ -2175,18 +2177,6 @@ export async function openReleaseDriverModal(idOrOrder) {
               priority: 'high',
               orderId: o.id,
               status: 'unread',
-              sound: 'alert.mp3',
-              createdAt: serverTimestamp()
-            });
-
-            // Global Push dispatch trigger
-            await addDoc(collection(db, 'notifications'), {
-              userId: selectedDriver.uid,
-              title: '🚨 ¡PEDIDO ASIGNADO DIRECTAMENTE!',
-              body: `Se te asignó directamente el Pedido #${orderNum}. ¡Ingresá a tu panel de delivery!`,
-              url: `#/delivery`,
-              type: 'direct_assignment',
-              priority: 'high',
               sound: 'alert.mp3',
               createdAt: serverTimestamp()
             });

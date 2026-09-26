@@ -97,7 +97,9 @@ service cloud.firestore {
         return [
           'role', 'isAdmin', 'isComercio', 'isDelivery', 'isCanonExempt',
           'commissionRate', 'saldo', 'balance', 'settled',
-          'blocked', 'isBlocked', 'suspended', 'ratings'
+          'blocked', 'isBlocked', 'suspended', 'ratings',
+          // Deuda y cuota diaria: las maneja el servidor (cobro al conectarse) y el admin.
+          'deliveryDebt', 'lastCanonChargeDate', 'lastCanonDate', 'lastLiquidationAt'
         ];
       }
 
@@ -424,17 +426,23 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Movimientos y cuotas: los escriben el servidor (cobro de la cuota al
+    // conectarse, tarifas al completar) y el admin. El cadete sólo los lee:
+    // si pudiera marcar su cuota como pagada, el servidor no se la cobraría.
     match /delivery_transactions/{transactionId} {
-      allow read:   if isAdmin() || isOwnerField('driverId');
-      allow create: if isAdmin() || isDriver();
-      allow update, delete: if isAdmin();
+      allow read:  if isAdmin() || isOwnerField('driverId');
+      allow write: if isAdmin();
     }
 
     match /delivery_canon_payments/{paymentId} {
-      allow read:   if isAdmin() || isOwnerField('driverId');
-      allow create: if isAdmin() || isDriver();
-      allow update: if isAdmin() || isOwnerField('driverId');
-      allow delete: if isAdmin();
+      allow read:  if isAdmin() || isOwnerField('driverId');
+      allow write: if isAdmin();
+    }
+
+    // Liquidaciones de deuda que registra el admin (historial de cobros).
+    match /delivery_debt_settlements/{settlementId} {
+      allow read:  if isAdmin() || isOwnerField('driverId');
+      allow write: if isAdmin();
     }
 
     match /delivery_settlement_proofs/{proofId} {

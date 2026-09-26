@@ -7,6 +7,8 @@ import { getState, setState } from "../../state.js";
 import { showToast } from "../../components/toast.js";
 import { showConfirm, showModal, closeModal } from "../../components/modal.js";
 import { compressImage } from "../../utils/image-compressor.js";
+import { argentinaDateStr, isCanonPaid, toggleCanonPaidToday } from "../../utils/canon.js";
+import { settleDriverDebt, voidDriverSettlement } from "../../utils/driver-settlement.js";
 let globalPendingOrders = [];
 export async function renderAdminSettings() {
   const content = document.getElementById("app-content");
@@ -771,7 +773,9 @@ export async function renderAdminDeliveriesSettings(container) {
     return;
   }
   const s = getState();
-  const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  // Argentina day, same as the server that charges the daily fee (toISOString is UTC: after 21 h it was already tomorrow).
+  const todayStr = argentinaDateStr();
+  const canonPaidToday = (uid) => isCanonPaid(canonPaymentsData.find((c) => c.id === `${uid}_${todayStr}`));
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Minimalist 1-Row Header (sticky) -->
@@ -838,10 +842,11 @@ export async function renderAdminDeliveriesSettings(container) {
   let unsubUsers = null;
   async function loadData() {
     try {
-      const { onSnapshot, collection: collection2, query, where, getDocs: getDocs2 } = await import("firebase/firestore");
+      const { onSnapshot, collection: collection2, query, where, or, getDocs: getDocs2 } = await import("firebase/firestore");
       if (unsubUsers) unsubUsers();
-      // Filter only delivery drivers — avoids reading all users
-      unsubUsers = onSnapshot(query(collection2(db, "users"), where("role", "==", "delivery")), (usersSnap) => {
+      // Filter only delivery drivers — avoids reading all users. Drivers approved from an
+      // application keep role "user" with isDelivery, and trip drivers use role "chofer".
+      unsubUsers = onSnapshot(query(collection2(db, "users"), or(where("role", "in", ["delivery", "chofer", "driver", "repartidor"]), where("isDelivery", "==", true))), (usersSnap) => {
         driversData = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (activeTab === "drivers") {
           renderTab();
@@ -885,22 +890,40 @@ export async function renderAdminDeliveriesSettings(container) {
       try {
         const proofsSnap = await getDocs2(collection2(db, "delivery_settlement_proofs"));
         pendingProofsData = proofsSnap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-        const pendingCount = pendingProofsData.filter((p) => p.status === "pending").length;
-        const badgeEl = document.getElementById("del-proofs-badge");
-        if (badgeEl) {
-          if (pendingCount > 0) {
-            badgeEl.textContent = pendingCount;
-            badgeEl.style.display = "block";
-          } else {
-            badgeEl.style.display = "none";
-          }
-        }
+        updateProofsBadge();
       } catch (err) {
         console.warn("Error loading pending proofs:", err);
       }
+      // The drivers listener usually renders before the fee data above arrives.
+      if (activeTab === "drivers") renderTab();
     } catch (err) {
       console.error("Error loading deliveries data:", err);
       showToast("Error al cargar informaci\xF3n de repartidores", "error");
+    }
+  }
+  function updateProofsBadge() {
+    const pendingCount = pendingProofsData.filter((p) => p.status === "pending").length;
+    const badgeEl = document.getElementById("del-proofs-badge");
+    if (badgeEl) {
+      badgeEl.textContent = pendingCount;
+      badgeEl.style.display = pendingCount > 0 ? "block" : "none";
+    }
+  }
+  // After approving or rejecting: refresh only the history and the receipts, in the background.
+  // (loadData also re-reads up to 1000 orders; the driver list and debts update on their own.)
+  async function refreshLedgerLists() {
+    try {
+      const [settlementsSnap, proofsSnap] = await Promise.all([
+        getDocs(collection(db, "delivery_debt_settlements")),
+        getDocs(collection(db, "delivery_settlement_proofs"))
+      ]);
+      const byNewest = (a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0);
+      settlementsData = settlementsSnap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
+      pendingProofsData = proofsSnap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
+      updateProofsBadge();
+      if (activeTab === "settlements-history") renderTab();
+    } catch (err) {
+      console.warn("Could not refresh settlements:", err);
     }
   }
   function switchTab(tab) {
@@ -980,7 +1003,7 @@ export async function renderAdminDeliveriesSettings(container) {
       return `
         <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:16px; padding:14px; display:flex; align-items:center; justify-content:space-between;">
           <div>
-            <div style="font-weight:900; font-size:15px; color:#22c55e;">+${formatPrice(s2.amount)}</div>
+            <div style="font-weight:900; font-size:15px; color:${s2.voided ? "var(--color-text-tertiary)" : "#22c55e"}; ${s2.voided ? "text-decoration:line-through;" : ""}">+${formatPrice(s2.amount)}${s2.voided ? ` <span style="font-size:10px; text-decoration:none;">ANULADA</span>` : ""}</div>
             <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">${methodText} \u2022 ${dateStr}</div>
             ${s2.notes ? `<div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; font-style:italic;">"${s2.notes}"</div>` : ""}
           </div>
@@ -991,96 +1014,89 @@ export async function renderAdminDeliveriesSettings(container) {
       `;
     }).join("");
   }
+  // Readable reason for a failed liquidation; offline is the common one and used to look like a hang.
+  function settlementErrorText(err) {
+    if (err?.code === "unavailable" || err?.code === "deadline-exceeded" || /offline/i.test(err?.message || "")) {
+      return "Sin conexi\xF3n con la base de datos: no se cobr\xF3 nada. Recarg\xE1 la p\xE1gina y prob\xE1 de nuevo.";
+    }
+    if (err?.code === "permission-denied") return "Sin permiso para liquidar: revis\xE1 que tu cuenta sea admin.";
+    return err?.message && !err.code ? err.message : "Error al procesar la liquidaci\xF3n";
+  }
   function bindPendingProofListeners(body, renderFn) {
+    // Optimistic: the card reacts on tap and the write runs behind it; on failure it comes back.
+    const markCard = (btn, html, color) => {
+      const actions = btn.parentElement;
+      const status = document.createElement("div");
+      status.style.cssText = `height:36px; border-radius:10px; background:${color}1f; color:${color}; font-weight:900; font-size:12px; display:flex; align-items:center; justify-content:center; gap:6px;`;
+      status.innerHTML = html;
+      actions.style.display = "none";
+      actions.after(status);
+      return () => { status.remove(); actions.style.display = ""; };
+    };
+    const dismissCard = (card) => {
+      if (!card) return renderFn();
+      card.style.transition = "opacity 0.25s ease, transform 0.25s ease";
+      card.style.opacity = "0";
+      card.style.transform = "scale(0.97)";
+      setTimeout(() => {
+        card.remove();
+        if (!body.querySelector("[data-proof-card]")) renderFn();
+      }, 260);
+    };
     body.querySelectorAll(".approve-proof-btn").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.dataset.proofId;
         const proof = pendingProofsData.find((p) => p.id === id);
-        if (!proof) return;
-        btn.disabled = true;
-        btn.innerHTML = "Aprobando...";
+        if (!proof || proof.status !== "pending") return;
+        // The admin approves what actually arrived, which may differ from what the driver declared.
+        const amountInput = body.querySelector(`.proof-amount-input[data-proof-id="${id}"]`);
+        const approvedAmount = amountInput ? parseFloat(amountInput.value) || 0 : proof.amount || 0;
+        if (approvedAmount <= 0) {
+          showToast("Ingres\xE1 el monto recibido", "error");
+          return;
+        }
+        const card = btn.closest("[data-proof-card]");
+        const undo = markCard(btn, `${icon("check", 14)} Aprobado \xB7 ${formatPrice(approvedAmount)}`, "#10b981");
+        if (amountInput) amountInput.disabled = true;
+        proof.status = "approved";
+        updateProofsBadge();
+        // Debt and email from the live driver list: no extra read before the payment.
+        const driver = driversData.find((d) => d.id === proof.driverId);
         try {
-          const { writeBatch: writeBatch2, doc: doc2, collection: collection2, serverTimestamp: serverTimestamp2 } = await import("firebase/firestore");
-          const batch = writeBatch2(db);
-          const driver = driversData.find((d) => d.id === proof.driverId);
-          const currentDebt = driver ? driver.deliveryDebt || 0 : proof.amount;
-          const newDebt = Math.max(0, currentDebt - proof.amount);
-          const adminEmail = getState().user?.email || "Admin";
-          batch.update(doc2(db, "users", proof.driverId), {
-            deliveryDebt: newDebt,
-            points: 0
-          });
-          const settlementRef = doc2(collection2(db, "delivery_debt_settlements"));
-          batch.set(settlementRef, {
+          await settleDriverDebt({
+            db,
+            adminEmail: getState().user?.email || "Admin",
             driverId: proof.driverId,
-            driverName: proof.driverName || "Repartidor",
-            driverEmail: driver?.email || "",
-            amount: proof.amount,
+            driverName: proof.driverName || driver?.displayName || driver?.name,
+            driverEmail: driver?.email,
+            currentDebt: driver ? Math.max(0, driver.deliveryDebt || 0) : undefined,
+            amount: approvedAmount,
             method: "transferencia",
-            notes: "Aprobación comprobante nativo app",
-            settledBy: adminEmail,
-            createdAt: serverTimestamp2()
+            notes: approvedAmount !== proof.amount ? `Comprobante (declarado ${formatPrice(proof.amount || 0)})` : "Comprobante subido desde la app",
+            proofId: id
           });
-          const transRef = doc2(collection2(db, "delivery_transactions"));
-          batch.set(transRef, {
-            driverId: proof.driverId,
-            type: "liquidation",
-            amount: -proof.amount,
-            description: `Aprobación Comprobante Nativa App`,
-            settledBy: adminEmail,
-            createdAt: serverTimestamp2()
-          });
-          batch.update(doc2(db, "delivery_settlement_proofs", id), {
-            status: "approved",
-            settledAt: serverTimestamp2(),
-            settledBy: adminEmail
-          });
-
-          // Mark driver orders as settled
-          const proofOrders = globalPendingOrders.filter((o) => o.driverId === proof.driverId && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
-          proofOrders.forEach((o) => {
-            batch.update(doc2(db, "orders", o.id), {
-              isSettledDriver: true,
-              driverCommissionStatus: "paid",
-              driverSettledAt: serverTimestamp2()
-            });
-          });
-
-          // Mark driver canons as settled
-          try {
-            const { collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
-            const canonQ = q2(col2(db, "delivery_canon_payments"), w2("driverId", "==", proof.driverId));
-            const canonSnap = await gD2(canonQ);
-            canonSnap.docs.forEach((cDoc) => {
-              if (cDoc.data().settled !== true) {
-                batch.update(doc2(db, "delivery_canon_payments", cDoc.id), {
-                  settled: true,
-                  status: "settled",
-                  settledAt: serverTimestamp2()
-                });
-              }
-            });
-          } catch (cErr) {
-            console.warn("Could not mark canons as settled in proof approval:", cErr);
-          }
-
-          await batch.commit();
-          showToast("\u2705 Comprobante aprobado con \xE9xito.", "success");
-          await loadData();
-          renderFn();
+          showToast(`\u2705 ${formatPrice(approvedAmount)} acreditados a ${proof.driverName || "el repartidor"}`, "success");
+          dismissCard(card);
+          refreshLedgerLists();
         } catch (err) {
           console.error(err);
-          showToast("\u274C Error al aprobar comprobante.", "error");
-          btn.disabled = false;
-          btn.innerHTML = `${icon("check", 12)} Aprobar Pago`;
+          proof.status = "pending";
+          updateProofsBadge();
+          undo();
+          if (amountInput) amountInput.disabled = false;
+          showToast(settlementErrorText(err), "error");
         }
       };
     });
     body.querySelectorAll(".reject-proof-btn").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.dataset.proofId;
-        btn.disabled = true;
-        btn.innerHTML = "Rechazando...";
+        const proof = pendingProofsData.find((p) => p.id === id);
+        if (!proof || proof.status !== "pending") return;
+        const card = btn.closest("[data-proof-card]");
+        const undo = markCard(btn, `${icon("x", 14)} Rechazado`, "#ef4444");
+        proof.status = "rejected";
+        updateProofsBadge();
         try {
           const { doc: doc2, updateDoc: updateDoc2, serverTimestamp: serverTimestamp2 } = await import("firebase/firestore");
           await updateDoc2(doc2(db, "delivery_settlement_proofs", id), {
@@ -1088,14 +1104,14 @@ export async function renderAdminDeliveriesSettings(container) {
             rejectedAt: serverTimestamp2(),
             rejectedBy: getState().user?.email || "Admin"
           });
-          showToast("\u274C Comprobante rechazado.", "warning");
-          await loadData();
-          renderFn();
+          showToast("Comprobante rechazado", "warning");
+          dismissCard(card);
         } catch (err) {
           console.error(err);
+          proof.status = "pending";
+          updateProofsBadge();
+          undo();
           showToast("\u274C Error al rechazar comprobante.", "error");
-          btn.disabled = false;
-          btn.innerHTML = `${icon("x", 12)} Rechazar`;
         }
       };
     });
@@ -1103,8 +1119,8 @@ export async function renderAdminDeliveriesSettings(container) {
   function renderDriversTab(body) {
     const totalDebt = driversData.reduce((sum, d) => sum + (d.deliveryDebt || 0), 0);
     const onlineCount = driversData.filter((d) => d.isOnline === true).length;
-    const activeTodayCount = driversData.filter((d) => d.lastCanonDate === todayStr || d.isOnline === true).length;
-    const paidCanonTodayCount = driversData.filter((d) => d.lastCanonDate === todayStr).length;
+    const activeTodayCount = driversData.filter((d) => d.lastCanonChargeDate === todayStr || d.isOnline === true).length;
+    const paidCanonTodayCount = driversData.filter((d) => canonPaidToday(d.id)).length;
     const withDebtCount = driversData.filter((d) => (d.deliveryDebt || 0) > 0).length;
     const cleanCount = driversData.filter((d) => (d.deliveryDebt || 0) <= 0).length;
     const filteredDrivers = driversData.filter((d) => {
@@ -1119,7 +1135,7 @@ export async function renderAdminDeliveriesSettings(container) {
       if (filterStatus === "online") return isOnline;
       if (filterStatus === "debt") return debt > 0;
       if (filterStatus === "clean") return debt <= 0;
-      if (filterStatus === "active") return d.lastCanonDate === todayStr || isOnline;
+      if (filterStatus === "active") return d.lastCanonChargeDate === todayStr || isOnline;
       return true;
     });
     body.innerHTML = `
@@ -1163,14 +1179,15 @@ export async function renderAdminDeliveriesSettings(container) {
           </div>
         ` : filteredDrivers.map((d) => {
       const debt = Math.max(0, d.deliveryDebt || 0);
-      const isCanonPaidToday = d.lastCanonDate === todayStr;
+      const isCanonPaidToday = canonPaidToday(d.id);
       const isExempt = d.isCanonExempt === true;
       const isOnlineNow = d.isOnline === true;
       const photo = d.photoURL || d.avatarUrl || d.photo || d.profileImage || "";
       const displayId = d.deliveryId || d.goId || d.customId || "go-" + d.id.slice(0, 4);
       const driverOrders = debt > 0 ? globalPendingOrders.filter((o) => (o.driverId === d.id || o.driverDeliveryId === d.id) && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")) : [];
       const totalCouponsCredit = debt > 0 ? driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0) : 0;
-      const finalSettleAmount = Math.max(0, debt - totalCouponsCredit);
+      // deliveryDebt is already net of coupons (the server subtracts them when each order completes).
+      const finalSettleAmount = Math.max(0, debt);
       return `
             <div style="background:var(--color-surface); border:1.5px solid ${finalSettleAmount > 0 ? "rgba(239,68,68,0.25)" : "var(--color-border-light)"}; border-radius:24px; padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:16px; transition:all 0.2s;">
               
@@ -1222,9 +1239,9 @@ export async function renderAdminDeliveriesSettings(container) {
                   <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; border-bottom:1px dashed var(--color-border-light); padding-bottom:8px;">
                     <div>
                       <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em; display:flex; align-items:center; gap:4px;">
-                        Deuda Sistema
+                        Deuda Bruta
                       </div>
-                      <div style="font-size:15px; font-weight:900; color:#ef4444; margin-top:2px;">${formatPrice(debt)}</div>
+                      <div style="font-size:15px; font-weight:900; color:#ef4444; margin-top:2px;">${formatPrice(debt + totalCouponsCredit)}</div>
                     </div>
                     <div style="text-align:right;">
                       <div style="font-size:9px; font-weight:800; color:#a855f7; text-transform:uppercase; letter-spacing:0.04em;">Descuentos/Cupones</div>
@@ -1278,6 +1295,9 @@ export async function renderAdminDeliveriesSettings(container) {
                 </button>
                 <button data-toggle-canon="${d.id}" style="height:34px; border-radius:10px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); color:var(--color-text); font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px;">
                   ${isCanonPaidToday ? "\u21A9\uFE0F Cuota Hoy" : "\u{1F4B5} Cuota Hoy"}
+                </button>
+                <button data-test-push="${d.id}" style="grid-column:1 / -1; height:34px; border-radius:10px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); color:#d97706; font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px;">
+                  \u{1F514} Probar notificaci\xF3n
                 </button>
               </div>
 
@@ -1350,6 +1370,45 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         if (driver) openSettlementsModal(driver);
       };
     });
+    body.querySelectorAll("[data-test-push]").forEach((btn) => {
+      btn.onclick = async () => {
+        const uid = btn.dataset.testPush;
+        const driver = driversData.find((d) => d.id === uid);
+        const originalHTML = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = "⏳ Enviando...";
+        try {
+          const { auth } = await import("../../firebase.js");
+          const { getIdToken } = await import("firebase/auth");
+          const idToken = await getIdToken(auth.currentUser);
+          const response = await fetch("https://us-central1-godelivery-magdalena.cloudfunctions.net/adminTestPush", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken, targetUid: uid })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+          const fmt = (ms) => ms ? new Date(ms).toLocaleString("es-AR") : "sin fecha";
+          const rows = (data.tokens || []).map((t) => `
+            <div style="padding:8px 10px; border:1px solid var(--color-border-light); border-radius:10px; margin-top:6px; font-size:12.5px;">
+              <b>${t.ok ? "✅ Enviada" : "❌ Fall\xF3"}</b> \xB7 ${t.platform || "plataforma desconocida"} \xB7 token …${t.tail}<br>
+              Registrado: ${fmt(t.updatedAtMs)}${t.error ? `<br><span style="color:#ef4444;">${t.error}</span>` : ""}
+            </div>`).join("");
+          showConfirm({
+            title: "Prueba de notificaci\xF3n",
+            message: data.tokens?.length
+              ? `Se envi\xF3 a ${driver?.displayName || driver?.name || "el repartidor"}. Preguntale si le lleg\xF3 <b>ahora</b>.${rows}<br>Si dice ✅ pero no le lleg\xF3: el token es de otro tel\xE9fono, o el suyo bloquea las notificaciones. Que cierre sesi\xF3n y vuelva a entrar en <b>su</b> tel\xE9fono, y prob\xE1 de nuevo: tiene que aparecer un token con fecha de ahora.`
+              : "Este repartidor <b>no tiene ning\xFAn token</b> registrado: su tel\xE9fono nunca se registr\xF3 para notificaciones. Que cierre sesi\xF3n y vuelva a entrar, y acepte el permiso de notificaciones.",
+            onConfirm: () => {}
+          });
+        } catch (err) {
+          showToast(`No se pudo enviar la prueba: ${err.message}`, "error");
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = originalHTML;
+        }
+      };
+    });
     body.querySelectorAll("[data-toggle-online]").forEach((btn) => {
       btn.onclick = async () => {
         const uid = btn.dataset.toggleOnline;
@@ -1377,47 +1436,24 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
           message: `\xBFQuer\xE9s ${newStatus ? "CONECTAR" : "DESCONECTAR"} a ${driver.displayName || driver.name}?${locationWarningHTML}`,
           onConfirm: async () => {
             try {
-              const { doc: doc2, updateDoc: updateDoc2, setDoc: setDoc2, increment, serverTimestamp: fTimestamp } = await import("firebase/firestore");
+              const { doc: doc2, updateDoc: updateDoc2, serverTimestamp: fTimestamp } = await import("firebase/firestore");
               const updateData = {
                 isOnline: newStatus,
                 lastActivityAt: fTimestamp()
               };
-              let chargedCanonThisConnection = false;
-              const isExempt = driver.isCanonExempt === true || driver.role === "admin" || driver.isAdmin === true;
-              if (newStatus && !isExempt && driver.lastCanonChargeDate !== todayStr) {
-                const canonAmt = getState().canonAmount || 2e3;
-                const canonDocRef = doc2(db, "delivery_canon_payments", `${uid}_${todayStr}`);
-                await setDoc2(canonDocRef, {
-                  driverId: uid,
-                  driverName: driver.displayName || driver.name || "Repartidor",
-                  dateStr: todayStr,
-                  amount: canonAmt,
-                  settled: false,
-                  createdAt: fTimestamp()
-                }, { merge: true });
-                const transRef = doc2(collection(db, "delivery_transactions"));
-                await setDoc2(transRef, {
-                  driverId: uid,
-                  type: "canon_charge",
-                  amount: canonAmt,
-                  description: `Canon Diario Jornada (${todayStr})`,
-                  createdAt: fTimestamp()
-                });
-                updateData.deliveryDebt = increment(canonAmt);
-                updateData.lastCanonChargeDate = todayStr;
-                updateData.lastCanonDate = todayStr;
-                driver.lastCanonDate = todayStr;
-                driver.lastCanonChargeDate = todayStr;
-                driver.deliveryDebt = (driver.deliveryDebt || 0) + canonAmt;
-                chargedCanonThisConnection = true;
+              // The server's 2h inactivity clock runs on lastTripAcceptedAt: without resetting it,
+              // a driver connected from here was disconnected again within 5 minutes.
+              if (newStatus) {
+                updateData.lastTripAcceptedAt = fTimestamp();
+                updateData.inactivityWarningSentAt = null;
+                updateData.disconnectedReason = null;
+              } else {
+                updateData.disconnectedReason = "admin";
               }
+              // The daily fee is charged by the server (chargeDailyCanonOnConnect) on this switch to online.
               await updateDoc2(doc2(db, "users", uid), updateData);
               driver.isOnline = newStatus;
-              if (chargedCanonThisConnection) {
-                showToast(`Repartidor conectado. Se sumaron $${(getState().canonAmount || 2e3).toLocaleString("es-AR")} de canon diario.`, "info");
-              } else {
-                showToast(`Repartidor ${newStatus ? "conectado" : "desconectado"} correctamente`, "success");
-              }
+              showToast(`Repartidor ${newStatus ? "conectado" : "desconectado"} correctamente`, "success");
               renderDriversTab(body);
             } catch (err) {
               console.error(err);
@@ -1440,34 +1476,26 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         const uid = btn.dataset.toggleCanon;
         const driver = driversData.find((d) => d.id === uid);
         if (!driver) return;
-        const isCurrentlyActive = driver.lastCanonDate === todayStr;
-        const actionText = isCurrentlyActive ? "desmarcar" : "marcar como abonado";
+        const isCurrentlyPaid = canonPaidToday(uid);
+        const name = driver.displayName || driver.name;
         showConfirm({
           title: "Cuota Diaria",
-          message: `\xBFQuer\xE9s ${actionText} la cuota diaria de hoy de ${driver.displayName || driver.name}?`,
+          message: isCurrentlyPaid
+            ? `¿Deshacer el pago de la cuota de hoy de ${name}? Vuelve a quedar como deuda.`
+            : `¿${name} te pagó en mano la cuota de hoy (${formatPrice(getState().canonAmount || 2e3)})? Se descuenta de su deuda, o si todavía no se conectó, no se le cobra al conectarse.`,
           onConfirm: async () => {
             try {
-              const canonDocRef = doc(db, "delivery_canon_payments", `${uid}_${todayStr}`);
-              if (!isCurrentlyActive) {
-                await setDoc(canonDocRef, {
-                  driverId: uid,
-                  date: todayStr,
-                  amount: getState().canonAmount || 2e3,
-                  settled: true,
-                  createdAt: serverTimestamp()
-                }, { merge: true });
-                await updateDoc(doc(db, "users", uid), { lastCanonDate: todayStr, lastCanonChargeDate: todayStr });
-                driver.lastCanonDate = todayStr;
-              } else {
-                await setDoc(canonDocRef, { status: "revoked", settled: false, updatedAt: serverTimestamp() }, { merge: true });
-                await updateDoc(doc(db, "users", uid), { lastCanonDate: null, lastCanonChargeDate: null });
-                driver.lastCanonDate = null;
-              }
-              showToast("Cuota diaria actualizada", "success");
+              const result = await toggleCanonPaidToday({
+                db,
+                driverId: uid,
+                canonAmount: getState().canonAmount || 2e3,
+                adminEmail: getState().user?.email || "Admin"
+              });
+              showToast(result === "undone" ? "Pago de cuota deshecho" : result === "prepaid" ? "Cuota de hoy registrada como pagada por adelantado" : "Cuota de hoy cobrada y descontada de la deuda", "success");
               loadData();
             } catch (err) {
               console.error(err);
-              showToast("Error al actualizar cuota diaria", "error");
+              showToast(err?.message && !err.code ? err.message : "Error al actualizar cuota diaria", "error");
             }
           }
         });
@@ -1560,12 +1588,13 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
             ${activePendingProofs.map((p) => {
         const dateStr = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString("es-AR") : "Reciente";
         return `
-                <div style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow-sm);">
+                <div data-proof-card="${p.id}" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow-sm);">
                   <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
                       <div style="font-weight:900; font-size:14px; color:var(--color-text-primary);">${p.driverName || "Repartidor"}</div>
                       <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">ID: ${p.driverDeliveryId || "---"} \u2022 ${dateStr}</div>
-                      <div style="font-size:16px; font-weight:950; color:#E11D48; margin-top:6px;">Monto: ${formatPrice(p.amount)}</div>
+                      <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); margin-top:6px;">Declarado: ${formatPrice(p.amount)} • aprobar por:</div>
+                      <input type="number" class="proof-amount-input" data-proof-id="${p.id}" value="${p.amount || 0}" style="margin-top:4px; width:130px; height:36px; border-radius:10px; padding:0 10px; font-weight:900; font-size:15px; color:#E11D48; border:1px solid var(--color-border); background:var(--color-bg);" />
                     </div>
                     <div style="position:relative; width:64px; height:64px; border-radius:12px; overflow:hidden; border:1.5px solid var(--color-border-light); cursor:pointer;" onclick="window.showImageFullscreen('${p.imageUrl}')">
                       <img src="${p.imageUrl}" style="width:100%; height:100%; object-fit:cover;" />
@@ -1639,8 +1668,9 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
             ${filteredSettlements.map((s2) => {
       const dateStr = s2.createdAt?.toDate ? s2.createdAt.toDate().toLocaleString("es-AR") : "Reciente";
       const methodText = s2.method === "transferencia" ? "\u{1F3E6} Transferencia" : "\u{1F4B5} Efectivo";
+      const canVoid = s2.voided !== true && s2.kind !== "canon";
       return `
-                <div style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm);">
+                <div style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:16px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm); ${s2.voided ? "opacity:0.55;" : ""}">
                   <div style="display:flex; align-items:center; gap:14px;">
                     <div style="width:40px; height:40px; border-radius:12px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon("checkCircle", 20)}
@@ -1654,8 +1684,9 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
                     </div>
                   </div>
                   <div style="text-align:right;">
-                    <div style="font-size:18px; font-weight:950; color:#22c55e;">${formatPrice(s2.amount)}</div>
-                    <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700;">Liquidado por ${s2.settledBy || "Admin"}</div>
+                    <div style="font-size:18px; font-weight:950; color:${s2.voided ? "var(--color-text-tertiary)" : "#22c55e"}; ${s2.voided ? "text-decoration:line-through;" : ""}">${formatPrice(s2.amount)}</div>
+                    <div style="font-size:10px; color:var(--color-text-tertiary); font-weight:700;">${s2.voided ? `ANULADA por ${s2.voidedBy || "Admin"}` : `Liquidado por ${s2.settledBy || "Admin"}`}</div>
+                    ${canVoid ? `<button data-void-settlement="${s2.id}" style="margin-top:6px; height:26px; padding:0 10px; border-radius:8px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#ef4444; font-weight:800; font-size:10.5px; cursor:pointer;">Anular</button>` : ""}
                   </div>
                 </div>
               `;
@@ -1664,6 +1695,28 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         `}
       </div>
     `;
+    body.querySelectorAll("[data-void-settlement]").forEach((btn) => {
+      btn.onclick = () => {
+        const s2 = settlementsData.find((x) => x.id === btn.dataset.voidSettlement);
+        if (!s2) return;
+        showConfirm({
+          title: "Anular liquidaci\xF3n",
+          message: `\xBFAnular el cobro de ${formatPrice(s2.amount)} a ${s2.driverName || "el repartidor"}? Su deuda vuelve a subir en lo que ese cobro hab\xEDa descontado${s2.proofId ? " y el comprobante vuelve a Validaciones" : ""}.`,
+          confirmText: "S\xED, anular",
+          onConfirm: async () => {
+            try {
+              await voidDriverSettlement({ db, settlementId: s2.id, adminEmail: getState().user?.email || "Admin" });
+              showToast("Liquidaci\xF3n anulada", "success");
+              await loadData();
+              renderTab();
+            } catch (err) {
+              console.error(err);
+              showToast(err?.message && !err.code ? err.message : "No se pudo anular la liquidaci\xF3n", "error");
+            }
+          }
+        });
+      };
+    });
     const sInput = body.querySelector("#settlement-search-input");
     if (sInput) {
       sInput.oninput = (e) => {
@@ -1782,40 +1835,30 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
     }
   }
   function openSettlementsModal(driver) {
-    const currentDebt = driver.deliveryDebt || 0;
+    const currentDebt = Math.max(0, driver.deliveryDebt || 0);
     const driverOrders = globalPendingOrders.filter((o) => o.driverId === driver.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
     const totalCouponsCredit = driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
-    const finalSettleAmount = Math.max(0, currentDebt - totalCouponsCredit);
+    const driverPendingProofs = pendingProofsData.filter((p) => p.driverId === driver.id && p.status === "pending");
     const modalContent = document.createElement("div");
     modalContent.style.cssText = "padding:20px; display:flex; flex-direction:column; gap:16px;";
     modalContent.innerHTML = `
       <div style="text-align:center;">
         <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Repartidor</div>
         <div style="font-family:var(--font-display); font-size:18px; font-weight:900; color:var(--color-text); margin-top:2px;">${driver.displayName || driver.name}</div>
-        
+        <div style="font-size:24px; font-weight:950; color:#ef4444; margin-top:6px;">${formatPrice(currentDebt)}</div>
         ${totalCouponsCredit > 0 ? `
-          <div style="margin-top:10px; padding:12px; background:var(--color-bg-secondary); border-radius:16px; font-size:12px; display:flex; flex-direction:column; gap:6px; text-align:left; border:1px solid var(--color-border-light); box-shadow:inset 0 1px 2px rgba(0,0,0,0.01);">
-            <div style="display:flex; justify-content:space-between; color:var(--color-text-secondary);">
-              <span>Deuda en Sistema:</span>
-              <strong style="color:#ef4444; font-weight:800;">${formatPrice(currentDebt)}</strong>
-            </div>
-            <div style="display:flex; justify-content:space-between; color:var(--color-text-secondary);">
-              <span>Cr\xE9dito por Cupones:</span>
-              <strong style="color:#a855f7; font-weight:800;">-${formatPrice(totalCouponsCredit)}</strong>
-            </div>
-            <div style="display:flex; justify-content:space-between; border-top:1px dashed var(--color-border); padding-top:6px; font-weight:900; margin-top:4px;">
-              <span style="color:var(--color-text-primary);">Neto a Cobrar:</span>
-              <strong style="color:#10b981; font-size:13.5px; font-weight:950;">${formatPrice(finalSettleAmount)}</strong>
-            </div>
-          </div>
-        ` : `
-          <div style="font-size:24px; font-weight:950; color:#ef4444; margin-top:6px;">${formatPrice(currentDebt)}</div>
-        `}
+          <div style="font-size:11.5px; font-weight:700; color:#a855f7; margin-top:4px;">Incluye ${formatPrice(totalCouponsCredit)} de cupones ya descontados</div>
+        ` : ""}
       </div>
+      ${driverPendingProofs.length > 0 ? `
+        <div style="padding:12px 14px; border-radius:14px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); color:#b45309; font-size:12.5px; font-weight:700; line-height:1.45;">
+          ⚠️ Tiene ${driverPendingProofs.length === 1 ? "un comprobante de transferencia" : `${driverPendingProofs.length} comprobantes de transferencia`} sin revisar por ${formatPrice(driverPendingProofs.reduce((sum, p) => sum + (p.amount || 0), 0))}. Revis\xE1 Validaciones antes de cobrarle en mano, para no cobrarle dos veces.
+        </div>
+      ` : ""}
 
       <div>
         <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Monto a Liquidar ($)</label>
-        <input type="number" id="settle-amount-input" value="${finalSettleAmount}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:900; font-size:18px; border:1px solid var(--color-border);" />
+        <input type="number" id="settle-amount-input" value="${currentDebt}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:900; font-size:18px; border:1px solid var(--color-border);" />
       </div>
 
       <div>
@@ -1838,106 +1881,42 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
     showModal({ title: "Liquidar Deuda de Repartidor", content: modalContent, height: "auto" });
     modalContent.querySelector("#confirm-settlement-btn").onclick = async () => {
       const btn = modalContent.querySelector("#confirm-settlement-btn");
-      btn.disabled = true;
       const amountToSettle = parseFloat(modalContent.querySelector("#settle-amount-input").value) || 0;
       const method = modalContent.querySelector("#settle-method-select").value;
       const notes = modalContent.querySelector("#settle-notes-input").value.trim();
-      if (amountToSettle <= 0 && currentDebt > 0 && finalSettleAmount > 0) {
-        showToast("Ingresá un monto mayor a $0", "error");
-        btn.disabled = false;
-        btn.innerHTML = `${icon("checkCircle", 20)} Confirmar Liquidación`;
+      if (amountToSettle <= 0) {
+        showToast("Ingres\xE1 un monto mayor a $0", "error");
         return;
       }
+      btn.disabled = true;
+      btn.innerHTML = "Procesando...";
       try {
-        const { writeBatch: writeBatch2, doc: doc2, collection: collection2 } = await import("firebase/firestore");
-        const batch = writeBatch2(db);
-
-        // Calculate remaining debt taking into account the coupon credit applied to the settled orders
-        let newDebt = 0;
-        if (amountToSettle >= finalSettleAmount) {
-          // Full liquidation of pending net amount -> debt is completely cleared to 0
-          newDebt = 0;
-        } else {
-          // Partial liquidation -> deduct paid cash plus proportional coupons credit
-          const totalSettledDebt = amountToSettle + (finalSettleAmount > 0 ? (amountToSettle / finalSettleAmount) * totalCouponsCredit : totalCouponsCredit);
-          newDebt = Math.max(0, currentDebt - totalSettledDebt);
-        }
-
-        const adminEmail = getState().user?.email || "Admin";
-        batch.update(doc2(db, "users", driver.id), {
-          deliveryDebt: newDebt,
-          points: 0
-        });
-        const settlementRef = doc2(collection2(db, "delivery_debt_settlements"));
-        batch.set(settlementRef, {
+        const { newDebt } = await settleDriverDebt({
+            db,
+            adminEmail: getState().user?.email || "Admin",
           driverId: driver.id,
-          driverName: driver.displayName || driver.name || "Repartidor",
-          driverEmail: driver.email || "",
+          driverName: driver.displayName || driver.name,
+          driverEmail: driver.email,
+          currentDebt,
           amount: amountToSettle,
-          grossDebt: currentDebt,
-          couponsCredit: totalCouponsCredit,
-          remainingDebt: newDebt,
           method,
-          notes,
-          settledBy: adminEmail,
-          createdAt: serverTimestamp()
+          notes
         });
-        const transRef = doc2(collection2(db, "delivery_transactions"));
-        batch.set(transRef, {
-          driverId: driver.id,
-          type: "liquidation",
-          amount: -(currentDebt - newDebt),
-          amountPaid: amountToSettle,
-          couponsCredit: totalCouponsCredit,
-          description: `Liquidación de deuda (${method === "transferencia" ? "Transferencia" : "Efectivo"})${totalCouponsCredit > 0 ? ` [Neto: ${formatPrice(amountToSettle)} | Cupones: ${formatPrice(totalCouponsCredit)}]` : ""}${notes ? ": " + notes : ""}`,
-          settledBy: adminEmail,
-          createdAt: serverTimestamp()
-        });
-        driverOrders.forEach((o) => {
-          batch.update(doc2(db, "orders", o.id), {
-            isSettledDriver: true,
-            driverCommissionStatus: "paid",
-            driverSettledAt: serverTimestamp()
-          });
-        });
-
-        // Also mark all pending delivery_canon_payments as settled for this driver
-        try {
-          const canonQ = q2(col2(db, "delivery_canon_payments"), w2("driverId", "==", driver.id));
-          const canonSnap = await gD2(canonQ);
-          canonSnap.docs.forEach((cDoc) => {
-            if (cDoc.data().settled !== true) {
-              batch.update(doc2(db, "delivery_canon_payments", cDoc.id), {
-                settled: true,
-                status: "settled",
-                settledAt: serverTimestamp()
-              });
-            }
-          });
-        } catch (canonErr) {
-          console.warn("Could not mark canon payments as settled:", canonErr);
-        }
-
-        await batch.commit();
-        try {
-          const notifRef = doc2(collection2(db, "users", driver.id, "notifications"));
-          await setDoc(notifRef, {
-            title: "\u2705 Deuda Liquidada",
-            body: `\xA1Tu deuda por ${formatPrice(amountToSettle)} fue liquidada con \xE9xito! Saldo actual: ${formatPrice(newDebt)}.`,
-            type: "settlement",
-            url: "#/delivery-panel?tab=settlements",
-            status: "unread",
-            createdAt: serverTimestamp()
-          });
-        } catch (notifErr) {
-          console.warn("Could not send notification to driver:", notifErr);
-        }
         showToast(`Se liquidaron ${formatPrice(amountToSettle)} exitosamente.`, "success");
         closeModal();
-        loadData();
+        // The payment is committed; the driver's notice and the lists catch up in the background.
+        setDoc(doc(collection(db, "users", driver.id, "notifications")), {
+          title: "✅ Deuda Liquidada",
+          body: `\xA1Tu pago de ${formatPrice(amountToSettle)} fue registrado! Saldo actual: ${formatPrice(newDebt)}.`,
+          type: "settlement",
+          url: "#/delivery-panel?tab=settlements",
+          status: "unread",
+          createdAt: serverTimestamp()
+        }).catch((notifErr) => console.warn("Could not send notification to driver:", notifErr));
+        refreshLedgerLists();
       } catch (err) {
         console.error(err);
-        showToast("Error al procesar la liquidaci\xF3n", "error");
+        showToast(settlementErrorText(err), "error");
         btn.disabled = false;
         btn.innerHTML = `${icon("checkCircle", 20)} Confirmar Liquidaci\xF3n`;
       }
@@ -3212,7 +3191,8 @@ async function showDriverDebtDetailModal(driver, db2) {
   // If driver has active debt, ensure canonFeesTotal matches (currentDebt - appFeesTotal)
   let canonFeesTotal = 0;
   if (currentDebt > 0) {
-    const rawCanon = Math.max(0, currentDebt - appFeesTotal);
+    // deliveryDebt = app fees + daily fees - coupons, so coupons are added back to isolate the daily fees.
+    const rawCanon = Math.max(0, currentDebt - appFeesTotal + totalCouponsCredit);
     canonFeesTotal = rawCanon;
 
     // Filter itemized list to show canons matching current debt
