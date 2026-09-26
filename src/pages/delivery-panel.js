@@ -42,7 +42,9 @@ export function getOrderDriverEarnings(o) {
 }
 import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clearDriverRoute, setMap3DPerspective, recenterOnDriver, zoomInDriverMap, zoomOutDriverMap, getDriverMapTheme, setDriverMapTheme, getDriverThemeMode, setDriverThemeMode, renderDemandHotspots, checkAutoSolarTheme, startGpsRouteSimulation, stopGpsRouteSimulation, isGpsSimulationRunning, renderMultiStopRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { NavigationVoice } from '../utils/navigation-voice.js';
-import { driverTokens, orderKind, kindTag, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, pickupCoordsOf, dropoffCoordsOf } from '../components/driver-ui.js';
+import { driverTokens, orderKind, kindTag, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, pickupCoordsOf, dropoffCoordsOf, goCashInfo } from '../components/driver-ui.js';
+import { mandadoShoppingPlan, placeSearchQuery, categoryLabel, onPlacesChange, placeKm } from '../utils/mandado-places.js';
+import { loadMandadoPlaces, learnMandadoPlace, getVisitedStores, markStoreVisited } from '../utils/mandado-places-store.js';
 
 // Set while the driver asked to disconnect and the server hasn't confirmed it yet,
 // so a write that never landed is re-sent instead of leaving the driver "online".
@@ -460,6 +462,60 @@ function smartStopOrder(stops, driverPos, parseCoords) {
   return best.map(i => stops[i]);
 }
 
+// ── Mandados: a qué comercio ir ─────────────────────────────────────────────
+// El cliente escribe el comercio a mano; se ubica con los comercios adheridos y los lugares que
+// aprendió la app (utils/mandado-places.js). Con varios comercios, la parada es el que toca ahora.
+
+export function isGoCashOrder(o) {
+  return Boolean(o) && (o.favorType === 'gocash' || o.isGoCash === true || o.type === 'gocash');
+}
+
+/** Mandado de compra o de pago de servicios: el repartidor va a un comercio que eligió el cliente. */
+export function isShoppingFavor(o) {
+  return Boolean(o && o.isFavor && !o.isTrip && !o.comercioId && !isOrderEncomienda(o) && !isGoCashOrder(o));
+}
+
+function shoppingSource(o) {
+  // Pago de servicios: el lugar es la dirección de retiro ("Pago Fácil Centro (Trámite de Pago)")
+  if (o.favorType === 'pagodeservicios' && !(Array.isArray(o.mandadoStops) && o.mandadoStops.length)) {
+    const store = String(o.pickupAddress || 'Pago Fácil').replace(/\s*\(.*\)\s*$/, '').trim() || 'Pago Fácil';
+    return { ...o, mandadoStops: [{ store, items: '' }] };
+  }
+  return o;
+}
+
+/** Plan de compra del mandado: comercios, cuál toca ahora y cuántos faltan. */
+export function shoppingPlanOf(o, driverPos = window.lastRiderPos || null) {
+  return mandadoShoppingPlan(shoppingSource(o), driverPos, getVisitedStores(o.id));
+}
+
+/**
+ * Aprende dónde queda el comercio donde el repartidor acaba de comprar. Si la app ya lo ubicaba
+ * lejos de acá (desliza tarde, ya en camino), no se toma la visita.
+ */
+function learnShoppingStore(o, store) {
+  if (!o || !store || store.nearest) return;
+  if (String(o.id || '').startsWith('sim_') || window.mockSimulatedOrder || isGpsSimulationRunning()) return; // GPS de prueba
+  const pos = window.lastRiderPos;
+  if (!pos || (window.lastRiderPosAt && Date.now() - window.lastRiderPosAt > 60000)) return;
+  if (store.coords && (placeKm(pos, store.coords) ?? 0) > 1.3) return;
+  learnMandadoPlace({ name: store.store, position: pos, accuracy: window.lastRiderAccuracy ?? null, uid: getState().user?.uid || null });
+}
+
+// Al cargar o aprender lugares, se vuelve a dibujar lo que depende de ellos
+let placesRefreshTimer = null;
+onPlacesChange(() => {
+  clearTimeout(placesRefreshTimer);
+  placesRefreshTimer = setTimeout(() => {
+    if (!activeOrdersList.some(isShoppingFavor)) return;
+    const u = getState().user;
+    refreshBottomDock(document.getElementById('driver-footer-dock-container'), u, activeOrdersList);
+    const bar = document.getElementById('session-status-bar-container');
+    if (bar && u) { bar.innerHTML = renderStatusBar(u); attachStatusBarListeners(u); }
+    syncDriverNavigationWithOrders(activeOrdersList);
+  }, 250);
+});
+
 export function calculateOptimalMultiStopSequence(driverPos, activeOrders = []) {
   if (!Array.isArray(activeOrders) || activeOrders.length === 0) return [];
 
@@ -530,19 +586,24 @@ export function calculateOptimalMultiStopSequence(driverPos, activeOrders = []) 
           isUnverifiedMandado: !pCoords,
           order: o
         });
+      } else if (isGoCashOrder(o)) {
+        // Go Cash: no hay dónde retirar (el repartidor sale con el efectivo o la cuenta); la
+        // primera parada es el cliente. El pedido igual pasa por "salgo" con el deslizador.
       } else {
-        // Free-text shopping mandado without verified pickup GPS (coords: null)
-        const parsed = parseMandadoDetails(o.description || o.itemsText || o.notes || o.details, o.comercioName || o.originAddress);
+        // Mandado: el comercio que toca ahora, con ubicación si la app lo conoce
+        const cur = shoppingPlanOf(o, driverPos).current;
+        const name = cur ? (cur.placeName || cur.store) : 'Comercio indicado';
         stops.push({
           type: 'pickup',
           orderId: o.id,
-          title: `Retiro: ${parsed.comercio}`,
-          shortTitle: (parsed.comercio || 'Mandado').slice(0, 14),
-          address: parsed.comercio || 'Comercio / Kiosco indicado',
-          coords: null,
+          title: `Compra: ${name}`,
+          shortTitle: name.slice(0, 14),
+          address: (cur && cur.placeAddress) || name,
+          coords: cur && cur.coords ? [cur.coords.lng, cur.coords.lat] : null,
           isFoodCommerce: false,
           isEncomienda: false,
-          isUnverifiedMandado: true,
+          isUnverifiedMandado: !(cur && cur.coords),
+          mandadoStore: cur,
           order: o
         });
       }
@@ -961,6 +1022,7 @@ function renderAuthCheckingState(content) {
 }
 
 export async function renderDeliveryPanel(containerArg) {
+  loadMandadoPlaces(); // dónde quedan los comercios de los mandados (con caché; no frena la pantalla)
   const panelId = 'page-delivery';
   const content = containerArg || document.getElementById(panelId) || document.getElementById('app-content');
   if (!content) return;
@@ -6322,7 +6384,7 @@ function renderStatusBar(user) {
   let centerBadgeHtml = '';
   if (hasActiveOrders && o) {
     let destTitle = '';
-    let parsedMandado = null;
+    let shoppingStop = null;
 
     const clientFullName = o.userName || o.clientName || 'Cliente';
     const clientPhoto = o.userPhoto || o.clientPhoto || '';
@@ -6341,24 +6403,19 @@ function renderStatusBar(user) {
         // Antes caía en "Retirá el pedido en Local": un viaje no es un favor
         directiveLogo = '/go-car.jpg';
         destTitle = `Buscá a ${clientFullName} en ${o.originAddress || o.pickupAddress || 'el punto de inicio'}`;
-      } else if (isFavor) {
+      } else if (isFavor && !o.comercioId) {
         if (isEncomienda) {
           directiveLogo = '/go-pickup-point.png?v=5';
           const pickupAddr = o.pickupAddress || o.originAddress || 'Dirección de Retiro';
           destTitle = `Retirá el paquete en ${pickupAddr}`;
         } else if (isGoCash) {
           directiveLogo = '/go-cash.png?v=5';
-          destTitle = `Retirá el efectivo en ${o.pickupAddress || o.originAddress || 'punto acordado'}`;
-        } else if (isPagoServicios) {
-          directiveLogo = '/go-clipboard.png?v=5';
-          destTitle = `Realizá el pago de servicio en ${o.pickupAddress || o.originAddress || 'punto de cobro'}`;
-        } else if (isTrip) {
-          directiveLogo = '/go-car.jpg';
-          destTitle = `Recogé al pasajero en ${o.pickupAddress || o.originAddress || 'punto de inicio'}`;
+          destTitle = goCashInfo(o).driverBringsCash ? `Llevá el efectivo a ${clientFullName}` : `Andá a cambiar el efectivo de ${clientFullName}`;
         } else {
-          directiveLogo = '/go-bag.png?v=6';
-          parsedMandado = parseMandadoDetails(o.description || o.itemsText || o.notes || o.details, o.comercioName || o.originAddress);
-          destTitle = `Comprá en ${parsedMandado.comercio}`;
+          directiveLogo = isPagoServicios ? '/go-clipboard.png?v=5' : '/go-bag.png?v=6';
+          shoppingStop = shoppingPlanOf(o).current;
+          const where = shoppingStop ? (shoppingStop.placeName || shoppingStop.store) : (o.comercioName || 'el comercio indicado');
+          destTitle = isPagoServicios ? `Pagá los servicios en ${where}` : `Comprá en ${where}`;
         }
       } else {
         const allComercios = getState().comercios || [];
@@ -6369,7 +6426,7 @@ function renderStatusBar(user) {
     } else {
       directiveLogo = clientPhoto || '/go-bag.png?v=6';
       const cleanDestAddr = o.deliveryAddress || o.address || o.destinationAddress || clientFullName || 'el domicilio';
-      destTitle = isTrip ? `Llevá a ${clientFullName} a ${cleanDestAddr}` : (isGoCash ? `Entregá el efectivo en ${cleanDestAddr}` : (isEncomienda ? `Entregá la encomienda en ${cleanDestAddr}` : `Entregá el pedido en ${cleanDestAddr}`));
+      destTitle = isTrip ? `Llevá a ${clientFullName} a ${cleanDestAddr}` : (isGoCash ? `${goCashInfo(o).driverBringsCash ? 'Entregá el efectivo' : 'Cambiá el efectivo'} en ${cleanDestAddr}` : (isEncomienda ? `Entregá la encomienda en ${cleanDestAddr}` : `Entregá el pedido en ${cleanDestAddr}`));
     }
 
     // With several BATCHED ORDERS, the header shows contact info for whichever one is
@@ -6394,7 +6451,10 @@ function renderStatusBar(user) {
     };
 
     let targetCoords = null;
-    if (isPickupStage) {
+    if (isPickupStage && isFavor && !o.comercioId && !isEncomienda && !isTrip) {
+      // Mandado: el comercio que toca (el retiro del pedido es el centro del pueblo, no sirve)
+      targetCoords = shoppingStop && shoppingStop.coords ? shoppingStop.coords : null;
+    } else if (isPickupStage) {
       targetCoords = parseTargetCoords(o.pickupCoords || o.comercioCoords || o.originCoords || o.pickupLocation);
       if (!targetCoords && o.comercioId) {
         const allComercios = getState().comercios || [];
@@ -6429,7 +6489,8 @@ function renderStatusBar(user) {
     const stepTotal = optimalSequence.length;
     const orderCode = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
     const stepLabel = stepTotal > 1 ? `Parada 1 de ${stepTotal} · Pedido ${orderCode}` : `Pedido ${orderCode}`;
-    const noGpsMandado = isFavor && isPickupStage && !isEncomienda && !isTrip && !isGoCash && !isPagoServicios;
+    // Mandado sin ubicación del comercio: no hay ruta, se indica cómo encontrarlo
+    const noGpsMandado = isFavor && !o.comercioId && isPickupStage && !isEncomienda && !isTrip && !isGoCash && !(shoppingStop && shoppingStop.coords);
     const m = window.lastDriverManeuver || {};
     const mDist = m.distanceMeters ? (m.distanceMeters > 999 ? (m.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km' : m.distanceMeters + ' m') : '';
     return `
@@ -6453,7 +6514,7 @@ function renderStatusBar(user) {
           <div style="font-size: 15.5px; font-weight: 600; color: ${tk.tx}; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(destTitle)}</div>
           <div style="font-size: 12.5px; color: ${tk.tx2}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;">
             ${noGpsMandado
-              ? 'Andá al comercio que indicó el cliente'
+              ? (shoppingStop && shoppingStop.nearest ? `El cliente pidió cualquier ${esc(categoryLabel(shoppingStop.nearest))}: la más cerca` : 'Ubicación a confirmar · buscalo con Navegar')
               : `<span id="driver-maneuver-subtext" style="font-weight:600;color:${tk.tx}">${mDist || 'Ruta'}</span> · <span id="driver-maneuver-text">${esc(m.instruction || 'Seguí la línea del mapa')}</span>`}
           </div>
         </div>
@@ -6544,9 +6605,22 @@ function dockStopText(o, isPickup) {
   }
   if (isPickup) {
     if (isOrderEncomienda(o)) return { verb: 'Retirar encomienda', title: o.pickupAddress || o.originAddress || 'Dirección de retiro', sub: cleanMandadoText(o.details || o.description || o.itemsText || 'Paquete') };
-    if (o.isFavor) {
-      const parsed = parseMandadoDetails(o.description || o.itemsText || o.notes || o.details, o.comercioName || o.originAddress);
-      return { verb: 'Comprar en', title: parsed.comercio || o.comercioName || 'Comercio indicado', sub: parsed.items || cleanMandadoText(o.description || o.itemsText || '') };
+    if (isGoCashOrder(o)) {
+      const g = goCashInfo(o);
+      return g.driverBringsCash
+        ? { verb: 'Llevar el efectivo a', title: client, sub: o.deliveryAddress || o.address || '' }
+        : { verb: 'Cambiar el efectivo de', title: client, sub: o.deliveryAddress || o.address || '' };
+    }
+    if (isShoppingFavor(o)) {
+      const plan = shoppingPlanOf(o);
+      const cur = plan.current;
+      const isPago = o.favorType === 'pagodeservicios';
+      const step = plan.total > 1 ? ` · ${Math.min(plan.doneCount + 1, plan.total)} de ${plan.total}` : '';
+      const verb = (isPago ? 'Pagar servicios en' : (cur && cur.nearest ? `Comprar en la ${categoryLabel(cur.nearest)} más cercana` : 'Comprar en')) + step;
+      const title = cur ? (cur.placeName || cur.store) : (o.comercioName || 'Comercio indicado');
+      const where = cur && !cur.coords ? 'Ubicación a confirmar' : ((cur && cur.placeAddress) || '');
+      const items = cur && cur.items ? cur.items : (isPago ? '' : cleanMandadoText(o.description || o.itemsText || ''));
+      return { verb, title, sub: [where, items].filter(Boolean).join(' · '), store: cur, plan };
     }
     return { verb: 'Retirar en', title: o.comercioName || o.originAddress || 'Comercio', sub: o.pickupAddress || o.comercioAddress || o.originAddress || '' };
   }
@@ -6561,6 +6635,12 @@ function dockWhatsAppUrl(o) {
 }
 
 function dockNavUrl(o, isPickup) {
+  if (isPickup && isShoppingFavor(o)) {
+    const cur = shoppingPlanOf(o).current;
+    if (cur && cur.coords) return `https://www.google.com/maps/dir/?api=1&destination=${cur.coords.lat},${cur.coords.lng}&travelmode=driving`;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeSearchQuery(cur))}`;
+  }
+  if (isPickup && isGoCashOrder(o)) isPickup = false; // Go Cash: directo al cliente
   const c = isPickup ? pickupCoordsOf(o) : dropoffCoordsOf(o);
   const lat = c && Number(c.lat ?? c.latitude), lng = c && Number(c.lng ?? c.longitude);
   if (c && !isNaN(lat) && !isNaN(lng)) return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
@@ -6575,12 +6655,17 @@ function dockMoneyRow(o, isPickup, isLight) {
   const favorType = String(o.favorType || '').toLowerCase();
   const total = Number(o.totalAmount || o.total || 0);
   if (favorType === 'gocash' || o.isGoCash) {
-    return moneyRow({ label: 'Llevás en efectivo', amount: money(o.amount || o.cashAmount || total), sub: 'Confirmá la transferencia antes de entregar', tone: 'violet', icon: 'swap', action: breakdownBtn }, isLight);
+    const g = goCashInfo(o);
+    const fee = total > 0 ? ` · el envío (${money(total)}) se cobra aparte` : '';
+    return g.driverBringsCash
+      ? moneyRow({ label: 'Llevás en efectivo', amount: g.amount > 0 ? money(g.amount) : '', sub: `El cliente te lo transfiere al recibirlo${fee}`, tone: 'violet', icon: 'swap', action: breakdownBtn }, isLight)
+      : moneyRow({ label: 'Recibís en efectivo', amount: g.amount > 0 ? money(g.amount) : '', sub: `Le transferís ese monto al cliente${fee}`, tone: 'violet', icon: 'swap', action: breakdownBtn }, isLight);
   }
-  if (isPickup && o.isFavor && !isOrderEncomienda(o) && !o.isTrip) {
+  if (isPickup && isShoppingFavor(o)) {
     const buy = (o.purchaseCost !== undefined) ? o.purchaseCost : (o.purchaseItemsTotal || 0);
+    const isPago = favorType === 'pagodeservicios';
     const edit = `<button class="edit-mandado-purchase-btn" data-order-id="${esc(o.id)}" style="height:36px;padding:0 12px;border-radius:10px;background:${t.brand};border:0;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:inherit">Cargar monto</button>`;
-    return moneyRow({ label: 'Valor de la compra', amount: buy > 0 ? money(buy) : '', sub: 'Lo adelantás y te lo devuelve el cliente', tone: 'amber', icon: 'bag', action: edit }, isLight);
+    return moneyRow({ label: isPago ? 'Valor de las facturas' : 'Valor de la compra', amount: buy > 0 ? money(buy) : '', sub: 'Lo adelantás y te lo devuelve el cliente', tone: 'amber', icon: 'bag', action: edit }, isLight);
   }
   if (isCashPayment(o)) {
     if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'En efectivo', tone: 'amber', action: breakdownBtn }, isLight);
@@ -6597,7 +6682,10 @@ function renderDockActionRow(order, orderIsPickup, isLight) {
   const label = order.isTrip
     ? (orderIsPickup ? 'Deslizá: pasajero a bordo' : 'Deslizá: terminar viaje')
     : (orderIsPickup
-      ? (isOrderEncomienda(order) ? 'Deslizá: retiré la encomienda' : (order.isFavor ? 'Deslizá: ya compré' : 'Deslizá: retiré el pedido'))
+      ? (isOrderEncomienda(order) ? 'Deslizá: retiré la encomienda'
+        : (isGoCashOrder(order) ? 'Deslizá: salgo hacia el cliente'
+          : (order.favorType === 'pagodeservicios' ? 'Deslizá: ya pagué'
+            : (isShoppingFavor(order) ? 'Deslizá: ya compré' : 'Deslizá: retiré el pedido'))))
       : 'Deslizá: entregado');
   return `
     <div id="dock-pinned-action-slider-row" style="flex-shrink:0;width:100%">
@@ -6751,7 +6839,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
   // Lo que viene después (con varios pedidos)
   let nextChips = '';
   if (!isExpanded && activeOrders.length > 1 && totalStops > 1) {
-    const rest = route.filter((s, i) => i !== stopIndex);
+    const rest = route.filter((s, i) => i !== stopIndex && !(s.orderId === o.id && isGoCashOrder(o)));
     const next = rest[0];
     const nextOrder = next ? (next.order || activeOrders.find(x => x.id === next.orderId) || {}) : null;
     const nextTxt = nextOrder ? dockStopText(nextOrder, next.type === 'pickup') : null;
@@ -6772,7 +6860,8 @@ export function renderBottomDockContent(user, activeOrders = []) {
     const list = route.map((s, i) => {
       const so = s.order || activeOrders.find(x => x.id === s.orderId) || {};
       const st = dockStopText(so, s.type === 'pickup');
-      const isNow = so.id === o.id && (s.type === 'pickup') === currentIsPickup;
+      // Go Cash no tiene parada de retiro: mientras no salió, la parada de ahora es el cliente
+      const isNow = so.id === o.id && ((s.type === 'pickup') === currentIsPickup || (isGoCashOrder(so) && s.type === 'delivery'));
       return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : `Cobrá ${money(so.totalAmount || so.total)} ${isCashPayment(so) ? 'en efectivo' : 'por transferencia'}`, state: isNow ? 'now' : 'next', orderId: so.id };
     });
     // Las paradas pendientes llevan el mismo número que en el mapa; con varios pedidos se pueden tocar
@@ -6794,9 +6883,19 @@ export function renderBottomDockContent(user, activeOrders = []) {
       </div>`;
   }
 
+  // Mandado con varios comercios: se avisa al terminar cada uno y la parada pasa al siguiente
+  let storeStepRow = '';
+  if (currentIsPickup && txt.plan && txt.plan.pending.length > 1 && txt.store) {
+    const nextStore = txt.plan.pending[1];
+    storeStepRow = `<button id="dock-mandado-next-store-btn" data-order-id="${esc(o.id)}" data-index="${txt.store.index}" style="height:44px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit;flex-shrink:0;padding:0 12px">
+        ${dIcon('check', 16, t.greenTx)}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Terminé acá · sigo en ${esc(nextStore.placeName || nextStore.store)}</span>
+      </button>`;
+  }
+
   return `${sheetOpen}
       ${header}
       ${stopBlock}
+      ${storeStepRow}
       ${nextChips}
       ${expanded}
       ${dockMoneyRow(o, currentIsPickup, isLight)}
@@ -6865,12 +6964,22 @@ export function syncDriverNavigationWithOrders(activeOrders = []) {
     }
 
     const stage = (primaryOrder.status === 'pending' || primaryOrder.status === 'accepted' || primaryOrder.status === 'preparing' || primaryOrder.status === 'ready' || (!primaryOrder.pickedUpAt && primaryOrder.status !== 'delivering')) ? 'pickup' : 'delivery';
-    const isShoppingMandado = Boolean(primaryOrder.isFavor && !isOrderEncomienda(primaryOrder));
 
-    if (isShoppingMandado && stage === 'pickup') {
-      clearDriverRoute();
-      clearMultiStopMarkers();
-      setMap3DPerspective(false);
+    if (isGoCashOrder(primaryOrder)) {
+      // Go Cash: directo al cliente
+      setMap3DPerspective(true, 0, driverLoc);
+      drawDriverRoute(driverLoc, null, dropoffLoc, 'delivery');
+    } else if (isShoppingFavor(primaryOrder) && stage === 'pickup') {
+      // Mandado: al comercio que toca, si la app sabe dónde queda
+      const cur = shoppingPlanOf(primaryOrder, driverLoc).current;
+      if (cur && cur.coords) {
+        setMap3DPerspective(true, 0, driverLoc);
+        drawDriverRoute(driverLoc, cur.coords, dropoffLoc, 'pickup');
+      } else {
+        clearDriverRoute();
+        clearMultiStopMarkers();
+        setMap3DPerspective(false);
+      }
     } else {
       if (stage === 'pickup' && !pickupLoc) {
         clearDriverRoute();
@@ -7399,9 +7508,11 @@ export function attachBottomDockListeners(user, activeOrders = []) {
         try {
           if (action === 'pickup' && oId) {
             const targetOrder = (activeOrdersList || []).find(o => o.id === oId);
-            const isShoppingMandado = targetOrder && targetOrder.isFavor && !isOrderEncomienda(targetOrder);
+            const isShoppingMandado = isShoppingFavor(targetOrder);
 
             if (isShoppingMandado) {
+              // Donde está ahora es el último comercio del mandado: se guarda su ubicación
+              learnShoppingStore(targetOrder, shoppingPlanOf(targetOrder).current);
               const { openMandadoPurchaseModal } = await import('./delivery-panel/mandado.js');
               openMandadoPurchaseModal({
                 order: targetOrder,
@@ -7473,8 +7584,9 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       const oId = btn.dataset.id;
       if (oId) {
         const targetOrder = (activeOrdersList || []).find(o => o.id === oId);
-        const isShoppingMandado = targetOrder && targetOrder.isFavor && !isOrderEncomienda(targetOrder);
+        const isShoppingMandado = isShoppingFavor(targetOrder);
         if (isShoppingMandado) {
+          learnShoppingStore(targetOrder, shoppingPlanOf(targetOrder).current);
           const { openMandadoPurchaseModal } = await import('./delivery-panel/mandado.js');
           openMandadoPurchaseModal({
             order: targetOrder,
@@ -7496,6 +7608,26 @@ export function attachBottomDockListeners(user, activeOrders = []) {
   });
 
   // EDIT MANDADO PURCHASE COST BUTTONS (FROM "VER DETALLES")
+  const nextStoreBtn = document.getElementById('dock-mandado-next-store-btn');
+  if (nextStoreBtn) {
+    nextStoreBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const order = (activeOrdersList || []).find(x => x.id === nextStoreBtn.dataset.orderId);
+      const index = Number(nextStoreBtn.dataset.index);
+      if (!order || isNaN(index)) return;
+      const store = shoppingPlanOf(order).stores.find(s => s.index === index);
+      learnShoppingStore(order, store);
+      markStoreVisited(order.id, index);
+      if (navigator.vibrate) { try { navigator.vibrate(40); } catch (err) { /* sin vibración */ } }
+      const u = getState().user;
+      refreshBottomDock(document.getElementById('driver-footer-dock-container'), u, activeOrdersList);
+      const bar = document.getElementById('session-status-bar-container');
+      if (bar && u) { bar.innerHTML = renderStatusBar(u); attachStatusBarListeners(u); }
+      syncDriverNavigationWithOrders(activeOrdersList);
+    };
+  }
+
   const editMandadoBtns = document.querySelectorAll('.edit-mandado-purchase-btn');
   editMandadoBtns.forEach(btn => {
     btn.onclick = async (e) => {

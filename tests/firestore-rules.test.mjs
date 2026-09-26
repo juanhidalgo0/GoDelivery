@@ -424,6 +424,40 @@ await check('admin baja la deuda al liquidar',
   assertSucceeds(updateDoc(doc(jefe, 'users/cadete1'), { deliveryDebt: 0 })));
 
 console.log('');
+console.log('=========== LUGARES DE MANDADOS ===========');
+const lugar = (extra = {}) => ({ name: 'Farmacia Pasteur', slug: 'farmacia-pasteur', category: 'farmacia', lat: -35.08, lng: -57.515, samples: [{ lat: -35.08, lng: -57.515, at: 1 }], visits: 1, verified: false, lastDriverUid: 'cadete1', ...extra });
+await check('cadete aprende un lugar nuevo',
+  assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar())));
+await check('cadete suma una visita',
+  assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ visits: 2, lat: -35.0801 }))));
+await check('cliente lee los lugares (para las sugerencias)',
+  assertSucceeds(getDocs(collection(cliente1, 'mandadoPlaces'))));
+await check('anonimo NO lee los lugares',
+  assertFails(getDocs(collection(anon, 'mandadoPlaces'))));
+await check('cliente NO escribe lugares',
+  assertFails(setDoc(doc(cliente2, 'mandadoPlaces/trampa'), lugar({ slug: 'trampa', lastDriverUid: 'cliente2' }))));
+await check('cadete NO confirma un lugar',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true }))));
+await check('cadete NO firma por otro',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ lastDriverUid: 'otro' }))));
+await check('cadete NO renombra un lugar',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ name: 'Otra cosa' }))));
+await check('cadete NO pone un lugar fuera de Magdalena',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/lejos'), lugar({ slug: 'lejos', lat: -34.6037, lng: -58.3816 }))));
+await check('cadete NO agrega campos raros',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ precio: 1 }))));
+await check('cadete NO borra lugares',
+  assertFails(deleteDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'))));
+await check('admin confirma un lugar',
+  assertSucceeds(updateDoc(doc(jefe, 'mandadoPlaces/farmacia-pasteur'), { verified: true })));
+await check('cadete NO mueve un lugar confirmado',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true, lat: -35.09 }))));
+await check('cadete suma visita a un lugar confirmado sin moverlo',
+  assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true, lat: -35.0801, visits: 3 }))));
+await check('admin borra un lugar',
+  assertSucceeds(deleteDoc(doc(jefe, 'mandadoPlaces/farmacia-pasteur'))));
+
+console.log('');
 console.log('================================================');
 console.log('  PASARON: ' + pass + '   |   FALLARON: ' + fail);
 if (failures.length) {

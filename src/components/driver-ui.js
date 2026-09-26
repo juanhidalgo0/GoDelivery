@@ -152,6 +152,24 @@ export const isCashPayment = (o = {}) => {
   return pm === 'efectivo' || pm === 'cash' || pm.includes('efect');
 };
 
+/**
+ * Go Cash: cuánto se cambia y en qué sentido.
+ * transfer_to_cash: el cliente transfiere y el repartidor le lleva el efectivo.
+ * cash_to_transfer: el cliente da efectivo y el repartidor le transfiere.
+ * (Los pedidos viejos no guardaban el monto: se lee del detalle "por valor de $20.000".)
+ */
+export function goCashInfo(o = {}) {
+  let amount = Number(o.goCashAmount ?? o.amount ?? o.cashAmount ?? 0);
+  if (!(amount > 0)) {
+    const m = String(o.details || o.description || '').match(/por valor de\s*\$\s*([\d.,]+)/i);
+    if (m) amount = Number(m[1].replace(/\./g, '').replace(',', '.')) || 0;
+  }
+  const type = String(o.goCashType || o.paymentMethod || '').toLowerCase();
+  const text = String(o.details || '').toLowerCase();
+  const driverBringsCash = type === 'transfer_to_cash' || (type !== 'cash_to_transfer' && /transferencia a efectivo/.test(text));
+  return { amount, driverBringsCash };
+}
+
 /** Distancia en km entre dos puntos {lat,lng} (o null). */
 export function kmBetween(a, b) {
   const p = (c) => (c && !isNaN(Number(c.lat ?? c.latitude)) && !isNaN(Number(c.lng ?? c.longitude)) ? { lat: Number(c.lat ?? c.latitude), lng: Number(c.lng ?? c.longitude) } : null);

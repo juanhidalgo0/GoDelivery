@@ -2906,6 +2906,21 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         }
       }
 
+      // Comercios del mandado tal como los eligió el cliente (con ubicación si eligió uno conocido).
+      // Solo sirven para guiar al repartidor: el precio sigue calculándose desde el centro.
+      const cleanStops = Array.isArray(req.body.mandadoStops) ? req.body.mandadoStops.slice(0, 10).map(st => {
+        const store = String((st && st.store) || "").replace(/\s+/g, " ").trim().slice(0, 80);
+        if (!store) return null;
+        const out = { store, items: String((st && st.items) || "").trim().slice(0, 600) };
+        const lat = Number(st && st.lat), lng = Number(st && st.lng);
+        if (isFinite(lat) && isFinite(lng) && lat > -35.6 && lat < -34.6 && lng > -58.1 && lng < -57.0) {
+          out.lat = Math.round(lat * 1e6) / 1e6;
+          out.lng = Math.round(lng * 1e6) / 1e6;
+        }
+        if (st && typeof st.nearest === "string" && /^[a-z]{3,20}$/.test(st.nearest)) out.nearest = st.nearest;
+        return out;
+      }).filter(Boolean) : [];
+
       const orderData = {
         orderId: lastId,
         isFavor: true,
@@ -2919,6 +2934,14 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         deliveryCoords: deliveryCoords || null,
         addressNotes: addressNotesVal,
         details: details,
+        ...(cleanStops.length ? { mandadoStops: cleanStops } : {}),
+        // Go Cash: el monto a cambiar y el sentido (antes no se guardaban y el repartidor veía
+        // el costo del envío como si fuera el efectivo a llevar)
+        ...(type === "gocash" ? {
+          isGoCash: true,
+          goCashAmount: Math.min(70000, Math.max(0, Math.round(Number(req.body.goCashAmount) || 0))),
+          goCashType: req.body.goCashType === "transfer_to_cash" ? "transfer_to_cash" : "cash_to_transfer",
+        } : {}),
         deliveryCost: finalDeliveryCost,
         isRaining: isRaining,
         rainSurcharge: activeRainSurcharge,

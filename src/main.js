@@ -698,6 +698,7 @@ async function init() {
     '/admin/gomarket': (c) => import('./pages/admin/gomarket.js').then(m => m.renderAdminGoMarket(c)),
     '/admin/offers': (c) => import('./pages/admin/offers.js').then(m => m.renderAdminOffers(c)),
     '/admin/coupons': (c) => import('./pages/admin/coupons.js').then(m => m.renderAdminCoupons(c)),
+    '/admin/lugares': (c) => import('./pages/admin/mandado-places.js').then(m => m.renderAdminMandadoPlaces(c)),
     '/admin/metrics': (c) => import('./pages/admin/metrics.js').then(m => m.renderAdminMetrics(c)),
     '/admin/metrics/services': (c) => import('./pages/admin/services-metrics.js').then(m => m.renderServicesMetrics(c)),
     '/admin/metrics/breakdown': (c) => import('./pages/admin/metrics-breakdown.js').then(m => m.renderAdminMetricsBreakdown(c)),

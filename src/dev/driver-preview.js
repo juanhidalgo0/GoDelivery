@@ -6,10 +6,19 @@ import { initDriverNavigationMap, updateDriverMapLocation, renderMultiStopRoute,
 import { showExclusiveOfferOverlay, hideExclusiveOfferOverlay, stopExclusiveOfferAlert } from '../components/exclusive-offer-modal.js';
 import { setState } from '../state.js';
 import { showToast } from '../components/toast.js';
+import { setPlaces } from '../utils/mandado-places.js';
+import { markStoreVisited } from '../utils/mandado-places-store.js';
 
 const USER = { uid: 'preview-driver', displayName: 'Repartidor de prueba', isOnline: true, role: 'delivery', tripStatus: 'approved' };
 const DRIVER_POS = { lat: -35.0760, lng: -57.5100 };
 window.lastRiderPos = DRIVER_POS;
+// Lugares de mandados que "aprendió" la app (en la app salen de Firestore)
+setPlaces([
+  { name: 'Farmacia del Pueblo', slug: 'farmacia-del-pueblo', lat: -35.0800, lng: -57.5185, category: 'farmacia', source: 'aprendido', visits: 4 },
+  { name: 'Farmacia Pasteur', slug: 'farmacia-pasteur', lat: -35.0842, lng: -57.5212, category: 'farmacia', source: 'aprendido', visits: 2, verified: true, address: 'Mitre 640' },
+  { name: 'Verdulería El Trébol', slug: 'verduleria-el-trebol', lat: -35.0772, lng: -57.5150, category: 'verduleria', source: 'aprendido', visits: 3 },
+  { name: 'Maxikiosco Paulos', slug: 'maxikiosco-paulos', lat: -35.0815, lng: -57.5147, category: 'kiosco', source: 'comercio', address: 'San Martín 1102' },
+]);
 setState({ driverTodayEarnings: 12400, driverTodayOrdersCount: 6 });
 window.currentDemandHotspots = [{ name: 'Pizzería Los Sabores', count: 2, coords: [-57.5147, -35.0815] }, { name: 'Burger Norte', count: 1, coords: [-57.5060, -35.0790] }];
 
@@ -42,9 +51,9 @@ const base = {
     totalAmount: 3200, total: 3200, shippingCost: 3200, deliveryCost: 3200, driverEarnings: 3200,
   }),
   gocash: () => ({
-    id: 'sim_g1', orderId: '4102', status: 'accepted', isFavor: true, favorType: 'gocash', amount: 20000, userName: 'Pablo R.',
+    id: 'sim_g1', orderId: '4102', status: 'accepted', isFavor: true, favorType: 'gocash', goCashAmount: 20000, goCashType: 'transfer_to_cash', userName: 'Pablo R.',
     userPhone: '2221665544', deliveryAddress: 'Moreno 1020', deliveryCoords: { lat: -35.0780, lng: -57.5120 }, paymentMethod: 'transferencia',
-    totalAmount: 20900, total: 20900, shippingCost: 900, deliveryCost: 900, driverEarnings: 900,
+    totalAmount: 900, total: 900, shippingCost: 900, deliveryCost: 900, driverEarnings: 900,
   }),
   burger: (n, name, addr, lat, lng, pay) => ({
     id: `sim_b${n}`, orderId: `77${n}0`, status: 'ready', comercioName: 'Burger Norte', comercioAddress: 'Calle 12 n° 100',
@@ -71,6 +80,15 @@ const CASES = {
   '1 pedido · retirar': () => ({ orders: [base.comercio()] }),
   '1 pedido · entregar': () => ({ orders: [{ ...base.comercio(), status: 'delivering', pickedUpAt: now() }] }),
   '1 mandado · comprar': () => ({ orders: [base.mandado()] }),
+  'Mandado · comercio sin ubicación': () => ({ orders: [{ ...base.mandado(), id: 'sim_m2', description: '', details: '🏪 **1. Comercio:** Almacén Don Pepe\n📦 **Pedido:** 1 yerba, 2 fideos' }] }),
+  'Mandado · 2 comercios': () => ({ orders: [{ ...base.mandado(), id: 'sim_m3', stopsCount: 2, description: '',
+    details: '🏪 **1. Comercio:** Maxikiosco Paulos\n📦 **Pedido:** 2 alfajores, 1 coca 2.25L\n\n🏪 **2. Comercio:** Verdulería El Trébol\n📦 **Pedido:** 1kg papas, 1/2kg tomates' }] }),
+  'Mandado · farmacia más cercana': () => ({ orders: [{ ...base.mandado(), id: 'sim_m4', description: '', details: '🏪 **1. Comercio:** Cualquier farmacia (la más cercana)\n📦 **Pedido:** Ibuprofeno 400',
+    mandadoStops: [{ store: 'Cualquier farmacia (la más cercana)', items: 'Ibuprofeno 400', nearest: 'farmacia' }] }] }),
+  'Oferta · mandado 2 comercios': () => ({ orders: [], offer: offer({ ...base.mandado(), id: 'sim_m3', stopsCount: 2, description: '',
+    details: '🏪 **1. Comercio:** Maxikiosco Paulos\n📦 **Pedido:** 2 alfajores\n\n🏪 **2. Comercio:** Verdulería El Trébol\n📦 **Pedido:** 1kg papas' }) }),
+  'Go Cash · salir (llevás efectivo)': () => ({ orders: [base.gocash()] }),
+  'Go Cash · salir (recibís efectivo)': () => ({ orders: [{ ...base.gocash(), goCashType: 'cash_to_transfer', paymentMethod: 'cash_to_transfer' }] }),
   '1 encomienda · retirar': () => ({ orders: [base.encomienda()] }),
   'GoViaje · buscar pasajero': () => ({ orders: [base.viaje()] }),
   'GoViaje · a bordo': () => ({ orders: [{ ...base.viaje(), status: 'delivering', pickedUpAt: now() }] }),
@@ -123,6 +141,8 @@ function bindDock() {
   document.querySelectorAll('.driver-dock-chat-btn, .open-order-breakdown-btn, .edit-mandado-purchase-btn').forEach((el) => {
     el.onclick = (e) => { e.stopPropagation(); showToast('En la app abre su pantalla (vista previa)', 'info'); };
   });
+  const nextStore = document.getElementById('dock-mandado-next-store-btn');
+  if (nextStore) nextStore.onclick = (e) => { e.stopPropagation(); markStoreVisited(nextStore.dataset.orderId, Number(nextStore.dataset.index)); rerender(); drawRoute(); };
   document.querySelectorAll('.driver-swipe-slider').forEach(bindSlider);
 }
 
@@ -173,6 +193,7 @@ function bindSlider(slider) {
 
 function showCase(name) {
   hideExclusiveOfferOverlay(); stopExclusiveOfferAlert();
+  try { localStorage.removeItem('go_mandado_visited_v1'); } catch (e) { /* sin almacenamiento */ }
   const c = CASES[name]();
   orders = c.orders;
   window.driverDockExpanded = false;

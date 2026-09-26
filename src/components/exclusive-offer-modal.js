@@ -5,7 +5,8 @@ import { AudioManager } from '../utils/audio-manager.js';
 import { showToast } from '../components/toast.js';
 import { db } from '../firebase.js';
 import { doc, getDoc, getDocs, collection, runTransaction } from 'firebase/firestore';
-import { driverTokens, orderKind, kindTag, countdownRing, RING_C, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, kmBetween, kmLabel, pickupCoordsOf, dropoffCoordsOf } from './driver-ui.js';
+import { driverTokens, orderKind, kindTag, countdownRing, RING_C, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, kmBetween, kmLabel, pickupCoordsOf, dropoffCoordsOf, goCashInfo } from './driver-ui.js';
+import { mandadoShoppingPlan, isPlaceholderCoords, categoryLabel } from '../utils/mandado-places.js';
 
 export function isOrderEncomienda(order) {
   if (!order) return false;
@@ -269,7 +270,7 @@ export function showExclusiveOfferOverlay(batch, user) {
 
     originIcon = `<img src="/go-cash.png?v=5" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Go Cash" />`;
     originTitle = orderObj.pickupAddress || orderObj.originAddress || 'Punto de retiro de efectivo';
-    originSubtitle = `Monto a entregar: $${Number(orderObj.amount || orderObj.cashAmount || orderObj.totalAmount || 0).toLocaleString('es-AR')}`;
+    originSubtitle = `Monto: ${money(goCashInfo(orderObj).amount)}`;
   } else if (isPagoServicios) {
     typeBadgeLabel = 'PAGO DE SERVICIO';
     typeBadgeIcon = `<img src="/go-clipboard.png?v=5" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Pago de Servicios" />`;
@@ -354,25 +355,54 @@ export function showExclusiveOfferOverlay(batch, user) {
   const clientName = orderObj.userName || orderObj.clientName || '';
 
   const stops = [];
+  let shoppingPlan = null;
   if (isTrip) {
     stops.push({ kind: 'person', title: `Buscás a ${clientName || 'tu pasajero'}`, sub: orderObj.originAddress || orderObj.pickupAddress || '', state: 'next' });
     stops.push({ kind: 'dest', title: destAddress, sub: 'Destino del viaje', state: 'next' });
   } else if (batch.isBundle) {
     stops.push({ kind: 'store', title: batch.comercioName || orderObj.comercioName || 'Comercio', sub: `Retirás ${batch.orders.length} pedidos`, state: 'next' });
     batch.orders.forEach(o => stops.push({ kind: 'dest', title: o.destinationAddress || o.address || o.deliveryAddress || 'Entrega', sub: o.userName ? `Entrega a ${o.userName}` : '', state: 'next' }));
+  } else if (isMandado || isPagoServicios) {
+    // Cada comercio del mandado, en el orden en que conviene hacerlos
+    const src = isPagoServicios && !(Array.isArray(orderObj.mandadoStops) && orderObj.mandadoStops.length)
+      ? { ...orderObj, mandadoStops: [{ store: String(originTitle).replace(/\s*\(.*\)\s*$/, ''), items: '' }] }
+      : orderObj;
+    shoppingPlan = mandadoShoppingPlan(src, window.lastRiderPos || null);
+    if (shoppingPlan.stores.length) {
+      shoppingPlan.pending.forEach(st => stops.push({
+        kind: 'store',
+        title: st.placeName || st.store,
+        sub: [st.nearest ? `Cualquier ${categoryLabel(st.nearest)}: la más cercana` : (st.coords ? (st.placeAddress || '') : 'Ubicación a confirmar'), st.items].filter(Boolean).join(' · '),
+        state: 'next',
+      }));
+    } else {
+      stops.push({ kind: 'store', title: originTitle, sub: originSubtitle, state: 'next' });
+    }
+    stops.push({ kind: 'dest', title: destAddress, sub: clientName ? `Entrega a ${clientName}` : '', state: 'next' });
   } else {
-    if (!(isGoCash && !orderObj.pickupAddress && !orderObj.originAddress)) {
+    // Go Cash no tiene retiro: el repartidor sale con el efectivo (o la cuenta) hacia el cliente
+    if (!isGoCash) {
       stops.push({ kind: isEncomienda ? 'pkg' : 'store', title: originTitle, sub: originSubtitle, state: 'next' });
     }
     stops.push({ kind: 'dest', title: destAddress, sub: clientName ? `Entrega a ${clientName}` : '', state: 'next' });
   }
 
-  // Distancia aproximada: de donde está el repartidor al retiro, y del retiro a la entrega
-  const pc = pickupCoordsOf(orderObj), dc = dropoffCoordsOf(orderObj);
-  let km = 0, haveKm = false;
-  const leg1 = kmBetween(window.lastRiderPos, pc || dc);
-  if (leg1 != null) { km += leg1; haveKm = true; }
-  if (pc && dc) { const leg2 = kmBetween(pc, dc); if (leg2 != null) { km += leg2; haveKm = true; } }
+  // Distancia aproximada: repartidor → retiro(s) → entrega. El "retiro" de los formularios de
+  // mandados es el centro del pueblo: no se usa; se suman solo los comercios que se sabe dónde quedan.
+  const dc = dropoffCoordsOf(orderObj);
+  let waypoints;
+  if (shoppingPlan) waypoints = shoppingPlan.pending.filter(st => st.coords).map(st => st.coords);
+  else {
+    const pc = isGoCash ? null : pickupCoordsOf(orderObj);
+    waypoints = pc && !isPlaceholderCoords(pc) ? [pc] : [];
+  }
+  let km = 0, haveKm = false, from = window.lastRiderPos || null;
+  for (const pt of [...waypoints, dc]) {
+    if (!pt) continue;
+    const leg = kmBetween(from, pt);
+    if (leg != null) { km += leg; haveKm = true; }
+    from = pt;
+  }
   const metaLines = [];
   if (batch.isBundle) metaLines.push(`${batch.orders.length} entregas`);
   if (haveKm) { metaLines.push(kmLabel(km)); metaLines.push(`~${Math.max(3, Math.round(km * 2.6))} min`); }
@@ -381,7 +411,11 @@ export function showExclusiveOfferOverlay(batch, user) {
   const orderTotal = batch.isBundle ? batch.total : (orderObj.totalAmount || orderObj.total || batch.total || 0);
   const rows = [];
   if (isGoCash) {
-    rows.push(moneyRow({ label: 'Llevás en efectivo', amount: money(orderObj.amount || orderObj.cashAmount || orderObj.totalAmount || 0), sub: 'El cliente te lo paga por transferencia', tone: 'violet', icon: 'swap' }, isLight));
+    const g = goCashInfo(orderObj);
+    rows.push(g.driverBringsCash
+      ? moneyRow({ label: 'Llevás en efectivo', amount: g.amount > 0 ? money(g.amount) : '', sub: 'El cliente te lo transfiere al recibirlo', tone: 'violet', icon: 'swap' }, isLight)
+      : moneyRow({ label: 'Recibís en efectivo', amount: g.amount > 0 ? money(g.amount) : '', sub: 'Le transferís ese monto al cliente', tone: 'violet', icon: 'swap' }, isLight));
+    rows.push(moneyRow({ label: 'Cobrás el envío', amount: money(orderTotal), sub: 'Aparte del cambio', tone: 'amber' }, isLight));
   } else {
     if (isMandado) {
       const buy = Number(orderObj.purchaseCost ?? orderObj.purchaseItemsTotal ?? batch.subtotal ?? 0);

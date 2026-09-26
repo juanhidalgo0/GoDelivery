@@ -9,6 +9,8 @@ import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn, isAdmin } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { getDistance, calculateDynamicFee } from '../utils/geo.js';
+import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel } from '../utils/mandado-places.js';
+import { loadMandadoPlaces } from '../utils/mandado-places-store.js';
 
 const BANNER_STORAGE_KEY = 'godelivery_active_banner_v2';
 let cachedActiveBanner = null;
@@ -1172,6 +1174,7 @@ async function createFavorOrder(data) {
     receiptDeliveryType: data.receiptDeliveryType || null,
     originBannerId: data.originBannerId || null
   };
+  if (Array.isArray(data.mandadoStops) && data.mandadoStops.length) body.mandadoStops = data.mandadoStops;
 
   // Inject direct driver assignment if admin selected one
   const directDriverUid = window._selectedDirectDriverUid;
@@ -1652,7 +1655,7 @@ export async function showCompraForm(targetContainer = null) {
       isPaulosPreset = true;
       const nameInput = subformsContainer.querySelector('.store-name-input');
       const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
-      if (nameInput) nameInput.value = 'Maxikiosco Paulos';
+      if (nameInput) { nameInput.value = 'Maxikiosco Paulos'; loadMandadoPlaces().then(() => pickKnownPlace(nameInput)); }
       if (detailTextarea) {
         detailTextarea.value = '';
         setTimeout(() => detailTextarea.focus(), 100);
@@ -1685,6 +1688,7 @@ export async function showCompraForm(targetContainer = null) {
   const renderSubforms = () => {
     // 1. Preserve existing inputs and textareas before clearing
     const existingNames = Array.from(subformsContainer.querySelectorAll('.store-name-input')).map(input => input.value);
+    const existingPicks = Array.from(subformsContainer.querySelectorAll('.store-name-input')).map(input => ({ ...input.dataset }));
     const existingDetails = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea')).map(textarea => textarea.value);
 
     subformsContainer.innerHTML = '';
@@ -1700,7 +1704,9 @@ export async function showCompraForm(targetContainer = null) {
           <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; font-size:10px; font-weight:950; display:flex; align-items:center; justify-content:center;">${i + 1}</div>
           <span style="font-size:11px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
         </div>
-        <input type="text" class="store-name-input" value="${prevName.replace(/"/g, '&quot;')}" placeholder="${pl.name}" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
+        <input type="text" class="store-name-input" value="${prevName.replace(/"/g, '&quot;')}" placeholder="${pl.name}" autocomplete="off" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
+        <div class="store-suggest-list" style="display:none; flex-direction:column; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-surface); overflow:hidden;"></div>
+        <div class="store-place-hint" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:#0d9488; padding:0 2px;"></div>
         <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:60px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:8px 12px; background:var(--color-bg-secondary); font-size:12.5px; font-weight:600; resize:none; outline:none; color:var(--color-text-primary); font-family:inherit; transition:all 0.2s;" required>${prevDetails}</textarea>
       `;
       subformsContainer.appendChild(stopDiv);
@@ -1709,7 +1715,83 @@ export async function showCompraForm(targetContainer = null) {
       const detailTextarea = stopDiv.querySelector('.store-detail-textarea');
       setupScrollFocus(nameInput);
       setupScrollFocus(detailTextarea);
+      Object.assign(nameInput.dataset, existingPicks[i] || {});
+      setupStorePicker(stopDiv, nameInput);
     }
+  };
+
+  // ── Comercio del mandado: sugerencias mientras se escribe ──
+  // Comercios adheridos y lugares que ya conocen los repartidores (con ubicación), y si se escribe
+  // un rubro, "cualquiera, el más cercano". Si no aparece, se escribe a mano como siempre.
+  loadMandadoPlaces();
+  const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const clearPick = (input) => { delete input.dataset.lat; delete input.dataset.lng; delete input.dataset.nearest; delete input.dataset.pick; };
+  const showPickHint = (stopDiv, input) => {
+    const hint = stopDiv.querySelector('.store-place-hint');
+    if (!hint) return;
+    if (input.dataset.nearest) {
+      hint.innerHTML = `${icon('mapPin', 13)} El repartidor va al más cercano a tu casa`;
+      hint.style.display = 'flex';
+    } else if (input.dataset.lat) {
+      hint.innerHTML = `${icon('mapPin', 13)} Ubicación del comercio confirmada`;
+      hint.style.display = 'flex';
+    } else {
+      hint.style.display = 'none';
+    }
+  };
+  function setupStorePicker(stopDiv, input) {
+    const list = stopDiv.querySelector('.store-suggest-list');
+    if (!list) return;
+    const hide = () => { list.style.display = 'none'; };
+    const choose = (opt) => {
+      clearPick(input);
+      input.value = opt.name;
+      if (opt.nearest) input.dataset.nearest = opt.nearest;
+      else if (typeof opt.lat === 'number') { input.dataset.lat = String(opt.lat); input.dataset.lng = String(opt.lng); }
+      input.dataset.pick = '1';
+      input.style.borderColor = 'var(--color-border-light)';
+      hide();
+      showPickHint(stopDiv, input);
+      const details = stopDiv.querySelector('.store-detail-textarea');
+      if (details && !details.value.trim()) setTimeout(() => details.focus(), 60);
+      updateCost();
+    };
+    const render = () => {
+      const q = input.value.trim();
+      if (q.length < 2) { hide(); return; }
+      const opts = [];
+      const cat = placeCategory(q);
+      if (cat) opts.push({ name: nearestLabel(cat), nearest: cat, sub: `El repartidor elige la ${categoryLabel(cat)} más cerca de tu casa` });
+      suggestPlaces(q).forEach(p => opts.push({ name: p.name, lat: p.lat, lng: p.lng, sub: p.address || (p.source === 'comercio' ? 'Comercio de GoDelivery' : 'Ubicación conocida por los repartidores') }));
+      if (!opts.length) { hide(); return; }
+      list.innerHTML = opts.map((o, k) => `
+        <button type="button" data-k="${k}" style="display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; background:transparent; border:none; ${k ? 'border-top:1px solid var(--color-border-light);' : ''} text-align:left; cursor:pointer; font-family:inherit; color:var(--color-text-primary);">
+          <span style="width:28px; height:28px; border-radius:9px; background:${o.nearest ? 'rgba(13,148,136,0.1)' : 'var(--color-bg-secondary)'}; color:${o.nearest ? '#0d9488' : 'var(--color-text-secondary)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon(o.nearest ? 'navigationArrow' : 'mapPin', 14)}</span>
+          <span style="min-width:0; display:flex; flex-direction:column; gap:1px;">
+            <span style="font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(o.name)}</span>
+            <span style="font-size:11px; font-weight:600; color:var(--color-text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(o.sub)}</span>
+          </span>
+        </button>`).join('');
+      list.style.display = 'flex';
+      list.querySelectorAll('button[data-k]').forEach(btn => {
+        // pointerdown: se elige antes de que el input pierda el foco y cierre la lista
+        btn.addEventListener('pointerdown', (e) => { e.preventDefault(); choose(opts[Number(btn.dataset.k)]); });
+      });
+    };
+    input.addEventListener('input', () => { clearPick(input); showPickHint(stopDiv, input); render(); });
+    input.addEventListener('focus', () => { if (!input.dataset.pick) render(); });
+    input.addEventListener('blur', () => setTimeout(hide, 150));
+    showPickHint(stopDiv, input);
+  }
+
+  // Ubicación conocida para un nombre cargado solo (Paulos, banner de un comercio)
+  const pickKnownPlace = (input) => {
+    if (!input) return;
+    clearPick(input);
+    const p = resolvePlaceByName(input.value);
+    if (p) { input.dataset.lat = String(p.lat); input.dataset.lng = String(p.lng); input.dataset.pick = '1'; }
+    const stopDiv = input.parentElement;
+    if (stopDiv) showPickHint(stopDiv, input);
   };
 
   renderSubforms();
@@ -1717,7 +1799,7 @@ export async function showCompraForm(targetContainer = null) {
   if (window._prefilledMerchantName) {
     const nameInput = subformsContainer.querySelector('.store-name-input');
     const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
-    if (nameInput) nameInput.value = window._prefilledMerchantName;
+    if (nameInput) { nameInput.value = window._prefilledMerchantName; loadMandadoPlaces().then(() => pickKnownPlace(nameInput)); }
     if (detailTextarea) {
       setTimeout(() => detailTextarea.focus(), 150);
     }
@@ -1843,7 +1925,18 @@ export async function showCompraForm(targetContainer = null) {
     for (let i = 0; i < stopsCount; i++) {
       const name = nameInputs[i] ? nameInputs[i].value.trim() : '';
       const details = detailTextareas[i] ? detailTextareas[i].value.trim() : '';
-      stopsList.push({ store: name, items: details });
+      const ds = nameInputs[i] ? nameInputs[i].dataset : {};
+      const stop = { store: name, items: details };
+      const nearest = ds.nearest || nearestCategoryOf(name);
+      if (nearest) stop.nearest = nearest;
+      else if (ds.lat && ds.lng) { stop.lat = Number(ds.lat); stop.lng = Number(ds.lng); }
+      else {
+        // Escrito a mano: si es un comercio adherido, se manda su ubicación (los aprendidos se
+        // buscan al momento en el panel del repartidor, así usan el punto más afinado)
+        const known = resolvePlaceByName(name);
+        if (known && known.source === 'comercio') { stop.lat = known.lat; stop.lng = known.lng; }
+      }
+      stopsList.push(stop);
     }
 
     if (!selectedPaymentMethod) {
@@ -1903,6 +1996,7 @@ export async function showCompraForm(targetContainer = null) {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: packagedDetails,
+            mandadoStops: stopsList,
             deliveryCost: calculatedDistFee,
             rainSurcharge: rainSurcharge,
             purchaseFee: activePurchaseFee,

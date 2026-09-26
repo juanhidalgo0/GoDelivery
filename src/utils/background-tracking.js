@@ -174,6 +174,8 @@ async function handleLocationUpdate(pos) {
   
   // Cache position in global window context for instant access across modals/maps
   window.lastRiderPos = { lat: latitude, lng: longitude };
+  window.lastRiderPosAt = Date.now();
+  window.lastRiderAccuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
   
   const tickDetail = {
     coords: { lat: latitude, lng: longitude, speed: (typeof speed === 'number' && speed >= 0) ? speed : 0 },

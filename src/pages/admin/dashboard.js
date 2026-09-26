@@ -164,6 +164,15 @@ export async function renderAdminDashboard() {
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>
 
+            <a href="#/admin/lugares" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
+              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#ccfbf1,#5eead4); color:#0f766e; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('mapPin', 24)}</div>
+              <div style="flex:1;">
+                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Lugares de mandados</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Dónde queda cada comercio que piden los clientes</div>
+              </div>
+              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
+            </a>
+
             ${isAdmin() ? `
               <a href="#/admin/broadcasts" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
                 <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#c084fc,#a855f7); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('bell', 24)}</div>
