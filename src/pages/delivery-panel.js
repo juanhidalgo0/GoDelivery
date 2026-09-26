@@ -1324,15 +1324,15 @@ export async function renderDeliveryPanel(containerArg) {
   // Render Floating HUD overlays into hudContainer
   hudContainer.innerHTML = `
     <!-- LAYER 2: SOLID INTEGRATED TOP STATUS BAR HEADER (WITH SYSTEM NOTIFICATION INTEGRATION) -->
+    <!-- Arriba: píldoras y cartel flotando sobre el mapa (sin franja de fondo); solo ellos reciben toques -->
+    <style>#session-status-bar-container > * { pointer-events: auto; }</style>
     <div id="session-status-bar-container" style="
       position: fixed;
       top: 0; left: 0; right: 0;
       padding: max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) 12px 10px 12px;
       z-index: 9999;
-      pointer-events: auto;
-      background: var(--driver-bg-panel);
-      border-bottom: 1px solid ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'};
-      box-shadow: 0 4px 20px ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.6)'};
+      pointer-events: none;
+      background: transparent;
     ">
       ${renderStatusBar(user)}
     </div>
