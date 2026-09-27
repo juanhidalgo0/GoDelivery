@@ -39,16 +39,20 @@ export function safeGoBack(fallback = '#/') {
     return;
   }
 
+  // The history stores normalized paths ("/comercio/abc"), not hashes ("#/comercio/abc"):
+  // compare in that format, or "back" never finds the previous page.
+  const currentPath = normalizeRoutePath(cleanHash);
+
   // 2. Pop current page if on top of stack
-  if (navigationHistory.length > 0 && navigationHistory[navigationHistory.length - 1] === cleanHash) {
+  if (navigationHistory.length > 0 && navigationHistory[navigationHistory.length - 1] === currentPath) {
     navigationHistory.pop();
   }
 
   // 3. Find the previous route that is different from current page
   while (navigationHistory.length > 0) {
     const prev = navigationHistory.pop();
-    if (prev && prev !== cleanHash) {
-      window.location.hash = prev;
+    if (prev && prev !== currentPath) {
+      window.location.hash = prev.startsWith('#') ? prev : `#${prev}`;
       return;
     }
   }

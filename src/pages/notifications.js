@@ -6,6 +6,8 @@ import { icon } from '../utils/icons.js';
 import { signInWithGoogle } from '../auth.js';
 import { initPushNotifications } from '../utils/notifications.js';
 import { showToast } from '../components/toast.js';
+import { showConfirm } from '../components/modal.js';
+import { escapeHtml } from '../utils/escape.js';
 
 let loadingMore = false;
 let hasMore = true;
@@ -13,220 +15,45 @@ let lastDoc = null;
 const PAGE_SIZE = 20;
 let unsub = null;
 
-function getNotificationStyles() {
-  return `
-    <style>
-      .notifications-page {
-        background: var(--color-bg);
-        min-height: 100vh;
-        padding-bottom: 90px;
-        box-sizing: border-box;
-      }
-      .notifications-container-premium {
-        max-width: 650px;
-        margin: 0 auto;
-        padding: 16px;
-        width: 100%;
-        box-sizing: border-box;
-      }
-      .notif-header-section-v6 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 12px;
-        border-bottom: 1px solid var(--color-border-light);
-      }
-      .notif-header-title-v6 {
-        font-family: var(--font-display);
-        font-size: 18px;
-        font-weight: 900;
-        color: var(--color-text-primary);
-        letter-spacing: -0.02em;
-        margin: 0;
-      }
-      .notif-clear-btn-v6 {
-        background: rgba(225, 29, 72, 0.05);
-        border: 1px solid rgba(225, 29, 72, 0.1);
-        color: var(--color-primary);
-        font-weight: 850;
-        font-size: 11.5px;
-        padding: 6px 12px;
-        border-radius: 10px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        transition: all 0.2s;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-      }
-      .notif-clear-btn-v6:hover {
-        background: var(--color-primary);
-        color: white;
-        border-color: var(--color-primary);
-        box-shadow: 0 4px 12px rgba(225, 29, 72, 0.2);
-      }
-      .notif-card-premium-v6 {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        padding: 16px;
-        background: var(--color-surface);
-        border: 1.5px solid var(--color-border-light);
-        border-radius: 20px;
-        margin-bottom: 12px;
-        cursor: pointer;
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-        box-shadow: var(--shadow-sm);
-      }
-      .notif-card-premium-v6:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--shadow-md);
-        border-color: var(--color-primary-light);
-      }
-      .notif-card-premium-v6.unread {
-        background: rgba(225, 29, 72, 0.02);
-        border-color: rgba(225, 29, 72, 0.15);
-      }
-      .notif-card-premium-v6.unread::after {
-        content: '';
-        position: absolute;
-        top: 16px;
-        right: 16px;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--color-primary);
-        box-shadow: 0 0 10px var(--color-primary);
-      }
-      .notif-icon-v6 {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.04);
-      }
-      .notif-icon-v6 svg {
-        color: white !important;
-        fill: none;
-      }
-      .notif-body-v6 {
-        flex: 1;
-        min-width: 0;
-      }
-      .notif-title-row-v6 {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 8px;
-        margin-bottom: 3px;
-      }
-      .notif-title-v6 {
-        font-family: var(--font-display);
-        font-weight: 850;
-        font-size: 14.5px;
-        color: var(--color-text-primary);
-      }
-      .notif-time-v6 {
-        font-size: 10.5px;
-        font-weight: 750;
-        color: var(--color-text-tertiary);
-        white-space: nowrap;
-      }
-      .notif-desc-v6 {
-        font-size: 12.5px;
-        font-weight: 600;
-        color: var(--color-text-secondary);
-        line-height: 1.4;
-      }
-      .notif-arrow-v6 {
-        color: var(--color-text-tertiary);
-        opacity: 0.6;
-        transition: transform 0.2s;
-        display: flex;
-        align-items: center;
-      }
-      .notif-card-premium-v6:hover .notif-arrow-v6 {
-        transform: translateX(3px);
-        color: var(--color-primary);
-        opacity: 1;
-      }
-      .empty-state-v6 {
-        text-align: center;
-        padding: 60px 20px;
-        opacity: 0.8;
-      }
-      .empty-state-icon-v6 {
-        width: 64px;
-        height: 64px;
-        background: var(--color-bg-secondary);
-        color: var(--color-text-tertiary);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        margin: 0 auto 16px auto;
-        box-shadow: var(--shadow-sm);
-      }
-      .empty-state-v6 h3 {
-        font-family: var(--font-display);
-        font-weight: 900;
-        font-size: 18px;
-        color: var(--color-text-primary);
-        margin: 0 0 8px 0;
-      }
-      .empty-state-v6 p {
-        font-size: 13px;
-        color: var(--color-text-secondary);
-        margin: 0;
-        font-weight: 600;
-      }
-    </style>
-  `;
-}
-
 export async function renderNotifications(content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
 
+  const askPermission = typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted';
   content.innerHTML = `
-    ${getNotificationStyles()}
-    <div class="notifications-page page-enter">
-      <div class="notifications-container-premium">
-        ${(typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted') ? `
-          <div id="notif-permission-banner" style="background: linear-gradient(135deg, rgba(225, 29, 72, 0.08), rgba(225, 29, 72, 0.02)); border: 1.5px solid rgba(225, 29, 72, 0.2); border-radius: 18px; padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
-              <span style="font-size: 22px;">🔔</span>
-              <div>
-                <div style="font-size: 13px; font-weight: 850; color: var(--color-text-primary);">Notificaciones desactivadas</div>
-                <div style="font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600;">Activá los avisos para enterarte cuando tu pedido esté en camino.</div>
-              </div>
-            </div>
-            <button id="enable-notifs-btn" style="background: var(--color-primary); color: white; border: none; padding: 8px 14px; border-radius: 12px; font-size: 12px; font-weight: 900; cursor: pointer; flex-shrink: 0; box-shadow: 0 4px 12px rgba(225, 29, 72, 0.25);">
-              Activar
-            </button>
+    <div class="go-service-page notifications-page">
+      <header class="go-service-header go-page-header" style="padding-top: calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)));">
+        <div class="go-service-row">
+          <button type="button" class="go-icon-btn" id="notif-back-btn" aria-label="Volver">${icon('chevronLeft', 20)}</button>
+          <div class="go-service-titles">
+            <span class="go-eyebrow go-service-eyebrow">Tu actividad</span>
+            <h1 class="go-title go-service-title">Notificaciones</h1>
+            <span class="go-bar go-service-bar"></span>
+          </div>
+          <div class="go-service-actions">
+            <button type="button" id="notif-clear-all-btn" class="go-icon-btn" aria-label="Borrar todas" style="display: none;">${icon('trash', 17)}</button>
+          </div>
+        </div>
+      </header>
+      <div class="go-service-scroll" id="notif-scroll">
+        ${askPermission ? `
+          <div id="notif-permission-banner" class="go-notif-permission">
+            <span class="go-notif-permission-icon">${icon('bell', 18)}</span>
+            <span class="go-notif-permission-text"><strong>Avisos desactivados</strong><small>Activalos para saber cuándo sale y llega tu pedido.</small></span>
+            <button type="button" id="enable-notifs-btn">Activar</button>
           </div>
         ` : ''}
-        <div class="notif-header-section-v6">
-          <h2 class="notif-header-title-v6">Historial</h2>
-          <button id="notif-clear-all-btn" class="notif-clear-btn-v6" style="display: none;">
-            ${icon('trash', 14)} Limpiar todo
-          </button>
-        </div>
-        <div id="notifications-list-full" class="notifications-list-full">
-          <div class="initial-loader" style="padding: 60px 0;">
-            <div class="spinner-mini"></div>
-          </div>
+        <div id="notifications-list-full" class="go-notif-list is-first">
+          ${[0, 1, 2, 3].map(() => '<div class="go-notif-skeleton"></div>').join('')}
         </div>
       </div>
     </div>
   `;
+
+  document.getElementById('notif-back-btn')?.addEventListener('click', () => {
+    if (window.safeGoBack) window.safeGoBack('#/');
+    else window.location.hash = '#/';
+  });
 
   startListener();
   renderItems();
@@ -237,31 +64,38 @@ export async function renderNotifications(content) {
       const { requestWebPushPermission } = await import('../utils/notifications.js');
       const perm = await requestWebPushPermission();
       if (perm === 'granted') {
-        showToast('¡Notificaciones activadas con éxito!', 'success');
+        showToast('Listo, te vamos a avisar.', 'success');
         document.getElementById('notif-permission-banner')?.remove();
       } else {
-        showToast('No se pudieron activar las notificaciones. Verificá los permisos de tu navegador.', 'warning');
+        showToast('No se pudieron activar. Revisá los permisos del navegador.', 'warning');
       }
     };
   }
 
   const unsubNotif = subscribe('notifications', () => renderItems());
-  const unsubUser = subscribe('user', () => {
+  // The user object changes often (points, heartbeat...). Only a different account matters here.
+  let lastUid = getState().user?.uid || null;
+  const unsubUser = subscribe('user', (u) => {
+    const uid = u?.uid || null;
+    if (uid === lastUid) return;
+    lastUid = uid;
+    if (unsub) { unsub(); unsub = null; }
     startListener();
     renderItems();
   });
 
-  window.onscroll = () => {
-    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
-      loadMore();
-    }
+  // Infinite scroll lives on the page's own scroller (it opens as a full-screen layer).
+  const scroller = document.getElementById('notif-scroll');
+  const onScroll = () => {
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 400) loadMore();
   };
+  scroller?.addEventListener('scroll', onScroll, { passive: true });
 
   return {
     cleanup: () => {
       unsubNotif();
       unsubUser();
-      window.onscroll = null;
+      scroller?.removeEventListener('scroll', onScroll);
     }
   };
 }
@@ -306,200 +140,164 @@ function isNotifClickable(n) {
   return true;
 }
 
+// Order statuses already looked up, so a re-render never waits on the network again.
+const orderStatusCache = new Map();
+let renderSeq = 0;
+
 async function renderItems() {
   const list = document.getElementById('notifications-list-full');
   if (!list) return;
+  const seq = ++renderSeq;
 
-  let notifications = getState().notifications || [];
   const user = getState().user;
-
-  notifications = notifications.filter(n => {
-    if (!n.title || !n.body) return false;
-    return true;
-  });
+  const notifications = (getState().notifications || []).filter(n => n.title && n.body);
 
   const clearBtn = document.getElementById('notif-clear-all-btn');
   if (clearBtn) {
-    clearBtn.style.display = (user && notifications.length > 0) ? 'flex' : 'none';
-    clearBtn.onclick = async () => {
-      const confirmClear = confirm('¿Estás seguro que deseas borrar todas las notificaciones?');
-      if (!confirmClear) return;
-      try {
-        const { writeBatch, collection, getDocs, doc } = await import('firebase/firestore');
-        const batch = writeBatch(db);
-        const snap = await getDocs(collection(db, 'users', user.uid, 'notifications'));
-        snap.docs.forEach(d => {
-          batch.delete(doc(db, 'users', user.uid, 'notifications', d.id));
-        });
-        await batch.commit();
-        showToast('Notificaciones borradas', 'success');
-      } catch (e) {
-        console.error(e);
-        showToast('Error al vaciar notificaciones', 'error');
-      }
+    clearBtn.style.display = (user && notifications.length > 0) ? 'inline-flex' : 'none';
+    clearBtn.onclick = () => {
+      showConfirm({
+        title: '¿Borrar todas?',
+        message: 'Se van a borrar todas tus notificaciones. No se puede deshacer.',
+        confirmText: 'Borrar todas',
+        danger: true,
+        onConfirm: async () => {
+          const { writeBatch, collection, getDocs, doc } = await import('firebase/firestore');
+          const batch = writeBatch(db);
+          const snap = await getDocs(collection(db, 'users', user.uid, 'notifications'));
+          snap.docs.forEach(d => batch.delete(doc(db, 'users', user.uid, 'notifications', d.id)));
+          await batch.commit();
+          showToast('Notificaciones borradas', 'success');
+        }
+      });
     };
   }
 
+  const paint = (html) => {
+    if (seq !== renderSeq) return false; // a newer render is on its way
+    if (list.dataset.sig === html) return false; // nothing changed: no flash
+    list.dataset.sig = html;
+    list.innerHTML = html;
+    // Cards animate in only the first time the list appears.
+    setTimeout(() => list.classList.remove('is-first'), 600);
+    return true;
+  };
+
   if (!user) {
-    list.innerHTML = `
-      <div class="empty-state-v6">
-        <div class="empty-state-icon-v6">${icon('lock', 24)}</div>
-        <h3>Acceso restringido</h3>
-        <p>Inicia sesión con tu cuenta de Google para ver tus notificaciones personales.</p>
-        <button class="btn btn-primary btn-lg" id="notif-login-btn" style="margin-top: 16px;">
-          Iniciar sesión
-        </button>
-      </div>
-    `;
-    document.getElementById('notif-login-btn').onclick = signInWithGoogle;
+    paint(`
+      <div class="go-notif-empty">
+        <span>${icon('lock', 24)}</span>
+        <h3 class="go-title">Iniciá sesión</h3>
+        <p>Entrá con tu cuenta para ver tus notificaciones.</p>
+        <button type="button" id="notif-login-btn">Iniciar sesión</button>
+      </div>`) && (document.getElementById('notif-login-btn').onclick = signInWithGoogle);
     return;
   }
 
   if (notifications.length === 0 && !loadingMore) {
-    list.innerHTML = `
-      <div class="empty-state-v6">
-        <div class="empty-state-icon-v6">${icon('bell', 24)}</div>
-        <h3>Todo al día</h3>
-        <p>No tienes notificaciones por el momento.</p>
-      </div>
-    `;
+    paint(`
+      <div class="go-notif-empty">
+        <span>${icon('bell', 24)}</span>
+        <h3 class="go-title">Todo al día</h3>
+        <p>Cuando pase algo con tus pedidos, te avisamos acá.</p>
+      </div>`);
     return;
   }
 
-  // Deduplication logic
-  const uniqueNotifications = [];
-  const seenKeys = new Set();
-
+  // Same message twice within two minutes is one notification.
+  const unique = [];
+  const seen = new Set();
   notifications.forEach(n => {
-    const timeKey = n.createdAt?.seconds ? Math.floor(n.createdAt.seconds / 120) : Math.floor(Date.now() / 120000);
+    const timeKey = n.createdAt?.seconds ? Math.floor(n.createdAt.seconds / 120) : 0;
     const key = `${n.title}_${n.body}_${timeKey}`;
-    
-    if (!seenKeys.has(key)) {
-      uniqueNotifications.push(n);
-      seenKeys.add(key);
-    }
+    if (!seen.has(key)) { unique.push(n); seen.add(key); }
   });
 
-  // Fetch referred order statuses to check if they exist or are finalized
-  const orderStatuses = {};
-  const orderIdsToCheck = [];
-  uniqueNotifications.forEach(n => {
-    if (n.url && n.url.includes('/pedido/')) {
-      const match = n.url.match(/#\/pedido\/([^/]+)/);
-      if (match && match[1]) {
-        orderIdsToCheck.push(match[1]);
-      }
-    }
-  });
-
-  if (orderIdsToCheck.length > 0) {
+  const orderIdOf = (n) => (n.url && n.url.includes('/pedido/')) ? (n.url.match(/#\/pedido\/([^/?]+)/) || [])[1] : null;
+  const missing = [...new Set(unique.map(orderIdOf).filter(id => id && !orderStatusCache.has(id)))];
+  if (missing.length) {
     const { getDoc, doc } = await import('firebase/firestore');
-    await Promise.all(orderIdsToCheck.map(async (orderId) => {
+    await Promise.all(missing.map(async (orderId) => {
       try {
         const oSnap = await getDoc(doc(db, 'orders', orderId));
-        if (oSnap.exists()) {
-          orderStatuses[orderId] = oSnap.data().status;
-        } else {
-          orderStatuses[orderId] = 'deleted';
-        }
+        orderStatusCache.set(orderId, oSnap.exists() ? oSnap.data().status : 'deleted');
       } catch (e) {
-        orderStatuses[orderId] = 'error';
+        orderStatusCache.set(orderId, 'error');
       }
     }));
   }
 
-  const html = uniqueNotifications.map((n, index) => {
+  const html = unique.map((n, index) => {
     let clickable = isNotifClickable(n);
-    
-    // Disable if the order is deleted or completed
-    if (n.url && n.url.includes('/pedido/')) {
-      const match = n.url.match(/#\/pedido\/([^/]+)/);
-      if (match && match[1]) {
-        const oStatus = orderStatuses[match[1]];
-        if (oStatus === 'deleted' || oStatus === 'completed' || oStatus === 'cancelled' || oStatus === 'entregado' || oStatus === 'cancelado') {
-          clickable = false;
-        }
-      }
-    }
-
+    const oStatus = orderStatusCache.get(orderIdOf(n));
+    if (['deleted', 'completed', 'cancelled', 'entregado', 'cancelado'].includes(oStatus)) clickable = false;
     return `
-      <div class="notif-card-premium-v6 ${n.status === 'unread' ? 'unread' : ''}" 
-        data-id="${n.id}" data-url="${n.url || ''}" data-clickable="${clickable}"
-        style="animation: fadeInUp 0.4s ease forwards ${index * 0.03}s; ${!clickable ? 'cursor: default; opacity: 0.55;' : 'cursor: pointer;'}">
-        
+      <div class="go-notif ${n.status === 'unread' ? 'is-unread' : ''} ${clickable ? '' : 'is-static'}"
+        data-id="${escapeHtml(n.id)}" data-url="${escapeHtml(n.url || '')}" data-clickable="${clickable}" style="--i: ${Math.min(index, 8)};">
         ${getNotificationIconV6(n.type)}
-        
-        <div class="notif-body-v6">
-          <div class="notif-title-row-v6">
-            <span class="notif-title-v6">${n.title || 'Aviso'}</span>
-            <span class="notif-time-v6">${formatTime(n.createdAt)}</span>
+        <div class="go-notif-body">
+          <div class="go-notif-top">
+            <span class="go-notif-title">${escapeHtml(n.title || 'Aviso')}</span>
+            <span class="go-notif-time">${formatTime(n.createdAt)}</span>
           </div>
-          <div class="notif-desc-v6">${n.body || ''}</div>
+          <div class="go-notif-text">${escapeHtml(n.body || '')}</div>
         </div>
-        
-        ${clickable ? `<div class="notif-arrow-v6">${icon('chevronRight', 18)}</div>` : ''}
-      </div>
-    `;
+        ${clickable ? `<span class="go-notif-chev">${icon('chevronRight', 16)}</span>` : ''}
+      </div>`;
   }).join('');
 
-  const loader = loadingMore ? '<div class="scroll-loader-v5" style="text-align: center; padding: 20px;"><div class="spinner-mini"></div></div>' : '';
-  const footer = (!hasMore && notifications.length > 0) ? '<div class="end-list-v5" style="text-align: center; font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); margin-top: 24px;">Eso es todo por ahora</div>' : '';
+  const loader = loadingMore ? '<div class="go-notif-more"><div class="spinner-mini"></div></div>' : '';
+  const footer = (!hasMore && notifications.length > 0) ? '<div class="go-notif-end">No hay más notificaciones</div>' : '';
+  if (!paint(html + loader + footer)) return;
 
-  list.innerHTML = html + loader + footer;
-
-  list.querySelectorAll('.notif-card-premium-v6').forEach(item => {
+  list.querySelectorAll('.go-notif').forEach(item => {
     item.onclick = async () => {
       const id = item.dataset.id;
       const url = item.dataset.url;
       const clickable = item.dataset.clickable === 'true';
-      
-      // Update status to read instead of deleting!
+      item.classList.remove('is-unread');
       try {
         const { updateDoc, doc } = await import('firebase/firestore');
         await updateDoc(doc(db, 'users', user.uid, 'notifications', id), { status: 'read' });
       } catch (e) {}
-      
-      if (!clickable) return;
-      if (url) {
-        if (url.includes('chatId=')) {
-          const matchChat = url.match(/chatId=([^&]+)/);
-          if (matchChat && matchChat[1]) {
-            const targetChatId = matchChat[1];
-            try {
-              const { getDoc, doc } = await import('firebase/firestore');
-              const chatSnap = await getDoc(doc(db, 'chats', targetChatId));
-              if (chatSnap.exists()) {
-                const chatData = chatSnap.data();
-                const orderSnap = await getDoc(doc(db, 'orders', chatData.orderId));
-                if (orderSnap.exists()) {
-                  const order = orderSnap.data();
-                  let otherName = 'Comercio';
-                  if (user.uid === order.userId) {
-                    otherName = chatData.type === 'client-commerce' ? (order.comercioName || 'Comercio') : (order.driverName || 'Repartidor');
-                  } else if (order.comercioId && user.uid === order.comercioId || (order.comercioOwnerId && user.uid === order.comercioOwnerId)) {
-                    otherName = chatData.type === 'client-commerce' ? (order.userName || 'Cliente') : (order.driverName || 'Repartidor');
-                  } else if (user.uid === order.driverId) {
-                    otherName = chatData.type === 'client-delivery' ? (order.userName || 'Cliente') : (order.comercioName || 'Comercio');
-                  }
-                  
-                  const { openChat } = await import('../components/chat.js');
-                  openChat({
-                    orderId: chatData.orderId,
-                    type: chatData.type,
-                    otherName: otherName,
-                    orderNum: order.orderId || chatData.orderId.slice(0, 6).toUpperCase(),
-                    senderDisplayName: user.displayName || 'Usuario'
-                  });
-                  return;
+
+      if (!clickable || !url) return;
+      if (url.includes('chatId=')) {
+        const matchChat = url.match(/chatId=([^&]+)/);
+        if (matchChat && matchChat[1]) {
+          try {
+            const { getDoc, doc } = await import('firebase/firestore');
+            const chatSnap = await getDoc(doc(db, 'chats', matchChat[1]));
+            if (chatSnap.exists()) {
+              const chatData = chatSnap.data();
+              const orderSnap = await getDoc(doc(db, 'orders', chatData.orderId));
+              if (orderSnap.exists()) {
+                const order = orderSnap.data();
+                let otherName = 'Comercio';
+                if (user.uid === order.userId) {
+                  otherName = chatData.type === 'client-commerce' ? (order.comercioName || 'Comercio') : (order.driverName || 'Repartidor');
+                } else if (order.comercioId && user.uid === order.comercioId || (order.comercioOwnerId && user.uid === order.comercioOwnerId)) {
+                  otherName = chatData.type === 'client-commerce' ? (order.userName || 'Cliente') : (order.driverName || 'Repartidor');
+                } else if (user.uid === order.driverId) {
+                  otherName = chatData.type === 'client-delivery' ? (order.userName || 'Cliente') : (order.comercioName || 'Comercio');
                 }
+                const { openChat } = await import('../components/chat.js');
+                openChat({
+                  orderId: chatData.orderId,
+                  type: chatData.type,
+                  otherName,
+                  orderNum: order.orderId || chatData.orderId.slice(0, 6).toUpperCase(),
+                  senderDisplayName: user.displayName || 'Usuario'
+                });
+                return;
               }
-            } catch (e) {
-              console.error('Failed to open chat from notification:', e);
             }
+          } catch (e) {
+            console.error('Failed to open chat from notification:', e);
           }
         }
-        window.location.hash = url;
       }
+      window.location.hash = url;
     };
   });
 }
@@ -534,29 +332,19 @@ async function loadMore() {
 }
 
 function getNotificationIconV6(type) {
-  let gradient = 'linear-gradient(135deg, #3b82f6, #1d4ed8)'; // Default blue
   let iconName = 'bell';
-
-  if (type === 'new_chat_message' || type === 'chat_message') {
-    gradient = 'linear-gradient(135deg, #ec4899, #8b5cf6)'; // Pink-Purple
-    iconName = 'chatBubble';
-  } else if (type === 'order_completed' || type === 'completed' || type === 'delivered') {
-    gradient = 'linear-gradient(135deg, #10b981, #059669)'; // Emerald
-    iconName = 'checkCircle';
-  } else if (type === 'order_cancelled' || type === 'cancelled') {
-    gradient = 'linear-gradient(135deg, #f43f5e, #e11d48)'; // Red-rose
-    iconName = 'xCircle';
-  } else if (type?.startsWith('order') || type === 'order') {
-    gradient = 'linear-gradient(135deg, #f59e0b, #d97706)'; // Orange-Amber
-    iconName = 'shoppingBag';
-  }
-
-  return `<div class="notif-icon-v6" style="background: ${gradient};">${icon(iconName, 20, '', '#ffffff')}</div>`;
+  let tone = '';
+  if (type === 'new_chat_message' || type === 'chat_message') iconName = 'chatBubble';
+  else if (type === 'order_completed' || type === 'completed' || type === 'delivered') iconName = 'checkCircle';
+  else if (type === 'order_cancelled' || type === 'cancelled') { iconName = 'xCircle'; tone = 'is-alert'; }
+  else if (type?.startsWith('order') || type === 'order') iconName = 'shoppingBag';
+  return `<span class="go-notif-icon ${tone}">${icon(iconName, 19)}</span>`;
 }
 
 function formatTime(ts) {
   if (!ts) return '';
-  const date = ts.toDate ? ts.toDate() : new Date(ts);
+  const date = ts.toDate ? ts.toDate() : (typeof ts.seconds === 'number' ? new Date(ts.seconds * 1000) : new Date(ts));
+  if (isNaN(date.getTime())) return '';
   const now = new Date();
   const diff = now - date;
   const mins = Math.floor(diff / 60000);

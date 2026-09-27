@@ -1979,3 +1979,60 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
   background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.85), var(--lvl) 55%);
   border: 2px solid var(--color-surface);
 }
+
+/* ── Notificaciones ── */
+.go-notif-permission {
+  display: flex; align-items: center; gap: 12px;
+  margin: 16px 16px 0; padding: 12px 12px 12px 14px; border-radius: 18px;
+  background: var(--color-surface); border: 1px solid var(--go-line);
+}
+.go-notif-permission-icon { width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0; background: var(--go-ink); color: #fff; display: flex; align-items: center; justify-content: center; }
+.go-notif-permission-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.go-notif-permission-text strong { font-size: 14px; color: var(--go-text); }
+.go-notif-permission-text small { font-size: 12.5px; color: var(--go-text-2); line-height: 1.35; }
+.go-notif-permission button { height: 38px; padding: 0 14px; border-radius: 12px; border: 0; background: var(--go-ink); color: #fff; font: 800 13px/1 var(--font-body); cursor: pointer; flex-shrink: 0; }
+.go-notif-list { display: flex; flex-direction: column; gap: 8px; padding: 16px 16px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); }
+.go-notif {
+  position: relative;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px; border-radius: 18px;
+  background: var(--color-surface); border: 1px solid var(--go-line);
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+}
+.go-notif:active { transform: scale(0.99); }
+.go-notif.is-static { cursor: default; }
+.go-notif.is-static:active { transform: none; }
+.go-notif.is-static .go-notif-body { opacity: 0.7; }
+.go-notif.is-unread { border-color: var(--go-ink); }
+.go-notif.is-unread::after {
+  content: ''; position: absolute; top: 14px; right: 14px; width: 8px; height: 8px; border-radius: 50%; background: var(--go-red);
+}
+.go-notif-list.is-first .go-notif { animation: goNotifIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(var(--i, 0) * 30ms); }
+@keyframes goNotifIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.go-notif-icon { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; background: var(--go-paper-2); color: var(--go-ink); display: flex; align-items: center; justify-content: center; }
+.go-notif-icon svg { stroke: currentColor; }
+.go-notif-icon.is-alert { background: rgba(220, 38, 38, 0.08); color: #dc2626; }
+.go-notif-body { flex: 1; min-width: 0; padding-right: 14px; }
+.go-notif-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.go-notif-title { font-size: 14.5px; font-weight: 700; color: var(--go-text); line-height: 1.3; }
+.go-notif.is-unread .go-notif-title { font-weight: 800; }
+.go-notif-time { font-size: 12px; color: var(--go-text-3); white-space: nowrap; flex-shrink: 0; }
+.go-notif.is-unread .go-notif-time { margin-right: 10px; }
+.go-notif-text { margin-top: 3px; font-size: 13.5px; line-height: 1.45; color: var(--go-text-2); }
+.go-notif-chev { align-self: center; color: var(--go-text-3); display: flex; }
+.go-notif-skeleton {
+  height: 76px; border-radius: 18px;
+  background: linear-gradient(90deg, var(--go-paper-2) 0%, var(--color-surface) 50%, var(--go-paper-2) 100%);
+  background-size: 200% 100%; animation: goSkeleton 1.2s ease-in-out infinite;
+}
+.go-notif-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 64px 24px; }
+.go-notif-empty > span { width: 60px; height: 60px; border-radius: 50%; background: var(--go-ink); color: #fff; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+.go-notif-empty .go-title { font-size: 22px; }
+.go-notif-empty p { margin: 10px 0 0; font-size: 14px; line-height: 1.45; color: var(--go-text-2); max-width: 280px; }
+.go-notif-empty button { margin-top: 20px; height: 48px; padding: 0 24px; border-radius: 14px; border: 0; background: var(--go-ink); color: #fff; font: 800 14.5px/1 var(--font-body); cursor: pointer; }
+.go-notif-more { display: flex; justify-content: center; padding: 16px; }
+.go-notif-end { text-align: center; margin-top: 12px; font-size: 12px; color: var(--go-text-3); }
+@media (prefers-reduced-motion: reduce) {
+  .go-notif-list.is-first .go-notif, .go-notif-skeleton { animation: none !important; }
+}
