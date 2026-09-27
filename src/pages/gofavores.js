@@ -2383,46 +2383,49 @@ export async function showGoCashForm(targetContainer = null) {
     });
   };
 
-  // Handle general info modal trigger
-  const showGoFavoresGeneralModal = () => {
-    showModal({
-      title: '📦 ¿Cómo funcionan los Mandados?',
-      height: 'auto',
-      content: `
-        <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-          <p style="margin: 0; font-weight: 700;">GO! Mandados te permite solicitar cadetes y repartidores para realizar cualquier favor o encargo en el pueblo.</p>
-          
-          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Seleccioná tu tipo de favor</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Encomienda (llevar/buscar algo), Mandado (ir a comprar) o GoCash (cambio de efectivo).</p>
-              </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Indicá los puntos en el mapa</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Establecé dónde se realiza la recolección/compra y la dirección de entrega.</p>
-              </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Aceptación y Chat en vivo</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">El repartidor cotizará el mandado y podrás coordinar detalles por el chat interno en tiempo real.</p>
-              </div>
+}
+
+// General "¿Cómo funcionan los Mandados?" sheet. Module-level: renderGoFavores opens it
+// on first visit and from the help button (it used to live inside showGoCashForm, where
+// renderGoFavores could not reach it and first-time visitors got the error screen).
+function showGoFavoresGeneralModal() {
+  showModal({
+    title: '📦 ¿Cómo funcionan los Mandados?',
+    height: 'auto',
+    content: `
+      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
+        <p style="margin: 0; font-weight: 700;">GO! Mandados te permite solicitar cadetes y repartidores para realizar cualquier favor o encargo en el pueblo.</p>
+        
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
+          <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
+            <div>
+              <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Seleccioná tu tipo de favor</h4>
+              <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Encomienda (llevar/buscar algo), Mandado (ir a comprar) o GoCash (cambio de efectivo).</p>
             </div>
           </div>
-          <button id="close-info-general-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+          <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
+            <div>
+              <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Indicá los puntos en el mapa</h4>
+              <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Establecé dónde se realiza la recolección/compra y la dirección de entrega.</p>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
+            <div>
+              <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Aceptación y Chat en vivo</h4>
+              <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">El repartidor cotizará el mandado y podrás coordinar detalles por el chat interno en tiempo real.</p>
+            </div>
+          </div>
         </div>
-      `,
-      onOpen: () => {
-        document.getElementById('close-info-general-modal-btn').onclick = () => closeModal();
-      }
-    });
-  };
+        <button id="close-info-general-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+      </div>
+    `,
+    onOpen: () => {
+      document.getElementById('close-info-general-modal-btn').onclick = () => closeModal();
+    }
+  });
 }
 
 export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
