@@ -1,6 +1,7 @@
 // GoDelivery — Product Detail Modal Component
 import { showModal, closeModal } from './modal.js';
 import { icon } from '../utils/icons.js';
+import { escapeHtml } from '../utils/escape.js';
 import { formatPrice } from '../utils/format.js';
 import { addToCart, isProductFavorite, toggleProductFavorite, getState } from '../state.js';
 import { showToast } from './toast.js';
@@ -287,33 +288,25 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           </div>
         ` : ''}
         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; width: 100%;">
-          <h2 style="font-size: 20px; margin: 0; line-height: 1.25; flex: 1;">${product.name}</h2>
+          <h2 style="font-family: var(--go-font); font-size: 20px; font-weight: 800; margin: 0; line-height: 1.2; flex: 1;">${escapeHtml(product.name)}</h2>
           ${offer ? `
             <div style="display:flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; text-align: right;">
               <span style="font-family:var(--font-display); font-size:20px; font-weight:900; color:var(--color-primary);">${formatPrice(baseDiscountedPrice)}</span>
               <span style="font-size:12px; color:var(--color-text-tertiary); text-decoration:line-through; font-weight:700; line-height:1;">${formatPrice(product.price)}</span>
             </div>
           ` : `
-            <div class="price" style="font-size: 20px; font-weight: 900; color: var(--color-primary); flex-shrink: 0; margin: 0;">${formatPrice(product.price)}</div>
+            <div class="price" style="font-family: var(--go-font); font-size: 20px; font-weight: 900; color: var(--go-text); flex-shrink: 0; margin: 0;">${formatPrice(product.price)}</div>
           `}
         </div>
-        ${product.description ? `<p style="font-size: 12.5px; color: var(--color-text-secondary); line-height: 1.4; margin: 2px 0 0 0;">${product.description}</p>` : ''}
+        ${product.description ? `<p style="font-size: 13.5px; color: var(--color-text-secondary); line-height: 1.45; margin: 2px 0 0 0;">${escapeHtml(product.description)}</p>` : ''}
         ${stockBadgeHTML ? `<div style="margin-top: 2px;">${stockBadgeHTML.replace('margin-top: 8px;', 'margin-top: 2px;').replace('padding: 4px 12px;', 'padding: 3px 10px;')}</div>` : ''}
 
-        <!-- Feature & Quality Badges -->
-        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
-          <span style="font-size:10.5px; font-weight:700; background:rgba(16,185,129,0.08); color:#059669; padding:3px 9px; border-radius:10px; border:1px solid rgba(16,185,129,0.18); display:inline-flex; align-items:center; gap:4px;">
-            ⚡ Entrega rápida
-          </span>
-          <span style="font-size:10.5px; font-weight:700; background:rgba(59,130,246,0.08); color:#2563eb; padding:3px 9px; border-radius:10px; border:1px solid rgba(59,130,246,0.18); display:inline-flex; align-items:center; gap:4px;">
-            🛡️ Calidad garantizada
-          </span>
-          ${comercioName ? `
-            <span style="font-size:10.5px; font-weight:700; background:rgba(245,158,11,0.08); color:#d97706; padding:3px 9px; border-radius:10px; border:1px solid rgba(245,158,11,0.18); display:inline-flex; align-items:center; gap:4px;">
-              🏬 ${comercioName}
-            </span>
-          ` : ''}
-        </div>
+        ${comercioName ? `
+          <div style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12px; color:var(--go-text-2);">
+            <span style="display:flex; color:var(--go-text);">${icon('store', 14)}</span>
+            <span>Vendido por <strong style="color:var(--go-text); font-weight:700;">${escapeHtml(comercioName)}</strong></span>
+          </div>
+        ` : ''}
       </div>
 
       <!-- DYNAMIC SCROLLABLE BODY (ONLY FLAVOR LIST SCROLLS) -->
@@ -335,7 +328,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           let countBadgeHtml = '';
           if (group.multi && group.maxSelections) {
             countBadgeHtml = `
-              <span style="font-weight:900; color:var(--color-primary); background:rgba(225,29,72,0.08); padding:4px 10px; border-radius:8px; font-size:12.5px; font-family:var(--font-display); border: 1px solid rgba(225,29,72,0.15); margin-left: auto; flex-shrink: 0;">
+              <span style="font-weight:800; color:var(--go-text); background:var(--go-paper-2); padding:4px 10px; border-radius:8px; font-size:12.5px; font-family:var(--go-font); margin-left: auto; flex-shrink: 0;">
                 ${currentCount}/${group.maxSelections}
               </span>
             `;
@@ -348,7 +341,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
               <div class="pm-group-header" style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--color-border-light); margin-bottom:0; gap:8px;">
                 <div class="pm-group-title" style="margin:0; font-family:var(--font-display); font-size:14px; font-weight:850; color:var(--color-text-primary); display:flex; align-items:center; gap:8px; flex:1;">
                   <span>${group.name}</span>
-                  ${group.required ? '<span class="pm-required-badge" style="font-size:8px; font-weight:900; background:rgba(225,29,72,0.08); color:var(--color-primary); padding:2px 6px; border-radius:4px; text-transform:uppercase; border:1px solid rgba(225,29,72,0.15); flex-shrink:0;">Obligatorio</span>' : ''}
+                  ${group.required ? '<span class="pm-required-badge" style="font-size:10px; font-weight:700; background:var(--go-ink); color:#fff; padding:3px 7px; border-radius:6px; text-transform:uppercase; letter-spacing:0.08em; flex-shrink:0;">Obligatorio</span>' : ''}
                 </div>
                 ${countBadgeHtml}
               </div>
@@ -384,7 +377,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                         const items = cats[catName];
                         return `
                           <div class="sabor-category-group" style="text-align: left; padding: 0 16px; margin-top: 12px;">
-                            <div style="font-size: 11px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4px; border-bottom: 1px dashed var(--color-border-light); margin-bottom: 8px;">${catName}</div>
+                            <div class="go-eyebrow" style="color: var(--go-text); padding-bottom: 6px; border-bottom: 1px solid var(--color-border-light); margin-bottom: 8px; display: flex; align-items: center; gap: 8px;"><span style="width: 12px; height: 2px; border-radius: 1px; background: var(--go-red);"></span>${escapeHtml(catName)}</div>
                             <div style="display: flex; flex-direction: column; gap: 8px;">
                               ${items.map(opt => {
                                 const optIdx = group.options.indexOf(opt);
@@ -522,7 +515,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           <span class="pm-main-qty-val">${qty}</span>
           <button class="pm-main-qty-btn" id="pm-qty-plus">${icon('plus', 18)}</button>
         </div>
-        <button class="pm-add-btn" id="pm-add-btn" ${(isAddDisabled && !(isCommerceOpen && !isOutOfStock && missingRequired)) ? 'disabled ' : ''}${isAddDisabled ? 'style="background: #cbd5e1; color: #94a3b8; cursor: not-allowed; justify-content: center; width: 100%; display: flex; border: none; box-shadow: none;"' : 'style="display: flex; align-items: center; justify-content: space-between; gap: 8px;"'}>
+        <button class="pm-add-btn" id="pm-add-btn" ${(isAddDisabled && !(isCommerceOpen && !isOutOfStock && missingRequired)) ? 'disabled ' : ''}${isAddDisabled ? 'style="background: var(--go-paper-2); color: var(--go-text-3); cursor: not-allowed; justify-content: center; width: 100%; display: flex; border: none; box-shadow: none;"' : 'style="display: flex; align-items: center; justify-content: space-between; gap: 8px;"'}>
           ${btnText}
         </button>
       </div>

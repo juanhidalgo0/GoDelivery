@@ -7,6 +7,7 @@ import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn } from '../auth.js';
 import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
+import { escapeHtml } from '../utils/escape.js';
 import { db, auth } from '../firebase.js';
 import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
@@ -338,9 +339,9 @@ export async function renderCart(content, isDirectMode = false) {
         addrDisplay.innerHTML = `
           <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Dirección de entrega:</div>
           <div style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${currentAddress || '<span style="color: var(--color-primary); font-weight: 900;">📍 Toca aquí para ingresar tu dirección</span>'}
+            ${currentAddress ? escapeHtml(currentAddress) : '<span style="color: var(--go-red); font-weight: 800;">Tocá acá para ingresar tu dirección</span>'}
           </div>
-          ${currentNotes ? `<div style="font-size: 11px; color: var(--color-text-secondary); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📝 ${currentNotes}</div>` : ''}
+          ${currentNotes ? `<div style="font-size: 11px; color: var(--color-text-secondary); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(currentNotes)}</div>` : ''}
         `;
       }
       const addrBtn = addressBar.querySelector('button');
@@ -649,19 +650,13 @@ function renderCartContent(content) {
 
   const deliveryStyleCartHeaderHTML = `
     <!-- Header estilo Mis Chats con Volver a Comercio a la derecha -->
-    <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 250; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); flex-shrink: 0;">
-      <!-- Decorative Circles -->
-      <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
-        <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-        <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-      </div>
-
+    <div style="background: var(--go-ink); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 250; overflow: hidden; flex-shrink: 0;">
       <div style="height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; position: relative; z-index: 2;">
-        <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em; white-space: nowrap;">Mi Carrito</span>
+        <span class="go-title" style="font-size: 22px; color: white; white-space: nowrap;">Mi carrito</span>
         
         ${targetComercioId ? `
-          <a href="#/${isDirectStoreCart ? 'tienda' : 'comercio'}/${targetComercioId}" style="height: 34px; padding: 0 12px; border-radius: 100px; background: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.35); font-size: 11.5px; font-weight: 850; color: white; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; transition: all 0.2s;">
-            ${icon('chevronLeft', 16)} <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Volver a ${targetComercioName}</span>
+          <a href="#/${isDirectStoreCart ? 'tienda' : 'comercio'}/${targetComercioId}" style="height: 36px; padding: 0 12px; border-radius: 18px; background: var(--go-ink-2); border: 1px solid var(--go-ink-line); font-size: 12px; font-weight: 700; color: white; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; transition: all 0.2s;">
+            ${icon('chevronLeft', 16)} <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Volver a ${escapeHtml(targetComercioName)}</span>
           </a>
         ` : ''}
       </div>
@@ -676,18 +671,18 @@ function renderCartContent(content) {
     <div style="padding: 10px 16px 0 16px;">
       <div id="cart-change-address-bar" style="background: var(--color-bg-card); border: 1.5px solid ${currentAddress ? 'var(--color-border-light)' : 'rgba(225,29,72,0.45)'}; border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; box-shadow: var(--shadow-xs); transition: all 0.2s;">
         <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
-          <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <div style="width: 36px; height: 36px; border-radius: 50%; background: var(--go-ink); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
             ${icon('mapPin', 16)}
           </div>
           <div style="min-width: 0; flex: 1;">
             <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Dirección de entrega:</div>
             <div style="font-size: 13px; font-weight: 800; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              ${currentAddress || '<span style="color: var(--color-primary); font-weight: 900;">📍 Toca aquí para ingresar tu dirección</span>'}
+              ${currentAddress ? escapeHtml(currentAddress) : '<span style="color: var(--go-red); font-weight: 800;">Tocá acá para ingresar tu dirección</span>'}
             </div>
-            ${currentNotes ? `<div style="font-size: 11px; color: var(--color-text-secondary); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📝 ${currentNotes}</div>` : ''}
+            ${currentNotes ? `<div style="font-size: 11px; color: var(--color-text-secondary); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(currentNotes)}</div>` : ''}
           </div>
         </div>
-        <button type="button" style="background: var(--color-primary-light); color: var(--color-primary); border: none; font-size: 11.5px; font-weight: 850; padding: 6px 12px; border-radius: 10px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
+        <button type="button" style="background: transparent; color: var(--go-text); border: 1px solid var(--go-line); font-size: 12px; font-weight: 700; padding: 0 12px; height: 34px; border-radius: 17px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
           ${currentAddress ? `${icon('edit', 12)} Cambiar` : `+ Ingresar`}
         </button>
       </div>
@@ -713,12 +708,12 @@ function renderCartContent(content) {
   const deliveryTypeSelectorHTML = `
     <!-- Delivery vs Take Away Mode Selector -->
     <div style="padding: 12px 16px 0 16px;">
-      <div style="background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 18px; padding: 4px; display: flex; gap: 6px; box-shadow: var(--shadow-xs);">
-        <button id="cart-mode-delivery-btn" type="button" style="flex: 1; padding: 10px 12px; border-radius: 14px; border: none; font-size: 12.5px; font-weight: 850; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; ${selectedDeliveryType === 'delivery' ? 'background: var(--color-primary); color: white; box-shadow: 0 4px 12px rgba(225,29,72,0.25);' : 'background: transparent; color: var(--color-text-secondary);'}">
-          🛵 Envío a Domicilio
+      <div style="background: var(--color-surface); border: 1px solid var(--go-line); border-radius: 16px; padding: 4px; display: flex; gap: 4px;">
+        <button id="cart-mode-delivery-btn" type="button" style="flex: 1; padding: 10px 12px; border-radius: 12px; border: none; font-size: 13px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; ${selectedDeliveryType === 'delivery' ? 'background: var(--go-ink); color: white;' : 'background: transparent; color: var(--color-text-secondary);'}">
+          ${icon('bike', 16)} Envío a domicilio
         </button>
-        <button id="cart-mode-takeaway-btn" type="button" style="flex: 1; padding: 10px 12px; border-radius: 14px; border: none; font-size: 12.5px; font-weight: 850; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; ${selectedDeliveryType === 'takeaway' ? 'background: #10b981; color: white; box-shadow: 0 4px 12px rgba(16,185,129,0.25);' : 'background: transparent; color: var(--color-text-secondary);'}">
-          🏬 Retiro en el Local
+        <button id="cart-mode-takeaway-btn" type="button" style="flex: 1; padding: 10px 12px; border-radius: 12px; border: none; font-size: 13px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; ${selectedDeliveryType === 'takeaway' ? 'background: var(--go-ink); color: white;' : 'background: transparent; color: var(--color-text-secondary);'}">
+          ${icon('store', 16)} Retiro en el local
         </button>
       </div>
     </div>
@@ -739,7 +734,7 @@ function renderCartContent(content) {
               <div class="comercio-group" style="margin-bottom:var(--space-5); background:var(--color-bg-card); border-radius:var(--radius-xl); border:1px solid var(--color-border-light); overflow:hidden; box-shadow:var(--shadow-md);">
                 <div style="padding:14px 16px; border-bottom:1px solid var(--color-border-light); background:var(--color-bg-secondary); display:flex; justify-content:space-between; align-items:center;">
                   <h3 style="font-family:var(--font-display);font-size:14.5px;font-weight:800;margin:0;display:flex;align-items:center;gap:10px; color:var(--color-text-primary);">
-                    ${logoUrl ? `<img src="${logoUrl}" style="width:24px; height:24px; border-radius:50%; object-fit:cover; border:1.5px solid var(--color-border-light);" />` : icon('store', 18)} ${group.comercioName}
+                    ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" style="width:24px; height:24px; border-radius:50%; object-fit:cover; border:1.5px solid var(--color-border-light);" />` : icon('store', 18)} ${escapeHtml(group.comercioName)}
                   </h3>
                 <div style="display:flex; align-items:center; gap:8px;">
                   ${getState().dynamicDeliveryFees[comercioId] !== undefined ? `
@@ -747,7 +742,7 @@ function renderCartContent(content) {
                       ${getState().dynamicDistances?.[comercioId] ? `${getState().dynamicDistances[comercioId].toFixed(1)} km` : 'Calculando...'}
                     </span>
                   ` : ''}
-                  <span class="badge badge-primary" style="font-size:10px;">${group.items.length} productos</span>
+                  <span style="font-size:11px; font-weight:700; color:var(--go-text-2); background:var(--color-surface); border:1px solid var(--go-line); padding:3px 8px; border-radius:8px;">${group.items.length} ${group.items.length === 1 ? 'producto' : 'productos'}</span>
                 </div>
               </div>
               
@@ -779,10 +774,10 @@ function renderCartContent(content) {
                     </div>
                     <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-top:2px;">
                       <div style="font-weight:800; font-size:14px; color:var(--color-text-primary); display:flex; align-items:center; gap:6px; flex-wrap:wrap; line-height:1.35;">
-                        <span style="word-break:break-word;">${item.product.name}</span>
+                        <span style="word-break:break-word;">${escapeHtml(item.product.name)}</span>
                       </div>
                       <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
-                        <span class="cart-item-total-price" style="color:var(--color-primary); font-weight:900; font-size:14px;">${formatPrice(finalTotal)}</span>
+                        <span class="cart-item-total-price" style="color:var(--go-text); font-family:var(--go-font); font-weight:800; font-size:14px;">${formatPrice(finalTotal)}</span>
                         ${finalTotal !== originalTotal ? `<span class="cart-item-original-price" style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; text-decoration:line-through;">${formatPrice(originalTotal)}</span>` : ''}
                         ${item.qty > 1 ? `<span class="cart-item-qty-multiplier" style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:500; opacity:0.85;">(${item.qty} x ${formatPrice(basePrice)})</span>` : ''}
                       </div>
@@ -792,8 +787,8 @@ function renderCartContent(content) {
                         </div>
                       ` : ''}
                       ${item.notes ? `
-                        <div style="font-size:11.5px; font-weight:700; color:var(--color-primary); background:rgba(225,29,72,0.08); padding:3px 8px; border-radius:6px; margin-top:4px; display:inline-block; border:1px solid rgba(225,29,72,0.15);">
-                          📝 "${item.notes}"
+                        <div style="font-size:12px; font-weight:600; color:var(--go-text-2); background:var(--go-paper-2); padding:3px 8px; border-radius:6px; margin-top:4px; display:inline-block;">
+                          "${escapeHtml(item.notes)}"
                         </div>
                       ` : ''}
                     </div>
@@ -825,56 +820,56 @@ function renderCartContent(content) {
             return `
               <div style="display:flex; flex-direction:column; gap:16px; margin-bottom:24px;">
                 <!-- Tip Pill -->
-                <button id="cart-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? '#10b981' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+                <button id="cart-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? 'var(--go-ink)' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
                   <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(16, 185, 129, 0.08)'}; color:${selectedTip > 0 ? 'white' : '#10b981'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'var(--go-ink)' : 'var(--go-paper-2)'}; color:${selectedTip > 0 ? 'white' : 'var(--go-text)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon('dollarSign', 18)}
                     </div>
                     <div style="min-width:0;">
-                      <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Propina al Repartidor</div>
+                      <div style="font-size:13px; font-weight:700; color:var(--color-text-primary);">Propina al repartidor</div>
                       <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
                         ${selectedTip > 0 ? `Propina aplicada: ${formatPrice(selectedTip)}` : 'Apoyar repartidor'}
                       </div>
                     </div>
                   </div>
                   <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
-                    ${selectedTip > 0 ? icon('checkCircle', 16, '', '#10b981') : icon('chevronRight', 16)}
+                    ${selectedTip > 0 ? icon('checkCircle', 16, '', 'var(--go-green)') : icon('chevronRight', 16)}
                   </div>
                 </button>
 
                 <!-- GoPoints Pill -->
-                <button id="cart-open-gopoints-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedDiscount > 0 ? '#f59e0b' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+                <button id="cart-open-gopoints-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedDiscount > 0 ? 'var(--go-ink)' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
                   <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <div style="width:36px; height:36px; background:${appliedDiscount > 0 ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : 'rgba(245, 158, 11, 0.08)'}; color:${appliedDiscount > 0 ? 'white' : '#f59e0b'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <div style="width:36px; height:36px; background:${appliedDiscount > 0 ? 'var(--go-ink)' : 'var(--go-paper-2)'}; color:${appliedDiscount > 0 ? 'white' : 'var(--go-text)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon('goPointsLogo', 20)}
                     </div>
                     <div style="min-width:0;">
-                      <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Canjear GoPoints</div>
+                      <div style="font-size:13px; font-weight:700; color:var(--color-text-primary);">Canjear GoPoints</div>
                       <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
                         ${appliedDiscount > 0 ? `Descuento: -${formatPrice(appliedDiscount)}` : `Disponibles: ${userPoints} pts`}
                       </div>
                     </div>
                   </div>
                   <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
-                    ${appliedDiscount > 0 ? icon('checkCircle', 16, '', '#f59e0b') : icon('chevronRight', 16)}
+                    ${appliedDiscount > 0 ? icon('checkCircle', 16, '', 'var(--go-green)') : icon('chevronRight', 16)}
                   </div>
                 </button>
 
                 <!-- Coupon Pill -->
-                <button id="cart-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? '#a855f7' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+                <button id="cart-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? 'var(--go-ink)' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
                   <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <div style="width:36px; height:36px; background:${appliedCoupon ? 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)' : 'rgba(168, 85, 247, 0.08)'}; color:${appliedCoupon ? 'white' : '#a855f7'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <div style="width:36px; height:36px; background:${appliedCoupon ? 'var(--go-ink)' : 'var(--go-paper-2)'}; color:${appliedCoupon ? 'white' : 'var(--go-text)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                       ${icon('tag', 18)}
                     </div>
                     <div style="min-width:0;">
-                      <div style="font-size:12px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Cupón de Descuento</div>
+                      <div style="font-size:13px; font-weight:700; color:var(--color-text-primary);">Cupón de descuento</div>
                       <div style="font-size:11px; color:var(--color-text-secondary); opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
                         ${appliedCoupon ? `${appliedCoupon.code} - ${appliedCoupon.scope === 'shipping' ? (appliedCoupon.discountType === 'percentage' ? `${appliedCoupon.value}% En envío` : `$${appliedCoupon.value} En envío`) : (appliedCoupon.discountType === 'percentage' ? `${appliedCoupon.value}% OFF` : `$${appliedCoupon.value} OFF`)}` : 'Ingresar cupón'}
                       </div>
                     </div>
                   </div>
                   <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
-                    ${appliedCoupon ? icon('checkCircle', 16, '', '#a855f7') : icon('chevronRight', 16)}
+                    ${appliedCoupon ? icon('checkCircle', 16, '', 'var(--go-green)') : icon('chevronRight', 16)}
                   </div>
                 </button>
               </div>
@@ -882,8 +877,8 @@ function renderCartContent(content) {
           })()}
           </div>
           <div style="display:flex; justify-content:center; align-items:center; margin: 8px 0 16px;">
-            <button class="btn btn-ghost" style="color:var(--color-danger); opacity:0.85; font-size:11px; padding:8px 16px; height:auto; display:flex; align-items:center; gap:6px; font-weight:800; background:rgba(239, 68, 68, 0.05); border-radius:12px; border:1px solid rgba(239, 68, 68, 0.1); cursor:pointer;" id="clear-cart-btn">
-              ${icon('trash', 12)} VACIAR TODO EL CARRITO
+            <button class="btn btn-ghost" style="color:var(--go-text-2); font-size:12px; padding:8px 16px; height:auto; display:flex; align-items:center; gap:6px; font-weight:700; background:transparent; border-radius:12px; border:1px solid var(--go-line); cursor:pointer;" id="clear-cart-btn">
+              ${icon('trash', 13)} Vaciar carrito
             </button>
           </div>
         </div>
@@ -1047,7 +1042,7 @@ function renderCartContent(content) {
                     ${!isTakeaway && !isMulti && commerceIds[0] && getState().dynamicDistances?.[commerceIds[0]] ? `
                       <span style="font-size:10px; opacity:0.6; font-weight:600;">(${getState().dynamicDistances[commerceIds[0]].toFixed(1)} km)</span>
                     ` : ''}
-                    <span id="cart-summary-delivery" style="color:var(--color-success); font-weight:700;">${isTakeaway ? '¡Gratis! ($0)' : (allFeesReady ? ((totalDelivery + appUsageFee) > 0 ? `${formatPrice(totalDelivery + appUsageFee)}` : '¡Gratis!') : 'Calculando...')}</span>
+                    <span id="cart-summary-delivery" style="color:var(--color-text-primary); font-weight:600;">${isTakeaway ? '¡Gratis! ($0)' : (allFeesReady ? ((totalDelivery + appUsageFee) > 0 ? `${formatPrice(totalDelivery + appUsageFee)}` : '¡Gratis!') : 'Calculando...')}</span>
                   </div>
                 </div>
                 ${getState().appliedDiscount ? `
@@ -1068,7 +1063,7 @@ function renderCartContent(content) {
 
                 <div style="display:flex; flex-direction:column;">
                   <span style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Total a pagar</span>
-                  <span id="cart-summary-grandtotal" style="font-size:24px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.03em;">${isReadyToCalculate ? formatPrice(grandTotal) : '---'}</span>
+                  <span id="cart-summary-grandtotal" style="font-family:var(--go-font); font-size:26px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.02em;">${isReadyToCalculate ? formatPrice(grandTotal) : '---'}</span>
                 </div>
                 
                 <button class="btn btn-primary checkout-btn" 
@@ -1134,10 +1129,8 @@ function renderCartContent(content) {
 
         /* Active Cash */
         .payment-option input:checked + .pm-cash {
-          background: #22C55E;
-          border-color: #22C55E;
-          transform: translateY(-2px);
-          box-shadow: 0 10px 25px rgba(34, 197, 94, 0.3);
+          background: var(--go-ink);
+          border-color: var(--go-ink);
         }
         .payment-option input:checked + .pm-cash .pm-label { color: white; }
         .payment-option input:checked + .pm-cash .pm-icon { color: white; }
@@ -1148,10 +1141,8 @@ function renderCartContent(content) {
 
         /* Active MP */
         .payment-option input:checked + .pm-mp {
-          background: #009EE3;
-          border-color: #009EE3;
-          transform: translateY(-2px);
-          box-shadow: 0 10px 25px rgba(0, 158, 227, 0.3);
+          background: var(--go-ink);
+          border-color: var(--go-ink);
         }
         .payment-option input:checked + .pm-mp .pm-label { color: white; }
         .payment-option input:checked + .pm-mp .pm-icon { color: white; }

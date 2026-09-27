@@ -701,3 +701,58 @@ body {
 .go-sheet .home-section { padding: 0 !important; }
 .go-sheet .home-section-title { margin-bottom: 0; }
 #promoted-section .go-store-card:active { transform: scale(0.985); }
+
+/* ---------- Acciones principales: negro GO! ---------- */
+
+.pm-add-btn:not([disabled]),
+.btn-primary {
+  background: var(--go-ink) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 16px !important;
+  box-shadow: none !important;
+  font-family: var(--font-body);
+  font-weight: 700;
+}
+
+[data-theme="dark"] .pm-add-btn:not([disabled]),
+[data-theme="dark"] .btn-primary {
+  background: #fff !important;
+  color: var(--go-ink) !important;
+}
+
+.pm-add-btn:not([disabled]):active,
+.btn-primary:active { transform: scale(0.98); }
+
+.pm-qty-main { border-radius: 16px; background: var(--go-paper-2); }
+.pm-main-qty-btn { color: var(--go-text); box-shadow: none; border: 1px solid var(--go-line); }
+.pm-check.checked { background: var(--go-ink); border-color: var(--go-ink); }
+[data-theme="dark"] .pm-check.checked { background: #fff; border-color: #fff; color: var(--go-ink); }
+.pm-option.selected { background: rgba(11, 11, 12, 0.03); }
+
+/* Pestañas y filtros */
+.tab-pill {
+  border: 1px solid var(--go-line) !important;
+  box-shadow: none !important;
+  font-weight: 600;
+  color: var(--go-text);
+}
+
+.tab-pill:hover { border-color: var(--go-text) !important; color: var(--go-text); }
+
+.tab-pill.active {
+  background: var(--go-ink) !important;
+  border-color: var(--go-ink) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+[data-theme="dark"] .tab-pill.active { background: #fff !important; border-color: #fff !important; color: var(--go-ink) !important; }
+
+.btn-primary:disabled,
+.btn-primary[disabled],
+[data-theme="dark"] .btn-primary:disabled {
+  background: var(--go-paper-2) !important;
+  color: var(--go-text-3) !important;
+  cursor: not-allowed;
+}

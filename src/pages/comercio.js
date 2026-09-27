@@ -11,6 +11,7 @@ import { getFooterHTML } from '../components/footer.js';
 
 import { renderNavbar, updateGlobalCartFAB } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
+import { escapeHtml } from '../utils/escape.js';
 import { openProductModal } from '../components/product-modal.js';
 import { createSlug, getStoreUrl } from '../utils/slug.js';
 
@@ -182,9 +183,8 @@ export async function renderComercio(content, isDirectMode = false) {
           if (statusBadge) {
             const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
             const badgeText = comercio.isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
-            const badgeBg = comercio.isPaused ? '#f59e0b' : (isOpen ? '#10b981' : '#64748b');
-            statusBadge.style.background = badgeBg;
-            statusBadge.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:white;display:inline-block;${!comercio.isPaused && isOpen ? 'animation:pulse 1.8s infinite;' : ''}"></span> ${badgeText}`;
+            const dotColor = comercio.isPaused ? '#f59e0b' : (isOpen ? '#22c55e' : '#8d8a86');
+            statusBadge.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;"></span> ${badgeText}`;
           }
           // Show/hide paused banner
           const pauseBanner = document.getElementById('comercio-pause-banner');
@@ -1118,40 +1118,42 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
             const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
             const isPausedNow = comercio.isPaused === true;
             const badgeText = isPausedNow ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
-            const badgeBg = isPausedNow ? '#f59e0b' : (isOpen ? '#10b981' : '#64748b');
+            const dotColor = isPausedNow ? '#f59e0b' : (isOpen ? '#22c55e' : '#8d8a86');
             return `
-              <div id="comercio-status-badge" style="position: absolute; top: -16px; right: 24px; font-size: 11px; font-weight: 900; padding: 6px 14px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; background: ${badgeBg}; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
-                <span style="width: 6px; height: 6px; border-radius: 50%; background: white; display: inline-block; ${!isPausedNow && isOpen ? 'animation: pulse 1.8s infinite;' : ''}"></span>
+              <div id="comercio-status-badge" style="position: absolute; top: -14px; right: 20px; font-size: 11px; font-weight: 700; height: 28px; padding: 0 12px; border-radius: 14px; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 6px; background: var(--go-ink); color: white;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: ${dotColor}; display: inline-block;"></span>
                 ${badgeText}
               </div>
             `;
           })()}
           
-          <div style="display: flex; align-items: center; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
             ${comercio.logo
-              ? `<img src="${comercio.logo}" alt="" loading="lazy" decoding="async" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: white;" />`
-              : `<div style="width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--color-surface); margin-top: -48px; display:flex;align-items:center;justify-content:center;background:var(--color-primary-light); box-shadow: 0 4px 12px rgba(0,0,0,0.1);">${icon('store', 28)}</div>`
+              ? `<img src="${escapeHtml(comercio.logo)}" alt="" loading="lazy" decoding="async" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 2px 8px rgba(11,11,12,0.12); background: white; flex-shrink: 0;" />`
+              : `<div style="width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--color-surface); margin-top: -48px; display:flex;align-items:center;justify-content:center;background:var(--go-paper-2); box-shadow: 0 2px 8px rgba(11,11,12,0.12); flex-shrink: 0;">${icon('store', 28)}</div>`
             }
-            <div style="display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-top: 8px;">
-              <h1 id="comercio-main-title" style="margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 24px; font-weight: 800; color: var(--color-text);">${comercio.name}</h1>
-              <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-top:6px;">
-                <span style="font-size: 11px; font-weight: 850; color: white; background: var(--color-primary); padding: 4px 12px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.03em;">${comercio.category || 'Comercio'}</span>
-                <button id="rate-comercio-btn" style="background: #f59e0b; border: none; border-radius: 8px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 850; color: white; cursor: pointer; text-transform: uppercase; box-shadow: 0 2px 6px rgba(245,158,11,0.2);">
-                  ⭐ ${comercio.ratingAverage !== undefined && comercio.ratingAverage > 0 ? `${comercio.ratingAverage.toFixed(1)} (${comercio.ratingCount || 0})` : 'Puntuar'}
-                </button>
-              </div>
+            <div style="display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-top: 4px;">
+              <span class="go-eyebrow">${escapeHtml(comercio.category || 'Comercio')}</span>
+              <h1 id="comercio-main-title" style="margin: 4px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--go-font); font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--color-text);">${escapeHtml(comercio.name)}</h1>
+              <span class="go-bar" style="margin-top: 8px;"></span>
             </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-top: 16px;">
+            <button id="rate-comercio-btn" style="height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--go-line); background: var(--color-surface); display: inline-flex; align-items: center; gap: 6px; font-family: inherit; font-size: 13px; font-weight: 700; color: var(--color-text); cursor: pointer;">
+              ${icon('star', 14, '', '#f59e0b')} ${comercio.ratingAverage !== undefined && comercio.ratingAverage > 0 ? `${comercio.ratingAverage.toFixed(1)} <span style="color: var(--go-text-2); font-weight: 500;">(${comercio.ratingCount || 0})</span>` : 'Puntuar'}
+            </button>
           </div>
           
           <div style="margin-top: 16px;">
-            ${comercio.description ? `<p style="margin: 0 0 12px 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.5;">${comercio.description}</p>` : ''}
+            ${comercio.description ? `<p style="margin: 0 0 12px 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.5;">${escapeHtml(comercio.description)}</p>` : ''}
             <div style="padding-top: 12px; border-top: 1px solid var(--color-border-light); color: var(--color-text-secondary); font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               ${comercio.address ? `
-              <span style="display: inline-flex; align-items: center; color: var(--color-primary);">${icon('mapPin', 14)}</span>
-              <span style="font-weight: 600;">${comercio.address.split(',')[0]}</span>
+              <span style="display: inline-flex; align-items: center; color: var(--go-text);">${icon('mapPin', 14)}</span>
+              <span style="font-weight: 600;">${escapeHtml(comercio.address.split(',')[0])}</span>
               <span style="color: var(--color-border); margin: 0 4px;">•</span>
               ` : ''}
-              <span style="display: inline-flex; align-items: center; color: var(--color-primary);">${icon('clock', 14)}</span>
+              <span style="display: inline-flex; align-items: center; color: var(--go-text);">${icon('clock', 14)}</span>
               <span style="font-weight: 700;">
                 ${comercio.schedules && comercio.schedules.length > 0
                   ? comercio.schedules.map(s => `${s.open} - ${s.close}`).join(', ')
@@ -1699,7 +1701,7 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
             ` : ''}
             
             ${(!isOpen || isPaused) ? `
-              <div style="position:absolute; bottom:6px; right:6px; background:${isPaused ? '#f59e0b' : 'var(--color-text-tertiary)'}; color:white; font-size:9.5px; font-weight:850; padding:4px 10px; border-radius:12px; text-transform:uppercase; letter-spacing:0.05em; z-index:10; border: 1.5px solid white;">${isPaused ? 'Pausado' : 'Cerrado'}</div>
+              <div style="position:absolute; bottom:6px; right:6px; background:rgba(11,11,12,0.82); color:white; font-size:10px; font-weight:700; padding:4px 9px; border-radius:10px; text-transform:uppercase; letter-spacing:0.08em; z-index:10;">${isPaused ? 'Pausado' : 'Cerrado'}</div>
             ` : !isUnavailable ? `
               <button class="product-card-add" data-product-id="${p.id}" title="Agregar al carrito" style="position:absolute; bottom:-6px; right:-6px; width:32px; height:32px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; border:2px solid var(--color-surface); box-shadow:0 4px 10px rgba(0,0,0,0.15); cursor:pointer; transition:all 0.2s ease; border:2px solid white;">
                 ${icon('plus', 16)}
