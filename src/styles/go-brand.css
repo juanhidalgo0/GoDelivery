@@ -1,0 +1,703 @@
+/* ============================================================
+   GO! — Identidad visual del lado cliente
+   Tinta negra, papel cálido, tipografía pesada en mayúsculas y la
+   barrita roja debajo de los títulos (igual que las piezas de @_godelivery).
+   Se carga después del resto de hojas: redefine tokens y agrega las
+   piezas de marca (go-*). Para volver atrás alcanza con quitar el <link>.
+   ============================================================ */
+
+:root {
+  --go-ink: #0b0b0c;
+  --go-ink-2: #161618;
+  --go-ink-3: #202023;
+  --go-ink-line: #2c2c30;
+  --go-paper: #f4f2ee;
+  --go-paper-2: #ebe7e0;
+  --go-card: #ffffff;
+  --go-line: #e4dfd6;
+  --go-text: #0b0b0c;
+  --go-text-2: #57534e;
+  --go-text-3: #78716c;
+  --go-on-ink: #f7f5f1;
+  --go-on-ink-2: #a8a29e;
+  --go-red: #e11d48;
+  --go-red-press: #be123c;
+  --go-green: #0e9f6e;
+  --go-kraft: #c9a273;
+  --go-radius: 16px;
+  --go-radius-lg: 22px;
+  --go-shadow: 0 1px 2px rgba(11, 11, 12, 0.04), 0 8px 24px rgba(11, 11, 12, 0.06);
+  --go-font: 'Montserrat', 'Inter', system-ui, sans-serif;
+
+  /* Tokens existentes de la app, llevados a la paleta GO! */
+  --color-bg: var(--go-paper);
+  --color-bg-secondary: var(--go-paper-2);
+  --color-surface: var(--go-card);
+  --color-surface-hover: #faf9f7;
+  --color-surface-elevated: var(--go-card);
+  --color-text: var(--go-text);
+  --color-text-primary: var(--go-text);
+  --color-text-secondary: var(--go-text-2);
+  --color-text-tertiary: var(--go-text-3);
+  --color-border: var(--go-line);
+  --color-border-light: #eee9e1;
+  --font-display: var(--go-font);
+  --footer-bg: var(--go-ink);
+  --footer-border: var(--go-ink-line);
+  --footer-item-inactive: #8d8a86;
+  --header-bg: var(--go-ink);
+  --shadow-xs: 0 1px 2px rgba(11, 11, 12, 0.05);
+  --shadow-sm: var(--go-shadow);
+}
+
+[data-theme="dark"] {
+  --go-paper: #0b0b0c;
+  --go-paper-2: #161618;
+  --go-card: #161618;
+  --go-line: #2c2c30;
+  --go-text: #f7f5f1;
+  --go-text-2: #b5afa9;
+  --go-text-3: #8d8a86;
+  --color-surface-hover: #202023;
+  --color-border-light: #232326;
+}
+
+body {
+  background: var(--color-bg);
+}
+
+/* ---------- Piezas de marca ---------- */
+
+.go-eyebrow {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--go-text-2);
+}
+
+.go-title {
+  font-family: var(--go-font);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 0.98;
+  color: var(--go-text);
+  margin: 0;
+}
+
+.go-bar {
+  display: block;
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--go-red);
+}
+
+.go-wordmark {
+  font-family: var(--go-font);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.go-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  margin-bottom: 14px;
+}
+
+.go-section-head .go-title { font-size: 22px; }
+.go-section-head .go-bar { margin-top: 8px; }
+
+.go-link {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--go-text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  white-space: nowrap;
+}
+
+/* ---------- Header móvil (home / perfil) ---------- */
+
+.go-header {
+  width: 100%;
+  background: var(--go-ink);
+  color: var(--go-on-ink);
+}
+
+.go-header-top {
+  height: 56px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  z-index: 2;
+}
+
+.go-header .go-wordmark {
+  font-size: 26px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.go-header-address {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  cursor: pointer;
+  padding-left: 12px;
+  border-left: 1px solid var(--go-ink-line);
+}
+
+.go-header-address .go-eyebrow { color: var(--go-on-ink-2); font-size: 10px; }
+
+.go-header-address-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.go-header-address-row #header-address-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.go-icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--go-ink-2);
+  border: 1px solid var(--go-ink-line);
+  color: #fff;
+  position: relative;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.go-icon-btn:active { transform: scale(0.94); background: var(--go-ink-3); }
+
+.go-header-actions { display: flex; align-items: center; gap: 8px; }
+
+.go-header-search {
+  padding: 0 16px 16px;
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+  height: 64px;
+  box-sizing: border-box;
+}
+
+.go-search-field {
+  height: 48px;
+  border-radius: 14px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  color: var(--go-text-3);
+}
+
+.go-search-field input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  color: #0b0b0c !important;
+}
+
+.go-search-field input::placeholder { color: #78716c; }
+
+/* ---------- Bloque de servicios del home (continúa la banda negra) ---------- */
+
+.go-hero {
+  background: var(--go-ink);
+  color: var(--go-on-ink);
+  padding: 8px 16px 28px;
+  margin-top: -1px;
+  position: relative;
+}
+
+.go-hero .go-eyebrow { color: var(--go-on-ink-2); }
+
+.go-hero .go-title {
+  color: #fff;
+  font-size: 30px;
+  margin-top: 8px;
+}
+
+.go-hero .go-bar { margin-top: 12px; }
+
+.go-services {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.go-service {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--go-on-ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.go-service-ring {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1.5px solid var(--go-ink-line);
+  background: var(--go-ink-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #fff;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.go-service-ring::after {
+  content: '';
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--go-red);
+}
+
+.go-service:active .go-service-ring { transform: scale(0.94); border-color: var(--go-red); }
+
+.go-service.is-featured .go-service-ring { border-color: var(--go-red); }
+
+/* Lámina de contenido que sube sobre la banda negra */
+.go-sheet {
+  background: var(--color-bg);
+  border-radius: 24px 24px 0 0;
+  margin-top: -16px;
+  padding-top: 22px;
+  position: relative;
+}
+
+/* ---------- Accesos grandes (Comida / GoMarket) ---------- */
+
+.go-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 16px;
+  margin-bottom: 24px;
+}
+
+.go-feature {
+  position: relative;
+  height: 156px;
+  border-radius: var(--go-radius-lg);
+  overflow: hidden;
+  background: var(--go-ink);
+  text-decoration: none;
+  display: block;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease;
+}
+
+.go-feature:active { transform: scale(0.98); }
+
+.go-feature img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.go-feature::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(11, 11, 12, 0.88) 0%, rgba(11, 11, 12, 0.2) 55%, rgba(11, 11, 12, 0) 100%);
+}
+
+.go-feature-text {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.go-feature-text .go-title { color: #fff; font-size: 20px; }
+.go-feature-text .go-eyebrow { color: rgba(255, 255, 255, 0.78); font-size: 10px; }
+
+/* ---------- Categorías chicas ---------- */
+
+.category-row-small { gap: 14px !important; padding: 2px 16px 8px !important; }
+
+.category-card-small {
+  flex: 0 0 76px !important;
+  height: auto !important;
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+  justify-content: flex-start !important;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.category-card-small::after { display: none !important; }
+.category-card-small:hover { transform: none !important; }
+.category-card-small:active { transform: scale(0.95) !important; }
+
+.category-card-small img {
+  position: static !important;
+  width: 76px !important;
+  height: 76px !important;
+  border-radius: 20px;
+  object-fit: cover;
+  background: var(--go-paper-2);
+}
+
+.category-card-small .card-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  background: var(--go-card);
+  border: 1px solid var(--go-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--go-text);
+}
+
+.category-card-small .card-title {
+  color: var(--go-text) !important;
+  text-shadow: none !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 76px;
+}
+
+.categories-arrow-btn { display: none !important; }
+
+/* ---------- Tarjeta de comercio ---------- */
+
+.go-store-card {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: var(--go-text);
+  background: var(--go-card);
+  border: 1px solid var(--go-line);
+  border-radius: var(--go-radius-lg);
+  overflow: hidden;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease;
+}
+
+.go-store-card:active { transform: scale(0.985); }
+
+.go-store-cover {
+  position: relative;
+  height: 148px;
+  background: var(--go-paper-2);
+}
+
+.go-store-cover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.go-store-cover-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--go-text-3);
+}
+
+.go-store-logo {
+  position: absolute;
+  left: 14px;
+  bottom: -22px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--go-card);
+  box-shadow: 0 2px 8px rgba(11, 11, 12, 0.12);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--go-text);
+}
+
+.go-store-logo img { width: 100%; height: 100%; object-fit: cover; }
+
+.go-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: rgba(11, 11, 12, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.go-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8d8a86;
+}
+
+.go-status.is-open::before { background: #22c55e; }
+.go-status.is-paused::before { background: #f59e0b; }
+
+.go-store-body {
+  padding: 30px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.go-store-name {
+  font-family: var(--go-font);
+  font-weight: 800;
+  font-size: 17px;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.go-store-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.go-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.go-store-meta {
+  font-size: 13px;
+  color: var(--go-text-2);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.go-dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+
+.go-free { color: var(--go-green); font-weight: 700; }
+
+.go-store-card.is-muted { opacity: 0.72; }
+.go-store-card.is-muted .go-store-cover > img { filter: grayscale(1); }
+
+/* Slider de comercios: tarjetas de ancho fijo con scroll horizontal */
+.comercios-slider-wrapper { position: relative; }
+
+#comercios-grid.comercios-slider {
+  display: flex !important;
+  gap: 12px !important;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding: 2px 16px 8px !important;
+}
+
+#comercios-grid.comercios-slider::-webkit-scrollbar { display: none; }
+
+#comercios-grid .go-store-card {
+  flex: 0 0 84%;
+  max-width: 340px;
+  scroll-snap-align: start;
+  scroll-margin-left: 16px;
+}
+
+/* ---------- Bloques "Sumate" estilo piezas de Instagram ---------- */
+
+.go-cta-card {
+  margin: 0 16px 12px;
+  border-radius: var(--go-radius-lg);
+  background: var(--go-ink);
+  color: #fff;
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.go-cta-card .go-title { color: #fff; font-size: 24px; max-width: 250px; }
+.go-cta-card p { margin: 0; font-size: 13px; color: var(--go-on-ink-2); line-height: 1.45; max-width: 260px; }
+
+.go-cta-pill {
+  align-self: flex-start;
+  margin-top: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  border: 1.5px solid #fff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.go-cta-card .go-stamp {
+  position: absolute;
+  right: -18px;
+  bottom: -18px;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  border: 1.5px solid var(--go-ink-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--go-font);
+  font-weight: 900;
+  font-size: 30px;
+  color: var(--go-ink-line);
+  letter-spacing: -0.03em;
+}
+
+.go-cta-card.is-light {
+  background: var(--go-card);
+  color: var(--go-text);
+  border: 1px solid var(--go-line);
+}
+
+.go-cta-card.is-light .go-title { color: var(--go-text); }
+.go-cta-card.is-light p { color: var(--go-text-2); }
+.go-cta-card.is-light .go-cta-pill { border-color: var(--go-text); color: var(--go-text); }
+
+.go-report {
+  margin: 4px 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--go-text-2);
+}
+
+.go-report button {
+  margin-left: auto;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  border: 1px solid var(--go-line);
+  background: var(--go-card);
+  color: var(--go-text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ---------- Barra inferior ---------- */
+
+.bottom-nav {
+  background: var(--go-ink) !important;
+  border-top: 1px solid var(--go-ink-line) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.bottom-nav .nav-item { color: #8d8a86; }
+.bottom-nav .nav-item > span:last-child { font-weight: 600 !important; }
+.bottom-nav .nav-item.active { color: #fff; }
+.bottom-nav .nav-item.active > span:last-child { font-weight: 800 !important; }
+
+.bottom-nav .nav-item.active::after {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--go-red);
+  bottom: 4px;
+}
+
+.bottom-nav .nav-item.active .nav-item-icon { transform: none; animation: none; }
+.bottom-nav .nav-item-badge { border-color: var(--go-ink) !important; }
+
+/* Sin manchas de color de fondo del diseño anterior */
+.home-blob { display: none !important; }
+
+/* Secciones del home: el encabezado GO! ya trae su propio margen lateral */
+.go-sheet .home-section { padding: 0 !important; }
+.go-sheet .home-section-title { margin-bottom: 0; }
+#promoted-section .go-store-card:active { transform: scale(0.985); }

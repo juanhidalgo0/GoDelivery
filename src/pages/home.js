@@ -4,6 +4,8 @@ import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, co
 import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js';
 import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
+import { escapeHtml } from '../utils/escape.js';
+import { goSectionHead } from '../components/go-ui.js';
 import { icon, categoryIcon, CATEGORY_ICON_MAP, CATEGORY_PHOSPHOR_MAP } from '../utils/icons.js';
 import { getState, subscribe } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
@@ -82,73 +84,57 @@ export async function renderHome(content) {
   // Core rendering callback once data is ready
   const doActualHomeRender = () => {
     content.innerHTML = `
-      <div class="home-page" style="padding-top: 8px; position: relative; overflow: hidden;">
-        <!-- Ambient Background Blobs (Soft Glows) -->
-        <div class="home-blob home-blob-1"></div>
-        <div class="home-blob home-blob-2"></div>
-        
-        <!-- Services & Main Categories Block (Symmetrical 16px Padding & 12px Gaps) -->
-        <div style="display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 0; margin-bottom: 12px;">
-          <!-- Mandados Hero Card -->
-          <a id="home-mandados-btn" href="javascript:void(0)" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #FF2E55 0%, #C9002B 100%); border-radius: 18px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; height: 68px; box-shadow: 0 8px 22px rgba(225, 0, 54, 0.22); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.22); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box; width: 100%;">
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 60%); pointer-events: none;"></div>
-            <div style="width: 38px; height: 38px; border-radius: 12px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-              ${icon('package', 20)}
-            </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">Mandados</h4>
-                <span style="font-size: 8.5px; font-weight: 900; background: rgba(255,255,255,0.25); color: #FFF; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px; backdrop-filter: blur(4px);">Express</span>
-              </div>
-              <span style="font-size: 11px; color: rgba(255,255,255,0.95); font-weight: 800; letter-spacing: -0.01em; margin-top: 2px; display: block; line-height: 1.2;">¿Qué te traemos? Pedí lo que quieras</span>
-            </div>
-            <span class="badge-pulse-modern" style="position: absolute; top: 10px; right: 12px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #000; font-size: 8px; font-weight: 900; padding: 3px 8px; border-radius: 16px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(255, 215, 0, 0.35); font-family: var(--font-display); line-height: 1; z-index: 3;">¡Más Pedido!</span>
+      <div class="home-page" style="position: relative; overflow: hidden;">
+        <!-- GO! hero: continues the black header band -->
+        <section class="go-hero">
+          <span class="go-eyebrow">Servicio puerta a puerta · Magdalena</span>
+          <h1 class="go-title">¿Qué te<br>traemos hoy?</h1>
+          <span class="go-bar"></span>
+          <nav class="go-services" aria-label="Servicios">
+            <a id="home-mandados-btn" href="javascript:void(0)" class="go-service is-featured">
+              <span class="go-service-ring">${icon('package', 22)}</span>
+              Mandados
+            </a>
+            <a href="#/viajes" class="go-service">
+              <span class="go-service-ring">${icon('car', 22)}</span>
+              Viajes
+            </a>
+            <a href="#/marketplace" class="go-service">
+              <span class="go-service-ring">${icon('store', 22)}</span>
+              Market
+            </a>
+            <a href="#/offers" class="go-service">
+              <span class="go-service-ring">${icon('tag', 22)}</span>
+              Ofertas
+            </a>
+          </nav>
+        </section>
+
+        <div class="go-sheet">
+        <!-- Big entry points (Comida & GoMarket) -->
+        <div class="go-feature-grid">
+          <a href="#/category/Comida" class="go-feature">
+            <img src="/images/categories/restaurants.png" alt="" loading="lazy" decoding="async" />
+            <span class="go-feature-text">
+              <span class="go-eyebrow">Tus antojos, rápido</span>
+              <span class="go-title">Comida</span>
+            </span>
           </a>
-  
-          <!-- Viajes & Market Split Row -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; box-sizing: border-box;">
-            <!-- Viajes Card -->
-            <a href="#/viajes" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #1E40AF 0%, #1D4ED8 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(30, 64, 175, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
-              <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-                ${icon('car', 18)}
-              </div>
-              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-                <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Viajes</h4>
-                <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Viajá seguro</span>
-              </div>
-            </a>
-  
-            <!-- Market Card -->
-            <a href="#/marketplace" class="glow-hover spring-hover" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-radius: 16px; padding: 10px 10px; display: flex; align-items: center; gap: 8px; height: 58px; box-shadow: 0 6px 18px rgba(5, 150, 105, 0.18); text-decoration: none; position: relative; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-sizing: border-box;">
-              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 60%); pointer-events: none;"></div>
-              <div style="width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.22); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 2;">
-                ${icon('store', 18)}
-              </div>
-              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; justify-content: center;">
-                <h4 style="font-family: var(--font-display); font-size: 14px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.02em; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,0.15);">Market</h4>
-                <span style="font-size: 10px; color: rgba(255,255,255,0.9); font-weight: 800; letter-spacing: -0.01em; margin-top: 1px; display: block; line-height: 1.2;">Compra y venta</span>
-              </div>
-            </a>
-          </div>
+          <a href="#/category/GoMarket" id="gomarket-card" class="go-feature">
+            <img src="/images/categories/gomarket.png" alt="" loading="lazy" decoding="async" />
+            <span class="go-feature-text">
+              <span class="go-eyebrow">Tu súper en minutos</span>
+              <span class="go-title">GoMarket</span>
+            </span>
+          </a>
         </div>
-   
-        <!-- Premium Category Grid (Comida & GoMarket) -->
-        <div class="category-grid" style="margin-top: 10px; margin-bottom: 14px;">
-          <a href="#/category/Comida" class="category-card-large glow-hover spring-hover">
-            <div style="position: absolute; top: 10px; left: 10px; background: rgba(225, 29, 72, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
-              Tus antojos, rápido
-            </div>
-            <img src="/images/categories/restaurants.png" alt="Comida" loading="lazy" decoding="async" style="object-fit: cover; width: 100%; height: 100%;" />
-            <span class="card-title">Comida</span>
-          </a>
-          <a href="#/category/GoMarket" id="gomarket-card" class="category-card-large glow-hover spring-hover">
-            <div style="position: absolute; top: 10px; left: 10px; background: rgba(13, 148, 136, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: white; padding: 4px 9px; border-radius: 8px; font-size: 9.5px; font-weight: 900; z-index: 3; box-shadow: 0 3px 10px rgba(0,0,0,0.18); text-transform: uppercase; letter-spacing: 0.4px;">
-              Tu súper en minutos
-            </div>
-            <img src="/images/categories/gomarket.png" alt="GoMarket" loading="lazy" decoding="async" style="object-fit: cover; width: 100%; height: 100%;" />
-            <span class="card-title">GoMarket</span>
-          </a>
+
+        <div class="go-section-head">
+          <div>
+            <span class="go-eyebrow">Explorá</span>
+            <h2 class="go-title" style="margin-top: 6px;">Categorías</h2>
+            <span class="go-bar"></span>
+          </div>
         </div>
   
         <!-- Small Categories Slider Section -->
@@ -197,21 +183,14 @@ export async function renderHome(content) {
         <div id="app-only-section" style="margin-top: 2px; margin-bottom: 14px;"></div>
   
         <!-- Main Content (Comercios Grid) -->
-        <div style="position: absolute; top: -50px; left: -20%; width: 140%; height: 300px; background: radial-gradient(circle at 50% 0%, rgba(225,29,72,0.15), rgba(16,185,129,0.05), transparent 70%); filter: blur(40px); z-index: -1; pointer-events: none;"></div>
-        <div class="home-section" style="margin-top: 24px; position: relative;">
-          <div style="padding: 0 16px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 4px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-                <h2 class="home-section-title" style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  Comercios
-                </h2>
-                <span style="background: rgba(16, 185, 129, 0.1); color: #059669; font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;">
-                  🛒 Locales
-                </span>
-              </div>
-              <a href="#/category/Todos" style="font-size: 12px; font-weight: 800; color: var(--color-primary); text-decoration: none; display: flex; align-items: center; gap: 2px; padding: 5px 11px; border-radius: 20px; background: rgba(225, 29, 72, 0.08); transition: all 0.2s; flex-shrink: 0; white-space: nowrap;">Ver todos <span style="display: flex;">${icon('chevronRight', 14)}</span></a>
+        <div class="home-section" style="margin-top: 28px; position: relative;">
+          <div class="go-section-head">
+            <div>
+              <span class="go-eyebrow">Locales de Magdalena</span>
+              <h2 class="home-section-title go-title" style="margin-top: 6px;">Comercios</h2>
+              <span class="go-bar"></span>
             </div>
-            <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Explorá gastronómicos, almacenes y tiendas locales</span>
+            <a href="#/category/Todos" class="go-link">Ver todos <span style="display: flex; color: var(--go-red);">${icon('chevronRight', 16)}</span></a>
           </div>
           
           <div class="comercios-slider-wrapper">
@@ -227,47 +206,31 @@ export async function renderHome(content) {
           </div>
         </div>
   
-        <!-- Join Commerce Banner -->
-        <div id="join-commerce-banner" class="scroll-reveal reveal-scale-up" style="margin: 20px 16px 10px; background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 8px 25px rgba(225, 29, 72, 0.18); color: white; cursor: pointer; transition: all 0.2s;">
-          <div style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
-            <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
-              🏪
-            </div>
-            <div style="text-align: left;">
-              <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; margin: 0 0 2px 0; color: white;">¿Querés sumar tu comercio?</h4>
-              <p style="font-size: 11px; margin: 0; color: rgba(255,255,255,0.95); font-weight: 600;">Registrá tu negocio y empezá a recibir pedidos.</p>
-            </div>
+        <!-- Join banners, same voice as the @_godelivery posts -->
+        <div style="margin-top: 32px;">
+          <div id="join-commerce-banner" class="go-cta-card" role="button" tabindex="0">
+            <span class="go-eyebrow" style="color: var(--go-on-ink-2);">Para comercios</span>
+            <h3 class="go-title">¿Tu comercio todavía no está en GO!?</h3>
+            <span class="go-bar"></span>
+            <p>Sumate y empezá a llegar a más clientes en Magdalena.</p>
+            <span class="go-cta-pill">Sumá tu comercio ${icon('chevronRight', 14)}</span>
+            <span class="go-stamp" aria-hidden="true">GO!</span>
           </div>
-          <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;">
-            ${icon('chevronRight', 16)}
+
+          <div id="join-team-banner" class="go-cta-card is-light" role="button" tabindex="0">
+            <span class="go-eyebrow">Trabajá con nosotros</span>
+            <h3 class="go-title">Sumate al equipo</h3>
+            <span class="go-bar"></span>
+            <p>Repartidor, chofer o ambos. Manejás tus horarios.</p>
+            <span class="go-cta-pill">Quiero sumarme ${icon('chevronRight', 14)}</span>
           </div>
-        </div>
-  
-        <!-- Work with us Banner -->
-        <div id="join-team-banner" class="scroll-reveal reveal-scale-up" style="margin: 0 16px 10px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 8px 25px rgba(15, 23, 42, 0.15); color: white; cursor: pointer; transition: all 0.2s;">
-          <div style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
-            <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
-              💼
-            </div>
-            <div style="text-align: left;">
-              <h4 style="font-family: var(--font-display); font-size: 15px; font-weight: 900; margin: 0 0 2px 0; color: white; text-transform: uppercase;">¿Querés trabajar con nosotros?</h4>
-              <p style="font-size: 11px; margin: 0; color: rgba(255,255,255,0.9); font-weight: 600;">Sumate al equipo como repartidor, chofer o ambos.</p>
-            </div>
-          </div>
-          <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;">
-            ${icon('chevronRight', 16)}
+
+          <div id="bug-report-banner" class="go-report">
+            <span style="display: flex; color: var(--go-text-3);">${icon('info', 16)}</span>
+            <span>¿Sugerencias o algún error?</span>
+            <button id="report-bug-btn" type="button">Reportar</button>
           </div>
         </div>
-  
-        <!-- Bug report Banner -->
-        <div id="bug-report-banner" class="scroll-reveal reveal-scale-up" style="margin: 0 16px 20px; background: var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius: 16px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: var(--shadow-xs);">
-          <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-            <span style="color: var(--color-primary); display: flex; flex-shrink: 0;">${icon('info', 16)}</span>
-            <span style="font-size: 11.5px; font-weight: 750; color: var(--color-text-secondary); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">¿Sugerencias o algún error en la app?</span>
-          </div>
-          <button id="report-bug-btn" style="height: 28px; border-radius: 8px; font-size: 11px; font-weight: 900; padding: 0 10px; background: rgba(225, 29, 72, 0.08); color: var(--color-primary); display: flex; align-items: center; gap: 4px; border: none; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0;">
-            ${icon('send', 10, '', 'var(--color-primary)')} Reportar
-          </button>
         </div>
         
         ${getFooterHTML()}
@@ -856,10 +819,7 @@ function renderBrandsSlider(comercios) {
   if (isLoadingComercios && (!comercios || comercios.length === 0)) {
     container.style.display = '';
     container.innerHTML = `
-      <div style="padding: 0 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px;">
-        <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comercios</h3>
-        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Los locales más elegidos por la comunidad</span>
-      </div>
+      ${goSectionHead({ eyebrow: 'Comunidad GO!', title: 'Los más elegidos', top: 8 })}
       <div style="display: flex; gap: 14px; padding: 6px 16px 12px; overflow: hidden;">
         ${renderSkeletonCircles(5)}
       </div>
@@ -892,10 +852,7 @@ function renderBrandsSlider(comercios) {
 
   container.style.display = ''; // Reset display:none from previous empty-data call
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px;">
-      <h3 style="font-family: var(--font-display); font-size: 15px; font-weight: 950; color: var(--color-text-primary); margin: 0;">Comercios</h3>
-      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600;">Los locales más elegidos por la comunidad</span>
-    </div>
+    ${goSectionHead({ eyebrow: 'Comunidad GO!', title: 'Los más elegidos', top: 8 })}
     <div style="overflow-x: auto; display: flex; gap: 14px; padding: 6px 16px 12px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${finalBrands.map(brand => {
         const isInactive = brand.isActive === false;
@@ -1049,77 +1006,30 @@ async function renderPromotedSection(comercios) {
 
   container.style.display = ''; // Reset display:none from previous empty-data call
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
-      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-          <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            Recomendados
-          </h2>
-          <span style="background: rgba(245, 158, 11, 0.12); color: #d97706; font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;">
-            ⭐ Destacados
-          </span>
-        </div>
-        <a href="#/category/Recomendados" style="font-size: 12px; font-weight: 800; color: var(--color-primary); text-decoration: none; display: flex; align-items: center; gap: 2px; padding: 5px 11px; border-radius: 20px; background: rgba(225, 29, 72, 0.08); transition: all 0.2s; flex-shrink: 0; white-space: nowrap;">Ver todos <span style="display: flex;">${icon('chevronRight', 14)}</span></a>
-      </div>
-      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Locales con las mejores opiniones cerca tuyo</span>
-    </div>
+    ${goSectionHead({ eyebrow: 'Mejor puntuados', title: 'Recomendados', href: '#/category/Recomendados' })}
     <div style="overflow-x: auto; display: flex; gap: 16px; padding: 0 16px 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none;">
       ${finalPromoted.map(p => {
         const isCustom = p.isCustom;
         const targetHref = p.link || 'javascript:void(0)';
         
-        let footerHtml = '';
-        if (!isCustom) {
-          footerHtml = `
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
-              <span style="font-weight: 800; font-size: 15px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.name}</span>
-              <span style="display: flex; align-items: center; gap: 2px; font-size: 13px; font-weight: 800; color: var(--color-text-primary);">
-                ${icon('star', 12)} ${p.rating || '4.8'}
-              </span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-text-tertiary); margin-top: 3px;">
-              <span style="display: flex; align-items: center; gap: 4px;">${icon('clock', 12)} ${p.deliveryTime || '20-35 min'}</span>
-              <span>•</span>
-              <span style="display: flex; align-items: center; gap: 4px;">${icon('bike', 12)} ${formatPrice(p.deliveryFee || 0)}</span>
-            </div>
-          `;
-        } else {
-          // Premium clean look for custom ads
-          footerHtml = `
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
-              <span style="font-weight: 800; font-size: 15px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.name}</span>
-              <span style="display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 900; color: var(--color-primary); background:var(--color-primary-light); padding:2px 8px; border-radius:6px; letter-spacing: 0.05em;">
-                Oficial
-              </span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-text-tertiary); margin-top: 3px;">
-              <span style="display: flex; align-items: center; gap: 4px; font-weight: 800; color: var(--color-text-secondary);">
-                Promoción Exclusiva
-              </span>
-            </div>
-          `;
-        }
-
-        // Custom badges for priority
-        const badgeBg = p.isPriority ? 'var(--color-warning)' : 'rgba(255, 235, 0, 0.95)';
-        const badgeColor = '#1a1a1a';
-        const priorityBorder = p.isPriority ? 'border: 2px solid var(--color-warning);' : 'border: 1px solid var(--color-border-light);';
+        const name = escapeHtml(p.name || '');
+        const meta = isCustom
+          ? '<span>Promoción exclusiva</span>'
+          : `<span>${escapeHtml(p.deliveryTime || '20-35 min')}</span><span class="go-dot"></span><span>${(p.deliveryFee || 0) === 0 ? '<span class="go-free">Envío gratis</span>' : `Envío ${formatPrice(p.deliveryFee)}`}</span>`;
 
         return `
-          <a href="${targetHref}" ${p.link && p.link.startsWith('http') ? 'target="_blank" rel="noopener noreferrer"' : ''} style="flex: 0 0 280px; width: 280px; max-width: 280px; text-decoration: none; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
-            <div style="position: relative; width: 100%; height: 155px; min-height: 155px; max-height: 155px; border-radius: 20px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.08); background: var(--color-surface); ${priorityBorder} box-sizing: border-box;">
-              <img src="${p.banner}" alt="${p.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover; display: block;" />
-              <div style="position: absolute; top: 12px; left: 12px; background: ${badgeBg}; color: ${badgeColor}; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 900; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 2;">
-                ${p.label}
-              </div>
+          <a href="${targetHref}" ${p.link && p.link.startsWith('http') ? 'target="_blank" rel="noopener noreferrer"' : ''} class="go-store-card" style="flex: 0 0 280px; width: 280px; ${p.isPriority ? 'border-color: var(--go-ink);' : ''}">
+            <div class="go-store-cover" style="height: 140px;">
+              ${p.banner ? `<img src="${escapeHtml(p.banner)}" alt="" loading="lazy" decoding="async" />` : `<div class="go-store-cover-empty">${icon('store', 36)}</div>`}
+              ${p.label ? `<span class="go-status is-open" style="background: var(--go-red);">${escapeHtml(p.label)}</span>` : ''}
+              <span class="go-store-logo"><img src="${escapeHtml(p.logo || '/logo.png')}" alt="" loading="lazy" decoding="async" /></span>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px; padding: 0 4px; min-height: 46px;">
-              <div style="width: 46px; height: 46px; border-radius: 50%; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.03); background: white; border: 1px solid var(--color-border-light); display: flex; align-items: center; justify-content: center;">
-                <img src="${p.logo || '/logo.png'}" alt="" loading="lazy" decoding="async" style="width: 78%; height: 78%; object-fit: contain; border-radius: 50%;" />
+            <div class="go-store-body">
+              <div class="go-store-name">
+                <span>${name}</span>
+                ${isCustom ? '<span class="go-eyebrow" style="color: var(--go-red);">Oficial</span>' : `<span class="go-rating">${icon('star', 14, '', '#f59e0b')} ${escapeHtml(String(p.rating || '4.8'))}</span>`}
               </div>
-              <div style="flex: 1; min-width: 0;">
-                ${footerHtml}
-              </div>
+              <div class="go-store-meta">${meta}</div>
             </div>
           </a>
         `;
@@ -1254,22 +1164,7 @@ async function renderOffersSection(offers = [], comercios = []) {
 
   container.innerHTML = `
     <div class="home-section" style="margin-top: 14px; position: relative;">
-      <div style="padding: 0 16px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div style="width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #ef4444, #f59e0b); display: flex; align-items: center; justify-content: center; color: white; box-shadow: 0 4px 10px rgba(239,68,68,0.25);">
-            ${icon('flame', 18)}
-          </div>
-          <div>
-            <h2 style="font-family: var(--font-display); font-size: 17px; font-weight: 950; letter-spacing: -0.02em; color: var(--color-text-primary); margin: 0; line-height: 1.1;">
-              Ofertas del Día
-            </h2>
-            <span style="font-size: 10.5px; color: var(--color-text-secondary); font-weight: 600;">Promociones exclusivas en comercios</span>
-          </div>
-        </div>
-        <a href="#/offers" style="font-size: 12px; font-weight: 850; color: var(--color-primary); text-decoration: none; display: flex; align-items: center; gap: 2px;">
-          Ver todas ${icon('chevronRight', 16)}
-        </a>
-      </div>
+      ${goSectionHead({ eyebrow: 'Promociones', title: 'Ofertas del día', href: '#/offers', linkLabel: 'Ver todas', top: 14 })}
 
       <div class="offers-slider" style="display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding: 4px 16px 14px; scroll-behavior: smooth;">
         ${offerItems.map((item, index) => `
@@ -1362,20 +1257,7 @@ function renderAppOnlySection(products, comercios, offers = []) {
   const shuffledProducts = seededShuffle(activeProducts, getHourSeed());
 
   container.innerHTML = `
-    <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
-      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-          <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            Exclusivos App
-          </h2>
-          <span style="background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(126,34,206,0.15)); color: #7e22ce; font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;">
-            📱 Solo en App
-          </span>
-        </div>
-        <a href="#/category/Solo En App" style="font-size: 12px; font-weight: 800; color: #7e22ce; text-decoration: none; display: flex; align-items: center; gap: 2px; padding: 5px 11px; border-radius: 20px; background: rgba(126, 34, 206, 0.08); transition: all 0.2s; flex-shrink: 0; white-space: nowrap;">Ver todos <span style="display: flex;">${icon('chevronRight', 14)}</span></a>
-      </div>
-      <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">Promociones especiales disponibles únicamente desde tu teléfono</span>
-    </div>
+    ${goSectionHead({ eyebrow: 'Solo desde el celu', title: 'Exclusivos app', href: '#/category/' + encodeURIComponent('Solo En App') })}
     <div class="app-only-slider" style="overflow-x: auto; display: flex; gap: 12px; padding: 4px 16px 14px; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; scroll-behavior: smooth;">
       ${shuffledProducts.map(p => {
         const c = comercios.find(com => com.id === p.comercioId);
@@ -1476,7 +1358,6 @@ const CATEGORY_IMAGE_MAP = {
 };
 
 function renderCategories(categories, active) {
-  console.log('[Home Categories] renderCategories received:', categories);
   const container = document.getElementById('categories-row-small');
   if (!container) return;
 
@@ -1514,12 +1395,12 @@ function renderCategories(categories, active) {
     const img = CATEGORY_IMAGE_MAP[cleanName] || CATEGORY_IMAGE_MAP[cat.name];
     
     return `
-      <a href="#/category/${cat.name}" class="category-card-small" style="flex: 0 0 106px; height: 122px; border-radius: 22px; text-decoration: none;">
+      <a href="#/category/${encodeURIComponent(cat.name)}" class="category-card-small">
         ${img ? 
-          `<img src="${img}" alt="${cleanName}" loading="lazy" decoding="async" />` : 
-          `<div class="card-icon">${icon('package', 24)}</div>`
+          `<img src="${img}" alt="" loading="lazy" decoding="async" />` : 
+          `<div class="card-icon">${categoryIcon(cleanName, 26)}</div>`
         }
-        <span class="card-title">${cleanName}</span>
+        <span class="card-title">${escapeHtml(cleanName)}</span>
       </a>
     `;
   }).join('');
@@ -1706,77 +1587,38 @@ async function renderComercios(comercios, category, search, filters) {
       const statusText = isInactive ? 'Próximamente' : (isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado'));
       const href = (isPaused || isInactive) ? 'javascript:void(0)' : `#/comercio/${c.id}`;
 
-      // Use c.banner properly
       const bannerSrc = c.banner || '';
+      const name = escapeHtml(c.name || 'Comercio');
+      const rating = c.ratingAverage !== undefined && c.ratingAverage > 0 ? Number(c.ratingAverage).toFixed(1) : null;
+      const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
+      const timeLabel = scheds.length === 0
+        ? 'Sin horario'
+        : (isOpen && !isPaused ? formatDeliveryTime(distanceKm, c.averagePrepTime) : `Abre ${escapeHtml(scheds[0].open || '')}`);
+      const feeLabel = deliveryFee === null
+        ? 'Envío a calcular'
+        : (deliveryFee === 0 ? '<span class="go-free">Envío gratis</span>' : `Envío $${deliveryFee}`);
+      const statusMod = isInactive ? '' : (isPaused ? 'is-paused' : (isOpen ? 'is-open' : ''));
 
       return `
-        <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} ${isInactive ? 'is-inactive' : ''} scroll-reveal reveal-fade-up reveal-delay-${Math.min(i + 1, 5)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom:18px; position:relative; ${isInactive ? 'opacity: 0.75; filter: grayscale(0.85);' : ''}">
-          <!-- Floating Favorite Heart Button (Moved out of banner to prevent clipping) -->
-          <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10; ${isInactive ? 'display:none;' : ''}" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
-            ${icon('heart', 18)}
+        <a href="${href}" class="go-store-card comercio-card ${isPaused ? 'is-paused' : ''} ${isInactive ? 'is-inactive' : ''} ${(isInactive || isPaused || !isOpen) ? 'is-muted' : ''}" aria-label="${name}">
+          <div class="go-store-cover">
+            ${bannerSrc ? `<img src="${escapeHtml(bannerSrc)}" alt="" loading="lazy" decoding="async" />` : `<div class="go-store-cover-empty">${icon('store', 36)}</div>`}
+            <span class="go-status ${statusMod}">${statusText}</span>
+            <span class="go-store-logo">
+              ${c.logo ? `<img src="${escapeHtml(c.logo)}" alt="" loading="lazy" decoding="async" />` : categoryIcon(c.category, 22)}
+            </span>
           </div>
-
-          <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
-            ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" decoding="async" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
-            
-            <div class="comercio-card-logo-container">
-              ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" decoding="async" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
+          <div class="go-store-body">
+            <div class="go-store-name">
+              <span>${name}</span>
+              <span class="go-rating">${icon('star', 14, '', '#f59e0b')} ${rating || 'Nuevo'}</span>
             </div>
-
-            <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
-            <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isInactive ? '#64748b' : (isOpen && !isPaused ? '#00B174' : '#3F372B')}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-              ${statusText === 'Abierto' ? 'Abierto ahora' : statusText.toUpperCase()}
-            </div>
-            
-            <!-- Rating Box on top-right -->
-            <div style="position:absolute; top:12px; right:12px; background:white; padding:6px 12px; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.08); z-index:2; border:1px solid rgba(0,0,0,0.03);">
-              <div style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:3.5px; line-height:1.2;">
-                <span style="color:#f59e0b; font-size:13px;">★</span>
-                <span>${c.ratingAverage !== undefined && c.ratingAverage > 0 ? c.ratingAverage.toFixed(1) : 'Nuevo'}</span>
-              </div>
-              ${c.ratingCount ? `<span style="font-size:9.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:1px;">(${c.ratingCount})</span>` : ''}
-            </div>
-          </div>
-          
-          <div class="comercio-card-body" style="padding: 16px; padding-top: 18px; display:flex; flex-direction:column; gap:2px; text-align:left; position:relative;">
-            <!-- Title -->
-            <div class="comercio-card-name" style="font-family:var(--font-display); font-size:18px; font-weight:800; color:var(--color-text-primary); margin:0; line-height:1.2;">${c.name}</div>
-            
-            <!-- Category & Distance -->
-            <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; display:flex; align-items:center; gap:5px; margin-top:2px;">
-              <span>${c.category || 'Comercio'}</span>
-              ${distanceKm !== null ? `<span>•</span> <span>${distanceKm.toFixed(1)} km</span>` : ''}
-            </div>
-            
-            <!-- Bottom Row: Separate Bordered Pills & Arrow Button in a Single Row -->
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; width:100%;">
-              <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;">
-                <!-- Pill 1: Shipping dynamic cost -->
-                <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
-                  ${icon('bike', 15, '', 'var(--color-primary)')}
-                  <span>${deliveryFee !== null ? (deliveryFee === 0 ? 'Envío gratis' : `Envío $${deliveryFee}`) : 'Envío a calcular'}</span>
-                </span>
-                
-                <!-- Pill 2: Duration -->
-                <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-text-secondary); white-space:nowrap; flex-shrink:0;">
-                  ${icon('clock', 14)}
-                  <span>
-                    ${(() => {
-                      const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
-                      if (scheds.length === 0) return 'Sin horario';
-                      if (isOpen && !isPaused) {
-                        return formatDeliveryTime(distanceKm, c.averagePrepTime);
-                      }
-                      return scheds.map(s => `${s.open}-${s.close}`).join(', ');
-                    })()}
-                  </span>
-                </span>
-              </div>
-              
-              <!-- Ver Comercio Button with Arrow -->
-              <span style="background:var(--color-primary); color:white; width:36px; height:36px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:none; flex-shrink:0; transition:all 0.2s; box-shadow:0 4px 12px rgba(225, 29, 72, 0.15);">
-                ${icon('chevronRight', 16, '', 'white')}
-              </span>
+            <div class="go-store-meta">
+              <span>${escapeHtml(c.category || 'Comercio')}</span>
+              <span class="go-dot"></span>
+              <span>${timeLabel}</span>
+              <span class="go-dot"></span>
+              <span>${feeLabel}</span>
             </div>
           </div>
         </a>
@@ -2288,21 +2130,7 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   // completa con productos del catálogo (porque todavía no hay ventas suficientes),
   // la sección NO se anuncia como "Top Ventas": mostrar productos al azar bajo ese
   // cartel es decirle al vecino algo que no es cierto.
-  const renderSectionHeader = (rankingLabel) => `
-      <div style="padding: 0 16px; margin-bottom: 14px; margin-top: 24px; display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-            <h2 style="font-family: var(--font-display); font-size: 18.5px; font-weight: 950; letter-spacing: -0.03em; color: var(--color-text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              Destacados
-            </h2>
-            ${rankingLabel ? `
-            <span style="background: rgba(225, 29, 72, 0.1); color: var(--color-primary); font-size: 9.5px; font-weight: 900; padding: 2px 7px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.4px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
-              🔥 Top Ventas
-            </span>` : ''}
-          </div>
-        </div>
-        <span style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 600; letter-spacing: -0.01em;">${rankingLabel || 'Productos de los comercios de Magdalena'}</span>
-      </div>`;
+  const renderSectionHeader = (rankingLabel) => goSectionHead({ eyebrow: rankingLabel ? 'Top ventas' : 'De los comercios de Magdalena', title: 'Destacados', note: rankingLabel || '' });
 
   const renderSliderContent = (productsList) => {
     return productsList.map(p => {

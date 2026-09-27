@@ -2,6 +2,7 @@
 import { getState, subscribe, setDeliveryAddress, setState } from '../state.js';
 import { isLoggedIn, isComercio, isDelivery } from '../auth.js';
 import { icon } from '../utils/icons.js';
+import { escapeHtml } from '../utils/escape.js';
 import { showAddressPrompt } from './address-modal.js';
 import { initSearchSuggestions } from './search-suggestions.js';
 import { showModal, closeModal } from './modal.js';
@@ -234,38 +235,33 @@ export function renderHeader() {
   if (isHome || isProfilePage) {
     header.innerHTML = `
       ${desktopHeaderHTML}
-      <div class="mobile-header-only" style="width:100%; padding-top: ${topPadding};">
-        <!-- Decorative Circles (clipped using dedicated wrapper to prevent clipping search dropdown) -->
-        <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
-          <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-          <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-        </div>
+      <div class="mobile-header-only go-header" style="padding-top: ${topPadding};">
+        <div class="header-top go-header-top">
+          <a href="#/" class="go-wordmark" aria-label="GO! inicio" style="text-decoration:none;">GO!</a>
 
-        <div class="header-top" style="height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 2;">
           <!-- Address Selector -->
-          <div id="header-location-selector" style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-            <span id="header-address-text" style="font-weight: 700; font-size: 14px; color: white; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              ${displayAddress}
+          <div id="header-location-selector" class="go-header-address" role="button" tabindex="0" aria-label="Cambiar dirección de entrega">
+            <span class="go-eyebrow">Entregar en</span>
+            <span class="go-header-address-row">
+              <span id="header-address-text">${escapeHtml(displayAddress)}</span>
+              <span style="display:flex; flex-shrink:0; color:var(--go-red);">${icon('chevronDown', 14)}</span>
             </span>
-            <span style="color: white; display: flex; opacity: 0.8;">${icon('chevronDown', 14)}</span>
           </div>
 
           <!-- Action Buttons -->
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <!-- Info Icon Button -->
-            <button id="header-info-btn" title="Información" style="color: white; border: none; display: flex; position: relative; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); cursor: pointer; transition: all 0.2s;">
-              ${icon('info', 20)}
+          <div class="go-header-actions">
+            <button id="header-info-btn" class="go-icon-btn" title="Información" aria-label="Información" style="overflow: hidden;">
+              ${icon('info', 18)}
             </button>
-            <!-- Modern Social-Style Notification Bell -->
-            <a href="#/notifications" title="Notificaciones" style="color: white; display: flex; position: relative; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: all 0.2s;">
-              ${icon('bell', 20)}
-              <span id="mobile-unread-badge" style="position: absolute; top: 2px; right: 2px; background: #E11D48; color: white; font-size: 10px; font-weight: 900; min-width: 16px; height: 16px; border-radius: 8px; border: 2px solid var(--color-primary); display: ${unreadCount > 0 ? 'flex' : 'none'}; align-items: center; justify-content: center; padding: 0 3px; box-sizing: border-box; animation: badgePulse 2s infinite;">${unreadCount}</span>
+            <a href="#/notifications" class="go-icon-btn" title="Notificaciones" aria-label="Notificaciones">
+              ${icon('bell', 18)}
+              <span id="mobile-unread-badge" style="position: absolute; top: -2px; right: -2px; background: var(--go-red); color: white; font-size: 10px; font-weight: 800; min-width: 18px; height: 18px; border-radius: 9px; border: 2px solid var(--go-ink); display: ${unreadCount > 0 ? 'flex' : 'none'}; align-items: center; justify-content: center; padding: 0 4px; box-sizing: border-box;">${unreadCount}</span>
             </a>
-            <a href="#/profile" style="color: white; display: flex; background: rgba(255,255,255,0.18); width: 38px; height: 38px; border-radius: 50%; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
-              ${icon('user', 20)}
+            <a href="#/profile" class="go-icon-btn" title="Mi perfil" aria-label="Mi perfil">
+              ${icon('user', 18)}
             </a>
-            <button id="header-search-expand-btn" class="header-action-btn" style="color: white; background: rgba(255,255,255,0.2); border: none; height: 38px; width: 0px; margin-left: 0px; opacity: 0; transform: scale(0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); cursor:pointer; overflow: hidden; padding: 0;">
-              <div style="min-width: 38px; display: flex; align-items: center; justify-content: center;">
+            <button id="header-search-expand-btn" class="header-action-btn go-icon-btn" aria-label="Buscar" style="width: 0px; margin-left: 0px; opacity: 0; transform: scale(0.5); overflow: hidden; padding: 0; border-width: 0;">
+              <div style="min-width: 40px; display: flex; align-items: center; justify-content: center;">
                 ${icon('search', 18)}
               </div>
             </button>
@@ -274,13 +270,11 @@ export function renderHeader() {
 
         <!-- Search Bar (Hidden on Profile Page) -->
         ${isProfilePage ? '' : `
-          <div id="header-search-container" style="padding: 0 16px 16px 16px; margin-top: 2px; position: relative; z-index: 2; overflow: hidden; height: 62px; opacity: 1; transform: translateY(0); will-change: height, opacity, transform;">
-            <div style="background: white; border-radius: 14px; height: 46px; display: flex; align-items: center; padding: 0 4px 0 16px; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-              <input type="text" id="header-search" placeholder="Locales, platos y productos" autocomplete="off" style="color: #333; font-weight: 600; font-size: 14px; border: none; background: transparent; width: 100%; outline: none;" />
-              <div style="background: var(--color-primary); width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; cursor: pointer;">
-                ${icon('search', 18)}
-              </div>
-            </div>
+          <div id="header-search-container" class="go-header-search" style="opacity: 1; transform: translateY(0); will-change: height, opacity, transform;">
+            <label class="go-search-field">
+              ${icon('search', 18)}
+              <input type="text" id="header-search" placeholder="Buscá locales, platos y productos" autocomplete="off" />
+            </label>
           </div>
         `}
       </div>
@@ -327,15 +321,25 @@ export function renderHeader() {
         // Use requestAnimationFrame for smooth progressive rendering
         requestAnimationFrame(() => {
           // Progressively compress search container
-          searchContainer.style.height = (62 * (1 - progress)) + 'px';
+          searchContainer.style.height = (64 * (1 - progress)) + 'px';
           searchContainer.style.opacity = 1 - Math.pow(progress, 1.5);
           searchContainer.style.paddingBottom = (16 * (1 - progress)) + 'px';
           searchContainer.style.transform = `translateY(${-10 * progress}px)`;
           searchContainer.style.pointerEvents = progress > 0.5 ? 'none' : 'auto';
 
           // Progressively expand search button on the right, pushing others
-          searchExpandBtn.style.width = (38 * progress) + 'px';
-          searchExpandBtn.style.marginLeft = (12 * progress) + 'px';
+          // The info button gives its slot to the search button while compact
+          const infoBtnEl = document.getElementById('header-info-btn');
+          if (infoBtnEl) {
+            infoBtnEl.style.width = (40 * (1 - progress)) + 'px';
+            infoBtnEl.style.opacity = 1 - progress;
+            infoBtnEl.style.borderWidth = progress > 0.95 ? '0' : '1px';
+            infoBtnEl.style.marginRight = (-8 * progress) + 'px';
+            infoBtnEl.style.pointerEvents = progress > 0.5 ? 'none' : 'auto';
+          }
+          searchExpandBtn.style.width = (40 * progress) + 'px';
+          searchExpandBtn.style.borderWidth = progress > 0.05 ? '1px' : '0';
+          searchExpandBtn.style.marginLeft = (0 * progress) + 'px';
           searchExpandBtn.style.opacity = progress;
           searchExpandBtn.style.transform = `scale(${0.5 + (0.5 * progress)})`;
           searchExpandBtn.style.pointerEvents = progress > 0.8 ? 'auto' : 'none';
@@ -361,10 +365,10 @@ export function renderHeader() {
   }
 
   if (window.innerWidth < 1024) {
-    header.style.setProperty('background', 'var(--color-primary)', 'important');
-    header.style.setProperty('border-bottom-left-radius', '28px', 'important');
-    header.style.setProperty('border-bottom-right-radius', '28px', 'important');
-    header.style.setProperty('box-shadow', '0 10px 30px rgba(var(--color-primary-rgb), 0.3)', 'important');
+    header.style.setProperty('background', 'var(--go-ink)', 'important');
+    header.style.setProperty('border-bottom-left-radius', '0', 'important');
+    header.style.setProperty('border-bottom-right-radius', '0', 'important');
+    header.style.setProperty('box-shadow', 'none', 'important');
     header.style.setProperty('border', 'none', 'important');
     header.style.setProperty('backdrop-filter', 'none', 'important');
     header.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
