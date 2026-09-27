@@ -136,8 +136,10 @@ export function serviceReturnPoint(path) {
 
 export function setOriginVars(el, o) {
   // Grow exactly to the farthest corner, so the whole duration is visible motion.
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  // With the keyboard open (the search box was focused) the visible height is much shorter
+  // than the screen the page grows to once it closes: size for the tallest of both.
+  const w = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+  const h = Math.max(window.innerHeight, document.documentElement.clientHeight || 0, window.screen?.height || 0);
   const far = Math.hypot(Math.max(o.x, w - o.x), Math.max(o.y, h - o.y));
   el.style.setProperty('--go-ox', `${Math.round(o.x)}px`);
   el.style.setProperty('--go-oy', `${Math.round(o.y)}px`);
@@ -171,6 +173,9 @@ export function initServiceScreens() {
     if (!isServiceRoute(path)) return;
     const c = circleOf(link.querySelector('.go-service-ring') || link);
     pendingOrigin = c ? { ...c, path, t: Date.now() } : null;
+    // Close the keyboard (search box) so the new screen opens at full height.
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur?.();
+    document.getElementById('search-suggestions')?.classList.remove('active');
   }, true);
 
   document.addEventListener('click', (e) => {

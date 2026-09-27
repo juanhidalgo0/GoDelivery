@@ -473,6 +473,14 @@ export async function handleRoute() {
             setOriginVars(overlay, origin);
             overlay.dataset.originPath = hash;
             overlay.classList.add('slide-from-origin');
+            // Once open, drop the clip entirely: if the viewport grew meanwhile (keyboard
+            // closing), a leftover circle would leave part of the screen cut off.
+            const openedPath = hash;
+            setTimeout(() => {
+              if (overlay.dataset.originPath === openedPath && overlay.classList.contains('slide-from-origin')) {
+                overlay.classList.remove('slide-from-origin');
+              }
+            }, 700);
           } else {
             overlay.classList.add('slide-from-bottom');
           }
