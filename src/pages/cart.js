@@ -14,6 +14,7 @@ import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { isRainingInMagdalena } from '../utils/weather.js';
 import { AudioManager } from '../utils/audio-manager.js';
 import { ConfettiCelebrator } from '../utils/confetti.js';
+import { functionUrl } from '../utils/functions-url.js';
 
 let currentCartStep = 1;
 let isSubmitting = false;
@@ -2817,7 +2818,7 @@ async function openCheckoutConfirmationModal() {
       }
 
       const { postOrderRequest } = await import('../utils/order-request.js');
-      const resData = await postOrderRequest('https://us-central1-godelivery-magdalena.cloudfunctions.net/createOrder', {
+      const resData = await postOrderRequest(functionUrl('createOrder'), {
           cart: getState().cart,
           address: finalAddress,
           addressNotes: finalAddressNotes,

@@ -1,6 +1,7 @@
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot } from 'firebase/firestore';
 import { db } from './firebase.js';
 import { AudioManager } from './utils/audio-manager.js';
+import { functionUrl } from './utils/functions-url.js';
 
 const listeners = new Map();
 
@@ -106,7 +107,7 @@ export async function initSettings() {
     // Sync time offset with server clock via Cloud Function
     try {
       const start = Date.now();
-      const res = await fetch('https://us-central1-godelivery-magdalena.cloudfunctions.net/getServerTime');
+      const res = await fetch(functionUrl('getServerTime'));
       if (res.ok) {
         const data = await res.json();
         if (data && data.serverTime) {

@@ -12,6 +12,7 @@ import { getDistance, calculateDynamicFee } from '../utils/geo.js';
 import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel } from '../utils/mandado-places.js';
 import { loadMandadoPlaces } from '../utils/mandado-places-store.js';
 import { goServiceHeader, goServiceHint, bindServiceHint, goServiceEmpty, closeServiceScreen, showGoInfoSheet } from '../components/service-screen.js';
+import { functionUrl } from '../utils/functions-url.js';
 
 const BANNER_STORAGE_KEY = 'godelivery_active_banner_v2';
 let cachedActiveBanner = null;
@@ -907,7 +908,7 @@ async function createFavorOrder(data) {
   // Timeout, safe retries and no duplicate favors on a dropped connection (see order-request.js).
   const { postOrderRequest } = await import('../utils/order-request.js');
   const resData = await postOrderRequest(
-    'https://us-central1-godelivery-magdalena.cloudfunctions.net/createFavorOrder',
+    functionUrl('createFavorOrder'),
     body,
     () => user.getIdToken()
   );
