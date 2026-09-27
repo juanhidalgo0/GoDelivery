@@ -124,7 +124,7 @@ export function updateGlobalCartFAB() {
       document.body.appendChild(btn);
     }
 
-    const isFullscreenPage = rawHash.startsWith('#/comercio/') || rawHash.startsWith('#/profile/') || rawHash.startsWith('#/mi-comercio/') || rawHash.startsWith('#/pedido/') || rawHash.startsWith('#/admin') || rawHash === '#/notifications' || rawHash === '#/viajes' || rawHash.startsWith('#/gofavores') || rawHash.startsWith('#/delivery');
+    const isFullscreenPage = rawHash.startsWith('#/comercio/') || rawHash.startsWith('#/profile/') || rawHash.startsWith('#/mi-comercio/') || rawHash.startsWith('#/pedido/') || rawHash.startsWith('#/admin') || rawHash === '#/notifications' || rawHash === '#/viajes' || rawHash.startsWith('#/gofavores') || rawHash.startsWith('#/mandados') || rawHash.startsWith('#/marketplace') || rawHash.startsWith('#/offers') || rawHash.startsWith('#/delivery');
     const bottomVal = isFullscreenPage ? '24px' : '80px';
 
     btn.style.cssText = `

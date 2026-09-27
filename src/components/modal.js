@@ -362,11 +362,11 @@ export function showConfirm({ title, message, confirmText = 'Confirmar', cancelT
   showModal({
     title,
     height: 'auto',
-    content: `<p style="color:var(--color-text-secondary); font-size:15px; line-height:1.6; padding:32px 24px; text-align:center; font-weight:500;">${message}</p>`,
+    content: `<p class="go-dialog-msg">${message}</p>`,
     footer: `
       <div style="display:flex;flex-wrap:wrap;gap:12px;width:100%;padding:0 4px 12px 4px;">
-        <button class="btn btn-ghost" id="${cancelId}" style="flex:1;min-width:120px;height:54px;border-radius:18px;font-weight:800;font-size:14px;color:var(--color-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px;background:var(--color-bg-secondary);border:1px solid var(--color-border);">${cancelText}</button>
-        <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="${confirmId}" style="flex:1.5;min-width:160px;height:54px;border-radius:18px;font-weight:900;font-size:14px;padding:0 16px;${danger ? 'background:linear-gradient(135deg,#EF4444,#DC2626);color:white;box-shadow:0 8px 20px rgba(239,68,68,0.35);border:none;' : 'box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);'}">${confirmText}</button>
+        <button class="btn btn-ghost" id="${cancelId}" style="flex:1;min-width:120px;height:52px;border-radius:16px;font-weight:800;font-size:14.5px;color:var(--go-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px;background:var(--color-surface);border:1px solid var(--go-line);">${cancelText}</button>
+        <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="${confirmId}" style="flex:1.5;min-width:160px;height:52px;border-radius:16px;font-weight:800;font-size:14.5px;padding:0 16px;${danger ? 'background:#DC2626;color:white;box-shadow:none;border:none;' : 'box-shadow:none;'}">${confirmText}</button>
       </div>
     `,
     onClose: () => {
@@ -412,10 +412,10 @@ export function showAlert({ title, message, btnText = 'OK', onClose }) {
   showModal({
     title,
     height: 'auto',
-    content: `<p style="color:var(--color-text-secondary); font-size:15px; line-height:1.6; padding:32px 24px; text-align:center; font-weight:500;">${message}</p>`,
+    content: `<p class="go-dialog-msg">${message}</p>`,
     footer: `
       <div style="display:flex;justify-content:center;width:100%;padding:0 4px 12px 4px;">
-        <button class="btn btn-primary" id="${okId}" style="width:100%;height:54px;border-radius:18px;font-weight:900;font-size:14px;padding:0 16px;box-shadow:0 8px 20px rgba(var(--color-primary-rgb),0.25);border:none;background:var(--color-primary);color:white;">${btnText}</button>
+        <button class="btn btn-primary" id="${okId}" style="width:100%;height:52px;border-radius:16px;font-weight:800;font-size:14.5px;padding:0 16px;box-shadow:none;border:none;background:var(--go-ink);color:white;">${btnText}</button>
       </div>
     `,
     onClose

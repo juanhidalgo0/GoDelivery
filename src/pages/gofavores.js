@@ -11,6 +11,7 @@ import { showAddressPrompt } from '../components/address-modal.js';
 import { getDistance, calculateDynamicFee } from '../utils/geo.js';
 import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel } from '../utils/mandado-places.js';
 import { loadMandadoPlaces } from '../utils/mandado-places-store.js';
+import { goServiceHeader, goServiceHint, bindServiceHint, goServiceEmpty, closeServiceScreen, showGoInfoSheet } from '../components/service-screen.js';
 
 const BANNER_STORAGE_KEY = 'godelivery_active_banner_v2';
 let cachedActiveBanner = null;
@@ -112,469 +113,178 @@ export async function prefetchActiveBanner() {
 // Start prefetching immediately to refresh the stored cache
 setTimeout(() => prefetchActiveBanner(), 300);
 
+const MANDADO_OPTIONS = [
+  { type: 'encomienda', img: '/go-pickup-point.png?v=5', title: 'Encomienda', text: 'Buscamos algo y lo llevamos a donde nos digas.', chip: 'Costo normal de envío' },
+  { type: 'mandado', img: '/go-bag.png?v=6', title: 'Mandado', text: 'Compramos lo que necesites en cualquier negocio.', chip: 'Tarifa de gestión' },
+  { type: 'gocash', img: '/go-cash.png?v=5', title: 'Go Cash', text: 'Cambiá efectivo por transferencia, o al revés.', chip: 'Efectivo o transferencia' },
+  { type: 'pagodeservicios', img: '/go-clipboard.png?v=5', title: 'Pago de servicios', text: 'Pagamos tus facturas: ABSA, Canal 4, Cyber y más.', chip: 'Facturas y trámites' },
+];
+
+// Mandados: a service page. The list of options and the chosen form sit side by side; the
+// form comes in from the right and back (header arrow or Android back) returns to the list.
 export async function renderGoFavores(content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
+  const meta = { eyebrow: 'Te lo buscamos y te lo llevamos', title: 'Mandados', infoLabel: '¿Cómo funcionan los Mandados?' };
 
   const user = getState().user;
   if (!user || !isLoggedIn()) {
-    content.innerHTML = `<div class="empty-state">Iniciá sesión para usar GoFavores</div>`;
+    content.innerHTML = `
+      <div class="go-service-page">
+        ${goServiceHeader({ ...meta, infoId: 'mandados-info-btn' })}
+        ${goServiceEmpty({ iconName: 'user', title: 'Iniciá sesión', text: 'Para pedir un mandado necesitamos saber a quién llevárselo.', ctaLabel: 'Iniciar sesión', ctaHref: '#/profile' })}
+      </div>`;
+    document.getElementById('mandados-info-btn')?.addEventListener('click', () => showGoFavoresGeneralModal());
     return;
   }
-  
+
   content.innerHTML = `
-    <div class="gofavores-page page-enter" style="display:flex; flex-direction:column; background: linear-gradient(to bottom, var(--color-bg), var(--color-bg-secondary)); width: 100%; box-sizing: border-box; height: 100%; overflow: hidden; position: relative;">
-      
-      <!-- Ambient Background Blobs (Soft Glows) -->
-      <div class="home-blob home-blob-1" style="position: absolute; top: -10%; left: -20%; width: 300px; height: 300px; background: rgba(225, 29, 72, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
-      <div class="home-blob home-blob-2" style="position: absolute; bottom: 10%; right: -20%; width: 250px; height: 250px; background: rgba(99, 102, 241, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
-
-      <!-- Encabezado GO! -->
-      <div class="go-page-header" style="background: var(--go-ink); padding: calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 5; flex-shrink: 0;">
-        <button type="button" class="go-icon-btn" aria-label="Volver" onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')">${icon('chevronLeft', 20)}</button>
-        <div style="flex: 1; min-width: 0;">
-          <span class="go-eyebrow" style="color: var(--go-on-ink-2); font-size: 10px;">Te lo buscamos y te lo llevamos</span>
-          <h1 style="margin: 2px 0 0; font-size: 22px; color: #fff;">Mandados</h1>
-        </div>
-        <button type="button" id="gofavores-help-header-btn" class="go-icon-btn" aria-label="¿Cómo funcionan los Mandados?">${icon('info', 18)}</button>
-      </div>
-
-      <div style="padding: 16px 14px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
-        
-        <!-- Cards Grouped Together -->
-        <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; box-sizing: border-box; flex-shrink: 0;">
-          <!-- Option 1: Encomienda -->
-          <div id="favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.05s both;">
-            <!-- Ambient light reflection -->
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('package', 22)}
+    <div class="go-service-page mandados-page">
+      ${goServiceHeader({ ...meta, infoId: 'mandados-info-btn', leftId: 'mandados-left-btn' })}
+      <div class="mandados-track-wrap">
+        <div class="mandados-track" id="mandados-track">
+          <section class="mandados-pane go-service-scroll" id="mandados-list-pane">
+            ${goServiceHint({ id: 'mandados-hint', storageKey: 'info_seen_gofavores_v4' })}
+            <div class="go-option-list">
+              ${MANDADO_OPTIONS.map(o => `
+                <button type="button" class="go-option" data-mandado="${o.type}">
+                  <span class="go-option-art"><img src="${o.img}" alt="" /></span>
+                  <span class="go-option-body">
+                    <span class="go-option-title">${o.title}</span>
+                    <span class="go-option-text">${o.text}</span>
+                    <span class="go-option-chip">${o.chip}</span>
+                  </span>
+                  <span class="go-option-chev">${icon('chevronRight', 16)}</span>
+                </button>`).join('')}
             </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Encomienda</h3>
-              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
-              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                Costo normal de envío
-              </span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-              <div id="info-mandado-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-                ${icon('info', 14)}
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-          </div>
-
-          <!-- Option 2: Mandado -->
-          <div id="favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.12s both;">
-            <!-- Ambient light reflection -->
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('shoppingBag', 22)}
-            </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Mandado</h3>
-              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
-              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                Tarifa de gestión
-              </span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-              <div id="info-compra-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-                ${icon('info', 14)}
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-          </div>
-
-          <!-- Option 3: Go Cash -->
-          <div id="favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.18s both;">
-            <!-- Ambient light reflection -->
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('dollarSign', 22)}
-            </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Go Cash</h3>
-              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
-              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                Efectivo ↔ Transferencia
-              </span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-              <div id="info-gocash-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-                ${icon('info', 14)}
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-          </div>
-
-          <!-- Option 4: Pago de Servicios -->
-          <div id="favor-pagodeservicios-btn" class="gofavores-card card-pagodeservicios glow-hover spring-hover" style="border-radius: 16px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.2s both;">
-            <!-- Ambient light reflection -->
-            <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-            <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('receipt', 22)}
-            </div>
-            <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
-              <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Pago de Servicios</h3>
-              <p style="font-size: 11px; color: rgba(255, 255, 255, 0.9); line-height: 1.3; margin: 0; font-weight: 600;">Pagá tus facturas (ABSA, Canal 4, Cyber, etc) a domicilio o digital.</p>
-              <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; background: rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 6px; color: #ffffff; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                Facturas 📄 Trámites
-              </span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2;">
-              <div id="info-pagodeservicios-btn" class="info-btn-favores" style="color: #ffffff; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background 0.2s;">
-                ${icon('info', 14)}
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25);">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Info Section (Stretches to fill available space) -->
-        <div class="gofavores-info-section" style="padding: 14px 16px; border-radius: 16px; border: 1px dashed var(--color-border); width: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; flex: 1; box-shadow: 0 4px 20px rgba(0,0,0,0.015); animation: fadeInUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.24s both; min-height: 0;">
-          <div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
-              <div style="width:28px; height:28px; border-radius:6px; background:rgba(var(--color-primary-rgb),0.15); color:var(--color-primary); display:flex; align-items:center; justify-content:center;">
-                ${icon('info', 15)}
-              </div>
-              <h4 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; color: var(--color-text-primary); margin: 0;">¿Cómo funciona GoFavores?</h4>
-            </div>
-            <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px;">
-              <li style="display:flex; gap:10px; align-items: flex-start;">
-                 <div style="width:18px; height:18px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; font-weight:900; margin-top:2px;">1</div>
-                 <div style="display: flex; flex-direction: column; text-align: left;">
-                   <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Completás el formulario</span>
-                   <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 1px;">Ingresá el origen, el destino y las aclaraciones sobre qué requerís.</span>
-                 </div>
-              </li>
-              <li style="display:flex; gap:10px; align-items: flex-start;">
-                 <div style="width:18px; height:18px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; font-weight:900; margin-top:2px;">2</div>
-                 <div style="display: flex; flex-direction: column; text-align: left;">
-                   <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Contacto y coordinación</span>
-                   <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 1px;">El repartidor asignado te escribirá por chat privado ante cualquier duda comercial.</span>
-                 </div>
-              </li>
-              <li style="display:flex; gap:10px; align-items: flex-start;">
-                 <div style="width:18px; height:18px; border-radius:50%; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; font-weight:900; margin-top:2px;">3</div>
-                 <div style="display: flex; flex-direction: column; text-align: left;">
-                   <span style="font-size: 12.5px; color: var(--color-text-primary); font-weight: 800; line-height: 1.2;">Seguís el recorrido en vivo</span>
-                   <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 600; line-height: 1.3; margin-top: 1px;">Seguí el recorrido en tiempo real sobre el mapa integrado hasta tu puerta.</span>
-                 </div>
-              </li>
-            </ul>
-          </div>
-          
-          <!-- Bottom Security Badge to fill space beautifully -->
-          <div style="display: flex; align-items: center; gap: 8px; background: rgba(var(--color-primary-rgb), 0.05); padding: 8px 12px; border-radius: 10px; margin-top: 10px; border: 1px solid rgba(var(--color-primary-rgb), 0.1); justify-content: center;">
-            <span style="color: var(--color-primary); display: flex; align-items: center; justify-content: center;">
-              ${icon('check', 14)}
-            </span>
-            <span style="font-size: 10px; font-weight: 700; color: var(--color-text-secondary); text-align: center;">
-              Tu solicitud está asegurada y monitoreada por soporte técnico en tiempo real.
-            </span>
-          </div>
+            <div id="wizard-banner-container" class="mandados-banner" style="display:none;"></div>
+          </section>
+          <section class="mandados-pane" id="mandados-form-pane" aria-hidden="true">
+            <div id="wizard-form-target" class="mandados-form-target"></div>
+          </section>
         </div>
       </div>
-    </div>
-    
-    <style>
-      .slide-overlay:has(.gofavores-page) {
-        overflow: hidden !important;
-        overflow-y: hidden !important;
-        height: 100% !important;
-      }
-      .slide-overlay:has(.gofavores-page) #app-content {
-        height: 100% !important;
-        min-height: 100% !important;
-        padding-bottom: 0 !important;
-        overflow: hidden !important;
-        display: flex !important;
-        flex-direction: column !important;
-      }
-      #app-content:has(.gofavores-page) {
-        overflow: hidden !important;
-        height: 100% !important;
-      }
-      #app-content:has(.gofavores-page) ~ #app-navbar,
-      body:has(.gofavores-page) #app-navbar,
-      body:has(.gofavores-page) .bottom-nav {
-        display: none !important;
-      }
-      
-      /* Make layout responsive to smaller screen heights to prevent overflow and clipping */
-      @media (max-height: 700px) {
-        .gofavores-page > div {
-          padding-top: calc(var(--header-height, 60px) + 4px) !important;
-          padding-bottom: calc(8px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
-        }
-        .gofavores-card {
-          padding: 8px 12px !important;
-          gap: 10px !important;
-        }
-        .gofavores-icon-box {
-          width: 38px !important;
-          height: 38px !important;
-        }
-        .gofavores-icon-box svg {
-          width: 18px !important;
-          height: 18px !important;
-        }
-        .gofavores-card h3 {
-          font-size: 13.5px !important;
-        }
-        .gofavores-card p {
-          font-size: 10.5px !important;
-        }
-        .gofavores-info-section {
-          padding: 8px 12px !important;
-          gap: 6px !important;
-        }
-        .gofavores-info-section ul {
-          gap: 4px !important;
-        }
-        .gofavores-info-section li {
-          gap: 8px !important;
-        }
-        .gofavores-info-section li span {
-          font-size: 11.5px !important;
-        }
-        .gofavores-info-section li span + span {
-          font-size: 10px !important;
-        }
-      }
+    </div>`;
 
-      .gofavores-card {
-        will-change: transform, box-shadow;
-        color: #ffffff;
-        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease, border-color 0.3s ease !important;
-        position: relative;
-        overflow: hidden;
-      }
-      
-      /* Solid Vibrant Colors for Light Theme */
-      .card-encomienda {
-        background: linear-gradient(135deg, #10B981 0%, #047857 100%) !important;
-        border-color: rgba(16, 185, 129, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.15) !important;
-      }
-      .card-mandado {
-        background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%) !important;
-        border-color: rgba(225, 29, 72, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(225, 29, 72, 0.15) !important;
-      }
-      .card-gocash {
-        background: linear-gradient(135deg, #6366F1 0%, #4338ca 100%) !important;
-        border-color: rgba(99, 102, 241, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.15) !important;
-      }
-      .card-pagodeservicios {
-        background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important;
-        border-color: rgba(245, 158, 11, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(245, 158, 11, 0.15) !important;
-      }
-      .gofavores-info-section {
-        background: rgba(255, 255, 255, 0.65) !important;
-        border: 1.5px solid rgba(226, 232, 240, 0.8) !important;
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        box-shadow: 0 8px 32px rgba(15, 23, 42, 0.04) !important;
-      }
+  const track = document.getElementById('mandados-track');
+  const formPane = document.getElementById('mandados-form-pane');
+  const target = document.getElementById('wizard-form-target');
+  const leftBtn = document.getElementById('mandados-left-btn');
+  const titleEl = content.querySelector('.go-service-title');
+  const eyebrowEl = content.querySelector('.go-service-eyebrow');
+  const formRenderers = { encomienda: showMandadoForm, mandado: showCompraForm, gocash: showGoCashForm, pagodeservicios: showPagoServiciosForm };
+  let currentType = null;
 
-      /* Solid Colors for Dark Theme */
-      [data-theme="dark"] .card-encomienda {
-        background: linear-gradient(135deg, #064e3b 0%, #047857 100%) !important;
-        border-color: rgba(4, 120, 87, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(4, 120, 87, 0.25) !important;
-      }
-      [data-theme="dark"] .card-mandado {
-        background: linear-gradient(135deg, #7f1d1d 0%, #E11D48 100%) !important;
-        border-color: rgba(225, 29, 72, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(225, 29, 72, 0.25) !important;
-      }
-      [data-theme="dark"] .card-gocash {
-        background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important;
-        border-color: rgba(67, 56, 202, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(67, 56, 202, 0.25) !important;
-      }
-      [data-theme="dark"] .card-pagodeservicios {
-        background: linear-gradient(135deg, #78350F 0%, #D97706 100%) !important;
-        border-color: rgba(217, 119, 6, 0.3) !important;
-        box-shadow: 0 8px 20px rgba(217, 119, 6, 0.25) !important;
-      }
-      [data-theme="dark"] .gofavores-info-section {
-        background: rgba(16, 25, 44, 0.65) !important;
-        border: 1.5px solid rgba(255, 255, 255, 0.08) !important;
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
-      }
+  const setHeader = (type) => {
+    const option = MANDADO_OPTIONS.find(o => o.type === type);
+    titleEl.textContent = option ? option.title : meta.title;
+    eyebrowEl.textContent = option ? 'Mandados' : meta.eyebrow;
+    leftBtn.classList.toggle('is-back', !!option);
+    leftBtn.setAttribute('aria-label', option ? 'Volver a las opciones' : 'Cerrar');
+  };
 
-      .gofavores-card:hover {
-        transform: translateY(-4px) scale(1.01);
-        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15) !important;
-      }
-      .gofavores-card:hover .gofavores-icon-box {
-        transform: scale(1.1) rotate(-8deg);
-      }
-      .gofavores-card:hover .chevron-icon-container {
-        transform: translateX(3px);
-      }
-      .gofavores-card:active {
-        transform: translateY(-1px) scale(0.99);
-      }
-      .gofavores-icon-box {
-        transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      }
-      .chevron-icon-container {
-        transition: transform 0.25s ease;
-      }
-      .info-btn-favores:hover {
-        background: rgba(255, 255, 255, 0.35) !important;
-      }
-    </style>
-  `;
+  const slideToForm = async (type) => {
+    const render = formRenderers[type];
+    if (!render) return;
+    currentType = type;
+    setHeader(type);
+    await render(target);
+    formPane.removeAttribute('aria-hidden');
+    track.classList.add('is-form');
+  };
 
-  const checkPhoneAndOpen = (openFn) => {
-    const u = getState().user;
+  const slideToList = () => {
+    if (!currentType) return false;
+    currentType = null;
+    setHeader(null);
+    track.classList.remove('is-form');
+    formPane.setAttribute('aria-hidden', 'true');
+    // Drop the form once it is off-screen so a half-filled one never comes back stale.
+    setTimeout(() => { if (!currentType) target.innerHTML = ''; }, 400);
+    return true;
+  };
+
+  const openWithPhone = (type) => {
+    const u = getState().user || {};
     if (!u.phone || u.phone.trim() === '') {
       showConfirm({
-        title: '📱 Teléfono Requerido',
-        message: 'Para realizar un favor o mandado es obligatorio configurar un celular de contacto para que el chofer y el soporte se comuniquen.',
-        confirmText: 'Configurar ahora',
+        title: 'Falta tu celular',
+        message: 'Para pedir un mandado necesitamos un celular de contacto, así el repartidor y soporte pueden comunicarse con vos.',
+        confirmText: 'Agregarlo ahora',
         cancelText: 'Volver',
         onConfirm: () => {
           sessionStorage.setItem('open-phone-edit', 'true');
           location.hash = '#/profile';
         }
       });
-    } else {
-      openFn();
+      return;
     }
+    slideToForm(type);
   };
 
-  document.getElementById('favor-mandado-btn').onclick = () => openMandadosWizard('encomienda');
-  document.getElementById('favor-compra-btn').onclick = () => openMandadosWizard('mandado');
-  document.getElementById('favor-gocash-btn').onclick = () => openMandadosWizard('gocash');
-  document.getElementById('favor-pagodeservicios-btn').onclick = () => openMandadosWizard('pagodeservicios');
+  content.querySelectorAll('[data-mandado]').forEach(btn => {
+    btn.addEventListener('click', () => openWithPhone(btn.dataset.mandado));
+  });
+  leftBtn.addEventListener('click', () => {
+    if (!slideToList()) closeServiceScreen();
+  });
+  document.getElementById('mandados-info-btn')?.addEventListener('click', () => {
+    if (currentType) showServiceInfoModal(currentType);
+    else showGoFavoresGeneralModal();
+  });
+  bindServiceHint('mandados-hint', () => showGoFavoresGeneralModal());
 
-  document.getElementById('info-mandado-btn').onclick = (e) => {
-    e.stopPropagation();
-    showServiceInfoModal('encomienda');
-  };
-  document.getElementById('info-compra-btn').onclick = (e) => {
-    e.stopPropagation();
-    showServiceInfoModal('mandado');
-  };
-  document.getElementById('info-gocash-btn').onclick = (e) => {
-    e.stopPropagation();
-    showServiceInfoModal('gocash');
-  };
-  document.getElementById('info-pagodeservicios-btn').onclick = (e) => {
-    e.stopPropagation();
-    showServiceInfoModal('pagodeservicios');
-  };
+  // Android back: inside a form it returns to the list instead of leaving Mandados.
+  window.__goServiceBack = () => (document.body.contains(track) ? slideToList() : false);
 
-  const helpBtn = document.getElementById('gofavores-help-header-btn');
-  if (helpBtn) {
-    helpBtn.onclick = () => showGoFavoresGeneralModal();
-  }
+  loadMandadosBanner(openWithPhone);
 
-  const hasSeenInfo = localStorage.getItem('info_seen_gofavores_v4');
-  if (!hasSeenInfo) {
-    showGoFavoresGeneralModal();
-    localStorage.setItem('info_seen_gofavores_v4', 'true');
-  }
+  const preselected = new URLSearchParams((window.location.hash.split('?')[1]) || '').get('tipo');
+  if (preselected && formRenderers[preselected]) openWithPhone(preselected);
 }
 
+const SERVICE_INFO = {
+  encomienda: {
+    title: 'Encomienda',
+    intro: 'El repartidor retira un paquete, documento u objeto en el punto de origen y lo lleva directo al destino que marcaste.',
+    notesTitle: 'Tené en cuenta',
+    notes: [
+      { title: 'Tiene que viajar en moto.', text: 'Si el paquete no se puede llevar de forma segura, el repartidor puede cancelar la encomienda.' },
+    ],
+  },
+  mandado: {
+    title: 'Mandado',
+    intro: 'El repartidor va a los negocios que le indiques (hasta 5 paradas), compra lo que pediste y te lo lleva a tu casa.',
+    notesTitle: 'Tarifa y límites',
+    notes: [
+      { title: 'Tarifa de gestión:', text: 'cubre el tiempo que el repartidor pasa buscando tus productos, haciendo fila y coordinando la compra, y que adelanta el dinero.' },
+      { title: 'Paradas extra:', text: 'cada negocio adicional suma una tarifa fija.' },
+      { title: 'Solo lo que entra en una moto:', text: 'si algo no se puede llevar de forma segura, el repartidor puede cancelar el mandado.' },
+    ],
+  },
+  gocash: {
+    title: 'Go Cash',
+    intro: 'Cambiá efectivo por transferencia o al revés. El repartidor va a tu dirección y el intercambio se hace en persona.',
+    notesTitle: 'Límites',
+    notes: [
+      { title: 'Hasta $70.000', text: 'por operación, por seguridad tuya y del repartidor.' },
+      { title: 'Transferencia en el momento:', text: 'tiene que acreditarse frente al repartidor antes de entregar el efectivo.' },
+    ],
+  },
+  pagodeservicios: {
+    title: 'Pago de servicios',
+    intro: 'Un repartidor paga tus facturas e impuestos (Cyber, ABSA, Canal 4, Rapipago o Pago Fácil) por vos.',
+    notesTitle: 'Comprobante',
+    notes: [
+      { title: 'Foto por chat:', text: 'te mandamos una foto nítida de la factura pagada. Solo pagás la tarifa del trámite.' },
+      { title: 'En papel:', text: 'el repartidor vuelve a tu casa con el ticket. Suma el costo del viaje de regreso.' },
+    ],
+  },
+};
+
 export function showServiceInfoModal(service) {
-  let title = '';
-  let contentHtml = '';
-  
-  if (service === 'encomienda') {
-    title = '📦 Encomiendas Especiales';
-    contentHtml = `
-      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-        <p style="margin: 0; font-weight: 700;">¿Cómo funciona el servicio?</p>
-        <p style="margin: 0; color: var(--color-text-secondary);">El repartidor retira un paquete, documento u objeto desde el punto de origen indicado y lo traslada de forma directa al destino seleccionado en el mapa.</p>
-        
-        <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Límites y Restricciones:</p>
-        <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
-          <li><strong>Medio de transporte:</strong> El paquete debe ser transportable de forma totalmente segura en una motocicleta. Si el repartidor lo considera, puede decidir cancelar la encomienda.</li>
-        </ul>
-        <button id="modal-entendido-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-      </div>
-    `;
-  } else if (service === 'mandado') {
-    title = '🏪 Mandados y Compras';
-    contentHtml = `
-      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-        <p style="margin: 0; font-weight: 700;">¿Cómo funciona el servicio?</p>
-        <p style="margin: 0; color: var(--color-text-secondary);">El repartidor se dirige a los locales comerciales indicados por vos (podés agregar hasta 5 paradas), compra los productos y te los entrega en tu domicilio.</p>
-        
-        <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Tarifa de Gestión Especial:</p>
-        <p style="margin: 0; color: var(--color-text-secondary);">El costo adicional por tarifa de gestión cubre el tiempo que el repartidor invierte en el comercio buscando tus productos, haciendo filas y coordinando la compra de forma personalizada, además de compensar la financiación de tu pedido en el momento.</p>
-
-        <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Límites y Restricciones:</p>
-        <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
-          <li><strong>Paradas extra:</strong> Se cobrará una tarifa adicional fija por cada parada comercial adicional agregada al recorrido original.</li>
-          <li><strong>No transportable:</strong> No se realizan compras de objetos grandes o que no puedan llevarse en moto de forma segura. Si el repartidor lo considera, puede decidir cancelar el mandado.</li>
-        </ul>
-        <button id="modal-entendido-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-      </div>
-    `;
-  } else if (service === 'gocash') {
-    title = '💵 Go Cash (Efectivo/Transferencia)';
-    contentHtml = `
-      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-        <p style="margin: 0; font-weight: 700;">¿Cómo funciona el servicio?</p>
-        <p style="margin: 0; color: var(--color-text-secondary);">Cambiá efectivo por dinero virtual o viceversa. El repartidor se acerca a tu dirección a retirar o entregarte el efectivo mientras realizás la transferencia bancaria en su presencia.</p>
-        
-        <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Límites y Restricciones:</p>
-        <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
-          <li><strong>Límite máximo:</strong> La transacción tiene un límite estricto de hasta $70.000 por motivos de seguridad del chofer y del cliente.</li>
-          <li><strong>Validación obligatoria:</strong> La transferencia bancaria/Mercado Pago debe realizarse e impactar en la cuenta de destino obligatoriamente frente al repartidor antes del intercambio del efectivo.</li>
-        </ul>
-        <button id="modal-entendido-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-      </div>
-    `;
-  } else if (service === 'pagodeservicios') {
-    title = '📄 Pago de Servicios / Impuestos';
-    contentHtml = `
-      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-        <p style="margin: 0; font-weight: 700;">¿Cómo funciona el servicio?</p>
-        <p style="margin: 0; color: var(--color-text-secondary);">Envía a un repartidor a pagar tus facturas e impuestos (Cyber, ABSA, Canal 4, Rapipago o PagoFácil). Puedes elegir entre recibir el comprobante digitalmente (foto por chat) o recibir el comprobante físico en tu domicilio.</p>
-        
-        <p style="margin: 0; font-weight: 700; color: var(--color-primary);">Opciones de Envío:</p>
-        <ul style="margin: 0; padding-left: 20px; color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 8px;">
-          <li><strong>Foto digital:</strong> El repartidor te envía una foto nítida de la factura abonada. Solo se cobra la tarifa base de trámite.</li>
-          <li><strong>Comprobante físico:</strong> El repartidor regresa a tu dirección para entregarte el ticket en papel. Esta opción suma un costo de envío logístico adicional por el viaje de regreso.</li>
-        </ul>
-        <button id="modal-entendido-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-      </div>
-    `;
-  }
-
-  const modalEl = document.createElement('div');
-  modalEl.innerHTML = contentHtml;
-  
-  const infoModal = showModal({
-    title: title,
-    content: modalEl,
-    height: 'auto',
-    hideHeader: false
-  });
-  
-  modalEl.querySelector('#modal-entendido-btn').onclick = () => infoModal.close();
+  const info = SERVICE_INFO[service];
+  if (info) showGoInfoSheet(info);
 }
 
 function showWarningModal(message) {
@@ -582,7 +292,7 @@ function showWarningModal(message) {
   alertEl.innerHTML = `
     <p style="padding: 32px 24px; text-align: center; color: var(--color-text-secondary); font-size: 15.5px; font-weight: 700; line-height: 1.6; margin: 0;">${message}</p>
     <div style="padding: 0 24px 24px;">
-      <button id="alert-ok-btn" class="btn btn-primary" style="width: 100%; height: 54px; border-radius: 18px; font-weight: 900; font-size: 15px; background: var(--color-primary); color: white; border: none; cursor: pointer; box-shadow: 0 6px 20px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+      <button id="alert-ok-btn" class="btn btn-primary" style="width: 100%; height: 54px; border-radius: 18px; font-weight: 900; font-size: 15px; background: var(--go-ink); color: white; border: none; cursor: pointer; box-shadow: none;">Entendido</button>
     </div>
   `;
   const alertModal = showModal({
@@ -638,7 +348,7 @@ export async function showMandadoForm(targetContainer = null) {
         </div>
 
         <!-- Botón Siguiente -->
-        <button type="button" id="step-1-next-btn" style="width: 100%; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 14px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 4px; flex-shrink: 0; box-shadow: 0 6px 16px rgba(var(--color-primary-rgb),0.22);">
+        <button type="button" id="step-1-next-btn" style="width: 100%; height: 50px; border-radius: 16px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 14px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 4px; flex-shrink: 0; box-shadow: none;">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
@@ -708,7 +418,7 @@ export async function showMandadoForm(targetContainer = null) {
       fullscreen: false,
       height: 'auto',
       hideHeader: false,
-      headerBackground: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
+      headerBackground: 'var(--go-ink)',
       headerTextColor: '#ffffff'
     });
   }
@@ -1077,7 +787,7 @@ async function verifyDriversAndConfirm(confirmOptions) {
           <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
             No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
           </p>
-          <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+          <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--go-ink); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: none;">
             ENTENDIDO
           </button>
         </div>
@@ -1299,7 +1009,7 @@ export async function showCompraForm(targetContainer = null) {
           <div style="display:flex; flex-direction:column; gap:6px;">
             <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">Método de Pago del Envío</label>
             <div style="position:relative; display:flex; background:var(--color-bg-secondary); padding:3px; border-radius:14px; border:1.5px solid var(--color-border-light); z-index:1; overflow:hidden; width:100%; height:44px; box-sizing:border-box; align-items:center;">
-              <div id="compra-payment-slider" style="position:absolute; top:3px; left:3px; width:calc(50% - 3px); height:36px; background:linear-gradient(135deg, #E11D48 0%, #F43F5E 100%); border-radius:10px; transition:transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s; z-index:0; box-shadow:0 4px 12px rgba(225, 29, 72, 0.25); opacity:0; pointer-events:none;"></div>
+              <div id="compra-payment-slider" style="position:absolute; top:3px; left:3px; width:calc(50% - 3px); height:36px; background:var(--go-ink); border-radius:10px; transition:transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s; z-index:0; box-shadow:0 4px 12px rgba(225, 29, 72, 0.25); opacity:0; pointer-events:none;"></div>
               <button type="button" id="compra-pay-efectivo" style="position:relative; z-index:1; flex:1; height:36px; border-radius:10px; border:none; font-size:12.5px; font-weight:850; cursor:pointer; transition:all 0.3s; background:transparent; color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px; outline:none;">
                 ${icon('dollarSign',14)} Efectivo
               </button>
@@ -1345,7 +1055,7 @@ export async function showCompraForm(targetContainer = null) {
       <button type="button" id="compra-back-btn" style="height:48px; width:48px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text-primary); border:1.5px solid var(--color-border-light); font-weight:900; cursor:pointer; display:none; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.2s;">
         ${icon('chevronLeft',18)}
       </button>
-      <button type="button" id="compra-main-btn" style="flex:1; height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:14px; cursor:pointer; text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.22); transition:background 0.2s, box-shadow 0.2s;">
+      <button type="button" id="compra-main-btn" style="flex:1; height:48px; border-radius:14px; background: var(--go-ink); color:white; border:none; font-weight:900; font-size:14px; cursor:pointer; text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: none; transition:background 0.2s, box-shadow 0.2s;">
         Siguiente ${icon('chevronRight',16)}
       </button>
     </div>
@@ -1361,7 +1071,7 @@ export async function showCompraForm(targetContainer = null) {
       fullscreen: false,
       height: '80vh',
       hideHeader: false,
-      headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
+      headerBackground: 'var(--go-ink)',
       headerTextColor: '#ffffff'
     });
   }
@@ -1612,7 +1322,7 @@ export async function showCompraForm(targetContainer = null) {
         height: 'auto',
         content: breakdownHtml,
         hideHeader: false,
-        headerBackground: 'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
+        headerBackground: 'var(--go-ink)',
         headerTextColor: '#ffffff'
       });
     };
@@ -2074,7 +1784,7 @@ export async function showGoCashForm(targetContainer = null) {
           </div>
         </div>
 
-        <button type="button" id="gocash-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
+        <button type="button" id="gocash-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0; box-shadow: none;">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
@@ -2132,7 +1842,7 @@ export async function showGoCashForm(targetContainer = null) {
       fullscreen: false,
       height: 'auto',
       hideHeader: false,
-      headerBackground: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
+      headerBackground: 'var(--go-ink)',
       headerTextColor: '#ffffff'
     });
   }
@@ -2394,42 +2104,14 @@ export async function showGoCashForm(targetContainer = null) {
 // on first visit and from the help button (it used to live inside showGoCashForm, where
 // renderGoFavores could not reach it and first-time visitors got the error screen).
 function showGoFavoresGeneralModal() {
-  showModal({
-    title: '📦 ¿Cómo funcionan los Mandados?',
-    height: 'auto',
-    content: `
-      <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-        <p style="margin: 0; font-weight: 700;">GO! Mandados te permite solicitar cadetes y repartidores para realizar cualquier favor o encargo en el pueblo.</p>
-        
-        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
-          <div style="display: flex; gap: 10px; align-items: flex-start;">
-            <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
-            <div>
-              <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Seleccioná tu tipo de favor</h4>
-              <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Encomienda (llevar/buscar algo), Mandado (ir a comprar) o GoCash (cambio de efectivo).</p>
-            </div>
-          </div>
-          <div style="display: flex; gap: 10px; align-items: flex-start;">
-            <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
-            <div>
-              <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Indicá los puntos en el mapa</h4>
-              <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Establecé dónde se realiza la recolección/compra y la dirección de entrega.</p>
-            </div>
-          </div>
-          <div style="display: flex; gap: 10px; align-items: flex-start;">
-            <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
-            <div>
-              <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Aceptación y Chat en vivo</h4>
-              <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">El repartidor cotizará el mandado y podrás coordinar detalles por el chat interno en tiempo real.</p>
-            </div>
-          </div>
-        </div>
-        <button id="close-info-general-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-      </div>
-    `,
-    onOpen: () => {
-      document.getElementById('close-info-general-modal-btn').onclick = () => closeModal();
-    }
+  showGoInfoSheet({
+    title: 'Mandados',
+    intro: 'Un repartidor hace por vos lo que necesites en el pueblo: buscar, llevar, comprar o pagar.',
+    steps: [
+      { title: 'Elegí qué necesitás', text: 'Encomienda, Mandado, Go Cash o Pago de servicios.' },
+      { title: 'Marcá los puntos en el mapa', text: 'Dónde retiramos o compramos, y dónde te lo entregamos.' },
+      { title: 'Seguilo y chateá en vivo', text: 'Ves al repartidor en el mapa y coordinás los detalles por chat.' },
+    ],
   });
 }
 
@@ -2962,7 +2644,7 @@ export async function showPagoServiciosForm(targetContainer = null) {
           </div>
         </div>
 
-        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb),0.25);">
+        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; box-shadow: none;">
           Siguiente ${icon('chevronRight', 16)}
         </button>
       </div>
@@ -3007,7 +2689,7 @@ export async function showPagoServiciosForm(targetContainer = null) {
           </div>
         </div>
 
-        <button id="confirm-ps-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0;">
+        <button id="confirm-ps-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0;">
           ${icon('check', 20)} Solicitar Pago de Servicios
         </button>
       </div>
@@ -3024,7 +2706,7 @@ export async function showPagoServiciosForm(targetContainer = null) {
       fullscreen: false,
       height: '88vh',
       hideHeader: false,
-      headerBackground: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+      headerBackground: 'var(--go-ink)',
       headerTextColor: '#ffffff'
     });
   }
@@ -3296,440 +2978,163 @@ export async function showPagoServiciosForm(targetContainer = null) {
   updateCost();
 }
 
+// Mandados is a page now (#/mandados). Kept for callers that open it with a preselected form.
 export function openMandadosWizard(initialServiceType = null) {
-  const checkPhoneAndOpen = (openFn, serviceName) => {
-    const u = getState().user || {};
-    if (!u.phone || u.phone.trim() === '') {
-      showConfirm({
-        title: '📱 Teléfono Requerido',
-        message: 'Para realizar un favor o mandado es obligatorio configurar un celular de contacto para que el chofer y el soporte se comuniquen.',
-        confirmText: 'Configurar ahora',
-        cancelText: 'Volver',
-        onConfirm: () => {
-          sessionStorage.setItem('open-phone-edit', 'true');
-          location.hash = '#/profile';
+  window.location.hash = initialServiceType ? `#/mandados?tipo=${encodeURIComponent(initialServiceType)}` : '#/mandados';
+}
+
+// Promo banner of the day (cached, then refreshed). Tapping it opens the Mandado form
+// prefilled with that store.
+async function loadMandadosBanner(slideToForm) {
+    try {
+      const renderBannerHTML = (banner, limitExceeded) => {
+        const displayTitle = banner.title && banner.title.trim() !== '' ? banner.title : banner.name;
+        let displaySubtitle = banner.subtitle && banner.subtitle.trim() !== '' ? banner.subtitle : 'Pedir ahora';
+        if (!banner.subtitle || banner.subtitle.trim() === '') {
+          if (banner.hasDiscount) {
+            displaySubtitle = limitExceeded 
+              ? 'Cupos de descuento agotados por hoy' 
+              : `¡Envío Bonificado: -${formatPrice(banner.discountAmount)}!`;
+          }
+        }
+
+        return `
+          ${banner.hasPremiumGlow ? `
+          <style>
+            @keyframes premiumGlow {
+              0% {
+                box-shadow: 0 0 6px rgba(252, 211, 77, 0.5), 0 12px 32px rgba(0,0,0,0.15);
+                border-color: rgba(252, 211, 77, 0.6) !important;
+              }
+              50% {
+                box-shadow: 0 0 22px rgba(252, 211, 77, 0.95), 0 12px 32px rgba(0,0,0,0.15);
+                border-color: rgba(252, 211, 77, 1) !important;
+              }
+              100% {
+                box-shadow: 0 0 6px rgba(252, 211, 77, 0.5), 0 12px 32px rgba(0,0,0,0.15);
+                border-color: rgba(252, 211, 77, 0.6) !important;
+              }
+            }
+            .glowing-premium-card {
+              animation: premiumGlow 3s infinite ease-in-out !important;
+              border-width: 2px !important;
+            }
+          </style>
+          ` : ''}
+          <div id="wizard-banner-card" class="wizard-banner-card-premium ${banner.hasPremiumGlow ? 'glowing-premium-card' : ''}" style="border-radius:22px; overflow:hidden; border:1.5px solid rgba(255,255,255,0.18); position:relative; box-shadow: 0 12px 32px rgba(0,0,0,0.15); cursor:pointer; width:100%; aspect-ratio:auto; flex-shrink:1; height:100%; transition:transform 0.2s;">
+            <img src="${banner.imageUrl}" style="width:100%; height:100%; object-fit:cover; display:block;" />
+            
+            <!-- Floating Promo Badge -->
+            <div style="position:absolute; top:12px; left:12px; background:rgba(225,29,72,0.95); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); color:white; font-size:9.5px; font-weight:950; padding:4px 10px; border-radius:8px; text-transform:uppercase; letter-spacing:0.08em; box-shadow:0 4px 12px rgba(225,29,72,0.35); display:flex; align-items:center; gap:4px; z-index:5; border: 1px solid rgba(255,255,255,0.2);">
+              ${icon('zap', 10)} ${banner.hasPremiumGlow ? 'DESTACADO' : 'PROMO'}
+            </div>
+
+            <!-- Glassmorphic bottom panel -->
+            <div style="position:absolute; bottom:0; left:0; right:0; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); background:linear-gradient(180deg, rgba(15,23,42,0.1) 0%, rgba(15,23,42,0.9) 100%); border-top:1px solid rgba(255,255,255,0.15); padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; box-sizing:border-box;">
+              <div style="display:flex; align-items:center; gap:12px; min-width:0; z-index:2;">
+                ${banner.logoUrl ? `
+                  <div style="width:40px; height:40px; border-radius:50%; overflow:hidden; border:2px solid white; flex-shrink:0; background:white; box-shadow:0 4px 10px rgba(0,0,0,0.25);">
+                    <img src="${banner.logoUrl}" style="width:100%; height:100%; object-fit:cover;" />
+                  </div>
+                ` : ''}
+                <div style="display:flex; flex-direction:column; min-width:0;">
+                  <span style="color:white; font-size:15px; font-weight:950; letter-spacing:-0.01em; text-shadow:0 1px 4px rgba(0,0,0,0.5);">${displayTitle}</span>
+                  <span style="color:${limitExceeded && banner.hasDiscount ? '#ff6b6b' : '#fcd34d'}; font-size:11px; font-weight:800; margin-top:1px;">
+                    ${displaySubtitle}
+                  </span>
+                </div>
+              </div>
+              <button id="wizard-banner-action-btn" style="height:34px; padding:0 14px; border-radius:8px; border:none; background:var(--color-primary); color:white; font-weight:950; font-size:11.5px; cursor:pointer; text-transform:uppercase; letter-spacing:0.04em; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.4); z-index:10; flex-shrink:0; transition:transform 0.15s;">
+                Pedir aquí
+              </button>
+            </div>
+          </div>
+        `;
+      };
+
+      const bindBannerEvents = (banner, limitExceeded) => {
+        const bannerCard = document.getElementById('wizard-banner-card');
+        if (bannerCard) {
+          bannerCard.onclick = async (e) => {
+            e.preventDefault();
+            window._prefilledMerchantName = banner.merchantName;
+            window._activeMandadoDiscount = banner.hasDiscount && !limitExceeded ? banner.discountAmount : 0;
+            window._activeMandadoBannerId = banner.id;
+            window._activeMandadoMerchantName = banner.merchantName;
+
+            const { doc, updateDoc, increment } = await import('firebase/firestore');
+            await updateDoc(doc(db, 'banners_mandados', banner.id), {
+              'stats.clicks': increment(1)
+            });
+
+            slideToForm('mandado');
+          };
+        }
+      };
+
+      const bannerContainer = document.getElementById('wizard-banner-container');
+      
+      // Render cached banner instantly if available
+      if (cachedActiveBanner && bannerContainer) {
+        bannerContainer.innerHTML = renderBannerHTML(cachedActiveBanner, cachedLimitExceeded);
+        bannerContainer.style.display = 'flex';
+        bindBannerEvents(cachedActiveBanner, cachedLimitExceeded);
+      }
+
+      // Now fetch fresh data asynchronously in the background
+      const { getDocs, query, collection, where, doc, updateDoc, increment } = await import('firebase/firestore');
+      const bannerSnap = await getDocs(query(collection(db, 'banners_mandados'), where('status', '==', 'active')));
+      const activeBanners = [];
+      bannerSnap.forEach(d => {
+        activeBanners.push({ id: d.id, ...d.data() });
+      });
+
+      const activeBanner = activeBanners.length > 0 
+        ? activeBanners[Math.floor(Math.random() * activeBanners.length)] 
+        : null;
+
+      if (!activeBanner) {
+        if (bannerContainer) bannerContainer.style.display = 'none';
+        cachedActiveBanner = null;
+        return;
+      }
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const ordersSnap = await getDocs(query(
+        collection(db, 'orders'),
+        where('originBannerId', '==', activeBanner.id)
+      ));
+
+      let todayConversions = 0;
+      ordersSnap.forEach(d => {
+        const oData = d.data();
+        if (oData.createdAt) {
+          const oDate = oData.createdAt.toDate ? oData.createdAt.toDate() : new Date(oData.createdAt);
+          if (oDate >= todayStart && oData.status !== 'cancelled') {
+            todayConversions++;
+          }
         }
       });
-    } else {
-      openFn(serviceName);
-    }
-  };
 
-  const modalContent = document.createElement('div');
-  modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden;';
-  
-  modalContent.innerHTML = `
-    <!-- Unified Wizard Header -->
-    <div id="wizard-header" style="display:flex; align-items:center; justify-content:space-between; padding:28px 20px 16px 20px; background:#E11D48; flex-shrink:0; color:white; border-bottom:none; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-      <button id="wizard-back-btn" style="background:none; border:none; color:white; cursor:pointer; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; width:36px; height:36px; outline:none; flex-shrink:0;">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-      </button>
-      <h3 id="wizard-title" style="font-family:var(--font-display); font-size:1.2rem; font-weight:950; margin:0; color:white; flex:1; text-align:center; letter-spacing:-0.01em;">Mandados</h3>
-      <button id="wizard-close-btn" style="width:36px; height:36px; border:none; background:rgba(255,255,255,0.12); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; color:white; outline:none; flex-shrink:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-      </button>
-    </div>
+      const limitExceeded = activeBanner.hasDiscount && todayConversions >= activeBanner.discountLimitPerDay;
+      
+      // Cache it for the next time
+      cachedActiveBanner = activeBanner;
+      cachedLimitExceeded = limitExceeded;
 
-    <!-- Wizard Slides Carrusel -->
-    <div class="wizard-wrapper" style="flex:1; width: 100%; overflow: hidden; position: relative;">
-      <div id="wizard-slides-container" style="display: flex; width: 200%; height: 100%; transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1); will-change: transform; transform: translateZ(0);">
-          <!-- Slide 1: Menu Selector -->
-          <div id="wizard-slide-selector" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 16px; display: flex; flex-direction: column; gap: 6px;">
-            <!-- Option 1: Encomienda -->
-            <div id="wizard-favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
-              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
-              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible;">
-                <img src="/go-pickup-point.png?v=5" style="width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
-              </div>
-              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
-                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Encomienda</h3>
-                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Buscamos y llevamos lo que necesites donde nos digas.</p>
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                    Costo normal de envío
-                  </span>
-                  <span id="wizard-info-mandado-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
-                </div>
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-
-            <!-- Option 2: Mandado -->
-            <div id="wizard-favor-compra-btn" class="gofavores-card card-mandado glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
-              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible; margin-left: 6px; margin-right: 6px;">
-                <img src="/go-bag.png?v=6" style="width: 96px; height: 96px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
-              </div>
-              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
-                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Mandado</h3>
-                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Compramos lo que necesites en cualquier negocio local.</p>
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                    Tarifa de gestión
-                  </span>
-                  <span id="wizard-info-compra-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
-                </div>
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-
-            <!-- Option 3: Go Cash -->
-            <div id="wizard-favor-gocash-btn" class="gofavores-card card-gocash glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
-              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible;">
-                <img src="/go-cash.png?v=5" style="width: 60px; height: 60px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
-              </div>
-              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
-                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Go Cash</h3>
-                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Cambiá efectivo por transferencia o viceversa.</p>
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                    Efectivo ↔ Transferencia
-                  </span>
-                  <span id="wizard-info-gocash-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
-                </div>
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-
-            <!-- Option 4: Pago de Servicios -->
-            <div id="wizard-favor-pagodeservicios-btn" class="gofavores-card card-pagodeservicios glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
-              <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
-              <div style="width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 2; overflow: visible;">
-                <img src="/go-clipboard.png?v=5" style="width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));" />
-              </div>
-              <div style="flex: 1; min-width: 0; text-align: left; z-index: 2; display: flex; flex-direction: column; gap: 2px;">
-                <h3 style="font-family: var(--font-display); font-size: 15.5px; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: -0.02em;">Pago de Servicios</h3>
-                <p style="font-size: 11px; color: rgba(255, 255, 255, 0.95); line-height: 1.3; margin: 0 0 2px 0; font-weight: 600;">Pagá tus facturas (ABSA, Canal 4, Cyber, etc) a domicilio o digital.</p>
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-                  <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 5px; color: #ffffff; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid rgba(255, 255, 255, 0.25);">
-                    Facturas 📄 Trámites
-                  </span>
-                  <span id="wizard-info-pagodeservicios-btn" style="color: #ffffff; font-size: 10.5px; font-weight: 900; text-decoration: underline; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: 0.05em;">Más info</span>
-                </div>
-              </div>
-              <div class="chevron-icon-container" style="color: #ffffff; display: flex; align-items: center; background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 50%; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink:0; z-index:2;">
-                ${icon('chevronRight', 12)}
-              </div>
-            </div>
-            <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px));"></div>
-          </div>
-         <!-- Slide 2: Form Container -->
-         <div id="wizard-slide-form" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; position: relative; background: var(--color-bg); display: flex; flex-direction: column;">
-            <div id="wizard-form-target" style="height: 100%; width: 100%; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; position: relative;"></div>
-         </div>
-      </div>
-    </div>
-
-    <style>
-      .gofavores-card {
-        flex: 1;
-        min-height: 0;
-        max-height: clamp(68px, 11dvh, 90px) !important;
-        display: flex;
-        align-items: center;
-        width: 100%;
-        box-sizing: border-box;
-        border-radius: 16px;
-        padding: 10px 14px !important;
-        gap: 10px !important;
-        position: relative;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.015);
-      }
-      .gofavores-card img {
-        width: clamp(38px, 7dvh, 50px) !important;
-        height: clamp(38px, 7dvh, 50px) !important;
-        object-fit: contain;
-      }
-      .gofavores-card h3 {
-        font-size: clamp(12px, 2.2dvh, 14.5px) !important;
-      }
-      .gofavores-card p {
-        font-size: clamp(9px, 1.6dvh, 10.5px) !important;
-      }
-      .gofavores-card span {
-        font-size: clamp(7.5px, 1.3dvh, 9.0px) !important;
-      }
-      .chevron-icon-container {
-        width: clamp(22px, 4.8dvh, 28px) !important;
-        height: clamp(22px, 4.8dvh, 28px) !important;
-      }
-      .wizard-banner-card-premium {
-        aspect-ratio: auto !important;
-        flex: 1;
-        min-height: 0;
-        height: 100%;
-      }
-      .card-encomienda { background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important; border-color: rgba(16,185,129,0.3) !important; box-shadow: 0 8px 20px rgba(16,185,129,0.15) !important; }
-      .card-mandado { background: linear-gradient(135deg, #E11D48 0%, #F43F5E 100%) !important; border-color: rgba(244,63,94,0.3) !important; box-shadow: 0 8px 20px rgba(244,63,94,0.15) !important; }
-      .card-gocash { background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important; border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 8px 20px rgba(99,102,241,0.15) !important; }
-      .card-pagodeservicios { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important; border-color: rgba(245,158,11,0.3) !important; box-shadow: 0 8px 20px rgba(245,158,11,0.15) !important; }
-      [data-theme="dark"] .card-encomienda { background: linear-gradient(135deg, #064e3b 0%, #047857 100%) !important; }
-      [data-theme="dark"] .card-mandado { background: linear-gradient(135deg, #7f1d1d 0%, #E11D48 100%) !important; }
-      [data-theme="dark"] .card-gocash { background: linear-gradient(135deg, #312e81 0%, #4338ca 100%) !important; }
-      [data-theme="dark"] .card-pagodeservicios { background: linear-gradient(135deg, #78350F 0%, #D97706 100%) !important; }
-      .gofavores-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12) !important; }
-      .gofavores-card:active { transform: translateY(0) scale(0.98); }
-    </style>
-  `;
-
-  const wizardModal = showModal({
-    title: '',
-    hideHeader: true,
-    height: '85vh',
-    content: modalContent,
-    onOpen: () => {
-      const modalBody = modalContent.closest('.modal-body');
-      if (modalBody) {
-        modalBody.style.overflow = 'hidden';
-        modalBody.style.webkitOverflowScrolling = 'auto';
-      }
-      const slidesContainer = document.getElementById('wizard-slides-container');
-      const backBtn = document.getElementById('wizard-back-btn');
-      const closeBtn = document.getElementById('wizard-close-btn');
-      const titleEl = document.getElementById('wizard-title');
-      const target = document.getElementById('wizard-form-target');
-
-      // Check active banner
-      const loadActiveBanner = async () => {
-        try {
-          const renderBannerHTML = (banner, limitExceeded) => {
-            const displayTitle = banner.title && banner.title.trim() !== '' ? banner.title : banner.name;
-            let displaySubtitle = banner.subtitle && banner.subtitle.trim() !== '' ? banner.subtitle : 'Pedir ahora';
-            if (!banner.subtitle || banner.subtitle.trim() === '') {
-              if (banner.hasDiscount) {
-                displaySubtitle = limitExceeded 
-                  ? 'Cupos de descuento agotados por hoy' 
-                  : `¡Envío Bonificado: -${formatPrice(banner.discountAmount)}!`;
-              }
-            }
-
-            return `
-              ${banner.hasPremiumGlow ? `
-              <style>
-                @keyframes premiumGlow {
-                  0% {
-                    box-shadow: 0 0 6px rgba(252, 211, 77, 0.5), 0 12px 32px rgba(0,0,0,0.15);
-                    border-color: rgba(252, 211, 77, 0.6) !important;
-                  }
-                  50% {
-                    box-shadow: 0 0 22px rgba(252, 211, 77, 0.95), 0 12px 32px rgba(0,0,0,0.15);
-                    border-color: rgba(252, 211, 77, 1) !important;
-                  }
-                  100% {
-                    box-shadow: 0 0 6px rgba(252, 211, 77, 0.5), 0 12px 32px rgba(0,0,0,0.15);
-                    border-color: rgba(252, 211, 77, 0.6) !important;
-                  }
-                }
-                .glowing-premium-card {
-                  animation: premiumGlow 3s infinite ease-in-out !important;
-                  border-width: 2px !important;
-                }
-              </style>
-              ` : ''}
-              <div id="wizard-banner-card" class="wizard-banner-card-premium ${banner.hasPremiumGlow ? 'glowing-premium-card' : ''}" style="border-radius:22px; overflow:hidden; border:1.5px solid rgba(255,255,255,0.18); position:relative; box-shadow: 0 12px 32px rgba(0,0,0,0.15); cursor:pointer; width:100%; aspect-ratio:auto; flex-shrink:1; height:100%; transition:transform 0.2s;">
-                <img src="${banner.imageUrl}" style="width:100%; height:100%; object-fit:cover; display:block;" />
-                
-                <!-- Floating Promo Badge -->
-                <div style="position:absolute; top:12px; left:12px; background:rgba(225,29,72,0.95); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); color:white; font-size:9.5px; font-weight:950; padding:4px 10px; border-radius:8px; text-transform:uppercase; letter-spacing:0.08em; box-shadow:0 4px 12px rgba(225,29,72,0.35); display:flex; align-items:center; gap:4px; z-index:5; border: 1px solid rgba(255,255,255,0.2);">
-                  ${icon('zap', 10)} ${banner.hasPremiumGlow ? 'DESTACADO' : 'PROMO'}
-                </div>
-
-                <!-- Glassmorphic bottom panel -->
-                <div style="position:absolute; bottom:0; left:0; right:0; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); background:linear-gradient(180deg, rgba(15,23,42,0.1) 0%, rgba(15,23,42,0.9) 100%); border-top:1px solid rgba(255,255,255,0.15); padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; box-sizing:border-box;">
-                  <div style="display:flex; align-items:center; gap:12px; min-width:0; z-index:2;">
-                    ${banner.logoUrl ? `
-                      <div style="width:40px; height:40px; border-radius:50%; overflow:hidden; border:2px solid white; flex-shrink:0; background:white; box-shadow:0 4px 10px rgba(0,0,0,0.25);">
-                        <img src="${banner.logoUrl}" style="width:100%; height:100%; object-fit:cover;" />
-                      </div>
-                    ` : ''}
-                    <div style="display:flex; flex-direction:column; min-width:0;">
-                      <span style="color:white; font-size:15px; font-weight:950; letter-spacing:-0.01em; text-shadow:0 1px 4px rgba(0,0,0,0.5);">${displayTitle}</span>
-                      <span style="color:${limitExceeded && banner.hasDiscount ? '#ff6b6b' : '#fcd34d'}; font-size:11px; font-weight:800; margin-top:1px;">
-                        ${displaySubtitle}
-                      </span>
-                    </div>
-                  </div>
-                  <button id="wizard-banner-action-btn" style="height:34px; padding:0 14px; border-radius:8px; border:none; background:var(--color-primary); color:white; font-weight:950; font-size:11.5px; cursor:pointer; text-transform:uppercase; letter-spacing:0.04em; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.4); z-index:10; flex-shrink:0; transition:transform 0.15s;">
-                    Pedir aquí
-                  </button>
-                </div>
-              </div>
-            `;
-          };
-
-          const bindBannerEvents = (banner, limitExceeded) => {
-            const bannerCard = document.getElementById('wizard-banner-card');
-            if (bannerCard) {
-              bannerCard.onclick = async (e) => {
-                e.preventDefault();
-                window._prefilledMerchantName = banner.merchantName;
-                window._activeMandadoDiscount = banner.hasDiscount && !limitExceeded ? banner.discountAmount : 0;
-                window._activeMandadoBannerId = banner.id;
-                window._activeMandadoMerchantName = banner.merchantName;
-
-                const { doc, updateDoc, increment } = await import('firebase/firestore');
-                await updateDoc(doc(db, 'banners_mandados', banner.id), {
-                  'stats.clicks': increment(1)
-                });
-
-                slideToForm('mandado');
-              };
-            }
-          };
-
-          const bannerContainer = document.getElementById('wizard-banner-container');
-          
-          // Render cached banner instantly if available
-          if (cachedActiveBanner && bannerContainer) {
-            bannerContainer.innerHTML = renderBannerHTML(cachedActiveBanner, cachedLimitExceeded);
-            bannerContainer.style.display = 'flex';
-            bindBannerEvents(cachedActiveBanner, cachedLimitExceeded);
-          }
-
-          // Now fetch fresh data asynchronously in the background
-          const { getDocs, query, collection, where, doc, updateDoc, increment } = await import('firebase/firestore');
-          const bannerSnap = await getDocs(query(collection(db, 'banners_mandados'), where('status', '==', 'active')));
-          const activeBanners = [];
-          bannerSnap.forEach(d => {
-            activeBanners.push({ id: d.id, ...d.data() });
-          });
-
-          const activeBanner = activeBanners.length > 0 
-            ? activeBanners[Math.floor(Math.random() * activeBanners.length)] 
-            : null;
-
-          if (!activeBanner) {
-            if (bannerContainer) bannerContainer.style.display = 'none';
-            cachedActiveBanner = null;
-            return;
-          }
-
-          const todayStart = new Date();
-          todayStart.setHours(0, 0, 0, 0);
-
-          const ordersSnap = await getDocs(query(
-            collection(db, 'orders'),
-            where('originBannerId', '==', activeBanner.id)
-          ));
-
-          let todayConversions = 0;
-          ordersSnap.forEach(d => {
-            const oData = d.data();
-            if (oData.createdAt) {
-              const oDate = oData.createdAt.toDate ? oData.createdAt.toDate() : new Date(oData.createdAt);
-              if (oDate >= todayStart && oData.status !== 'cancelled') {
-                todayConversions++;
-              }
-            }
-          });
-
-          const limitExceeded = activeBanner.hasDiscount && todayConversions >= activeBanner.discountLimitPerDay;
-          
-          // Cache it for the next time
-          cachedActiveBanner = activeBanner;
-          cachedLimitExceeded = limitExceeded;
-
-          if (bannerContainer) {
-            bannerContainer.innerHTML = renderBannerHTML(activeBanner, limitExceeded);
-            bannerContainer.style.display = 'flex';
-            bindBannerEvents(activeBanner, limitExceeded);
-            
-            // Increment impression count
-            await updateDoc(doc(db, 'banners_mandados', activeBanner.id), {
-              'stats.impressions': increment(1)
-            });
-          }
-        } catch (err) {
-          console.error('Error loading active banner:', err);
-        }
-      };
-
-      loadActiveBanner();
-
-      const slideToForm = async (serviceType) => {
-        titleEl.textContent = 'Cargando formulario...';
-        backBtn.style.visibility = 'visible';
+      if (bannerContainer) {
+        bannerContainer.innerHTML = renderBannerHTML(activeBanner, limitExceeded);
+        bannerContainer.style.display = 'flex';
+        bindBannerEvents(activeBanner, limitExceeded);
         
-        // Render form in Slide 2 target container
-        if (serviceType === 'encomienda') {
-          titleEl.textContent = 'Detalles de la Encomienda';
-          await showMandadoForm(target);
-        } else if (serviceType === 'mandado') {
-          titleEl.textContent = 'Mandado: Comprar algo';
-          await showCompraForm(target);
-        } else if (serviceType === 'gocash') {
-          titleEl.textContent = 'Go Cash';
-          await showGoCashForm(target);
-        } else if (serviceType === 'pagodeservicios') {
-          titleEl.textContent = 'Pago de Servicios';
-          await showPagoServiciosForm(target);
-        }
-
-        if (slidesContainer) {
-          slidesContainer.style.transform = 'translateX(-50%)';
-        }
-      };
-
-      const slideToSelector = () => {
-        titleEl.textContent = 'Mandados';
-        backBtn.style.visibility = 'hidden';
-        if (slidesContainer) {
-          slidesContainer.style.transform = 'translateX(0)';
-        }
-      };
-
-      // Set up back button
-      if (backBtn) {
-        backBtn.onclick = (e) => {
-          e.preventDefault();
-          slideToSelector();
-        };
+        // Increment impression count
+        await updateDoc(doc(db, 'banners_mandados', activeBanner.id), {
+          'stats.impressions': increment(1)
+        });
       }
-
-      // Close button
-      if (closeBtn) {
-        closeBtn.onclick = (e) => {
-          e.preventDefault();
-          closeModal();
-        };
-      }
-
-      // Selector options click handlers
-      document.getElementById('wizard-favor-mandado-btn').onclick = (e) => {
-        if (e.target.id === 'wizard-info-mandado-btn') return;
-        checkPhoneAndOpen(slideToForm, 'encomienda');
-      };
-      document.getElementById('wizard-favor-compra-btn').onclick = (e) => {
-        if (e.target.id === 'wizard-info-compra-btn') return;
-        checkPhoneAndOpen(slideToForm, 'mandado');
-      };
-      document.getElementById('wizard-favor-gocash-btn').onclick = (e) => {
-        if (e.target.id === 'wizard-info-gocash-btn') return;
-        checkPhoneAndOpen(slideToForm, 'gocash');
-      };
-      document.getElementById('wizard-favor-pagodeservicios-btn').onclick = (e) => {
-        if (e.target.id === 'wizard-info-pagodeservicios-btn') return;
-        checkPhoneAndOpen(slideToForm, 'pagodeservicios');
-      };
-
-      // Info buttons click handlers
-      document.getElementById('wizard-info-mandado-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('encomienda'); };
-      document.getElementById('wizard-info-compra-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('mandado'); };
-      document.getElementById('wizard-info-gocash-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('gocash'); };
-      document.getElementById('wizard-info-pagodeservicios-btn').onclick = (e) => { e.stopPropagation(); showServiceInfoModal('pagodeservicios'); };
-
-      // Support direct loading if preselected
-      if (initialServiceType) {
-        checkPhoneAndOpen(slideToForm, initialServiceType);
-      } else {
-        slideToSelector();
-      }
+    } catch (err) {
+      console.error('Error loading active banner:', err);
     }
-  });
 }

@@ -117,14 +117,17 @@ async function init() {
     import('@capacitor/app').then(({ App }) => {
       App.addListener('backButton', () => {
         const hash = window.location.hash || '#/';
-        const isHome = hash === '#/' || hash === '#' || hash === '' || hash === '#/profile' || hash === '#/notifications' || hash === '#/cart' || hash === '#/gofavores';
+        const isHome = hash === '#/' || hash === '#' || hash === '' || hash === '#/profile' || hash === '#/notifications' || hash === '#/cart';
         
         // Close modal first if any is open
-        const openModal = document.querySelector('.modal-container-v2') || document.querySelector('.modal-container');
+        const openModal = document.querySelector('.modal-overlay');
         if (openModal) {
           import('./components/modal.js').then(m => m.closeModal());
           return;
         }
+
+        // A screen with its own inner step (Mandados form → list) handles back first.
+        if (typeof window.__goServiceBack === 'function' && window.__goServiceBack()) return;
 
         if (!isHome) {
           window.history.back();
@@ -831,6 +834,7 @@ async function init() {
     '/offers': (c) => import('./pages/offers-page.js').then(m => m.renderOffersPage(c)),
     '/mp-connect': (c) => import('./pages/mp-connect.js').then(m => m.renderMPConnect(c)),
     '/gofavores': (c) => import('./pages/gofavores.js').then(m => m.renderGoFavores(c)),
+    '/mandados': (c) => import('./pages/gofavores.js').then(m => m.renderGoFavores(c)),
     '/viajes': (c) => import('./pages/viajes.js').then(m => m.renderViajes(c)),
     '/category/:id': (c) => {
       const { id } = (window.location.hash.match(/#\/category\/([^/]+)/) || [])[1] ? { id: decodeURIComponent(window.location.hash.split('/').pop()) } : { id: null };

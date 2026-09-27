@@ -955,3 +955,442 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 @media (prefers-reduced-motion: reduce) {
   .go-nav-live { animation: none; }
 }
+
+/* ── Pantallas de servicio (Mandados, Viajes, Market, Ofertas) ──
+   Suben desde abajo sobre el inicio y bajan al cerrarse. */
+.slide-overlay.slide-from-bottom {
+  animation: goServiceIn 0.44s cubic-bezier(0.32, 0.72, 0, 1) both;
+  will-change: transform;
+}
+.slide-overlay.slide-exit-bottom {
+  animation: goServiceOut 0.26s cubic-bezier(0.4, 0, 1, 1) both !important;
+  will-change: transform;
+}
+.slide-overlay.is-service.panel-fullscreen {
+  box-shadow: 0 -16px 40px rgba(11, 11, 12, 0.28) !important;
+  overflow: hidden !important;
+  background: var(--color-bg);
+}
+@keyframes goServiceIn {
+  from { transform: translateY(100%); border-radius: 24px 24px 0 0; }
+  70% { border-radius: 24px 24px 0 0; }
+  to { transform: translateY(0); border-radius: 0; }
+}
+@keyframes goServiceOut {
+  from { transform: translateY(0); border-radius: 24px 24px 0 0; }
+  to { transform: translateY(100%); border-radius: 24px 24px 0 0; }
+}
+
+.go-service-page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  overflow: hidden;
+  position: relative;
+}
+.go-service-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.go-service-header {
+  background: var(--go-ink) !important;
+  padding: calc(6px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  touch-action: pan-x;
+}
+.go-service-grabber {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  margin: 0 auto 8px;
+}
+.go-service-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.go-service-titles {
+  flex: 1;
+  min-width: 0;
+}
+.go-service-eyebrow {
+  display: block;
+  font-size: 10px;
+  color: var(--go-on-ink-2, rgba(255, 255, 255, 0.6));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.go-service-title {
+  font-size: 22px !important;
+  color: #fff !important;
+  margin-top: 3px !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.go-service-bar { margin-top: 7px; }
+.go-service-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.go-service-left svg { transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1); }
+.go-service-left.is-back svg { transform: rotate(90deg); }
+
+.go-service-skeleton {
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.go-service-skeleton span {
+  display: block;
+  border-radius: 18px;
+  background: linear-gradient(90deg, var(--go-paper-2, #e9e6e1) 0%, var(--color-surface, #fff) 50%, var(--go-paper-2, #e9e6e1) 100%);
+  background-size: 200% 100%;
+  animation: goSkeleton 1.2s ease-in-out infinite;
+}
+@keyframes goSkeleton {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.go-service-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 16px 0;
+  padding: 4px 4px 4px 14px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--go-line, var(--color-border-light));
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.go-service-hint.is-leaving { opacity: 0; transform: translateY(-6px); }
+.go-service-hint-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 0;
+  padding: 8px 0;
+  font: 700 13px/1.2 var(--font-body);
+  color: var(--go-text, var(--color-text));
+  text-align: left;
+  cursor: pointer;
+}
+.go-service-hint-open span:nth-child(2) { flex: 1; min-width: 0; }
+.go-service-hint-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--go-red);
+  flex-shrink: 0;
+}
+.go-service-hint-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--go-text-2, var(--color-text-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Barra de acciones fija abajo (Market: publicar) */
+.go-service-actionbar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+  background: var(--color-bg);
+  border-top: 1px solid var(--go-line, var(--color-border-light));
+}
+.go-service-actionbar a,
+.go-service-actionbar button {
+  height: 50px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: 800 14.5px/1 var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+  border: 0;
+  white-space: nowrap;
+}
+.go-service-actionbar .is-primary { flex: 1; background: var(--go-ink); color: #fff; }
+.go-service-actionbar .is-secondary { flex: 1; background: var(--color-surface); color: var(--go-text, var(--color-text)); border: 1px solid var(--go-line, var(--color-border-light)); }
+.go-service-actionbar a:active,
+.go-service-actionbar button:active { transform: scale(0.98); }
+
+/* Tarjetas de opción (lista de Mandados) */
+.go-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+.go-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--go-line, var(--color-border-light));
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--go-text, var(--color-text));
+  transition: transform 0.12s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  animation: goOptionIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.go-option:active { transform: scale(0.985); border-color: var(--go-ink); }
+.go-option:nth-child(2) { animation-delay: 0.04s; }
+.go-option:nth-child(3) { animation-delay: 0.08s; }
+.go-option:nth-child(4) { animation-delay: 0.12s; }
+@keyframes goOptionIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.go-option-art {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--go-paper-2, #efece7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.go-option-art img { width: 48px; height: 48px; object-fit: contain; }
+.go-option-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.go-option-title { font-family: var(--go-font); font-weight: 900; font-size: 16px; letter-spacing: -0.01em; }
+.go-option-text { font-size: 13px; line-height: 1.35; color: var(--go-text-2, var(--color-text-secondary)); }
+.go-option-chip {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--go-text-2, var(--color-text-secondary));
+  background: var(--go-paper-2, #efece7);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.go-option-chev {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--go-ink);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-overlay.slide-from-bottom,
+  .slide-overlay.slide-exit-bottom,
+  .go-option,
+  .go-service-skeleton span { animation: none !important; }
+}
+
+.go-service-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 28px calc(48px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+}
+.go-service-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--go-ink);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+.go-service-empty p {
+  margin: 12px 0 0;
+  max-width: 290px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--go-text-2, var(--color-text-secondary));
+}
+.go-service-empty-cta {
+  margin-top: 22px;
+  height: 50px;
+  padding: 0 28px;
+  border-radius: 14px;
+  background: var(--go-ink);
+  color: #fff !important;
+  display: inline-flex;
+  align-items: center;
+  font: 800 14.5px/1 var(--font-body);
+  text-decoration: none;
+}
+
+/* Mandados: lista y formulario lado a lado */
+.mandados-track-wrap { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.mandados-track {
+  display: flex;
+  width: 200%;
+  height: 100%;
+  transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+.mandados-track.is-form { transform: translateX(-50%); }
+.mandados-pane { width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; }
+#mandados-form-pane { display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg); }
+.mandados-form-target { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.mandados-banner { padding: 2px 16px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important; }
+.mandados-banner .wizard-banner-card-premium { height: 184px !important; border-color: transparent !important; }
+@media (prefers-reduced-motion: reduce) {
+  .mandados-track { transition: none; }
+}
+
+/* ── Encabezado negro para hojas (¿Dónde entregamos? y otras) ── */
+.go-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 26px 16px 16px;
+  background: var(--go-ink);
+  color: #fff;
+  flex-shrink: 0;
+}
+.go-sheet-titles { flex: 1; min-width: 0; }
+.go-sheet-titles .go-eyebrow { display: block; font-size: 10px; color: var(--go-on-ink-2); }
+.go-sheet-titles .go-title {
+  font-size: 19px;
+  color: #fff;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A hidden back button leaves no gap: the title starts at the edge. */
+.go-sheet-header > .go-icon-btn[style*="visibility:hidden"],
+.go-sheet-header > .go-icon-btn[style*="visibility: hidden"] { display: none; }
+.modal:has(.go-sheet-header) .modal-handle { background: rgba(255, 255, 255, 0.28) !important; }
+
+/* ¿Dónde entregamos? */
+.delivery-map-modal-v4 #address-search-input {
+  border: 1px solid var(--go-line) !important;
+  background: var(--color-surface) !important;
+  box-shadow: none !important;
+}
+.delivery-map-modal-v4 #address-search-input:focus { border-color: var(--go-ink) !important; }
+.delivery-map-modal-v4 #search-icon-wrapper { color: var(--go-ink) !important; }
+.delivery-map-modal-v4 #btn-open-map-direct {
+  background: var(--color-surface) !important;
+  color: var(--go-text) !important;
+  border: 1px solid var(--go-line) !important;
+  box-shadow: none !important;
+}
+.delivery-map-modal-v4 #btn-open-map-direct > div:first-child > div:first-child {
+  width: 40px !important;
+  height: 40px !important;
+  background: var(--go-ink) !important;
+  color: #fff !important;
+}
+.delivery-map-modal-v4 #btn-open-map-direct > div:last-child { color: var(--go-text-3) !important; }
+.go-map-btn-sub { font-size: 12px; font-weight: 500; color: var(--go-text-2); }
+.delivery-map-modal-v4 .saved-addr-chip {
+  border: 1px solid var(--go-line) !important;
+  border-radius: 18px !important;
+}
+.delivery-map-modal-v4 .saved-addr-chip > div:first-child > div:first-child {
+  background: var(--go-paper-2) !important;
+  color: var(--go-ink) !important;
+}
+.delivery-map-modal-v4 #current-selected-address-container { border-color: var(--go-line) !important; }
+.delivery-map-modal-v4 #address-apt-input,
+.delivery-map-modal-v4 #address-reference-input { border: 1px solid var(--go-line) !important; }
+.delivery-map-modal-v4 #address-apt-input:focus,
+.delivery-map-modal-v4 #address-reference-input:focus { border-color: var(--go-ink) !important; }
+
+/* Etiquetas Casa / Trabajo / Otro (también en el detalle de dirección) */
+.addr-tag-btn:not(.active) {
+  border: 1px solid var(--go-line) !important;
+  background: var(--color-surface) !important;
+  color: var(--go-text-2) !important;
+}
+.addr-tag-btn.active {
+  border: 1px solid var(--go-ink) !important;
+  background: var(--go-ink) !important;
+  color: #fff !important;
+}
+
+/* Hoja "Cómo funciona" */
+.go-info-sheet { display: flex; flex-direction: column; background: var(--color-bg); }
+.go-info-body { padding: 20px 20px 4px; display: flex; flex-direction: column; gap: 18px; }
+.go-info-intro { margin: 0; font-size: 15px; line-height: 1.5; font-weight: 600; color: var(--go-text); }
+.go-info-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.go-info-steps li { display: flex; gap: 14px; align-items: flex-start; }
+.go-info-num {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  background: var(--go-ink); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font: 900 13px/1 var(--go-font);
+}
+.go-info-step { display: flex; flex-direction: column; gap: 3px; padding-top: 3px; }
+.go-info-step strong { font-size: 14.5px; color: var(--go-text); }
+.go-info-step span { font-size: 13px; line-height: 1.45; color: var(--go-text-2); }
+.go-info-notes { padding: 14px 16px; border-radius: 16px; background: var(--color-surface); border: 1px solid var(--go-line); }
+.go-info-notes ul { margin: 8px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 8px; }
+.go-info-notes li { font-size: 13px; line-height: 1.45; color: var(--go-text-2); }
+.go-info-notes li::marker { color: var(--go-red); }
+.go-info-notes strong { color: var(--go-text); }
+.go-info-foot { padding: 18px 20px calc(18px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); }
+.go-info-cta {
+  width: 100%; height: 52px; border-radius: 14px; border: 0;
+  background: var(--go-ink); color: #fff;
+  font: 800 15px/1 var(--font-body); cursor: pointer;
+}
+.go-info-cta:active { transform: scale(0.99); }
+
+/* Confirmaciones y avisos: título y texto alineados, sin líneas de más */
+.go-dialog-msg {
+  margin: 0;
+  padding: 4px 20px 8px;
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 500;
+  color: var(--go-text-2);
+  text-align: left;
+}
+.modal:has(.go-dialog-msg) .modal-header { border-bottom: 0 !important; padding-bottom: 8px !important; }
+.modal:has(.go-dialog-msg) .modal-footer { border-top: 0 !important; padding-top: 12px !important; }
+.modal-header h3 { font-family: var(--go-font) !important; letter-spacing: -0.01em; }

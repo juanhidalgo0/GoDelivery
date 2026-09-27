@@ -2117,7 +2117,7 @@ async function openCheckoutConfirmationModal() {
             <p style="font-size: 13.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.95;">
               No es posible realizar tu pedido en este momento porque no hay repartidores conectados en la zona. Por favor, intenta de nuevo más tarde.
             </p>
-            <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
+            <button id="no-drivers-close-btn" class="btn btn-primary" style="height: 50px; width: 100%; border-radius: 14px; font-weight: 900; font-size: 14px; background: var(--go-ink); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: none;">
               ENTENDIDO
             </button>
           </div>
@@ -2923,7 +2923,7 @@ async function openCheckoutConfirmationModal() {
               <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.5; opacity: 0.9;">
                 ${errorMessage}
               </p>
-              <button id="error-retry-btn" class="btn btn-primary" style="height: 56px; border-radius: 16px; font-weight: 900; font-size: 16px; background: var(--color-primary); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25); cursor: pointer;">
+              <button id="error-retry-btn" class="btn btn-primary" style="height: 56px; border-radius: 16px; font-weight: 900; font-size: 16px; background: var(--go-ink); border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: none; cursor: pointer;">
                 ${retryText}
               </button>
               <button id="error-cancel-btn" class="btn btn-ghost" style="height: 48px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); cursor: pointer;">

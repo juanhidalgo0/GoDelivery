@@ -2908,7 +2908,7 @@ async function showDriverOrderHistoryModal(driver, db2) {
   showModal2({
     title: `\u{1F4E6} Pedidos \u2014 ${driver.displayName || driver.name || "Repartidor"}`,
     hideHeader: false,
-    headerBackground: "#E11D48",
+    headerBackground: "var(--go-ink)",
     headerTextColor: "#FFFFFF",
     height: "92dvh",
     content: `
@@ -3069,7 +3069,7 @@ async function showDriverPaymentHistoryModal(driver, db2) {
   showModal2({
     title: `\u{1F4B8} Pagos \u2014 ${driver.displayName || driver.name || "Repartidor"}`,
     hideHeader: false,
-    headerBackground: "#E11D48",
+    headerBackground: "var(--go-ink)",
     headerTextColor: "#FFFFFF",
     height: "92dvh",
     content: `
@@ -3345,7 +3345,7 @@ async function showDriverDebtDetailModal(driver, db2) {
   showModal2({
     title: `\u2139\uFE0F Detalles de Deuda`,
     hideHeader: false,
-    headerBackground: "#E11D48",
+    headerBackground: "var(--go-ink)",
     headerTextColor: "#FFFFFF",
     content: detailHTML,
     height: "auto"

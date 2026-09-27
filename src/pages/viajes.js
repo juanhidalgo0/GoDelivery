@@ -7,13 +7,14 @@ import { icon } from '../utils/icons.js';
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
+import { goServiceHeader, goServiceHint, bindServiceHint, goServiceEmpty, showGoInfoSheet } from '../components/service-screen.js';
 
 function showWarningModal(message) {
   const alertEl = document.createElement('div');
   alertEl.innerHTML = `
     <p style="padding: 32px 24px; text-align: center; color: var(--color-text-secondary); font-size: 15.5px; font-weight: 700; line-height: 1.6; margin: 0;">${message}</p>
     <div style="padding: 0 24px 24px;">
-      <button id="alert-ok-btn" class="btn btn-primary" style="width: 100%; height: 54px; border-radius: 18px; font-weight: 900; font-size: 15px; background: var(--color-primary); color: white; border: none; cursor: pointer; box-shadow: 0 6px 20px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
+      <button id="alert-ok-btn" class="btn btn-primary" style="width: 100%; height: 54px; border-radius: 18px; font-weight: 900; font-size: 15px; background: var(--go-ink); color: white; border: none; cursor: pointer; box-shadow: none;">Entendido</button>
     </div>
   `;
   const alertModal = showModal({
@@ -32,13 +33,9 @@ export async function renderViajes(content) {
   const user = getState().user;
   if (!user || !isLoggedIn()) {
     content.innerHTML = `
-      <div class="empty-state" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px; text-align:center; height:80dvh;">
-        <div style="width:72px; height:72px; background:rgba(var(--color-primary-rgb),0.1); color:var(--color-primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:20px;">
-          ${icon('user', 36)}
-        </div>
-        <h3 style="font-family:var(--font-display); font-size:18px; font-weight:800; margin-bottom:8px;">Iniciá sesión</h3>
-        <p style="color:var(--color-text-secondary); font-size:14px; margin-bottom:24px; max-width:280px;">Necesitás tener una cuenta activa para poder solicitar un viaje en la plataforma.</p>
-        <button onclick="location.hash='#/profile'" class="btn btn-primary" style="padding:12px 30px; border-radius:14px; font-weight:800; font-size:14px; border:none; background:var(--color-primary); color:white; cursor:pointer;">Ir a mi Perfil</button>
+      <div class="go-service-page">
+        ${goServiceHeader({ eyebrow: 'Elegí tu destino y viajá seguro', title: 'Viajes' })}
+        ${goServiceEmpty({ iconName: 'user', title: 'Iniciá sesión', text: 'Para pedir un viaje necesitás una cuenta activa.', ctaLabel: 'Iniciar sesión', ctaHref: '#/profile' })}
       </div>
     `;
     return;
@@ -47,23 +44,11 @@ export async function renderViajes(content) {
   content.innerHTML = `
     <div class="viajes-page" style="display:flex; flex-direction:column; height: 100dvh; background: var(--color-bg); overflow: hidden; position:relative;">
       
-      <!-- Premium Unified Blue Header with smooth gradient -->
-      <div class="go-page-header" style="background: var(--go-ink); padding:calc(18px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(37, 99, 235, 0.2); z-index:100;">
-        <button onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-          ${icon('chevronLeft', 24)}
-        </button>
-        <div style="flex:1; position:relative; z-index:2;">
-          <h1 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; letter-spacing:-0.03em;">Solicitar Viaje</h1>
-          <p style="font-size:10px; font-weight:850; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:0.1em; margin-top:2px;">Elegí tu destino y viaja seguro</p>
-        </div>
-        <!-- Help Button -->
-        <button id="viajes-help-header-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-          ${icon('info', 20)}
-        </button>
-      </div>
+      ${goServiceHeader({ eyebrow: 'Elegí tu destino y viajá seguro', title: 'Viajes', infoId: 'viajes-help-header-btn', infoLabel: '¿Cómo funcionan los Viajes?' })}
 
       <!-- Main Scrollable Body -->
       <div style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:20px; -webkit-overflow-scrolling:touch; padding-bottom:40px;">
+        ${goServiceHint({ id: 'viajes-hint', storageKey: 'info_seen_viajes_v4', style: 'margin: 0;' })}
         
         <!-- Address Selector Panel with connected route timeline -->
         <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:24px; padding:20px; display:flex; gap:16px; box-shadow:var(--shadow-sm); position:relative;">
@@ -144,7 +129,7 @@ export async function renderViajes(content) {
         </div>
 
         <!-- Request Button with premium action styling -->
-        <button id="request-trip-btn" style="width: 100%; height: 56px; border-radius: 18px; background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%); color: white; border: none; font-weight: 900; font-size: 15.5px; cursor: pointer; box-shadow: 0 8px 24px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top:auto; transition:all 0.2s;">
+        <button id="request-trip-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink) 100%); color: white; border: none; font-weight: 900; font-size: 15.5px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top:auto; transition:all 0.2s;">
           ${icon('zap', 18)} Pedir Viaje
         </button>
 
@@ -409,7 +394,7 @@ export async function renderViajes(content) {
 
         <div style="display:flex; gap:10px;">
           <button id="schedule-cancel-btn" style="flex:1; height:52px; border-radius:16px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); font-weight:800; font-size:14px; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s;">Cancelar</button>
-          <button id="schedule-confirm-btn" style="flex:2; height:52px; border-radius:16px; background:linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%); border:none; font-weight:900; font-size:14px; color:white; cursor:pointer; box-shadow:0 6px 20px rgba(var(--color-primary-rgb),0.25); display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">${icon('calendar', 18)} Programar Viaje</button>
+          <button id="schedule-confirm-btn" style="flex:2; height:52px; border-radius:16px; background: var(--go-ink) 100%); border:none; font-weight:900; font-size:14px; color:white; cursor:pointer; box-shadow: none; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">${icon('calendar', 18)} Programar Viaje</button>
         </div>
       </div>
     `;
@@ -619,54 +604,20 @@ export async function renderViajes(content) {
   };
 
   // Handle general info modal trigger for trips
-  const showViajesInfoModal = () => {
-    showModal({
-      title: '🚗 ¿Cómo funcionan los Viajes?',
-      height: 'auto',
-      content: `
-        <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-          <p style="margin: 0; font-weight: 700;">GO! Viajes te permite solicitar autos y conductores habilitados para trasladarte de forma segura en tu zona.</p>
-          
-          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Indicá origen y destino</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Escribí las direcciones o seleccionalas directamente interactuando con el mapa integrado.</p>
-              </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Visualizá el costo estimado</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">El sistema calculará automáticamente la distancia en kilómetros y te mostrará la tarifa correspondiente.</p>
-              </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Viajá con seguridad</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Podrás visualizar en vivo la aproximación del chofer, ver la patente de su auto y chatear para coordinar.</p>
-              </div>
-            </div>
-          </div>
-          <button id="close-viajes-info-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-        </div>
-      `,
-      onOpen: () => {
-        document.getElementById('close-viajes-info-modal-btn').onclick = () => closeModal();
-      }
-    });
-  };
+  const showViajesInfoModal = () => showGoInfoSheet({
+    title: 'Viajes',
+    intro: 'Pedí un auto o una moto con conductores habilitados para moverte seguro por Magdalena.',
+    steps: [
+      { title: 'Indicá origen y destino', text: 'Escribí las direcciones o marcalas en el mapa.' },
+      { title: 'Mirá el precio antes de pedir', text: 'Calculamos la distancia y te mostramos la tarifa al instante.' },
+      { title: 'Viajá tranquilo', text: 'Seguís al conductor en vivo, ves la patente y podés chatear con él.' },
+    ],
+  });
 
   const helpBtn = document.getElementById('viajes-help-header-btn');
   if (helpBtn) {
     helpBtn.onclick = () => showViajesInfoModal();
   }
 
-  const hasSeenInfo = localStorage.getItem('info_seen_viajes_v4');
-  if (!hasSeenInfo) {
-     showViajesInfoModal();
-     localStorage.setItem('info_seen_viajes_v4', 'true');
-  }
+  bindServiceHint('viajes-hint', () => showViajesInfoModal());
 }

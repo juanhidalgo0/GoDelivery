@@ -66,7 +66,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
     const closeBtn = document.getElementById('address-modal-close-btn');
     const slidesContainer = document.getElementById('address-slides-container');
 
-    if (titleEl) titleEl.textContent = 'Ajustar Ubicación';
+    if (titleEl) titleEl.textContent = 'Ajustá el punto';
     if (backBtn) backBtn.style.visibility = 'visible';
     if (closeBtn) closeBtn.style.visibility = 'hidden';
 
@@ -120,23 +120,13 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
   const renderMainView = () => {
     modalContent.innerHTML = `
-      <div id="address-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:20px 20px 14px; background:#E11D48; flex-shrink:0; color:white; border-bottom:none; box-shadow:0 2px 10px rgba(0,0,0,0.1); position:relative; z-index:100;">
-        <!-- Left Slot -->
-        <div style="width:75px; display:flex; justify-content:flex-start; flex-shrink:0;">
-          <button id="address-modal-back-btn" style="background:none; border:none; color:white; cursor:pointer; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; padding:4px 8px; font-weight:800; font-size:13.5px; outline:none; display:flex; gap:4px; margin:0;">
-            ${icon('chevronLeft', 16)} Buscar
-          </button>
+      <div id="address-modal-header" class="go-sheet-header">
+        <button type="button" id="address-modal-back-btn" class="go-icon-btn" aria-label="Volver a buscar" style="visibility:hidden;">${icon('chevronLeft', 20)}</button>
+        <div class="go-sheet-titles">
+          <span class="go-eyebrow">Entrega</span>
+          <h3 id="address-modal-title" class="go-title">¿Dónde entregamos?</h3>
         </div>
-        
-        <!-- Center Title -->
-        <h3 id="address-modal-title" style="font-family:var(--font-display); font-size:1.2rem; font-weight:950; margin:0; color:white; text-align:center; letter-spacing:-0.01em; flex:1;">¿Dónde entregamos?</h3>
-        
-        <!-- Right Slot -->
-        <div style="width:75px; display:flex; justify-content:flex-end; flex-shrink:0;">
-          <button id="address-modal-close-btn" style="width:36px; height:36px; border:none; background:rgba(255,255,255,0.15); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:all 0.2s; color:white; outline:none; margin:0;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
-        </div>
+        <button type="button" id="address-modal-close-btn" class="go-icon-btn" aria-label="Cerrar">${icon('close', 18)}</button>
       </div>
 
       <!-- Slides Wrapper -->
@@ -148,7 +138,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
              <!-- Buscador de Calle y Número -->
              <div id="search-section" style="padding: 16px 20px 8px; position: relative; background: var(--color-bg); flex-shrink: 0; z-index: 50;">
                <div style="position: relative; width: 100%;">
-                 <input type="text" id="address-search-input" placeholder="Calle y Número (Ejemplo: Miguens 1340)" style="width: 100%; height: 50px; padding: 0 48px 0 16px; border-radius: 16px; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); font-size: 14.5px; font-weight: 700; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-shadow: var(--shadow-sm);" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border-light)'">
+                 <input type="text" id="address-search-input" placeholder="Calle y número, ej: Miguens 1340" style="width: 100%; height: 50px; padding: 0 48px 0 16px; border-radius: 16px; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); font-size: 14.5px; font-weight: 700; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-shadow: var(--shadow-sm);" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border-light)'">
                  <div id="search-icon-wrapper" style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--color-primary); display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; cursor: pointer;">
                    ${icon('search', 20)}
                  </div>
@@ -164,7 +154,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
                  <div style="width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.25); display:flex; align-items:center; justify-content:center; color:white; flex-shrink:0;">
                    ${icon('mapPin', 16)}
                  </div>
-                 <span>Seleccionar ubicación en el mapa</span>
+                 <span style="display:flex; flex-direction:column; gap:2px; text-align:left;"><span>Elegir en el mapa</span><span class="go-map-btn-sub">Mové el punto hasta tu puerta</span></span>
                </div>
                <div style="color:rgba(255,255,255,0.85); display:flex; align-items:center;">
                  ${icon('chevronRight', 16)}
@@ -266,7 +256,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
                </div>
 
                <button id="confirm-location-btn" class="btn btn-primary btn-block" style="height: 48px; border-radius: 14px; font-weight: 900; font-size: 15px; background: #E11D48; border: none; color: white; box-shadow: 0 6px 16px rgba(225, 29, 72, 0.22); cursor: pointer; width: 100%;">
-                 Confirmar Dirección
+                 Confirmar dirección
                </button>
              </div>
            </div>
@@ -748,7 +738,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
             pendingConfirm = false;
             const confirmBtn = document.getElementById('confirm-location-btn');
             if (confirmBtn) {
-              confirmBtn.innerHTML = 'Confirmar Dirección';
+              confirmBtn.innerHTML = 'Confirmar dirección';
               confirmBtn.disabled = false;
               confirmBtn.click();
             }
@@ -782,7 +772,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           pendingConfirm = false;
           const confirmBtn = document.getElementById('confirm-location-btn');
           if (confirmBtn) {
-            confirmBtn.innerHTML = 'Confirmar Dirección';
+            confirmBtn.innerHTML = 'Confirmar dirección';
             confirmBtn.disabled = false;
             confirmBtn.click();
           }
@@ -796,7 +786,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
         pendingConfirm = false;
         const confirmBtn = document.getElementById('confirm-location-btn');
         if (confirmBtn) {
-          confirmBtn.innerHTML = 'Confirmar Dirección';
+          confirmBtn.innerHTML = 'Confirmar dirección';
           confirmBtn.disabled = false;
         }
       }
@@ -1163,10 +1153,11 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
 
   modalContent.innerHTML = `
     <!-- Header -->
-    <div style="padding:20px; display:flex; align-items:center; gap:16px; border-bottom:1px solid var(--color-border-light); flex-shrink:0;">
-      <button id="details-back" style="background:none; border:none; padding:8px; cursor:pointer; color: var(--color-text-primary);">${icon('arrowLeft', 20)}</button>
-      <div style="flex:1;">
-        <h2 style="font-family:var(--font-display); font-size:17px; font-weight:900; color:var(--color-text-primary); margin:0;">${config.editAddress ? 'Editar dirección' : 'Detalles de entrega'}</h2>
+    <div class="go-sheet-header">
+      <button type="button" id="details-back" class="go-icon-btn" aria-label="Volver">${icon('chevronLeft', 20)}</button>
+      <div class="go-sheet-titles">
+        <span class="go-eyebrow">Entrega</span>
+        <h2 class="go-title">${config.editAddress ? 'Editar dirección' : 'Detalles de entrega'}</h2>
       </div>
     </div>
 
@@ -1203,7 +1194,7 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
 
     <!-- Sticky Footer -->
     <div style="padding:20px; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0))); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10;">
-       <button id="save-address-final" class="btn btn-primary" style="width:100%; height:56px; border-radius:18px; font-weight:900; font-size:16px; background:#E11D48; border:none; box-shadow: 0 8px 20px rgba(225, 29, 72, 0.2);">Guardar y continuar</button>
+       <button id="save-address-final" class="btn btn-primary" style="width:100%; height:56px; border-radius:16px; font-weight:800; font-size:16px; background:var(--go-ink); color:#fff; border:none; box-shadow:none;">Guardar y continuar</button>
        ${config.editAddress ? `
          <button id="delete-address-btn" style="width:100%; height:48px; border:1.5px solid var(--color-border); border-radius:18px; font-weight:800; font-size:14px; background:transparent; color:#EF4444; border-color:#EF4444; cursor:pointer; transition:all 0.2s;">
            Eliminar dirección
@@ -1230,6 +1221,7 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     // Set default active styling to Casa
     const defaultActive = Array.from(tagButtons).find(b => b.dataset.tag === 'Casa');
     if (defaultActive) {
+      defaultActive.classList.add('active');
       defaultActive.style.borderColor = 'var(--color-primary)';
       defaultActive.style.color = 'var(--color-primary)';
       defaultActive.style.background = 'rgba(var(--color-primary-rgb, 225, 29, 72), 0.05)';
@@ -1252,10 +1244,12 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     btn.onclick = (e) => {
       e.preventDefault();
       tagButtons.forEach(b => {
+        b.classList.remove('active');
         b.style.borderColor = 'var(--color-border)';
         b.style.color = 'var(--color-text-secondary)';
         b.style.background = 'var(--color-bg)';
       });
+      btn.classList.add('active');
       btn.style.borderColor = 'var(--color-primary)';
       btn.style.color = 'var(--color-primary)';
       btn.style.background = 'rgba(var(--color-primary-rgb, 225, 29, 72), 0.05)';

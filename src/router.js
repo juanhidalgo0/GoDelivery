@@ -1,6 +1,7 @@
 import { isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from './auth.js';
 import { getState, subscribe } from './state.js';
 import { clearActiveListeners } from './utils/cleanup.js';
+import { isServiceRoute, serviceSkeleton, initServiceScreens } from './components/service-screen.js';
 
 let routes = {};
 let currentCleanup = null;
@@ -84,7 +85,6 @@ const getMainRoutes = () => {
 
   const list = {
     '/': 'page-home',
-    '/offers': 'page-offers',
     '/mi-comercio': 'page-commerce',
     '/mi-comercio/:id/orders': 'page-commerce',
     '/delivery': 'page-delivery',
@@ -299,20 +299,34 @@ export async function handleRoute() {
     // Match is already parsed above
 
     if (mainRoutes[pattern]) {
-      if (overlay && overlay.classList.contains('active')) {
-        if (overlay.classList.contains('slide-from-left')) {
+      const overlayClasses = ['active', 'is-service', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-from-bottom', 'slide-exit-left', 'slide-exit-right', 'slide-exit-bottom'];
+      const resetOverlay = (el) => {
+        el.classList.remove(...overlayClasses);
+        el.innerHTML = '';
+        el.style.animation = '';
+        el.style.transform = '';
+        el.style.transition = '';
+        delete el.dataset.dismissed;
+      };
+      if (overlay && overlay.classList.contains('active') && overlay.dataset.dismissed !== '1') {
+        // Leave the way it came in: service screens drop back down, sub-pages slide out sideways.
+        if (overlay.classList.contains('is-service')) {
+          overlay.classList.add('slide-exit-bottom');
+        } else if (overlay.classList.contains('slide-from-left')) {
           overlay.classList.add('slide-exit-left');
         } else {
           overlay.classList.add('slide-exit-right');
         }
         const currentTarget = overlay;
         setTimeout(() => {
-          currentTarget.classList.remove('active', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-exit-left', 'slide-exit-right');
-          currentTarget.innerHTML = '';
+          // A new overlay may have opened during the exit; don't wipe it.
+          if (currentTarget.classList.contains('slide-exit-bottom') || currentTarget.classList.contains('slide-exit-left') || currentTarget.classList.contains('slide-exit-right')) {
+            resetOverlay(currentTarget);
+          }
         }, 260);
       } else if (overlay) {
-        overlay.classList.remove('active', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-exit-left', 'slide-exit-right');
-        overlay.innerHTML = '';
+        // Already dragged off-screen (or not open): no second animation.
+        resetOverlay(overlay);
       }
       document.body.classList.remove('overlay-open');
 
@@ -400,19 +414,34 @@ export async function handleRoute() {
     } else {
       // Overlay routes (Sub-pages, Modals, etc.)
       if (overlay) {
-        if (hash.startsWith('/profile') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash.startsWith('/tienda') || hash === '/viajes' || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
+        const isService = isServiceRoute(hash);
+        if (isService || hash.startsWith('/profile') || hash.startsWith('/marketplace') || hash.startsWith('/mi-comercio/') || hash.startsWith('/pedido/') || hash.startsWith('/admin') || hash === '/notifications' || hash.startsWith('/comercio/') || hash.startsWith('/tienda') || hash.startsWith('/gofavores') || hash.startsWith('/delivery/')) {
           overlay.classList.add('panel-fullscreen');
         } else {
           overlay.classList.remove('panel-fullscreen');
         }
 
+        // Coming back to a service from one of its pages (Market → product → back) is a
+        // step back, not a new opening: it returns from the left instead of rising again.
+        const wasOpen = overlay.classList.contains('active') && !overlay.classList.contains('slide-exit-bottom') && !overlay.classList.contains('slide-exit-left') && !overlay.classList.contains('slide-exit-right');
+
+        // Clear what a drag or a previous exit left behind before the next entrance.
+        overlay.classList.remove('slide-exit-left', 'slide-exit-right', 'slide-exit-bottom');
+        overlay.style.animation = '';
+        overlay.style.transform = '';
+        overlay.style.transition = '';
+        delete overlay.dataset.dismissed;
+
         overlay.classList.add('active');
-        if (hash === '/viajes') {
-          overlay.classList.add('slide-from-left');
-          overlay.classList.remove('slide-from-right');
+        // Services (Mandados, Viajes, Market, Ofertas) rise from the bottom over the home;
+        // everything deeper (a store, a product, an order) comes in from the right.
+        overlay.classList.toggle('is-service', isService);
+        overlay.classList.remove('slide-from-right', 'slide-from-left', 'slide-from-bottom');
+        void overlay.offsetWidth; // restart the entrance even if the class is the same
+        if (isService) {
+          overlay.classList.add(wasOpen ? 'slide-from-left' : 'slide-from-bottom');
         } else {
           overlay.classList.add('slide-from-right');
-          overlay.classList.remove('slide-from-left');
         }
       }
 
@@ -421,6 +450,7 @@ export async function handleRoute() {
       overlay.innerHTML = '<div id="overlay-render-target" style="width:100%; height:100%;"></div>';
       const target = document.getElementById('overlay-render-target');
       target.id = 'app-content';
+      if (isServiceRoute(hash)) target.innerHTML = serviceSkeleton(hash);
       
       // Force scroll top for overlay
       overlay.scrollTop = 0;
@@ -429,9 +459,10 @@ export async function handleRoute() {
         const result = await handler(target);
         if (result && result.cleanup) {
           const originalCleanup = result.cleanup;
+          // The overlay content is removed after its exit animation (or replaced by the next
+          // page), not here: wiping it now made closing screens slide away blank.
           currentCleanup = () => {
             originalCleanup();
-            overlay.innerHTML = '';
           };
         }
       } catch (err) {
@@ -547,6 +578,7 @@ const updateUI = (index, scrollX) => {
 
 export function initRouter() {
   window.addEventListener('hashchange', handleRoute);
+  initServiceScreens();
   
   // Rescale horizontal slider on window resize to prevent out-of-bound blank screens
   window.addEventListener('resize', () => {

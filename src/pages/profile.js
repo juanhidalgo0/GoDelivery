@@ -91,7 +91,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
             <input type="email" id="test-email" placeholder="Correo electrónico" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
             <input type="password" id="test-password" placeholder="Contraseña" style="height: 48px; border-radius: 14px; border: 1.5px solid var(--color-border); padding: 0 16px; font-size: 14px; outline: none; background: var(--color-bg-card); color: var(--color-text-primary);" />
           </div>
-          <button id="btn-submit-test-login" style="margin-top: 16px; height: 50px; border-radius: 16px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.2);">
+          <button id="btn-submit-test-login" style="margin-top: 16px; height: 50px; border-radius: 16px; background: var(--go-ink); color: white; border: none; font-weight: 850; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: none;">
             Iniciar Sesión
           </button>
         `;
@@ -1090,7 +1090,7 @@ async function showDeliveryApplicationModal(user) {
       </div>
 
       <!-- Submit button -->
-      <button type="submit" id="submit-app-btn" class="btn btn-primary" style="width: 100%; height: 50px; border-radius: 14px; background: var(--color-primary); color: white; border: none; font-weight: 900; font-size: 14.5px; cursor: pointer; box-shadow: 0 8px 24px rgba(var(--color-primary-rgb), 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
+      <button type="submit" id="submit-app-btn" class="btn btn-primary" style="width: 100%; height: 50px; border-radius: 14px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 14.5px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
         ${icon('check', 18)} Enviar Postulación
       </button>
     </form>
@@ -1744,7 +1744,7 @@ async function showEditDisplayNameModal(user) {
     footer: `
       <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
         <button id="profile-name-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
-        <button id="profile-name-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Guardar</button>
+        <button id="profile-name-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background: var(--go-ink); border:none; color:white; cursor:pointer;">Guardar</button>
       </div>
     `,
     onOpen: () => {
@@ -1828,7 +1828,7 @@ async function showEditPhoneModal(user) {
     footer: `
       <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
         <button id="profile-phone-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
-        <button id="profile-phone-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Guardar</button>
+        <button id="profile-phone-save-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background: var(--go-ink); border:none; color:white; cursor:pointer;">Guardar</button>
       </div>
     `,
     onOpen: () => {
@@ -1946,7 +1946,7 @@ async function showPhoneVerificationModal(user, phoneVal, confirmationResult) {
     footer: `
       <div style="display:flex; gap:12px; justify-content:flex-end; padding: 0 4px 12px 4px;">
         <button id="verification-cancel-btn" class="btn btn-ghost" style="flex:1; height:48px; border-radius:12px; font-weight:800; font-size:14px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border); cursor:pointer;">Cancelar</button>
-        <button id="verification-confirm-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background:var(--color-primary); border:none; color:white; cursor:pointer;">Confirmar</button>
+        <button id="verification-confirm-btn" class="btn btn-primary" style="flex:1.5; height:48px; border-radius:12px; font-weight:900; font-size:14px; background: var(--go-ink); border:none; color:white; cursor:pointer;">Confirmar</button>
       </div>
     `,
     onOpen: () => {
@@ -2005,7 +2005,7 @@ async function showPhoneVerificationModal(user, phoneVal, confirmationResult) {
                 `,
                 footer: `
                   <div style="padding: 0 4px 12px 4px; display: flex; justify-content: center; width: 100%;">
-                    <button id="success-confirm-btn" class="btn btn-primary" style="width: 100%; height: 48px; border-radius: 12px; font-weight: 900; font-size: 14.5px; background: var(--color-primary); border: none; color: white; cursor: pointer;">Entendido</button>
+                    <button id="success-confirm-btn" class="btn btn-primary" style="width: 100%; height: 48px; border-radius: 12px; font-weight: 900; font-size: 14.5px; background: var(--go-ink); border: none; color: white; cursor: pointer;">Entendido</button>
                   </div>
                 `,
                 onOpen: () => {

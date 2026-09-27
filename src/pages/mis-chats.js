@@ -750,7 +750,7 @@ async function showDeleteAllChatsModal(user, container) {
       <p style="margin:0; font-size:12px; color:var(--color-text-secondary); font-weight:600; line-height:1.5;">Esta acción ocultará definitivamente todas tus conversaciones. El otro participante seguirá teniendo acceso a las mismas.</p>
     </div>
     
-    <button id="btn-delete-chats-all-confirm" style="display:flex; align-items:center; justify-content:center; gap:8px; height:50px; border-radius:16px; border:none; background:var(--color-primary); color:white; font-size:14px; font-weight:900; cursor:pointer; width:100%; transition:background 0.2s;">
+    <button id="btn-delete-chats-all-confirm" style="display:flex; align-items:center; justify-content:center; gap:8px; height:50px; border-radius:16px; border:none; background: var(--go-ink); color:white; font-size:14px; font-weight:900; cursor:pointer; width:100%; transition:background 0.2s;">
       ${icon('trash', 18)} ELIMINAR TODOS
     </button>
     

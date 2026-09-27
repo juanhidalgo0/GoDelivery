@@ -91,7 +91,7 @@ export async function renderHome(content) {
           <h1 class="go-title">¿Qué te<br>traemos hoy?</h1>
           <span class="go-bar"></span>
           <nav class="go-services" aria-label="Servicios">
-            <a id="home-mandados-btn" href="javascript:void(0)" class="go-service is-featured">
+            <a id="home-mandados-btn" href="#/mandados" class="go-service is-featured">
               <span class="go-service-ring">${icon('package', 22)}</span>
               Mandados
             </a>
@@ -287,20 +287,6 @@ export async function renderHome(content) {
         }
         showJoinTeamModal();
       });
-    }
-
-    const mandadosBtn = document.getElementById('home-mandados-btn');
-    if (mandadosBtn) {
-      mandadosBtn.onclick = async () => {
-        const user = getState().user;
-        if (!user) {
-          const { showToast } = await import('../components/toast.js');
-          showToast('Iniciá sesión para usar el servicio de Mandados.', 'warning');
-          return;
-        }
-        const { openMandadosWizard } = await import('./gofavores.js');
-        openMandadosWizard();
-      };
     }
 
     content.addEventListener('scroll', () => {
@@ -568,7 +554,7 @@ function checkAndShowWelcomeModal() {
       
       <!-- Pie de página fijo con el botón -->
       <div style="padding: 12px 24px 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff); border-top: 1.5px solid var(--color-border-light, #f1f5f9);">
-        <button id="welcome-beta-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
+        <button id="welcome-beta-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: var(--go-ink); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
           ¡Entendido, vamos a GO!
         </button>
       </div>
@@ -751,7 +737,7 @@ async function checkAndShowWelcomeCouponModal() {
           
           <!-- Footer Button -->
           <div style="padding: 0 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff);">
-            <button id="welcome-coupon-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
+            <button id="welcome-coupon-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: var(--go-ink); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
               ¡Buenísimo, comprar!
             </button>
           </div>
@@ -1956,7 +1942,7 @@ async function showBugReportModal() {
     
     <div style="display: flex; gap: 12px; margin-top: 6px;">
       <button id="bug-cancel-btn" style="flex: 1; height: 50px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); border: 1.5px solid var(--color-border-light); background: transparent; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='var(--color-bg-secondary)'" onmouseout="this.style.background='transparent'">Cancelar</button>
-      <button id="bug-submit-btn" style="flex: 2; height: 50px; border-radius: 16px; font-weight: 900; font-size: 14px; background: var(--color-primary); color: white; border: none; box-shadow: 0 6px 18px rgba(225, 29, 72, 0.25); cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 8px 22px rgba(225, 29, 72, 0.35)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 6px 18px rgba(225, 29, 72, 0.25)';">Enviar Reporte</button>
+      <button id="bug-submit-btn" style="flex: 2; height: 50px; border-radius: 16px; font-weight: 900; font-size: 14px; background: var(--go-ink); color: white; border: none; box-shadow: none; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 8px 22px rgba(225, 29, 72, 0.35)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 6px 18px rgba(225, 29, 72, 0.25)';">Enviar Reporte</button>
     </div>
   `;
 
@@ -2472,7 +2458,7 @@ async function showJoinCommerceModal() {
             <input type="text" id="join-com-address" placeholder="Ej: Calle 6 nro 123" style="width: 100%; height: 50px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 16px; font-weight: 600; font-size: 14px; outline: none; background: var(--color-bg-secondary); color: var(--color-text-primary); box-sizing: border-box;" autocomplete="off" />
             <div id="join-com-address-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--color-surface); border: 1.5px solid var(--color-border-light); border-radius: 12px; box-shadow: var(--shadow-lg); z-index: 9999; max-height: 180px; overflow-y: auto; margin-top: 4px; display: none;"></div>
           </div>
-          <button type="button" id="join-com-map-btn" style="width: 50px; height: 50px; border-radius: 14px; border: none; background: var(--color-primary); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.2);">
+          <button type="button" id="join-com-map-btn" style="width: 50px; height: 50px; border-radius: 14px; border: none; background: var(--go-ink); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: none;">
             ${icon('mapPin', 20)}
           </button>
         </div>
@@ -2502,7 +2488,7 @@ async function showJoinCommerceModal() {
 
       <div style="display: flex; gap: 12px; margin-top: 10px;">
         <button id="join-cancel-btn" style="flex: 1; height: 52px; border-radius: 16px; font-weight: 800; font-size: 14px; color: var(--color-text-secondary); border: 1.5px solid var(--color-border-light); background: transparent; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='var(--color-bg-secondary)'" onmouseout="this.style.background='transparent'">Cancelar</button>
-        <button id="join-submit-btn" style="flex: 2; height: 52px; border-radius: 16px; font-weight: 900; font-size: 14px; background: var(--color-primary); color: white; border: none; box-shadow: 0 6px 18px rgba(225, 29, 72, 0.25); cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 8px 22px rgba(225, 29, 72, 0.35)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 6px 18px rgba(225, 29, 72, 0.25)';">Enviar Solicitud</button>
+        <button id="join-submit-btn" style="flex: 2; height: 52px; border-radius: 16px; font-weight: 900; font-size: 14px; background: var(--go-ink); color: white; border: none; box-shadow: none; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 8px 22px rgba(225, 29, 72, 0.35)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 6px 18px rgba(225, 29, 72, 0.25)';">Enviar Solicitud</button>
       </div>
     </div>
   `;

@@ -2,6 +2,7 @@ import { db } from '../firebase.js';
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { getState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
+import { goServiceHeader } from '../components/service-screen.js';
 import { formatPrice } from '../utils/format.js';
 import { openProductModal } from '../components/product-modal.js';
 import { isShopOpen } from '../utils/format.js';
@@ -24,24 +25,9 @@ export async function renderOffersPage(container) {
     console.warn('Error reading offers page cache:', e);
   }
   
-  // Calculate padding dynamically for iOS/Android native
-  const isNative = !!window.Capacitor;
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  const topPadding = isNative 
-    ? 'var(--status-bar-height, 24px)' 
-    : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
-
   container.innerHTML = `
-    <div class="offers-page" style="display:flex; flex-direction:column; min-height:100vh; background:var(--color-bg); padding-bottom: 90px;">
-      <!-- Header estilo Mis Chats (Sticky) -->
-      <div class="go-page-header" style="background: var(--go-ink); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 200; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); flex-shrink: 0;">
-
-        <div style="height: 56px; padding: 0 16px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 2;">
-          <button type="button" class="go-icon-btn" aria-label="Volver" onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')">${icon('chevronLeft', 20)}</button>
-          <span class="go-title" style="font-size: 22px; color: white;">Ofertas y Descuentos</span>
-        </div>
-      </div>
+    <div class="go-service-page offers-page">
+      ${goServiceHeader({ eyebrow: 'Promociones de hoy', title: 'Ofertas' })}
 
       <!-- Filters & Search Area -->
       <div style="padding: 16px 16px 8px 16px; display:flex; flex-direction:column; gap:12px; border-bottom:1px solid var(--color-border-light); flex-shrink: 0; background:var(--color-bg);">
@@ -60,7 +46,7 @@ export async function renderOffersPage(container) {
       </div>
 
       <!-- Scrollable Offers Grid -->
-      <div style="flex:1; padding:16px; -webkit-overflow-scrolling:touch;" id="offers-page-scrollable">
+      <div class="go-service-scroll" style="padding:16px 16px calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));" id="offers-page-scrollable">
         <div id="offers-grid-container" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:16px; max-width:1200px; margin:0 auto; padding-bottom:40px;">
           <!-- Loaded dynamically -->
         </div>

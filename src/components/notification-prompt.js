@@ -56,7 +56,7 @@ export function showNotificationPrompt(onAccept) {
     </div>
     <div style="display:flex; gap:10px;">
       <button id="n-prompt-later" style="flex:1; height:44px; border-radius:12px; border:1.5px solid var(--color-border-light); background:transparent; color:var(--color-text-secondary); font-size:13px; font-weight:800; cursor:pointer;">Más tarde</button>
-      <button id="n-prompt-ok" style="flex:1.5; height:44px; border-radius:12px; border:none; background:var(--color-primary); color:white; font-size:13px; font-weight:900; cursor:pointer; box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.2);">Activar ahora</button>
+      <button id="n-prompt-ok" style="flex:1.5; height:44px; border-radius:12px; border:none; background: var(--go-ink); color:white; font-size:13px; font-weight:900; cursor:pointer; box-shadow: none;">Activar ahora</button>
     </div>
   `;
 

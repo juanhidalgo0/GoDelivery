@@ -76,7 +76,7 @@ export async function renderProductDetail(productId, content) {
           ${isOwner ? `
             <button disabled style="width:100%; height:50px; background:var(--color-border); color:var(--color-text-secondary); border:none; border-radius:14px; font-weight:800; font-size:15px; cursor:not-allowed;">Tu publicación</button>
           ` : `
-            <button id="btn-contact-seller" style="width:100%; height:50px; background:var(--color-primary); color:white; border:none; border-radius:14px; font-weight:800; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 24px rgba(var(--color-primary-rgb),0.2);">
+            <button id="btn-contact-seller" style="width:100%; height:50px; background: var(--go-ink); color:white; border:none; border-radius:14px; font-weight:800; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: none;">
               ${icon('chat', 18) || '💬'} Contactar Vendedor
             </button>
           `}

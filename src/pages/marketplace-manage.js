@@ -144,7 +144,7 @@ export async function renderMyPublications(content) {
       <input type="text" id="edit-title" value="${item.title}" style="height:44px; border-radius:10px; border:1px solid var(--color-border); padding:0 12px; font-size:14px; background:var(--color-surface); color:var(--color-text);" />
       <input type="number" id="edit-price" value="${item.price}" style="height:44px; border-radius:10px; border:1px solid var(--color-border); padding:0 12px; font-size:14px; background:var(--color-surface); color:var(--color-text);" />
       <textarea id="edit-desc" style="height:100px; border-radius:10px; border:1px solid var(--color-border); padding:10px; font-size:14px; background:var(--color-surface); color:var(--color-text); resize:none;">${item.description}</textarea>
-      <button id="btn-save-edit" style="height:48px; background:var(--color-primary); color:white; border:none; border-radius:12px; font-weight:800; cursor:pointer;">Guardar Cambios</button>
+      <button id="btn-save-edit" style="height:48px; background: var(--go-ink); color:white; border:none; border-radius:12px; font-weight:800; cursor:pointer;">Guardar Cambios</button>
     `;
 
     import('../components/modal.js').then(m => {

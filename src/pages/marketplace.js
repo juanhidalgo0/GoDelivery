@@ -2,6 +2,7 @@ import { db } from '../firebase.js';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { getState } from '../state.js';
 import { icon } from '../utils/icons.js';
+import { goServiceHeader, goServiceHint, bindServiceHint, showGoInfoSheet } from '../components/service-screen.js';
 
 export async function renderMarketplace(content) {
   if (!content) content = document.getElementById('app-content');
@@ -21,28 +22,8 @@ export async function renderMarketplace(content) {
         animation: productFadeIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
     </style>
-    <div class="marketplace-container" style="display:flex; flex-direction:column; height:100%; background:var(--color-bg); position:relative;">
-      <!-- Header (Green Premium style) -->
-      <div class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(16, 185, 129, 0.2); z-index:100;">
-        <a href="#/" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s;">
-          ${icon('chevronLeft', 24)}
-        </a>
-        <div style="flex:1;">
-          <h1 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; letter-spacing:-0.03em;">Marketplace</h1>
-          <p style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:0.1em; margin:2px 0 0;">Compra y venta</p>
-        </div>
-        <div style="display:flex; gap:8px;">
-          <button id="marketplace-help-header-btn" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; transition:all 0.2s;">
-            ${icon('info', 20)}
-          </button>
-          <a href="#/profile/publications" title="Mis Publicaciones" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s;">
-            ${icon('tag', 20) || icon('shop', 20) || '🏷️'}
-          </a>
-          <a href="#/marketplace/publish" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:12px; padding:0 12px; font-weight:700; text-decoration:none; font-size:13.5px; display:flex; align-items:center; gap:4px; height:40px;">
-            ${icon('plus', 14) || '+'} Publicar
-          </a>
-        </div>
-      </div>
+    <div class="go-service-page marketplace-container">
+      ${goServiceHeader({ eyebrow: 'Compra y venta entre vecinos', title: 'Market', infoId: 'marketplace-help-header-btn', infoLabel: '¿Cómo funciona el Market?' })}
 
       <!-- Search and Filter -->
       <div class="marketplace-filters" style="padding:12px 16px; background:var(--color-surface); border-bottom:1px solid var(--color-border); display:flex; flex-direction:column; gap:8px;">
@@ -58,12 +39,19 @@ export async function renderMarketplace(content) {
         </div>
       </div>
 
+      ${goServiceHint({ id: 'market-hint', storageKey: 'info_seen_marketplace_v4' })}
+
       <!-- Products Grid -->
       <div id="market-products-list" style="flex:1; overflow-y:auto; padding:16px; display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; align-content:start;">
         <div style="grid-column:1/-1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; color:var(--color-text-secondary); gap:14px;">
           <div style="width:32px; height:32px; border:3px solid rgba(16,185,129,0.15); border-top-color:var(--go-ink); border-radius:50%; animation:marketSpin 0.75s linear infinite;"></div>
           <span style="font-size:13px; font-weight:600; color:var(--color-text-secondary);">Cargando publicaciones...</span>
         </div>
+      </div>
+
+      <div class="go-service-actionbar">
+        <a href="#/profile/publications" class="is-secondary">${icon('tag', 18)} Mis publicaciones</a>
+        <a href="#/marketplace/publish" class="is-primary">${icon('plus', 18)} Publicar</a>
       </div>
     </div>
   `;
@@ -164,57 +152,22 @@ export async function renderMarketplace(content) {
   });
 
   // Handle general info modal trigger for marketplace
-  const showMarketplaceInfoModal = async () => {
-    const { showModal, closeModal } = await import('../components/modal.js');
-    showModal({
-      title: '🏷️ ¿Cómo funciona el Market?',
-      height: 'auto',
-      content: `
-        <div style="padding: 20px; font-family: inherit; color: var(--color-text-primary); line-height: 1.5; font-size: 14px; display: flex; flex-direction: column; gap: 16px;">
-          <p style="margin: 0; font-weight: 700;">GO! Market es un espacio de compra y venta directa entre los vecinos de la comunidad.</p>
-          
-          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px;">
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">1</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Explorá productos locales</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Buscá artículos publicados cerca tuyo: ropa, tecnología, herramientas, etc. (nuevos o usados).</p>
-              </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">2</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Chateá directamente con el vendedor</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">Coordiná el precio final, evacuá dudas o arreglá el punto de encuentro mediante el chat interno de la app.</p>
-              </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-start;">
-              <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 900; margin-top: 2px;">3</div>
-              <div>
-                <h4 style="font-size: 13px; font-weight: 800; margin: 0 0 2px; color: var(--color-text-primary);">Publicá gratis</h4>
-                <p style="font-size: 11.5px; color: var(--color-text-secondary); margin: 0; line-height: 1.35;">¿Tenés algo para vender? Subilo en segundos desde el botón de publicar artículos en tu perfil.</p>
-              </div>
-            </div>
-          </div>
-          <button id="close-market-info-modal-btn" style="margin-top: 10px; width: 100%; height: 48px; border-radius: 12px; border: none; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer; box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.2);">Entendido</button>
-        </div>
-      `,
-      onOpen: () => {
-        document.getElementById('close-market-info-modal-btn').onclick = () => closeModal();
-      }
-    });
-  };
+  const showMarketplaceInfoModal = () => showGoInfoSheet({
+    title: 'Market',
+    intro: 'Comprá y vendé entre vecinos de Magdalena, sin intermediarios.',
+    steps: [
+      { title: 'Explorá lo que hay cerca', text: 'Ropa, tecnología, herramientas y más, nuevos o usados.' },
+      { title: 'Hablá con quien vende', text: 'Coordinás precio, dudas y punto de encuentro por el chat de la app.' },
+      { title: 'Publicá gratis', text: '¿Tenés algo para vender? Subilo en segundos con el botón Publicar.' },
+    ],
+  });
 
   const helpBtn = document.getElementById('marketplace-help-header-btn');
   if (helpBtn) {
     helpBtn.onclick = () => showMarketplaceInfoModal();
   }
 
-  const hasSeenInfo = localStorage.getItem('info_seen_marketplace_v4');
-  if (!hasSeenInfo) {
-    showMarketplaceInfoModal();
-    localStorage.setItem('info_seen_marketplace_v4', 'true');
-  }
+  bindServiceHint('market-hint', () => showMarketplaceInfoModal());
 
   return {
     cleanup: () => {}

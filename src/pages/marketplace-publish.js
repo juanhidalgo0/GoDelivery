@@ -63,7 +63,7 @@ export async function renderPublishProduct(content) {
           <input type="file" id="prod-image-input" accept="image/*" style="display:none;" />
         </div>
 
-        <button type="submit" id="btn-submit-publish" style="height:50px; background:var(--color-primary); color:white; border:none; border-radius:14px; font-weight:800; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; box-shadow:0 8px 24px rgba(var(--color-primary-rgb),0.2);">
+        <button type="submit" id="btn-submit-publish" style="height:50px; background: var(--go-ink); color:white; border:none; border-radius:14px; font-weight:800; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; box-shadow: none;">
           Publicar Producto
         </button>
       </form>

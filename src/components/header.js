@@ -37,7 +37,7 @@ export function renderHeader() {
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';
-  const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores');
+  const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/mandados');
   const slider = document.getElementById('app-slider');
 
   // When opening fullscreen overlays like Profile, do not alter home header/slider layout to prevent glitches underneath
@@ -399,7 +399,7 @@ export function renderHeader() {
     let title = 'Notificaciones';
     if (hash.startsWith('#/profile/orders')) title = 'Mis Pedidos';
     else if (hash.startsWith('#/profile/publications')) title = 'Mis Publicaciones';
-    else if (hash.startsWith('#/gofavores')) title = 'Mandados';
+    else if (hash.startsWith('#/gofavores') || hash.startsWith('#/mandados')) title = 'Mandados';
     else if (hash.startsWith('#/category')) {
        title = decodeURIComponent(hash.split('/').pop());
     } else if (hash.startsWith('#/cart')) title = 'Mi Carrito';
