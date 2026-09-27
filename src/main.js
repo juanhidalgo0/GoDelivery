@@ -1208,7 +1208,9 @@ async function init() {
       }
 
       const splash = document.getElementById('splash-screen');
-      const isDeliveryTarget = window.location.hash.includes('delivery') || window.location.search.includes('redirect=delivery');
+      // Skip the intro only when a push is waiting (an offer to take); a driver simply
+      // opening the app gets the same entrance as everyone else.
+      const isDeliveryTarget = window.location.hash.includes('takeOrderId') || window.location.search.includes('redirect=delivery');
 
       if (splash) {
         if (isDeliveryTarget) {

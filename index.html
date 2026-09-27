@@ -657,17 +657,19 @@
       <div>
         <script>
           window.setSplashProgress = function() {};
-          // Every path that hides the splash goes through here. The first open of the
-          // session lets the GO! intro finish (~0.95 s from page start); later opens,
-          // and reduced-motion users, get it out of the way immediately.
+          // The splash is the way into the app: every open plays the whole GO! intro
+          // (~1.5 s) and holds it a beat before the ink rolls up into the header.
+          // Timed from when the splash is painted, not from page start, so a slow
+          // WebView boot never eats the animation. Reduced motion gets a short hold.
+          window.__gsStart = performance.now();
           window.dismissSplashScreen = function(opts) {
             var s = document.getElementById('splash-screen');
             if (!s || s.dataset.dismissed) return;
             s.dataset.dismissed = 'true';
-            var seen = false;
-            try { seen = sessionStorage.getItem('gd_splash_intro_seen') === '1'; sessionStorage.setItem('gd_splash_intro_seen', '1'); } catch (e) {}
             var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            var wait = (opts && opts.immediate) || seen || reduce ? 0 : Math.max(0, 950 - performance.now());
+            var minShow = reduce ? 500 : 1900;
+            var elapsed = performance.now() - (window.__gsStart || 0);
+            var wait = (opts && opts.immediate) ? 0 : Math.max(0, minShow - elapsed);
             setTimeout(function() {
               s.classList.add('fade-out');
               var appEl = document.getElementById('app');
@@ -675,10 +677,11 @@
               setTimeout(function() { if (s && s.parentNode) s.parentNode.removeChild(s); }, 450);
             }, wait);
           };
-          // Safety fallback: the splash never stays longer than 1.5 s
+          // Safety net: once the intro has played, leave even if the app never signals ready
+          // (the pre-rendered shell is already behind it).
           setTimeout(function() {
-            if (window.dismissSplashScreen) window.dismissSplashScreen({ immediate: true });
-          }, 1500);
+            if (window.dismissSplashScreen) window.dismissSplashScreen();
+          }, 2000);
         </script>
       </div>
     </div>

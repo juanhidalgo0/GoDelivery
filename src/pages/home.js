@@ -1058,6 +1058,8 @@ async function renderOffersSection(offers = [], comercios = []) {
   const fetchPromises = [];
 
   for (const offer of shuffledOffers) {
+    // An offer saved without its store would make doc() throw and blank the whole section.
+    if (!offer || !offer.comercioId) continue;
     const comercio = comerciosMap[offer.comercioId];
     const comercioName = comercio ? comercio.name : (offer.merchantName || 'Comercio');
     const isClosed = comercio ? !isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen) : false;
@@ -2932,191 +2934,138 @@ async function showJoinTeamModal() {
 
 
 
+// "Exclusivo GO!" promo: a product you can only get through GO!. It is an invitation, not
+// a wall, so it shows at most once a day, only while the person is idle on the home, and
+// never on top of another sheet or the first-run guides.
+const APP_ONLY_PROMO_KEY = 'gd_app_only_promo_last';
+const APP_ONLY_PROMO_EVERY_MS = 24 * 60 * 60 * 1000;
+let appOnlyPromoTries = 0;
+
+function appOnlyPromoCanShow() {
+  const hash = window.location.hash || '#/';
+  const onHome = hash === '#/' || hash === '#' || hash === '';
+  const busy = document.querySelector('.modal-overlay, .go-promo-sheet, #welcome-beta-modal-overlay, #onboarding-container, #app-guide-overlay, #welcome-coupon-modal-overlay, .delivery-map-modal-v4, #splash-screen, #app-overlay.active, #login-wall');
+  return onHome && !busy && document.visibilityState === 'visible';
+}
+
 async function checkAndShowAppOnlyPromo() {
   const user = getState().user;
   if (!user) return;
 
-  const promoShown = sessionStorage.getItem('gd_app_only_promo_shown');
-  if (promoShown === 'true') return;
+  let last = 0;
+  try { last = Number(localStorage.getItem(APP_ONLY_PROMO_KEY) || 0); } catch (e) {}
+  if (Date.now() - last < APP_ONLY_PROMO_EVERY_MS) return;
+  if (sessionStorage.getItem('gd_app_only_promo_shown') === 'true') return;
 
-  // Defer if welcome beta, onboarding, or tutorial guides are active or not completed
+  // First-run guides go first; this can wait for another day.
   const welcomeBetaDone = localStorage.getItem('welcome_beta_v1') === 'true';
   const onboardingDone = localStorage.getItem('gd-onboarding-done') === 'true';
   const appGuideDone = localStorage.getItem('gd-app-guide-seen-v2') === 'true';
-  const welcomeActive = document.getElementById('welcome-beta-modal-overlay') 
-    || document.getElementById('onboarding-container') 
-    || document.getElementById('app-guide-overlay')
-    || document.getElementById('welcome-coupon-modal-overlay')
-    || document.querySelector('.delivery-map-modal-v4');
+  if (!welcomeBetaDone || !onboardingDone || !appGuideDone) return;
 
-  if (!welcomeBetaDone || !onboardingDone || !appGuideDone || welcomeActive) {
-    setTimeout(checkAndShowAppOnlyPromo, 1000);
+  // Wait for a calm moment on the home (at most ~20 s, then give up for this session).
+  if (!appOnlyPromoCanShow()) {
+    if (++appOnlyPromoTries < 10) setTimeout(checkAndShowAppOnlyPromo, 2000);
     return;
   }
 
-  const renderModal = async (product, offers, comercioId, isFromCache = false) => {
-    // If already shown during this session, bypass unless it is the cached trigger
-    if (sessionStorage.getItem('gd_app_only_promo_shown') === 'true' && !isFromCache) return;
-    sessionStorage.setItem('gd_app_only_promo_shown', 'true');
+  const renderModal = async (product, offers, comercioId) => {
+    if (sessionStorage.getItem('gd_app_only_promo_shown') === 'true') return;
 
     const offer = offers.find(o => o.active !== false && (o.targetProductId === product.id || (o.productIds && o.productIds.includes(product.id))));
     const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
     const discountedPrice = discountPercent > 0 ? product.price * (1 - discountPercent / 100) : product.price;
 
-    const { doc, getDoc } = await import('firebase/firestore');
-    let comercioName = 'Comercio';
+    let comercioName = '';
     try {
       const comSnap = await getDoc(doc(db, 'comercios', comercioId));
-      if (comSnap.exists()) {
-        comercioName = comSnap.data().name || 'Comercio';
-      }
+      if (comSnap.exists()) comercioName = comSnap.data().name || '';
     } catch (e) {
       console.error(e);
     }
 
-    const overlayId = `app-only-promo-overlay-${Math.random().toString(36).substr(2, 9)}`;
-    const overlay = document.createElement('div');
-    overlay.id = overlayId;
-    overlay.style.cssText = `
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.45);
-      backdrop-filter: blur(5px);
-      -webkit-backdrop-filter: blur(5px);
-      z-index: 99999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-      animation: fadeIn 0.25s ease-out forwards;
-    `;
+    // The person may have moved on while we fetched the store name.
+    if (!appOnlyPromoCanShow()) return;
+    sessionStorage.setItem('gd_app_only_promo_shown', 'true');
+    try { localStorage.setItem(APP_ONLY_PROMO_KEY, String(Date.now())); } catch (e) {}
 
-    overlay.innerHTML = `
-      <div id="${overlayId}-card" style="
-        background: var(--color-bg);
-        border-radius: 28px;
-        width: 100%;
-        max-width: 380px;
-        max-height: calc(100dvh - 32px);
-        overflow-y: auto;
-        scrollbar-width: none;
-        -ms-overflow-style: none;
-        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-        display: flex;
-        flex-direction: column;
-        position: relative;
-        animation: zoomIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.15) forwards;
-      ">
-        <button id="${overlayId}-close-btn" style="
-          position: absolute;
-          top: 16px;
-          right: 16px;
-          border: none;
-          background: rgba(0, 0, 0, 0.05);
-          width: 34px;
-          height: 34px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          color: var(--color-text-secondary);
-          z-index: 10;
-          transition: all 0.2s;
-        ">
-          ${icon('close', 18)}
-        </button>
-
-        <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: 24px 20px 20px; gap: 16px; width: 100%; box-sizing: border-box;">
-          <div style="font-size: 50px; animation: bouncePromo 2s infinite; line-height: 1;">📱</div>
-          
-          <div>
-            <span style="font-size: 11px; font-weight: 900; color: #7e22ce; background: rgba(126, 34, 206, 0.08); padding: 4px 10px; border-radius: 20px; border: 1.5px solid rgba(126, 34, 206, 0.15); text-transform: uppercase; font-family: var(--font-display);">¡Exclusivo en la App!</span>
-            <h2 style="font-family: var(--font-display); font-weight: 850; font-size: 19px; color: var(--color-text-primary); margin: 12px 0 6px;">${product.name}</h2>
-            <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0; line-height: 1.45;">Disponible de forma exclusiva en nuestra plataforma. ¡Pedilo ahora en <b>${comercioName}</b>!</p>
-          </div>
-
-          ${product.image ? `
-            <div style="width: 100%; height: 160px; border-radius: 18px; overflow: hidden; border: 1px solid var(--color-border-light); background: #f8fafc; position: relative;">
-              <img src="${product.image}" alt="${product.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
-              ${discountPercent > 0 ? `
-                <div style="position: absolute; top: 10px; right: 10px; background: var(--color-primary); color: white; padding: 4px 10px; border-radius: 8px; font-size: 10px; font-weight: 900; box-shadow: var(--shadow-sm); z-index: 2; text-transform: uppercase;">
-                  ${discountPercent}% OFF
-                </div>
-              ` : ''}
-            </div>
-          ` : ''}
-
-          <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-            ${discountPercent > 0 ? `
-              <span style="font-size: 24px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">${formatPrice(discountedPrice)}</span>
-              <span style="font-size: 14px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(product.price)}</span>
-            ` : `
-              <span style="font-size: 24px; font-weight: 950; color: var(--color-primary); font-family: var(--font-display);">${formatPrice(product.price)}</span>
-            `}
-          </div>
-
-          <button id="${overlayId}-action-btn" class="btn btn-primary" style="width: 100%; height: 50px; border-radius: 14px; font-weight: 900; font-size: 13.5px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(126, 34, 206, 0.25); margin: 0;">
-            VER PRODUCTO E IR A LA TIENDA
-          </button>
+    const name = escapeHtml(product.name || 'Producto');
+    const sheet = document.createElement('div');
+    sheet.className = 'go-promo-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label', `Exclusivo GO!: ${product.name || 'Producto'}`);
+    sheet.innerHTML = `
+      <div class="go-promo-backdrop" data-promo-close></div>
+      <div class="go-promo-card">
+        <span class="go-promo-handle" aria-hidden="true"></span>
+        <div class="go-promo-media">
+          ${product.image ? `<img src="${escapeHtml(product.image)}" alt="" decoding="async" />` : `<div class="go-promo-media-empty">${icon('shoppingBag', 40)}</div>`}
+          <span class="go-promo-badge"><span class="go-promo-badge-dot"></span>Exclusivo GO!</span>
+          ${discountPercent > 0 ? `<span class="go-promo-off">${discountPercent}% OFF</span>` : ''}
+          <button type="button" class="go-promo-x" data-promo-close aria-label="Cerrar">${icon('close', 16)}</button>
         </div>
-      </div>
+        <div class="go-promo-body">
+          ${comercioName ? `<span class="go-eyebrow">En ${escapeHtml(comercioName)}</span>` : ''}
+          <h2 class="go-title">${name}</h2>
+          <span class="go-bar"></span>
+          <p>No lo vas a encontrar en otra app: lo pedís solo desde GO!.</p>
+          <div class="go-promo-price">
+            <strong>${formatPrice(discountedPrice)}</strong>
+            ${discountPercent > 0 ? `<s>${formatPrice(product.price)}</s>` : ''}
+          </div>
+        </div>
+        <div class="go-promo-actions">
+          <button type="button" class="go-promo-cta" data-promo-go>Ver producto</button>
+          <button type="button" class="go-promo-later" data-promo-close>Ahora no</button>
+        </div>
+      </div>`;
+    document.body.appendChild(sheet);
+    requestAnimationFrame(() => sheet.classList.add('is-open'));
 
-      <style>
-        @keyframes bouncePromo {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-8px); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes zoomIn {
-          from { transform: scale(0.9) translateY(10px); opacity: 0; }
-          to { transform: scale(1) translateY(0); opacity: 1; }
-        }
-      </style>
-    `;
-
-    document.body.appendChild(overlay);
-
-    window.history.pushState({ isAppOnlyOverlay: overlayId }, '');
-
-    const closeOverlay = () => {
-      const el = document.getElementById(overlayId);
-      if (el) {
-        const card = document.getElementById(`${overlayId}-card`);
-        if (card) {
-          card.style.transition = 'transform 0.25s ease-in, opacity 0.2s ease-in';
-          card.style.transform = 'scale(0.9) translateY(10px)';
-          card.style.opacity = '0';
-        }
-        el.style.transition = 'opacity 0.25s ease-in';
-        el.style.opacity = '0';
-        setTimeout(() => el.remove(), 250);
-      }
-      window.removeEventListener('popstate', handlePopState);
+    let closed = false;
+    const close = (fromPop = false) => {
+      if (closed) return;
+      closed = true;
+      window.removeEventListener('popstate', onPop);
+      sheet.classList.remove('is-open');
+      sheet.classList.add('is-closing');
+      setTimeout(() => sheet.remove(), 260);
+      if (!fromPop && window.history.state && window.history.state.isAppOnlyOverlay) window.history.back();
     };
+    const onPop = () => close(true);
+    window.history.pushState({ isAppOnlyOverlay: true }, '');
+    window.addEventListener('popstate', onPop);
 
-    const handlePopState = (e) => {
-      if (e.state && e.state.isAppOnlyOverlay === overlayId) return;
-      closeOverlay();
-    };
-    window.addEventListener('popstate', handlePopState);
+    sheet.querySelectorAll('[data-promo-close]').forEach(el => el.addEventListener('click', () => close()));
+    sheet.querySelector('[data-promo-go]').addEventListener('click', () => {
+      close(true);
+      // Replace the promo's history entry with the product, so back returns to the home.
+      window.location.replace(`#/comercio/${comercioId}?product=${product.id}`);
+    });
 
-    document.getElementById(`${overlayId}-close-btn`).onclick = () => {
-      window.history.back();
-    };
-    overlay.onclick = (e) => {
-      if (e.target === overlay) {
-        window.history.back();
-      }
-    };
-
-    document.getElementById(`${overlayId}-action-btn`).onclick = () => {
-      closeOverlay();
-      location.hash = `#/comercio/${comercioId}?product=${product.id}`;
-    };
+    // Drag the card down to dismiss, like every other sheet.
+    const card = sheet.querySelector('.go-promo-card');
+    let startY = null;
+    let dy = 0;
+    card.addEventListener('touchstart', (e) => {
+      if (e.target.closest('button')) return;
+      startY = e.touches[0].clientY;
+      dy = 0;
+      card.style.transition = 'none';
+    }, { passive: true });
+    card.addEventListener('touchmove', (e) => {
+      if (startY === null) return;
+      dy = Math.max(0, e.touches[0].clientY - startY);
+      card.style.transform = `translateY(${dy}px)`;
+    }, { passive: true });
+    card.addEventListener('touchend', () => {
+      if (startY === null) return;
+      startY = null;
+      card.style.transition = '';
+      card.style.transform = '';
+      if (dy > 90) close();
+    });
   };
 
   // 1. Render instantly using local cache if available

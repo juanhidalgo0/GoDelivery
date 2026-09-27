@@ -1394,3 +1394,133 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 .modal:has(.go-dialog-msg) .modal-header { border-bottom: 0 !important; padding-bottom: 8px !important; }
 .modal:has(.go-dialog-msg) .modal-footer { border-top: 0 !important; padding-top: 12px !important; }
 .modal-header h3 { font-family: var(--go-font) !important; letter-spacing: -0.01em; }
+
+/* ── Exclusivo GO! (promo de producto) ── */
+.go-promo-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.go-promo-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 11, 12, 0.5);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.go-promo-card {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  background: var(--color-bg);
+  border-radius: 26px 26px 0 0;
+  transform: translateY(100%);
+  transition: transform 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+  box-shadow: 0 -12px 50px rgba(11, 11, 12, 0.3);
+  padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px));
+}
+.go-promo-sheet.is-open .go-promo-backdrop { opacity: 1; }
+.go-promo-sheet.is-open .go-promo-card { transform: translateY(0); }
+.go-promo-sheet.is-closing .go-promo-backdrop { opacity: 0; transition: opacity 0.22s ease-in; }
+.go-promo-sheet.is-closing .go-promo-card { transform: translateY(100%); transition: transform 0.24s cubic-bezier(0.4, 0, 1, 1); }
+.go-promo-handle {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 40px;
+  height: 5px;
+  margin-left: -20px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.7);
+  z-index: 3;
+}
+.go-promo-media {
+  position: relative;
+  height: 230px;
+  background: var(--go-paper-2);
+  overflow: hidden;
+}
+.go-promo-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.go-promo-media-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--go-text-3); }
+.go-promo-badge {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--go-ink);
+  color: #fff;
+  font: 800 11px/1 var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.go-promo-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--go-red); }
+.go-promo-off {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--go-red);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  font: 800 12px/1 var(--font-body);
+}
+.go-promo-x {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(11, 11, 12, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.go-promo-body { padding: 20px 20px 6px; }
+.go-promo-body .go-eyebrow { display: block; margin-bottom: 6px; }
+.go-promo-body .go-title { font-size: 24px; }
+.go-promo-body .go-bar { margin-top: 10px; }
+.go-promo-body p { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--go-text-2); }
+.go-promo-price { display: flex; align-items: baseline; gap: 10px; margin-top: 14px; }
+.go-promo-price strong { font: 900 26px/1 var(--go-font); color: var(--go-text); }
+.go-promo-price s { font-size: 15px; font-weight: 600; color: var(--go-text-3); }
+.go-promo-actions { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px 16px; }
+.go-promo-cta {
+  height: 54px;
+  border-radius: 16px;
+  border: 0;
+  background: var(--go-ink);
+  color: #fff;
+  font: 800 15.5px/1 var(--font-body);
+  cursor: pointer;
+}
+.go-promo-cta:active { transform: scale(0.99); }
+.go-promo-later {
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--go-text-2);
+  font: 700 14px/1 var(--font-body);
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .go-promo-card, .go-promo-backdrop { transition: none !important; }
+}
