@@ -572,6 +572,8 @@ export function showExclusiveOfferOverlay(batch, user) {
 
       stopExclusiveOfferAlert();
       hideExclusiveOfferOverlay();
+      // Accepted from client mode: take the driver to the panel so they see the route.
+      if (!(window.location.hash || '').startsWith('#/delivery')) window.location.hash = '#/delivery';
     };
   }
 

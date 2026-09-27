@@ -1095,6 +1095,11 @@ function renderAuthCheckingState(content) {
 }
 
 export async function renderDeliveryPanel(containerArg) {
+  // In client mode the panel must not paint itself: late re-renders (a Firestore snapshot,
+  // a session write finishing) would put the fullscreen map back over the client home.
+  try {
+    if (sessionStorage.getItem('gd_temp_client_mode') === 'true' && !(window.location.hash || '').startsWith('#/delivery')) return;
+  } catch (e) {}
   loadMandadoPlaces(); // dónde quedan los comercios de los mandados (con caché; no frena la pantalla)
   const panelId = 'page-delivery';
   const content = containerArg || document.getElementById(panelId) || document.getElementById('app-content');
@@ -1783,7 +1788,7 @@ export async function renderDeliveryPanel(containerArg) {
     <div style="flex:1; overflow-y:auto; padding:14px 16px calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display:flex; flex-direction:column; gap:8px;">
       <button type="button" id="delivery-drawer-client-mode-btn" data-go-client-mode class="dsheet-row" style="background:${drawerIsLight ? '#0b0b0c' : '#ffffff'}; color:${drawerIsLight ? '#ffffff' : '#0b0b0c'}; border:none;">
         <div class="dsheet-tile" style="background:${drawerIsLight ? 'rgba(255,255,255,0.14)' : 'rgba(11,11,12,0.08)'}; color:inherit;">${icon('shoppingBag', 20)}</div>
-        <div style="flex:1; min-width:0;"><div class="dsheet-row-title">Ir a modo cliente</div><div class="dsheet-row-sub" style="color:inherit; opacity:0.75;">Pedí como cualquier vecino</div></div>
+        <div style="flex:1; min-width:0;"><div class="dsheet-row-title">Ir a modo cliente</div><div class="dsheet-row-sub" style="color:inherit; opacity:0.75;">${user?.isOnline ? 'Pedí sin desconectarte' : 'Pedí como cualquier vecino'}</div></div>
         <span class="dsheet-chev" style="color:inherit; opacity:0.7;">${icon('chevronRight', 18)}</span>
       </button>
       <div class="dsheet-label">Mi cuenta</div>
@@ -7860,7 +7865,7 @@ function renderPerfilTabHTML(user) {
           </div>
           <div style="flex:1; min-width:0;">
             <div>Ir a modo cliente</div>
-            <div style="font-size:12px; font-weight:500; opacity:0.75; margin-top:1px;">Pedí como cualquier vecino y volvé cuando quieras</div>
+            <div style="font-size:12px; font-weight:500; opacity:0.75; margin-top:1px;">${user?.isOnline ? 'Seguís en línea mientras pedís' : 'Pedí como cualquier vecino y volvé cuando quieras'}</div>
           </div>
           <span style="display:flex; opacity:0.7;">${icon('chevronRight', 18)}</span>
         </button>
@@ -8230,39 +8235,20 @@ if (typeof document !== 'undefined' && !window.__goClientModeDelegation) {
   }, true);
 }
 
-// Going to client mode while online would leave the driver "online" in Firestore without
-// seeing offers (they expire and count toward the auto-pause), so offer to disconnect first.
+// Going to client mode never disconnects the driver: the heartbeat keeps running and
+// delivery-monitor keeps showing offers over the client pages, so they can order something
+// and still take a trip. Back to the panel with "Delivery" in the bottom bar.
 export function requestClientMode(user) {
   try { window.__closeDeliveryDrawer?.(); } catch (e) {}
   const currentUser = getState().user || user;
-  if (!currentUser || currentUser.isOnline !== true) {
-    switchToClientMode();
-    return;
-  }
+  switchToClientMode();
 
+  if (currentUser?.isOnline !== true) return;
   if (activeOrdersCount > 0) {
-    showConfirm({
-      title: '¿Ir a modo cliente?',
-      message: 'Tenés pedidos en curso. Podés pedir algo y volver cuando quieras tocando <b>Delivery</b> en la barra de abajo, pero no te olvides de terminar tus entregas.',
-      confirmText: 'Ir a modo cliente',
-      onConfirm: () => {
-        closeModal();
-        switchToClientMode();
-      }
-    });
-    return;
+    showToast('Tenés un pedido en curso. Volvés tocando Delivery en la barra de abajo.', 'warning', 5000);
+  } else {
+    showToast('Seguís en línea: si entra un pedido, te avisamos acá mismo.', 'success', 4500);
   }
-
-  showConfirm({
-    title: '¿Ir a modo cliente?',
-    message: 'Estás <b>en línea</b>. Para que no te lleguen pedidos que no vas a ver, te desconectamos. Volvés tocando <b>Delivery</b> en la barra de abajo y no se te cobra de nuevo la cuota del día.',
-    confirmText: 'Desconectarme e ir',
-    onConfirm: async () => {
-      closeModal();
-      try { await endSession(currentUser); } catch (e) { console.warn('endSession before client mode failed', e); }
-      switchToClientMode();
-    }
-  });
 }
 
 export async function switchToClientMode() {
@@ -8279,10 +8265,9 @@ export async function switchToClientMode() {
     window.__gd_delivery_unsub = null;
   }
 
-  const driverMapEl = document.getElementById('driver-fullscreen-map');
-  if (driverMapEl) driverMapEl.style.display = 'none';
-  const hudEl = document.getElementById('driver-hud-container');
-  if (hudEl) hudEl.style.display = 'none';
+  // Both are fixed on <body> with inline !important, so hide them the same way.
+  document.getElementById('driver-fullscreen-map')?.style.setProperty('display', 'none', 'important');
+  document.getElementById('driver-hud-container')?.style.setProperty('display', 'none', 'important');
 
   const delPage = document.getElementById('page-delivery');
   if (delPage) {

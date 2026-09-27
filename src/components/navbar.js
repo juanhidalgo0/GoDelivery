@@ -68,8 +68,8 @@ export function renderNavbar() {
         </a>
       ` : ''}
       ${isDelivery() ? `
-        <a href="#/delivery" class="nav-item ${hashPath.startsWith('/delivery') ? 'active' : ''}">
-          <span class="nav-item-icon">${icon('bike', 24)}</span>
+        <a href="#/delivery" class="nav-item ${hashPath.startsWith('/delivery') ? 'active' : ''}"${user?.isOnline ? ' aria-label="Delivery, estás en línea"' : ''}>
+          <span class="nav-item-icon">${icon('bike', 24)}${user?.isOnline ? '<span class="go-nav-live" aria-hidden="true"></span>' : ''}</span>
           <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Delivery</span>
         </a>
       ` : ''}

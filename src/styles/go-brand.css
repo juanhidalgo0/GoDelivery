@@ -908,3 +908,50 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
     transition-duration: 1ms !important;
   }
 }
+
+/* ── Driver bubbles over client pages (online in client mode) ── */
+#global-active-delivery-fab,
+#global-delivery-available-fab {
+  background: var(--go-ink) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 999px !important;
+  font-family: var(--go-font) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.02em;
+  box-shadow: 0 14px 32px rgba(11, 11, 12, 0.35) !important;
+  animation: go-driver-bubble 2.2s ease-out infinite !important;
+}
+#global-active-delivery-fab .fab-toggle-dot,
+#global-delivery-available-fab .fab-toggle-dot {
+  background: var(--go-red) !important;
+}
+@keyframes go-driver-bubble {
+  0% { box-shadow: 0 14px 32px rgba(11, 11, 12, 0.35), 0 0 0 0 rgba(225, 29, 72, 0.55); }
+  70% { box-shadow: 0 14px 32px rgba(11, 11, 12, 0.35), 0 0 0 14px rgba(225, 29, 72, 0); }
+  100% { box-shadow: 0 14px 32px rgba(11, 11, 12, 0.35), 0 0 0 0 rgba(225, 29, 72, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #global-active-delivery-fab,
+  #global-delivery-available-fab { animation: none !important; }
+}
+
+/* Delivery tab while the driver is still online in client mode */
+.go-nav-live {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid var(--go-ink);
+  animation: go-nav-live 2s ease-out infinite;
+}
+@keyframes go-nav-live {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6); }
+  70% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .go-nav-live { animation: none; }
+}

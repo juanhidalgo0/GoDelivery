@@ -211,6 +211,10 @@ export async function handleRoute() {
     } else {
       document.documentElement.classList.remove('is-delivery-mode');
       document.body.classList.remove('is-delivery-mode');
+      // The driver map and HUD live on <body> with inline !important: outside the panel
+      // they must never cover a page.
+      document.getElementById('driver-fullscreen-map')?.style.setProperty('display', 'none', 'important');
+      document.getElementById('driver-hud-container')?.style.setProperty('display', 'none', 'important');
     }
 
     const isDirectStoreRoute = hash.startsWith('/tienda') || fullHash.includes('direct=true') || hash.startsWith('/seguimiento/wa');
