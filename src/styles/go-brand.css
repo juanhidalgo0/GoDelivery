@@ -2199,3 +2199,4 @@ html.is-delivery-mode.driver-light-mode {
 .panel-page a > div[style*="color:#7c3aed"] { color: var(--go-text-3) !important; }
 /* Switches y casillas en tinta. */
 .panel-page input[type="checkbox"] { accent-color: var(--go-ink); }
+html.go-search-typing .bottom-nav { visibility: hidden !important; }

@@ -141,7 +141,10 @@ export function initSearchSuggestions() {
     loadProducts();
   };
 
+  // The keyboard covers the footer: it must not ride up above the keyboard.
+  searchInput.addEventListener('blur', () => document.documentElement.classList.remove('go-search-typing'));
   searchInput.addEventListener('focus', () => {
+    document.documentElement.classList.add('go-search-typing');
     warmUp();
     if (currentQuery().length >= 2) show();
   });
