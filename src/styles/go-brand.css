@@ -1816,3 +1816,166 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
   .slide-overlay.slide-from-origin .go-service-titles,
   .go-service-ring.is-landing { animation: none !important; }
 }
+
+/* ── Perfil ── */
+.go-profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 20px 24px;
+  background: var(--go-ink);
+  color: #fff;
+}
+.go-profile-avatar { position: relative; width: 68px; height: 68px; flex-shrink: 0; cursor: pointer; }
+.go-profile-avatar img {
+  width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block;
+  border: 2px solid #f7f5f1; box-sizing: border-box; background: #17171a;
+}
+.go-profile-avatar .avatar-edit-overlay {
+  position: absolute; inset: 0; border-radius: 50%; background: rgba(11, 11, 12, 0.5);
+  display: flex; align-items: center; justify-content: center; color: #fff; opacity: 0; transition: opacity 0.2s;
+}
+.go-profile-cam {
+  position: absolute; right: -2px; bottom: -2px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--go-red); color: #fff; border: 2px solid var(--go-ink);
+  display: flex; align-items: center; justify-content: center;
+}
+.go-profile-id { flex: 1; min-width: 0; }
+.go-profile-id .go-eyebrow { display: block; color: var(--go-on-ink-2); font-size: 10px; }
+.go-profile-id .go-title { color: #fff; font-size: 24px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-profile-mail { display: block; margin-top: 4px; font-size: 13px; color: rgba(247, 245, 241, 0.62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.go-club-card {
+  margin: 16px 16px 0;
+  padding: 18px 18px 6px;
+  border-radius: 22px;
+  background: var(--go-ink);
+  color: #fff;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
+}
+.go-club-card:active { transform: scale(0.99); }
+.go-club-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.go-club-top .go-eyebrow { color: var(--go-on-ink-2); font-size: 10px; }
+.go-club-points { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; }
+.go-club-points strong { font: 900 36px/1 var(--go-font); letter-spacing: -0.02em; }
+.go-club-points span { font: 800 12px/1 var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--go-on-ink-2); }
+.go-club-level {
+  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+  height: 30px; padding: 0 12px 0 10px; border-radius: 999px;
+  background: #17171a; border: 1px solid rgba(255, 255, 255, 0.12);
+  font: 800 11px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: #fff;
+}
+/* The level keeps its own color, but only as a medal dot. */
+.go-club-level i {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.85), var(--lvl) 55%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lvl) 28%, transparent);
+}
+.go-club-progress { margin-top: 18px; }
+.go-club-progress-row { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: rgba(247, 245, 241, 0.75); }
+.go-club-progress-row strong { color: #fff; }
+.go-club-track { height: 6px; margin-top: 8px; border-radius: 3px; background: #26262a; overflow: hidden; }
+.go-club-track span { display: block; height: 100%; border-radius: 3px; background: var(--go-red); transition: width 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+.go-club-progress small { display: block; margin-top: 8px; font-size: 12px; color: rgba(247, 245, 241, 0.55); }
+.go-club-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 14px -18px 0; padding: 14px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font: 700 13.5px/1 var(--font-body); color: #fff;
+}
+
+.go-profile-stack { margin: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.go-ref-card { padding: 18px; border-radius: 22px; background: var(--color-surface); border: 1px solid var(--go-line); }
+.go-ref-head { display: flex; gap: 14px; align-items: flex-start; }
+.go-ref-icon { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; background: var(--go-ink); color: #fff; display: flex; align-items: center; justify-content: center; }
+.go-ref-head h4 { margin: 2px 0 4px; font: 900 16px/1.15 var(--go-font); color: var(--go-text); }
+.go-ref-head p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--go-text-2); }
+.go-ref-head p strong { color: var(--go-text); }
+.go-ref-code {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 14px; padding: 14px 16px; border-radius: 16px;
+  border: 1.5px dashed var(--go-line); background: var(--color-bg);
+}
+.go-ref-code-label { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--go-text-2); }
+.go-ref-code strong { font: 900 17px/1 var(--go-font); letter-spacing: 0.04em; color: var(--go-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-ref-actions { display: flex; gap: 10px; margin-top: 12px; }
+.go-ref-actions button {
+  flex: 1; height: 46px; border-radius: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font: 800 14px/1 var(--font-body);
+}
+.go-ref-actions .is-secondary { background: var(--color-surface); color: var(--go-text); border: 1px solid var(--go-line); }
+.go-ref-actions .is-primary { background: var(--go-ink); color: #fff; border: 0; }
+.go-profile-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; border-radius: 18px;
+  background: var(--color-surface); border: 1px solid var(--go-line);
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.go-profile-row:active { transform: scale(0.99); }
+.go-profile-row-icon { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; background: var(--go-paper-2); color: var(--go-ink); display: flex; align-items: center; justify-content: center; }
+.go-profile-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.go-profile-row-text strong { font-size: 14.5px; color: var(--go-text); }
+.go-profile-row-text small { font-size: 12.5px; color: var(--go-text-2); line-height: 1.35; }
+.go-profile-row-chev { color: var(--go-text-3); display: flex; }
+
+/* Lista de ajustes: un solo tono */
+.profile-page .settings-list { border: 1px solid var(--go-line) !important; border-radius: 20px !important; box-shadow: none !important; }
+.profile-page .settings-icon-box { background: var(--go-paper-2) !important; color: var(--go-ink) !important; border-radius: 50% !important; }
+.profile-page #delete-account-btn .settings-icon-box,
+.profile-page .settings-row[id*="delete"] .settings-icon-box { background: rgba(220, 38, 38, 0.08) !important; color: #dc2626 !important; }
+.profile-page #logout-btn { background: var(--color-surface) !important; border: 1px solid var(--go-line) !important; color: #dc2626 !important; border-radius: 14px !important; }
+.profile-page #force-reload-btn { background: var(--color-surface) !important; border: 1px solid var(--go-line) !important; color: var(--go-text) !important; border-radius: 14px !important; }
+
+/* ── Modal Club GO ── */
+.go-club-modal-hero {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px;
+  margin: -24px -20px 0; padding: 26px 20px 24px;
+  background: var(--go-ink); color: #fff;
+}
+.go-club-ring {
+  position: relative; width: 60px; height: 60px; border-radius: 50%;
+  border: 2px solid #f7f5f1; display: flex; align-items: center; justify-content: center; color: #fff; margin-bottom: 6px;
+}
+.go-club-ring i {
+  position: absolute; top: -5px; left: 50%; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%;
+  background: var(--go-red); box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.22);
+}
+.go-club-modal-hero .go-eyebrow { color: var(--go-on-ink-2); font-size: 10px; }
+.go-club-modal-points { font: 900 38px/1 var(--go-font); letter-spacing: -0.02em; }
+.go-club-modal-points small { font: 800 13px/1 var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--go-on-ink-2); }
+.go-club-modal-hero p { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: rgba(247, 245, 241, 0.62); max-width: 280px; }
+/* Oranges, greens and blues from the old palette become GO! ink, with red only as accent. */
+.go-club-modal [style*="rgba(245, 158, 11"],
+.go-club-modal [style*="rgba(16, 185, 129, 0.1)"],
+.go-club-modal [style*="rgba(59, 130, 246, 0.1)"] {
+  background: var(--go-paper-2) !important;
+  color: var(--go-ink) !important;
+  border-color: var(--go-line) !important;
+}
+.go-club-modal [style*="color: #f59e0b"],
+.go-club-modal [style*="color: #d97706"],
+.go-club-modal [style*="color:#f59e0b"],
+.go-club-modal [style*="color: #10b981"] { color: var(--go-text) !important; }
+.go-club-modal [style*="linear-gradient(90deg, #f59e0b"],
+.go-club-modal [style*="linear-gradient(135deg, #f59e0b"] { background: var(--go-red) !important; box-shadow: none !important; }
+.go-club-modal [style*="border: 1.5px dashed rgba(245, 158, 11"] { background: var(--color-surface) !important; border: 1px solid var(--go-line) !important; }
+.go-club-modal .btn-primary { text-transform: none !important; }
+.go-club-modal-hero { margin: 0; border-radius: 22px; }
+/* Level medal: neutral disc, the level's own color as a ring and dot. */
+.go-level-medal {
+  position: relative;
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--go-paper-2); color: var(--go-ink);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lvl) 70%, transparent);
+}
+.go-level-medal::after {
+  content: ''; position: absolute; top: -2px; right: -2px; width: 11px; height: 11px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.85), var(--lvl) 55%);
+  border: 2px solid var(--color-surface);
+}

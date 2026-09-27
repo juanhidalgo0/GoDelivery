@@ -10,6 +10,7 @@ import { checkIfInstalled, isIOS, showInstallUI } from '../components/install-pr
 import { getPublicBaseUrl } from '../utils/slug.js';
 import { compressImageFile } from '../utils/image-compressor.js';
 import { uploadDataUrlImage } from '../utils/storage-upload.js';
+import { escapeHtml } from '../utils/escape.js';
 
 export async function renderProfile(content) {
   const updateInstallVisibility = () => {
@@ -161,17 +162,10 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       const remaining = target - completed;
 
       progressBarHtml = `
-        <div style="margin-top: 12px; width: 100%; display: flex; flex-direction: column; gap: 4px; z-index: 1;">
-          <div style="display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 800; opacity: 0.95; letter-spacing: 0.2px;">
-            <span>Progreso a Nivel <strong style="color: ${nextLevel.color || '#fff'}">${nextLevel.name}</strong></span>
-            <span>${completed}/${target} pedidos</span>
-          </div>
-          <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.18); border-radius: 4px; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.15);">
-            <div style="width: ${percentage}%; height: 100%; background: linear-gradient(90deg, #ffffff 0%, rgba(255,255,255,0.85) 100%); border-radius: 4px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 0 6px rgba(255,255,255,0.5);"></div>
-          </div>
-          <div style="font-size: 9.5px; opacity: 0.85; font-weight: 700; margin-top: 1px;">
-            ¡Te faltan solo ${remaining} ${remaining === 1 ? 'pedido' : 'pedidos'} para subir a ${nextLevel.name}!
-          </div>
+        <div class="go-club-progress">
+          <div class="go-club-progress-row"><span>Camino a <strong>${escapeHtml(nextLevel.name)}</strong></span><span>${completed}/${target} pedidos</span></div>
+          <div class="go-club-track"><span style="width: ${percentage}%;"></span></div>
+          <small>Te ${remaining === 1 ? 'falta 1 pedido' : `faltan ${remaining} pedidos`} para subir de nivel.</small>
         </div>
       `;
 
@@ -183,28 +177,24 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           </div>
           
           <div style="display: flex; align-items: center; gap: 10px; margin: 4px 0;">
-            <span style="font-size: 12px; font-weight: 900; color: ${level.color}">${level.name}</span>
+            <span style="font-size: 12px; font-weight: 900; color: var(--go-text-2)">${level.name}</span>
             <div style="flex: 1; height: 8px; background: var(--color-border-light); border-radius: 6px; overflow: hidden; position: relative;">
               <div style="width: ${percentage}%; height: 100%; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%); border-radius: 6px; transition: width 1s cubic-bezier(0.34, 1.56, 0.64, 1);"></div>
             </div>
-            <span style="font-size: 12px; font-weight: 900; color: ${nextLevel.color}">${nextLevel.name}</span>
+            <span style="font-size: 12px; font-weight: 900; color: var(--go-text)">${nextLevel.name}</span>
           </div>
           
           <div style="font-size: 12px; color: var(--color-text-secondary); text-align: center; font-weight: 600; line-height: 1.4;">
-            ¡Te faltan solo <strong style="color: var(--color-primary); font-weight: 800;">${remaining} ${remaining === 1 ? 'pedido' : 'pedidos'}</strong> para alcanzar el rango <strong style="color: ${nextLevel.color}; font-weight: 800;">${nextLevel.name}</strong> y aumentar tus recompensas!
+            ¡Te faltan solo <strong style="color: var(--color-primary); font-weight: 800;">${remaining} ${remaining === 1 ? 'pedido' : 'pedidos'}</strong> para alcanzar el rango <strong style="color: var(--go-text); font-weight: 800;">${nextLevel.name}</strong> y aumentar tus recompensas!
           </div>
         </div>
       `;
     } else {
       progressBarHtml = `
-        <div style="margin-top: 12px; width: 100%; display: flex; flex-direction: column; gap: 4px; z-index: 1;">
-          <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 900; color: #fff;">
-            <span>${icon('sparkles', 12)}</span> ¡Nivel Máximo Alcanzado!
-          </div>
-          <div style="width: 100%; height: 6px; background: linear-gradient(90deg, #ffffff 0%, #ffe066 100%); border-radius: 4px; box-shadow: 0 0 8px rgba(255,255,255,0.6);"></div>
-          <div style="font-size: 9.5px; opacity: 0.9; font-weight: 700; margin-top: 1px;">
-            Estás disfrutando del beneficio máximo (+50% GoPoints y promos exclusivas).
-          </div>
+        <div class="go-club-progress">
+          <div class="go-club-progress-row"><span><strong>Nivel máximo</strong></span><span>${icon('sparkles', 14)}</span></div>
+          <div class="go-club-track"><span style="width: 100%;"></span></div>
+          <small>Tenés el beneficio más alto: +50% de GO Points y promos exclusivas.</small>
         </div>
       `;
 
@@ -277,67 +267,31 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
 
           
           <!-- User Profile Info -->
-          <div style="padding:16px 20px; background:var(--color-surface); border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; gap:14px; width: 100%; box-sizing: border-box;">
-            <div style="position:relative; cursor:pointer;" id="profile-avatar-container" title="Cambiar foto de perfil">
-              <img src="${user.photoURL || '/logo.png'}" alt="${user.displayName}" style="width:58px; height:58px; border-radius:18px; object-fit:cover; border:2.5px solid var(--color-bg-secondary); box-shadow:var(--shadow-md);" referrerpolicy="no-referrer" />
-              <div class="avatar-edit-overlay" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); border-radius:18px; display:flex; align-items:center; justify-content:center; color:white; opacity:0; transition:opacity 0.2s;">
-                ${icon('camera', 16)}
-              </div>
-              <!-- Camera badge indicator always visible in top-right -->
-              <div style="position:absolute; top:-4px; right:-4px; width:20px; height:20px; border-radius:50%; background:var(--color-primary); display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface); z-index:2; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
-                ${icon('camera', 10)}
-              </div>
-              <div style="position:absolute; bottom:-3px; right:-3px; width:22px; height:22px; border-radius:8px; background:${level.color}; display:flex; align-items:center; justify-content:center; color:white; border:2.5px solid var(--color-surface); z-index:2;">
-                ${icon(level.icon || 'award', 11)}
-              </div>
+          <div class="go-profile-hero">
+            <div class="go-profile-avatar" id="profile-avatar-container" title="Cambiar foto de perfil">
+              <img src="${user.photoURL || '/logo.png'}" alt="" onerror="this.src='/logo.png'" />
+              <div class="avatar-edit-overlay">${icon('camera', 16)}</div>
+              <span class="go-profile-cam" aria-hidden="true">${icon('camera', 11)}</span>
             </div>
             <input type="file" id="profile-avatar-input" accept="image/*" style="display:none;" />
-            <div style="flex:1; min-width:0;">
-              <h2 style="font-family:var(--font-display); font-weight:900; font-size:18px; color:var(--color-text); margin:0; letter-spacing:-0.03em;">${user.displayName || 'Usuario'}</h2>
-              <p style="font-size:12px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.email || ''} • <strong style="color:var(--color-text-primary); font-family:monospace; letter-spacing:0.5px;">${user.goId || '...'}</strong></p>
-              <div style="font-size: 10px; font-weight: 800; color:var(--color-primary); margin-top:4px; text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; gap:4px;">
-                Nivel ${level.name} • 
-                <span style="display:inline-flex; align-items:center; gap:2.5px; background:rgba(245, 158, 11, 0.1); color:#f59e0b; padding:1.5px 5px; border-radius:5px; font-weight:900; text-transform:none;">
-                  ${icon('goPointsLogo', 10)} ${user.points || 0} pts
-                </span>
-              </div>
+            <div class="go-profile-id">
+              <span class="go-eyebrow">Mi cuenta${user.goId ? ` · ${escapeHtml(user.goId)}` : ''}</span>
+              <h2 class="go-title">${escapeHtml(user.displayName || 'Usuario')}</h2>
+              ${user.email ? `<span class="go-profile-mail">${escapeHtml(user.email)}</span>` : ''}
             </div>
           </div>
 
-          <!-- Premium GoPoints Badge / Card -->
-          <div id="gopoints-badge-card" style="margin: 10px 20px; background: linear-gradient(145deg, #FF6B00 0%, #E85D00 45%, #D14E00 100%); border-radius: 22px; padding: 0; color: white; display: flex; flex-direction: column; cursor: pointer; box-shadow: 0 10px 32px -6px rgba(232,93,0,0.45), 0 0 0 1px rgba(255,255,255,0.1) inset; position: relative; overflow: hidden; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); border: none;" onmouseover="this.style.transform='translateY(-2px) scale(1.01)'; this.style.boxShadow='0 18px 44px -6px rgba(232,93,0,0.55), 0 0 0 1px rgba(255,255,255,0.12) inset';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 10px 32px -6px rgba(232,93,0,0.45), 0 0 0 1px rgba(255,255,255,0.1) inset';">
-            <!-- Decorative circles -->
-            <div style="position: absolute; right: -30px; top: -30px; width: 140px; height: 140px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%); border-radius: 50%; pointer-events:none;"></div>
-            <div style="position: absolute; left: -20px; bottom: -30px; width: 110px; height: 110px; background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%); border-radius: 50%; pointer-events:none;"></div>
-            <!-- Shimmer line -->
-            <div style="position:absolute; top:0; left:0; right:0; height:1px; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%); pointer-events:none;"></div>
-
-            <!-- Header Row -->
-            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; z-index: 1; position:relative;">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="width: 42px; height: 42px; background: rgba(255,255,255,0.2); border-radius: 13px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                  ${icon('goPointsLogo', 22)}
-                </div>
-                <div>
-                  <div style="font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,0.7); margin-bottom: 2px;">Club GO · Mis Puntos</div>
-                  <div style="font-size: 26px; font-weight: 950; letter-spacing: -1px; line-height: 1; display: flex; align-items: baseline; gap: 4px;">
-                    <span style="color: white;">${(user.points || 0).toLocaleString('es-AR')}</span>
-                    <span style="font-size: 11px; font-weight: 900; color: rgba(255,255,255,0.65); letter-spacing: 1px;">PTS</span>
-                  </div>
-                </div>
+          <!-- Club GO -->
+          <div id="gopoints-badge-card" class="go-club-card" role="button" tabindex="0" aria-label="Ver Club GO">
+            <div class="go-club-top">
+              <div>
+                <span class="go-eyebrow">Club GO · Mis puntos</span>
+                <div class="go-club-points"><strong>${(user.points || 0).toLocaleString('es-AR')}</strong><span>pts</span></div>
               </div>
-              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
-                <div style="display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 20px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: white; border: 1px solid rgba(255,255,255,0.25);">
-                  Ver Club ${icon('chevronRight', 8)}
-                </div>
-                <div style="font-size: 9px; color: rgba(255,255,255,0.5); font-weight: 700; letter-spacing: 0.5px;">Nivel ${level.name}</div>
-              </div>
+              <span class="go-club-level" style="--lvl: ${level.color || '#e11d48'};"><i></i>Nivel ${escapeHtml(level.name || '')}</span>
             </div>
-
-            <!-- Progress Bar Area -->
-            <div style="padding: 0 18px 16px; z-index:1; position:relative;">
-              ${progressBarHtml}
-            </div>
+            ${progressBarHtml}
+            <div class="go-club-cta"><span>Ver beneficios del Club</span>${icon('chevronRight', 16)}</div>
           </div>
 
           <!-- Delivery Application Section -->
@@ -447,90 +401,36 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               </a>
             </div>
           ` : ''}
-          <!-- Módulo 1.1: Sistema de Referidos & 1.2 Desafíos y Rachas Semanales -->
-          <div style="margin: 10px 20px; display: flex; flex-direction: column; gap: 12px;">
-            <!-- Referidos Card (Premium - warm orange) -->
-            <div style="background: linear-gradient(145deg, #FF6B00 0%, #E85D00 50%, #D14E00 100%); border-radius: 20px; padding: 0; border: none; box-shadow: 0 8px 28px rgba(232,93,0,0.38), 0 0 0 1px rgba(255,255,255,0.1) inset; position: relative; overflow: hidden;">
-              <!-- Top shimmer -->
-              <div style="position:absolute; top:0; left:0; right:0; height:1px; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%); pointer-events:none;"></div>
-              <!-- Glow orb -->
-              <div style="position:absolute; top:-40px; right:-30px; width:130px; height:130px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%); border-radius:50%; pointer-events:none;"></div>
-
-              <div style="padding: 16px 18px 0;">
-                <div style="display: flex; gap: 12px; align-items: flex-start;">
-                  <div style="width: 44px; height: 44px; border-radius: 14px; background: rgba(255,255,255,0.2); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                    ${icon('gift', 22)}
-                  </div>
-                  <div style="flex: 1; min-width: 0;">
-                    <h4 style="font-size: 14px; font-weight: 900; color: #fff; margin: 0 0 3px 0; letter-spacing: -0.2px;">Traé a un amigo, ¡ganan ambos!</h4>
-                    <p style="font-size: 11.5px; color: rgba(255,255,255,0.72); margin: 0; line-height: 1.5;">
-                      Compartí tu código. Cuando tu amigo complete su primer pedido, ¡ambos reciben puntos!
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Reward badge -->
-                <div style="margin: 14px 0 0; display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 12px; padding: 10px 14px;">
-                  <div style="display:flex; align-items:center; gap:6px; flex:1;">
-                    <div style="font-size:22px; line-height:1;">🎁</div>
-                    <div>
-                      <div style="font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,0.65); margin-bottom: 1px;">Bono para cada uno</div>
-                      <div style="font-size: 17px; font-weight: 950; color: white; letter-spacing: -0.5px;">${(s.referralPoints || 500).toLocaleString('es-AR')} <span style="font-size:10px; font-weight:900; color:rgba(255,255,255,0.7);">GO Points</span></div>
-                    </div>
-                  </div>
-                  <div style="font-size:9px; font-weight:900; color: rgba(255,255,255,0.6); text-align:right; letter-spacing:0.5px;">A VOS<br/>+ A TU AMIGO</div>
+          <!-- Referidos, desafíos y regalar puntos -->
+          <div class="go-profile-stack">
+            <div class="go-ref-card">
+              <div class="go-ref-head">
+                <span class="go-ref-icon">${icon('gift', 20)}</span>
+                <div>
+                  <h4>Traé a un amigo y ganan los dos</h4>
+                  <p>Cuando tu amigo haga su primer pedido, cada uno suma <strong>${(s.referralPoints || 500).toLocaleString('es-AR')} GO Points</strong>.</p>
                 </div>
               </div>
-
-              <!-- Code row -->
-              <div style="padding: 12px 18px 16px; display: flex; align-items: center; gap: 8px;">
-                <div style="flex:1; background: rgba(0,0,0,0.15); border-radius: 10px; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.2); display:flex; align-items:center; gap:8px; min-width:0;">
-                  <div style="width:6px; height:6px; border-radius:50%; background:white; box-shadow: 0 0 6px rgba(255,255,255,0.8); flex-shrink:0;"></div>
-                  <span style="font-family: monospace; font-weight: 900; font-size: 13px; color: white; letter-spacing: 1px; white-space: nowrap; overflow:hidden; text-overflow:ellipsis;">${user.referralCode || 'GO-REF-XXXXX'}</span>
-                </div>
-                <button id="copy-ref-btn" style="height: 34px; padding: 0 10px; font-size: 10px; font-weight: 800; border-radius: 9px; display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: white; cursor:pointer; white-space: nowrap; flex-shrink:0; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                  ${icon('copy', 12)} Copiar
-                </button>
-                <button id="share-ref-btn" style="height: 34px; padding: 0 12px; font-size: 10px; font-weight: 900; border-radius: 9px; display: flex; align-items: center; gap: 4px; border: none; color: #C23E00; background: white; cursor:pointer; white-space: nowrap; flex-shrink:0; box-shadow: 0 3px 10px rgba(0,0,0,0.2); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 5px 15px rgba(0,0,0,0.25)'" onmouseout="this.style.transform='none'; this.style.boxShadow='0 3px 10px rgba(0,0,0,0.2)'">
-                  ${icon('share', 12)} Compartir
-                </button>
+              <div class="go-ref-code">
+                <span class="go-ref-code-label">Tu código</span>
+                <strong>${escapeHtml(user.referralCode || 'GO-REF-XXXXX')}</strong>
+              </div>
+              <div class="go-ref-actions">
+                <button id="copy-ref-btn" type="button" class="is-secondary">${icon('copy', 16)} Copiar</button>
+                <button id="share-ref-btn" type="button" class="is-primary">${icon('share', 16)} Compartir</button>
               </div>
             </div>
 
-            <!-- Desafíos Card (Premium) -->
-            <div id="weekly-challenges-card" style="background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(59,130,246,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(99,102,241,0.2); box-shadow: 0 4px 16px rgba(99,102,241,0.06); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(99,102,241,0.12)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 16px rgba(99,102,241,0.06)';">
-              <div style="display: flex; gap: 12px; align-items: center;">
-                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(59,130,246,0.1) 100%); color: #6366f1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(99,102,241,0.25); box-shadow: 0 3px 8px rgba(99,102,241,0.1);">
-                  ${icon('target', 22)}
-                </div>
-                <div>
-                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">Desafíos Semanales</h4>
-                  <p style="font-size: 11px; color: var(--color-text-secondary); margin: 0;">
-                    Completá misiones y sumá hasta <strong style="color:#6366f1;">10.000 pts</strong> esta semana.
-                  </p>
-                </div>
-              </div>
-              <div style="background: rgba(99,102,241,0.12); border-radius: 10px; padding: 6px 8px; color: #6366f1; border: 1px solid rgba(99,102,241,0.2);">
-                ${icon('chevronRight', 16)}
-              </div>
+            <div id="weekly-challenges-card" class="go-profile-row" role="button" tabindex="0">
+              <span class="go-profile-row-icon">${icon('target', 20)}</span>
+              <span class="go-profile-row-text"><strong>Desafíos semanales</strong><small>Completá misiones y sumá hasta 10.000 pts esta semana.</small></span>
+              <span class="go-profile-row-chev">${icon('chevronRight', 16)}</span>
             </div>
 
-            <!-- Transferir Puntos Card (Premium) -->
-            <div id="transfer-gopoints-card" style="background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(5,150,105,0.03) 100%); border-radius: 18px; padding: 16px; border: 1.5px solid rgba(16,185,129,0.2); box-shadow: 0 4px 16px rgba(16,185,129,0.06); display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.25s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(16,185,129,0.12)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 16px rgba(16,185,129,0.06)';">
-              <div style="display: flex; gap: 12px; align-items: center;">
-                <div style="width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(5,150,105,0.1) 100%); color: #10b981; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(16,185,129,0.25); box-shadow: 0 3px 8px rgba(16,185,129,0.1);">
-                  ${icon('share', 22)}
-                </div>
-                <div>
-                  <h4 style="font-size: 14px; font-weight: 900; color: var(--color-text-primary); margin: 0 0 2px 0;">Regalar GO Points</h4>
-                  <p style="font-size: 11px; color: var(--color-text-secondary); margin: 0;">
-                    Transferí tus puntos a otro usuario por su ID.
-                  </p>
-                </div>
-              </div>
-              <div style="background: rgba(16,185,129,0.12); border-radius: 10px; padding: 6px 8px; color: #10b981; border: 1px solid rgba(16,185,129,0.2);">
-                ${icon('chevronRight', 16)}
-              </div>
+            <div id="transfer-gopoints-card" class="go-profile-row" role="button" tabindex="0">
+              <span class="go-profile-row-icon">${icon('share', 20)}</span>
+              <span class="go-profile-row-text"><strong>Regalar GO Points</strong><small>Pasale puntos a otra persona con su ID GO.</small></span>
+              <span class="go-profile-row-chev">${icon('chevronRight', 16)}</span>
             </div>
           </div>
 
@@ -542,7 +442,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               <div class="settings-icon-box" style="background:rgba(245, 158, 11, 0.1); color:#f59e0b;">
                 ${icon('shoppingBag', 20)}
               </div>
-              <span class="settings-label">Mis Pedidos</span>
+              <span class="settings-label">Mis pedidos</span>
               ${icon('chevronRight', 16, 'settings-chevron')}
             </a>
 
@@ -550,7 +450,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               <div class="settings-icon-box" style="background:rgba(16, 185, 129, 0.1); color:#10b981;">
                 ${icon('shop', 20) || icon('tag', 20) || '🏷️'}
               </div>
-              <span class="settings-label">Mis Publicaciones (Market)</span>
+              <span class="settings-label">Mis publicaciones en Market</span>
               ${icon('chevronRight', 16, 'settings-chevron')}
             </a>
 
@@ -559,7 +459,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 ${icon('user', 20)}
               </div>
               <div style="flex:1;">
-                <span class="settings-label">Nombre Visible</span>
+                <span class="settings-label">Nombre visible</span>
                 <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.displayName || 'Establecer nombre'}</p>
               </div>
               ${icon('edit', 16, 'settings-chevron')}
@@ -570,7 +470,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 ${icon('mapPin', 20)}
               </div>
               <div style="flex:1;">
-                <span class="settings-label">Tus Direcciones</span>
+                <span class="settings-label">Tus direcciones</span>
                 <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${deliveryAddress || 'No establecida'}</p>
               </div>
               ${icon('edit', 16, 'settings-chevron')}
@@ -600,7 +500,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 ${icon('info', 20)}
               </div>
               <div style="flex:1;">
-                <span class="settings-label">Soporte y Términos Legales</span>
+                <span class="settings-label">Soporte y términos legales</span>
               </div>
               ${icon('chevronRight', 16, 'settings-chevron')}
             </div>
@@ -638,13 +538,13 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               ${icon('logOut', 16)} Cerrar sesión
             </button>
             <button class="btn btn-ghost" id="force-reload-btn" style="flex:1; height:46px; border-radius:12px; color:var(--color-primary); font-weight:800; background:rgba(225, 29, 72, 0.08); font-size:13px;" title="Limpiar caché y forzar actualización">
-              ${icon('refresh', 16)} Actualizar App
+              ${icon('refresh', 16)} Actualizar app
             </button>
           </div>
 
           <p id="profile-app-version-footer" style="text-align:center; margin-top:14px; font-size:11px; color:var(--color-text-tertiary); font-weight:700; cursor:pointer;" title="Tocar para forzar actualización">
             GoDelivery v1.6.1 (Build: ${localStorage.getItem('gd_app_version') || '1.6.1'})
-            <br/><span style="font-size:10px; color:var(--color-primary); font-weight:800;">⚡ Tocar aquí si no ves los últimos cambios</span>
+            <br/><span style="font-size:10px; color:var(--color-primary); font-weight:800;">Tocá acá si no ves los últimos cambios</span>
           </p>
       </div>
     `;
@@ -794,15 +694,13 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           : `Tasa base de puntos`;
           
         return `
-          <div style="background: ${isCurrent ? 'rgba(var(--color-primary-rgb), 0.04)' : 'var(--color-bg-page)'}; border: 1.5px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-border-light)'}; border-radius: 16px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: all 0.2s;">
+          <div style="background: var(--color-surface); border: ${isCurrent ? '1.5px solid var(--go-ink)' : '1px solid var(--go-line)'}; border-radius: 16px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: all 0.2s;">
             <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-              <div style="width: 32px; height: 32px; background: ${lvl.color || '#ccc'}; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
-                ${icon(lvl.icon || 'award', 16)}
-              </div>
+              <span class="go-level-medal" style="--lvl: ${lvl.color || '#a8a29e'};">${icon(lvl.icon || 'award', 15)}</span>
               <div style="min-width: 0; overflow: hidden;">
                 <div style="font-size: 12px; font-weight: 900; color: var(--color-text-primary); display: flex; align-items: center; gap: 6px; white-space: nowrap;">
                   ${lvl.name}
-                  ${isCurrent ? `<span style="background:var(--color-primary); color:white; font-size:8px; font-weight:900; padding:1px 5px; border-radius:4px; text-transform:uppercase; letter-spacing:0.02em;">Tú</span>` : ''}
+                  ${isCurrent ? `<span style="background:var(--go-ink); color:white; font-size:9px; font-weight:800; padding:2px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:0.08em;">Vos</span>` : ''}
                 </div>
                 <div style="font-size: 10px; color: var(--color-text-secondary); opacity: 0.8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   Desde ${lvl.minOrders} pedidos
@@ -810,7 +708,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               </div>
             </div>
             <div style="text-align: right; flex-shrink: 0;">
-              <div style="font-size: 12px; font-weight: 900; color: var(--color-success);">${lvl.multiplier}x Puntos</div>
+              <div style="font-size: 12.5px; font-weight: 900; color: var(--go-text);">${lvl.multiplier}x puntos</div>
               <div style="font-size: 9px; color: var(--color-text-tertiary); font-weight: 700; margin-top: 1px;">${multiplierText}</div>
             </div>
           </div>
@@ -818,20 +716,18 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       }).join('');
       
       showModal({
-        title: 'Club GO Points',
+        title: 'Club GO',
         height: 'auto',
         content: `
-          <div style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 20px; max-height: 75dvh; overflow-y: auto;">
+          <div class="go-club-modal" style="padding: 24px 20px; color: var(--color-text-primary); font-family: var(--font-body); display: flex; flex-direction: column; gap: 20px; max-height: 75dvh; overflow-y: auto;">
             
             <!-- Hero Header -->
-            <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 4px;">
-              <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; border-radius: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3);">
-                ${icon('goPointsLogo', 38)}
-              </div>
-              <h4 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; margin: 0; letter-spacing: -0.5px;">¡Bienvenido a GO Points!</h4>
-              <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; max-width: 280px; opacity: 0.85;">
-                El programa de fidelidad de GO Delivery que te devuelve dinero en cada compra.
-              </p>
+            <div class="go-club-modal-hero">
+              <span class="go-club-ring">${icon('goPointsLogo', 28)}<i></i></span>
+              <span class="go-eyebrow">Tus puntos</span>
+              <strong class="go-club-modal-points">${(user.points || 0).toLocaleString('es-AR')} <small>pts</small></strong>
+              <span class="go-club-level" style="--lvl: ${level.color || '#e11d48'};"><i></i>Nivel ${escapeHtml(level.name || '')}</span>
+              <p>El programa de GO que te devuelve plata en cada compra.</p>
             </div>
 
             <!-- Gamified Progress Bar Inside Modal -->
@@ -914,7 +810,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 12px;">
                   <span style="color: var(--color-text-secondary); font-weight: 555;">Tu Nivel Actual:</span>
-                  <span style="font-weight: 800; color: ${level.color || 'var(--color-primary)'};">${level.name}</span>
+                  <span style="font-weight: 800; color: var(--go-text);">${level.name}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 12px;">
                   <span style="color: var(--color-text-secondary); font-weight: 555;">Tu Multiplicador:</span>
