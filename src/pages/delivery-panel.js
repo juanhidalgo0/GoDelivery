@@ -1494,6 +1494,12 @@ export async function renderDeliveryPanel(containerArg) {
           ">
             ${icon('power', 20)} CONECTAR AHORA
           </button>
+          <button type="button" id="main-client-mode-hero-btn" data-go-client-mode style="
+            margin-top: 14px; height: 48px; padding: 0 20px; border-radius: 24px;
+            background: transparent; border: 1px solid var(--driver-border-strong);
+            color: var(--driver-text-primary); font-family: inherit; font-size: 14px; font-weight: 700;
+            display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+          ">${icon('shoppingBag', 18)} Ir a modo cliente</button>
         </div>
       </div>
     ` : ''}
@@ -6517,7 +6523,7 @@ function renderStatusBar(user) {
         border-radius: 20px;
         border: 1px solid ${isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255,255,255,0.12)'};
         font-size: 11px; font-weight: 800; color: var(--driver-text-primary);
-        display: flex; align-items: center; gap: 5px;
+        display: flex; align-items: center; gap: 5px; white-space: nowrap;
         cursor: pointer; user-select: none;
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};
       ">
@@ -6525,6 +6531,15 @@ function renderStatusBar(user) {
         <strong style="color:${isLight ? '#16a34a' : '#22c55e'}; font-weight:900; font-size:12px;">${formatPrice(todayEarn)}</strong>
         <span style="color:var(--driver-text-secondary-b); font-size:10px; font-weight:700;">(${todayCount} ped.)</span>
       </div>
+      <button type="button" data-go-client-mode aria-label="Ir a modo cliente" title="Ir a modo cliente" style="
+        height: 34px; min-width: 34px; padding: 0 ${finalIsOnline ? '12px' : '0'}; justify-content: center; border-radius: 17px; flex-shrink: 0;
+        background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9,13,22,0.85)'};
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        border: 1px solid ${isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255,255,255,0.12)'};
+        color: var(--driver-text-primary); font-family: inherit; font-size: 11px; font-weight: 800;
+        display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+        box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};
+      ">${icon('shoppingBag', 14)}${finalIsOnline ? ' Cliente' : ''}</button>
     `;
   }
 
@@ -8015,6 +8030,24 @@ function renderPerfilTabHTML(user) {
 
       <!-- Menu Options Stack -->
       <div style="display:flex; flex-direction:column; gap:7px; flex:1;">
+        <!-- Modo cliente: siempre a mano para pedir como cualquier vecino -->
+        <button type="button" id="drawer-client-mode-btn" data-go-client-mode style="
+          display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px;
+          background: ${isLight ? '#0b0b0c' : '#ffffff'};
+          border: none;
+          color: ${isLight ? '#ffffff' : '#0b0b0c'};
+          font-family: inherit; font-size: 14px; font-weight: 800; cursor: pointer; text-align: left;
+        ">
+          <div style="width:36px; height:36px; border-radius:50%; background:${isLight ? 'rgba(255,255,255,0.14)' : 'rgba(11,11,12,0.08)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${icon('shoppingBag', 18)}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div>Ir a modo cliente</div>
+            <div style="font-size:12px; font-weight:500; opacity:0.75; margin-top:1px;">Pedí como cualquier vecino y volvé cuando quieras</div>
+          </div>
+          <span style="display:flex; opacity:0.7;">${icon('chevronRight', 18)}</span>
+        </button>
+
         <!-- 1. Theme 3-Way Segment Selector: Claro / Oscuro / Automático -->
         <div id="drawer-theme-card" style="
           background: ${isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.05)'};
@@ -8211,25 +8244,6 @@ function renderPerfilTabHTML(user) {
           </button>
         ` : ''}
 
-        <!-- 6. Ir a Modo Cliente (Tiendas) -->
-        <button id="drawer-client-mode-btn" style="
-          display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px;
-          background: var(--driver-fill-subtle-b);
-          border: 1px solid ${isLight ? '#cbd5e1' : 'rgba(255,255,255,0.08)'};
-          color: var(--driver-text-primary);
-          font-size: 13px; font-weight: 800; cursor: pointer; text-align: left;
-          margin-top: auto;
-        ">
-          <div style="width:30px; height:30px; border-radius:9px; background:var(--driver-border); color:var(--driver-text-label); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-              <line x1="3" y1="6" x2="21" y2="6"></line>
-              <path d="M16 10a4 4 0 0 1-8 0"></path>
-            </svg>
-          </div>
-          <span>Ir a Modo Cliente (Tiendas)</span>
-        </button>
-
         <!-- 7. Desconectarme / Iniciar Jornada (AT THE VERY BOTTOM) -->
         <button id="drawer-toggle-online-btn" style="
           display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px;
@@ -8359,12 +8373,6 @@ function attachPerfilTabListeners(user, container) {
     };
   }
 
-  const clientBtn = document.getElementById('drawer-client-mode-btn');
-  if (clientBtn) {
-    clientBtn.onclick = () => {
-      switchToClientMode();
-    };
-  }
 
   const debtBtn = document.getElementById('drawer-debt-btn');
   if (debtBtn) {
@@ -8388,6 +8396,54 @@ function attachPerfilTabListeners(user, container) {
       startFullDriverSimulation();
     };
   }
+}
+
+// Every "Ir a modo cliente" button carries data-go-client-mode. One document-level
+// listener handles them all, so the exit keeps working no matter which part of the panel
+// re-rendered (status bar, offline hero, Perfil tab...).
+if (typeof document !== 'undefined' && !window.__goClientModeDelegation) {
+  window.__goClientModeDelegation = true;
+  document.addEventListener('click', (e) => {
+    const trigger = e.target.closest?.('[data-go-client-mode]');
+    if (!trigger) return;
+    e.preventDefault();
+    e.stopPropagation();
+    requestClientMode();
+  }, true);
+}
+
+// Going to client mode while online would leave the driver "online" in Firestore without
+// seeing offers (they expire and count toward the auto-pause), so offer to disconnect first.
+export function requestClientMode(user) {
+  const currentUser = getState().user || user;
+  if (!currentUser || currentUser.isOnline !== true) {
+    switchToClientMode();
+    return;
+  }
+
+  if (activeOrdersCount > 0) {
+    showConfirm({
+      title: '¿Ir a modo cliente?',
+      message: 'Tenés pedidos en curso. Podés pedir algo y volver cuando quieras con el botón <b>Modo Repartidor</b>, pero no te olvides de terminar tus entregas.',
+      confirmText: 'Ir a modo cliente',
+      onConfirm: () => {
+        closeModal();
+        switchToClientMode();
+      }
+    });
+    return;
+  }
+
+  showConfirm({
+    title: '¿Ir a modo cliente?',
+    message: 'Estás <b>en línea</b>. Para que no te lleguen pedidos que no vas a ver, te desconectamos. Volvés con el botón <b>Modo Repartidor</b> y no se te cobra de nuevo la cuota del día.',
+    confirmText: 'Desconectarme e ir',
+    onConfirm: async () => {
+      closeModal();
+      try { await endSession(currentUser); } catch (e) { console.warn('endSession before client mode failed', e); }
+      switchToClientMode();
+    }
+  });
 }
 
 export async function switchToClientMode() {
@@ -8666,12 +8722,6 @@ function attachStatusBarListeners(user) {
     };
   }
 
-  const clientModeBtn = document.getElementById('go-client-mode-btn');
-  if (clientModeBtn) {
-    clientModeBtn.onclick = () => {
-      switchToClientMode();
-    };
-  }
 
   const badge = document.getElementById('status-tarife-badge');
   if (badge) {
