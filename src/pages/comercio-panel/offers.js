@@ -719,7 +719,7 @@ function openCouponEditor() {
 
     <div style="display: flex; gap: 12px; margin-top: 12px;">
       <button class="btn btn-ghost" id="modal-coup-cancel" style="height:48px; border-radius:14px; font-weight:800; flex:1;">Cancelar</button>
-      <button class="btn btn-primary" id="modal-coup-create" style="height:48px; border-radius:14px; font-weight:900; background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border:none; color:white; flex:2; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 18px rgba(126, 34, 206, 0.2);">
+      <button class="btn btn-primary" id="modal-coup-create" style="height:48px; border-radius:14px; font-weight:900; background:#0b0b0c; border:none; color:white; flex:2; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
         ${icon('check', 16)} CREAR CUPÓN
       </button>
     </div>

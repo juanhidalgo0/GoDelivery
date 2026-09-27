@@ -131,7 +131,7 @@ export async function renderAdminLogisticsSettings(container) {
     container.innerHTML = `
       <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
         <!-- Header -->
-        <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
+        <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
           <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
             ${icon("chevronLeft", 24)}
           </a>
@@ -519,7 +519,7 @@ export async function renderAdminEconomySettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #10b981 0%, #059669 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(16, 185, 129, 0.25); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -779,7 +779,7 @@ export async function renderAdminDeliveriesSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Minimalist 1-Row Header (sticky) -->
-      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
         <div style="display:flex; align-items:center; gap:10px; min-width:0;">
           <a href="#/admin" style="width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; flex-shrink:0; transition:all 0.2s;">
             ${icon("chevronLeft", 20)}
@@ -1966,7 +1966,7 @@ export async function renderAdminDynamicSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(79, 70, 229, 0.25); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -2110,7 +2110,7 @@ export async function renderAdminGoPointsSettings(container) {
     container.innerHTML = `
       <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
         <!-- Header -->
-        <div style="background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(245, 158, 11, 0.25); z-index:100;">
+        <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
           <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
             ${icon("chevronLeft", 24)}
           </a>
@@ -2315,7 +2315,7 @@ export async function renderAdminPushSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(59, 130, 246, 0.25); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -2397,7 +2397,7 @@ export async function renderAdminMaintenanceSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #ef4444 0%, #991b1b 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(239, 68, 68, 0.25); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -2457,7 +2457,7 @@ export async function renderAdminMaintenanceSettings(container) {
             <p style="font-size:12px; color:var(--color-text-secondary); line-height:1.6; margin:0;">
               Comprime todas las fotos de comercios y productos de tu base de datos al formato ligero <strong>WebP (calidad 75%)</strong>.
             </p>
-            <button class="btn" id="btn-optimize-images" style="width:100%; height:48px; border-radius:12px; background:linear-gradient(135deg,#0284c7,#0369a1); color:white; border:none; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <button class="btn" id="btn-optimize-images" style="width:100%; height:48px; border-radius:12px; background:#0b0b0c; color:white; border:none; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon("sparkles", 16)} OPTIMIZAR IM\xC1GENES
             </button>
             <div id="optimize-progress-container" style="display:none; margin-top:10px; background:var(--color-bg-secondary); padding:14px; border-radius:14px; border:1px solid var(--color-border-light);">
@@ -2486,7 +2486,7 @@ export async function renderAdminMaintenanceSettings(container) {
               <p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0;">
                 Resetea a <strong>$0</strong> las deudas de todos los repartidores, comisiones de comercios y tarifas app, marcando las operaciones como liquidadas y limpiando la secci\xF3n de Econom\xEDa.
               </p>
-              <button class="btn" id="btn-reset-economy-balances" style="width: 100%; height: 46px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; font-weight: 900; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);">
+              <button class="btn" id="btn-reset-economy-balances" style="width: 100%; height: 46px; border-radius: 12px; background: #0b0b0c; color: white; border: none; font-weight: 900; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow:none;">
                 ${icon("refresh", 16)} RESETEAR SALDOS A $0 Y LIMPIAR ECONOM\xCDA
               </button>
             </div>

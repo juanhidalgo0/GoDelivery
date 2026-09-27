@@ -12,7 +12,7 @@ export async function renderAdminCoupons() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Premium Header with Violet Gradient -->
-      <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
         <!-- Decorative Background Circles -->
         <div style="position: absolute; top: -30px; right: -30px; width: 110px; height: 110px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         <div style="position: absolute; bottom: -20px; left: -20px; width: 70px; height: 70px; background: rgba(255,255,255,0.05); border-radius: 50%; pointer-events: none;"></div>
@@ -418,7 +418,7 @@ function showGenerateCouponModal(onSuccessCallback, comerciosList = []) {
     `,
     footer: `
       <button class="btn btn-ghost" id="modal-coupon-cancel" style="height:48px; border-radius:14px; font-weight:800; flex:1;">Cancelar</button>
-      <button class="btn btn-primary" id="modal-coupon-create" style="height:48px; border-radius:14px; font-weight:900; background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border:none; color:white; flex:2; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 18px rgba(126, 34, 206, 0.2);">
+      <button class="btn btn-primary" id="modal-coupon-create" style="height:48px; border-radius:14px; font-weight:900; background:#0b0b0c; border:none; color:white; flex:2; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
         ${icon('check', 16)} CREAR CUPÓN
       </button>
     `

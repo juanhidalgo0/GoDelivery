@@ -664,7 +664,7 @@ function openFeaturedSliderModal(comercioId, comercioName) {
         <span style="font-size:18px; font-weight:950; color:#d97706;">${formatPrice(featuredPrice)}</span>
       </div>
 
-      <button type="button" id="btn-submit-featured-ad" style="height:52px; border-radius:16px; border:none; background:linear-gradient(135deg, #f59e0b, #d97706); color:white; font-weight:900; font-size:15px; cursor:pointer; width:100%; box-shadow:0 8px 20px rgba(245,158,11,0.25);">
+      <button type="button" id="btn-submit-featured-ad" style="height:52px; border-radius:16px; border:none; background:#0b0b0c; color:white; font-weight:900; font-size:15px; cursor:pointer; width:100%; box-shadow:none;">
         Activar Destaque (${formatPrice(featuredPrice)})
       </button>
     </div>

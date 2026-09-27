@@ -166,23 +166,10 @@ export async function initSettings() {
         state.maxDebtLimit = data.maxDebtLimit !== undefined ? data.maxDebtLimit : 15000;
         state.debtLimitEnabled = data.debtLimitEnabled !== undefined ? data.debtLimitEnabled : false;
 
-        // Dynamically apply brand theme
-        const primaryColor = state.useDarkBrandTheme ? '#0F172A' : '#E11D48';
-        if (state.useDarkBrandTheme) {
-          document.documentElement.style.setProperty('--color-primary', '#0F172A');
-          document.documentElement.style.setProperty('--color-primary-hover', '#1E293B');
-          document.documentElement.style.setProperty('--color-primary-dark', '#020617');
-          document.documentElement.style.setProperty('--color-primary-light', 'rgba(15, 23, 42, 0.1)');
-          document.documentElement.style.setProperty('--color-primary-lighter', 'rgba(15, 23, 42, 0.05)');
-          document.documentElement.style.setProperty('--color-primary-rgb', '15, 23, 42');
-        } else {
-          document.documentElement.style.setProperty('--color-primary', '#E11D48');
-          document.documentElement.style.setProperty('--color-primary-hover', '#BE123C');
-          document.documentElement.style.setProperty('--color-primary-dark', '#9F1239');
-          document.documentElement.style.setProperty('--color-primary-light', 'rgba(225, 29, 72, 0.1)');
-          document.documentElement.style.setProperty('--color-primary-lighter', 'rgba(225, 29, 72, 0.05)');
-          document.documentElement.style.setProperty('--color-primary-rgb', '225, 29, 72');
-        }
+        // The GO! identity decides the action color (ink) in CSS. Clear any value an
+        // older build left inline, so the stylesheet wins.
+        const primaryColor = '#0b0b0c';
+        ['', '-hover', '-dark', '-light', '-lighter', '-rgb'].forEach(k => document.documentElement.style.removeProperty(`--color-primary${k}`));
 
         // Update HTML meta theme-color for mobile web browsers
         const metaTheme = document.querySelector('meta[name="theme-color"]');

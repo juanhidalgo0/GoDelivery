@@ -197,7 +197,7 @@ export async function openChat(options) {
   const chatContainer = document.createElement('div');
   chatContainer.className = 'chat-container';
   chatContainer.innerHTML = `
-    <div class="chat-header-bar" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; border-radius: 0; padding: calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.15); box-sizing: border-box;">
+    <div class="go-page-header chat-header-bar"  style="background: var(--go-ink); color: white; border-radius: 0; padding: calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.15); box-sizing: border-box;">
       <button class="chat-back-btn" id="chat-back-${chatId}" style="background: none; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; margin-right: 2px; transition: transform 0.2s;" onmousedown="this.style.transform='scale(0.85)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.85)'" ontouchend="this.style.transform='scale(1)'">
         ${icon('chevronLeft', 24)}
       </button>

@@ -1495,7 +1495,7 @@ function renderActiveSection() {
     container.innerHTML = `
       <!-- Upper Action Buttons Symmetrical & Centered -->
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 14px; width: 100%; margin-bottom: 16px;">
-        <button onclick="location.hash='#/admin/metrics/breakdown'" class="ecosystem-control-btn" style="width:100%; max-width:none; min-width:0; margin:0; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; gap:6px; background:linear-gradient(135deg, var(--color-primary), #be123c); box-shadow:0 4px 12px rgba(225,29,72,0.18); color:white;">
+        <button onclick="location.hash='#/admin/metrics/breakdown'" class="ecosystem-control-btn" style="width:100%; max-width:none; min-width:0; margin:0; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; gap:6px; background:#0b0b0c; box-shadow:none; color:white;">
           <span style="display:flex; align-items:center; justify-content:center;">${icon('users', 16)}</span>
           <span>Desglose Ecosistema</span>
         </button>

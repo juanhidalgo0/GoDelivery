@@ -130,7 +130,7 @@ export async function renderAdminBroadcasts() {
               </div>
             </div>
 
-            <button class="btn btn-block" id="btn-send-global-push" style="width:100%;height:52px;border-radius:16px;background:linear-gradient(135deg,#c084fc,#a855f7);color:white;border:none;font-weight:900;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 20px rgba(168,85,247,0.3);">
+            <button class="btn btn-block" id="btn-send-global-push" style="width:100%;height:52px;border-radius:16px;background:#0b0b0c;color:white;border:none;font-weight:900;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:none;">
               ${icon('send', 18)} ENVIAR CAMPAÑA PUSH
             </button>
           </div>
@@ -863,7 +863,7 @@ async function loadAndRenderAutomations() {
             <button type="button" class="btn-test-auto-push" data-id="${auto.id}" style="flex:1;height:44px;border-radius:14px;background:var(--color-bg-secondary);border:1px solid var(--color-border);color:var(--color-text);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;">
               ${icon('send', 14)} Probar en mi móvil
             </button>
-            <button type="button" class="btn-save-auto-push" data-id="${auto.id}" style="flex:1.2;height:44px;border-radius:14px;background:linear-gradient(135deg,#a855f7,#9333ea);border:none;color:white;font-weight:900;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;box-shadow:0 4px 12px rgba(147,51,234,0.25);">
+            <button type="button" class="btn-save-auto-push" data-id="${auto.id}" style="flex:1.2;height:44px;border-radius:14px;background:#0b0b0c;border:none;color:white;font-weight:900;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;box-shadow:none;">
               ${icon('check', 14)} Guardar Regla
             </button>
           </div>

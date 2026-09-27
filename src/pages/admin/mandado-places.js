@@ -15,7 +15,7 @@ export async function renderAdminMandadoPlaces() {
   const content = document.getElementById('app-content');
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
-      <div style="background:linear-gradient(135deg, #0d9488 0%, #0f766e 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; box-shadow:0 4px 20px rgba(15,118,110,0.25); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; box-shadow:none; z-index:100;">
         <button onclick="location.hash='#/admin'" aria-label="Volver" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer;">
           ${icon('chevronLeft', 24)}
         </button>

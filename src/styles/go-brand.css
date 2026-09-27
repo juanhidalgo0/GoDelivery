@@ -2161,3 +2161,41 @@ html.is-delivery-mode .go-drawer-session .go-drawer-session-tile { background: #
 .go-drawer-session.is-online .go-drawer-session-tile { background: rgba(225, 29, 72, 0.12) !important; color: var(--go-red) !important; }
 .go-drawer-session.is-online .dsheet-row-title { color: var(--go-red); }
 #session-toggle-btn:active { transform: scale(0.97); }
+
+/* ============================================================
+   Acciones en tinta en toda la app. El token heredado --color-primary
+   era rojo y lo usan cientos de botones, pestañas, switches y títulos
+   escritos en línea. Lo llevamos a tinta; el rojo queda solo como acento
+   (--go-red) y para estados de error. En el modo repartidor oscuro se
+   mantiene claro sobre fondo oscuro.
+   ============================================================ */
+html:not(.is-delivery-mode),
+html.is-delivery-mode.driver-light-mode {
+  --color-primary: #0b0b0c;
+  --color-primary-hover: #202023;
+  --color-primary-dark: #000000;
+  --color-primary-light: rgba(11, 11, 12, 0.08);
+  --color-primary-lighter: rgba(11, 11, 12, 0.04);
+  --color-primary-rgb: 11, 11, 12;
+}
+
+/* ---------- Configuración (admin y comercio): tarjetas y fichas GO! ---------- */
+/* Las fichas de ícono de colores de cada sección pasan a discos de tinta. */
+.panel-page a > div > div[style*="width:44px; height:44px; border-radius:14px"],
+.panel-page button > div > div[style*="width:44px; height:44px; border-radius:14px"] {
+  background: var(--go-ink) !important;
+  color: #fff !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+}
+.panel-page a > div > div[style*="width:44px; height:44px; border-radius:14px"] svg,
+.panel-page button > div > div[style*="width:44px; height:44px; border-radius:14px"] svg { stroke: currentColor; }
+/* Tarjetas destacadas con degradé de color: misma tarjeta que el resto. */
+.panel-page a[style*="rgba(124,58,237"],
+.panel-page a[style*="rgba(76,29,149"] {
+  background: var(--go-card) !important;
+  border: 1px solid var(--go-line) !important;
+}
+.panel-page a > div[style*="color:#7c3aed"] { color: var(--go-text-3) !important; }
+/* Switches y casillas en tinta. */
+.panel-page input[type="checkbox"] { accent-color: var(--go-ink); }

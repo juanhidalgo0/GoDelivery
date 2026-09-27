@@ -192,7 +192,7 @@ export async function renderAdminOrders() {
         
         <!-- Ultra-Premium Segmented Control Bar (APP / WHATSAPP) -->
         <div class="premium-segmented-bar" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:5px; display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:14px; box-shadow:0 4px 20px rgba(0,0,0,0.03);">
-          <button class="main-segment-btn active" data-segment="app" style="height:44px; border-radius:16px; border:none; background:linear-gradient(135deg, #e11d48, #be123c); color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 4px 14px rgba(225,29,72,0.3); transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+          <button class="main-segment-btn active" data-segment="app" style="height:44px; border-radius:16px; border:none; background:#0b0b0c; color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:none; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
             <div style="width:24px; height:24px; border-radius:8px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('smartphone', 14, '', '#FFF')}</div>
             <span>App</span>
             <span id="seg-count-app" style="background:rgba(255,255,255,0.25); color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
@@ -474,9 +474,9 @@ function setupEventListeners() {
       btn.classList.add('active');
 
       if (seg === 'app') {
-        btn.style.background = 'linear-gradient(135deg, #e11d48, #be123c)';
+        btn.style.background = '#0b0b0c';
         btn.style.color = 'white';
-        btn.style.boxShadow = '0 4px 14px rgba(225,29,72,0.3)';
+        btn.style.boxShadow = 'none';
         const appBadge = btn.querySelector('#seg-count-app');
         if (appBadge) {
           appBadge.style.background = 'rgba(255,255,255,0.25)';
@@ -1531,11 +1531,11 @@ window.showOrderDetail = async (idOrObject) => {
     content: detailHtml,
     footer: `
       <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
-        <button id="admin-live-tracking-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 15px rgba(37,99,235,0.3);">
+        <button id="admin-live-tracking-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#0b0b0c; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
           ${icon('navigationArrow', 20)} SEGUIMIENTO EN TIEMPO REAL (GPS)
         </button>
         ${o.status !== 'cancelled' && o.status !== 'completed' && o.status !== 'entregado' ? `
-          <button id="admin-force-complete-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 15px rgba(16,185,129,0.3);">
+          <button id="admin-force-complete-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#0b0b0c; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
             ${icon('checkCircle', 20)} FORZAR ENTREGA (MARCAR COMO COMPLETADO)
           </button>
           <button id="admin-cancel-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#E74C3C; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">

@@ -163,7 +163,7 @@ async function init() {
     if (!document.getElementById('gd-update-overlay')) {
       const overlay = document.createElement('div');
       overlay.id = 'gd-update-overlay';
-      overlay.style.cssText = 'position: fixed; inset: 0; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); z-index: 9999999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: Outfit, sans-serif; text-align: center; padding: 24px;';
+      overlay.style.cssText = 'position: fixed; inset: 0; background: #0b0b0c; z-index: 9999999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: Montserrat, Inter, sans-serif; text-align: center; padding: 24px;';
       overlay.innerHTML = `
         <img src="/logo-pwa.png" style="width: 85px; height: 85px; border-radius: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); margin-bottom: 22px; animation: updatePulse 1.8s infinite ease-in-out;" />
         <h3 style="font-size: 20px; font-weight: 900; margin: 0 0 6px 0; letter-spacing: -0.03em;">Actualizando GoDelivery</h3>
@@ -1093,7 +1093,7 @@ async function init() {
           loginBtn.style.opacity = '0.7';
           loginBtn.style.cursor = 'not-allowed';
           loginBtn.innerHTML = `
-            <div style="border: 3px solid #E5E7EB; border-top: 3px solid #E11D48; border-radius: 50%; width: 20px; height: 20px; animation: gd-spin 1s linear infinite;"></div>
+            <div style="border: 3px solid #E5E7EB; border-top: 3px solid #0b0b0c; border-radius: 50%; width: 20px; height: 20px; animation: gd-spin 1s linear infinite;"></div>
             <span style="font-weight:700; color:#374151; font-size:15px;">Iniciando sesión...</span>
           `;
           

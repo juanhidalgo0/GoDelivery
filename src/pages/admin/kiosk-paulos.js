@@ -23,7 +23,7 @@ export async function renderAdminKioskPaulos() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 16px rgba(76,29,149,0.3); z-index:100;">
+      <div   class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:none; z-index:100;">
         <a href="#/admin/settings" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;">
           ${icon('chevronLeft', 24)}
         </a>
@@ -148,7 +148,7 @@ async function loadKioskPaulosData() {
             <input type="text" id="paulos-phone-input" value="${config.whatsappNumber || '5492215555555'}" placeholder="Ej: 549221XXXXXXX" style="height:44px; border-radius:12px; border:1.5px solid var(--color-border); padding:0 12px; background:var(--color-bg); font-weight:800; color:var(--color-text-primary);" required />
           </div>
 
-          <button type="submit" style="height:46px; border-radius:14px; background:linear-gradient(135deg,#7c3aed,#6d28d9); color:white; border:none; font-weight:900; font-size:13.5px; cursor:pointer; box-shadow:0 4px 12px rgba(124,58,237,0.3); text-transform:uppercase;">
+          <button type="submit" style="height:46px; border-radius:14px; background:#0b0b0c; color:white; border:none; font-weight:900; font-size:13.5px; cursor:pointer; box-shadow:none; text-transform:uppercase;">
             Guardar Configuración
           </button>
         </form>
