@@ -4,7 +4,6 @@ import { isAdmin, isComercio, isDelivery } from '../auth.js';
 import { icon } from '../utils/icons.js';
 
 let lastCartCount = 0;
-let floatingDriverBtn = null;
 
 export function renderNavbar() {
   const navbar = document.getElementById('app-navbar');
@@ -97,85 +96,9 @@ export function renderNavbar() {
 }
 
 export function updateGlobalDriverReturnBadge() {
-  const rawHash = window.location.hash || '#/';
-  const cleanHash = rawHash.split('?')[0];
-  const isDeliveryRoute = cleanHash.startsWith('#/delivery');
-  
-  let isDriverUser = false;
-  try {
-    isDriverUser = isDelivery() || (typeof localStorage !== 'undefined' && (localStorage.getItem('gd_is_delivery') === 'true' || localStorage.getItem('gd_user_role') === 'delivery'));
-  } catch (e) {}
-
-  const isDirectStore = cleanHash.startsWith('#/tienda') || 
-                        cleanHash.startsWith('#/comercio') || 
-                        cleanHash.startsWith('#/seguimiento') || 
-                        document.body.classList.contains('is-direct-store-mode') ||
-                        document.documentElement.classList.contains('is-direct-store-mode');
-
-  // Badge must be visible whenever the user is a driver AND is NOT currently on the delivery or direct store screen
-  // En el seguimiento de un pedido tapaba la tarjeta de abajo (total, detalles); ahí se vuelve con la flecha
-  const isOrderTracking = cleanHash.startsWith('#/pedido/');
-  if (isDriverUser && !isDeliveryRoute && !isDirectStore && !isOrderTracking) {
-    if (!floatingDriverBtn) {
-      floatingDriverBtn = document.createElement('a');
-      floatingDriverBtn.id = 'floating-driver-mode-pill';
-      floatingDriverBtn.href = '#/delivery';
-      floatingDriverBtn.title = 'Volver al Modo Repartidor';
-      floatingDriverBtn.innerHTML = `
-        <span style="font-size: 15px; display: inline-flex; align-items: center; justify-content: center;">🛵</span>
-        <span style="letter-spacing: -0.01em;">Modo Repartidor</span>
-      `;
-      floatingDriverBtn.onclick = (e) => {
-        e.preventDefault();
-        try {
-          sessionStorage.removeItem('gd_temp_client_mode');
-        } catch (err) {}
-        document.documentElement.classList.add('is-delivery-mode');
-        document.body.classList.add('is-delivery-mode');
-        window.location.hash = '#/delivery';
-      };
-      document.body.appendChild(floatingDriverBtn);
-    } else if (floatingDriverBtn.parentElement !== document.body) {
-      document.body.appendChild(floatingDriverBtn);
-    }
-
-    const isBottomNavVisible = !document.body.classList.contains('overlay-open') && 
-                              !cleanHash.startsWith('#/admin') && 
-                              !cleanHash.startsWith('#/tienda') && 
-                              !cleanHash.startsWith('#/pedido/') && 
-                              !document.body.classList.contains('is-direct-store-mode');
-    
-    const bottomOffset = isBottomNavVisible 
-      ? 'calc(var(--navbar-height, 68px) + 16px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 16px))' 
-      : 'max(20px, calc(16px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 16px)))';
-
-    floatingDriverBtn.style.cssText = `
-      position: fixed !important;
-      bottom: ${bottomOffset} !important;
-      left: 16px !important;
-      z-index: 99999999 !important;
-      background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
-      color: white !important;
-      padding: 9px 16px !important;
-      border-radius: 30px !important;
-      box-shadow: 0 8px 24px rgba(225, 29, 72, 0.45), 0 2px 8px rgba(0,0,0,0.3) !important;
-      font-weight: 900 !important;
-      font-size: 12px !important;
-      font-family: var(--font-display, sans-serif) !important;
-      display: flex !important;
-      align-items: center !important;
-      gap: 7px !important;
-      text-decoration: none !important;
-      cursor: pointer !important;
-      border: 2px solid #ffffff !important;
-      pointer-events: auto !important;
-      transform: translateZ(0) !important;
-      transition: transform 0.15s ease, box-shadow 0.15s ease !important;
-    `;
-    floatingDriverBtn.style.display = 'flex';
-  } else if (floatingDriverBtn) {
-    floatingDriverBtn.remove();
-  }
+  // Drivers go back to their panel with the "Delivery" item of this bottom bar;
+  // the floating "Modo Repartidor" pill was removed. Clean up any leftover one.
+  document.getElementById('floating-driver-mode-pill')?.remove();
 }
 
 export function updateGlobalCartFAB() {

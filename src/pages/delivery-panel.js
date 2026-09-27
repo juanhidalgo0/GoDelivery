@@ -8224,7 +8224,7 @@ export function requestClientMode(user) {
   if (activeOrdersCount > 0) {
     showConfirm({
       title: '¿Ir a modo cliente?',
-      message: 'Tenés pedidos en curso. Podés pedir algo y volver cuando quieras con el botón <b>Modo Repartidor</b>, pero no te olvides de terminar tus entregas.',
+      message: 'Tenés pedidos en curso. Podés pedir algo y volver cuando quieras tocando <b>Delivery</b> en la barra de abajo, pero no te olvides de terminar tus entregas.',
       confirmText: 'Ir a modo cliente',
       onConfirm: () => {
         closeModal();
@@ -8236,7 +8236,7 @@ export function requestClientMode(user) {
 
   showConfirm({
     title: '¿Ir a modo cliente?',
-    message: 'Estás <b>en línea</b>. Para que no te lleguen pedidos que no vas a ver, te desconectamos. Volvés con el botón <b>Modo Repartidor</b> y no se te cobra de nuevo la cuota del día.',
+    message: 'Estás <b>en línea</b>. Para que no te lleguen pedidos que no vas a ver, te desconectamos. Volvés tocando <b>Delivery</b> en la barra de abajo y no se te cobra de nuevo la cuota del día.',
     confirmText: 'Desconectarme e ir',
     onConfirm: async () => {
       closeModal();
