@@ -6820,6 +6820,15 @@ export function renderBottomDockContent(user, activeOrders = []) {
   const header = handleRow(`<div style="display:flex;align-items:center;gap:8px;min-width:0">${kindTag(kind, isLight)}<span style="font-size:13px;color:${t.tx3};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(meta)}</span></div>`, sosBtn + expandBtn + hideBtn);
 
   const navUrl = dockNavUrl(o, currentIsPickup);
+  // What the customer wants to buy, in full: the driver must read the whole list, never "...".
+  const shopItems = currentIsPickup && isShoppingFavor(o)
+    ? String((txt.store && txt.store.items) || cleanMandadoText(o.description || o.itemsText || '')).trim()
+    : '';
+  if (shopItems && txt.sub) txt.sub = txt.sub.replace(shopItems, '').replace(/\s*·\s*$/, '').trim();
+  const shopList = shopItems ? `<div style="margin-top:10px;padding:12px 14px;border-radius:14px;background:${t.card};border:1px solid ${t.line}">
+      <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${t.tx3};margin-bottom:6px">Lista del cliente</div>
+      <div style="font-size:15px;line-height:1.45;color:${t.tx};white-space:pre-wrap;word-break:break-word;max-height:34vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${esc(shopItems)}</div>
+    </div>` : '';
   const stopBlock = `<div style="display:flex;align-items:center;gap:12px">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;color:${t.tx3};font-weight:600">${esc(txt.verb)}</div>
@@ -6827,7 +6836,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
         ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:${isExpanded ? 2 : 1};-webkit-box-orient:vertical;overflow:hidden">${esc(txt.sub)}</div>` : ''}
       </div>
       ${navUrl ? `<a href="${esc(navUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Navegar con Google Maps" title="Navegar" style="width:52px;height:52px;border-radius:26px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none">${dIcon('nav', 22, t.brandTx)}</a>` : ''}
-    </div>`;
+    </div>${shopList}`;
 
   // Lo que viene después (con varios pedidos)
   let nextChips = '';
