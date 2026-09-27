@@ -68,7 +68,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
 
   modalWrapper.innerHTML = `
     <div class="modal-overlay" id="${modalId}-overlay" style="
-      position:fixed; top:0; left:0; width:100%; height:100lvh; background:rgba(0,0,0,${slideFromRight ? '0.15' : (isFullscreen ? '1' : '0.45')});
+      position:fixed; top:0; left:0; width:100%; height:100lvh; background:rgba(11,11,12,${slideFromRight ? '0.2' : (isFullscreen ? '1' : '0.5')});
       display:flex !important; align-items:${slideFromRight ? 'stretch' : (isFullscreen ? 'stretch' : 'flex-start')} !important; justify-content:${slideFromRight ? 'flex-end' : 'center'} !important;
       animation: fadeIn 0.25s ease-out !important;
       will-change: background;
@@ -82,9 +82,9 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
         will-change: transform, opacity;
         transform: translateZ(0);
       ">
-        ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(255,255,255,0.55); border-radius:var(--radius-full); position:absolute; top:6px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab; box-shadow: 0 1px 2px rgba(0,0,0,0.15);"></div>` : ''}
+        ${!isFullscreen ? `<div class="modal-handle" id="${modalId}-handle" style="width:44px; height:5px; background:rgba(120,113,108,0.35); border-radius:var(--radius-full); position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:200; cursor:grab;"></div>` : ''}
         ${!hideHeader && !isFullscreen ? `
-          <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1.5px solid rgba(0,0,0,0.06); z-index:90; flex-shrink:0; ${headerBackground ? `background:${headerBackground};` : 'background:var(--color-bg-secondary);'}">
+          <div class="modal-header" id="${modalId}-header-drag" style="display:flex; align-items:center; justify-content:space-between; padding:22px 20px 14px; border-bottom:1px solid var(--color-border-light); z-index:90; flex-shrink:0; ${headerBackground ? `background:${headerBackground};` : 'background:var(--color-bg);'}">
             <h3 style="font-family:var(--font-display); font-size:1.2rem; font-weight:900; margin:0; letter-spacing:-0.01em; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-primary);'}">${title}</h3>
             <button class="modal-close" id="${modalId}-close-btn" aria-label="Cerrar" style="width:44px; height:44px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:background 0.2s; ${headerTextColor ? `color:${headerTextColor};` : 'color:var(--color-text-secondary);'}">${icon('close', 22)}</button>
           </div>
@@ -124,10 +124,10 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
 
     dialog.style.animation = 'none';
     dialog.offsetHeight; // Force reflow
-    dialog.style.transition = 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)';
+    dialog.style.transition = 'transform 0.22s cubic-bezier(0.4, 0, 1, 1)'; // exits accelerate and are quicker than entrances
     dialog.style.transform = slideFromRight ? 'translateX(100%)' : 'translateY(100%)';
     
-    overlay.style.transition = 'background-color 0.24s ease-out, opacity 0.24s ease-out';
+    overlay.style.transition = 'background-color 0.22s ease-in, opacity 0.22s ease-in';
     overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
     overlay.style.opacity = '0';
     
@@ -313,11 +313,11 @@ export function closeMultipleModals(count = 1, isPopState = false) {
     if (dialog) {
       dialog.style.animation = 'none';
       dialog.offsetHeight; // Force reflow
-      dialog.style.transition = 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)';
+      dialog.style.transition = 'transform 0.22s cubic-bezier(0.4, 0, 1, 1)'; // exits accelerate and are quicker than entrances
       dialog.style.transform = modal.slideFromRight ? 'translateX(100%)' : 'translateY(100%)';
     }
     if (overlay) {
-      overlay.style.transition = 'background-color 0.24s ease-out, opacity 0.24s ease-out';
+      overlay.style.transition = 'background-color 0.22s ease-in, opacity 0.22s ease-in';
       overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
       overlay.style.opacity = '0';
     }

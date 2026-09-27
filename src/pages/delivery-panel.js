@@ -1758,7 +1758,7 @@ export async function renderDeliveryPanel(containerArg) {
   ensureSheetStyles();
   const drawerIsLight = getDriverMapTheme() === 'light';
   const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  deliveryDrawerEl.style.cssText = `position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 86vw); background: ${drawerIsLight ? '#ffffff' : '#111722'}; color: var(--driver-text-primary); border-left: 1px solid var(--driver-border); box-shadow: -12px 0 40px rgba(0,0,0,${drawerIsLight ? '0.12' : '0.5'}); z-index: 10001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; border-top-left-radius: 24px; border-bottom-left-radius: 24px; font-family: var(--font-body, sans-serif);`;
+  deliveryDrawerEl.style.cssText = `position: fixed; top: 0; left: 0; bottom: 0; width: min(320px, 86vw); background: ${drawerIsLight ? '#ffffff' : '#111722'}; color: var(--driver-text-primary); border-right: 1px solid var(--driver-border); box-shadow: 12px 0 40px rgba(0,0,0,${drawerIsLight ? '0.12' : '0.5'}); z-index: 10001; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1); display: flex; flex-direction: column; border-top-right-radius: 24px; border-bottom-right-radius: 24px; font-family: var(--font-body, sans-serif);`;
   const drawerTile = (iconName, bg, fg) => `<div class="dsheet-tile" style="background:${bg}; color:${fg};">${icon(iconName, 20)}</div>`;
   const drawerTone = (dark, light) => drawerIsLight ? light : dark;
   const drawerItem = ({ id, href, iconName, bg, fg, title, subtitle }) => {
@@ -1798,19 +1798,40 @@ export async function renderDeliveryPanel(containerArg) {
   document.body.appendChild(deliveryDrawerEl);
 
   const openDeliveryDrawer = () => {
+    deliveryDrawerEl.style.transition = 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)';
     deliveryDrawerEl.style.transform = 'translateX(0)';
     deliveryBackdropEl.style.opacity = '1';
     deliveryBackdropEl.style.pointerEvents = 'auto';
   };
   window.__openDeliveryDrawer = openDeliveryDrawer;
   const closeDeliveryDrawer = () => {
-    deliveryDrawerEl.style.transform = 'translateX(100%)';
+    deliveryDrawerEl.style.transition = 'transform 0.22s cubic-bezier(0.4, 0, 1, 1)';
+    deliveryDrawerEl.style.transform = 'translateX(-100%)';
     deliveryBackdropEl.style.opacity = '0';
     deliveryBackdropEl.style.pointerEvents = 'none';
   };
 
   window.__closeDeliveryDrawer = closeDeliveryDrawer;
   deliveryBackdropEl.addEventListener('click', closeDeliveryDrawer);
+
+  // Swipe it back toward the edge it came from (left) to close.
+  let drawerStartX = null;
+  deliveryDrawerEl.addEventListener('touchstart', (e) => {
+    drawerStartX = e.touches[0].clientX;
+    deliveryDrawerEl.style.transition = 'none';
+  }, { passive: true });
+  deliveryDrawerEl.addEventListener('touchmove', (e) => {
+    if (drawerStartX === null) return;
+    const dx = Math.min(0, e.touches[0].clientX - drawerStartX);
+    deliveryDrawerEl.style.transform = `translateX(${dx}px)`;
+  }, { passive: true });
+  deliveryDrawerEl.addEventListener('touchend', (e) => {
+    if (drawerStartX === null) return;
+    const dx = e.changedTouches[0].clientX - drawerStartX;
+    drawerStartX = null;
+    if (dx < -60) closeDeliveryDrawer();
+    else openDeliveryDrawer();
+  });
   document.getElementById('delivery-drawer-close-btn')?.addEventListener('click', closeDeliveryDrawer);
 
   // Close drawer on nav link click

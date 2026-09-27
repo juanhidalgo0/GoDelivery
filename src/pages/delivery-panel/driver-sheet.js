@@ -154,9 +154,11 @@ export function openDriverSheet({ id, iconName, tone = 'slate', title, subtitle 
     if (closed) return;
     closed = true;
     document.removeEventListener('keydown', onKey);
+    backdrop.style.transition = 'opacity 0.22s ease-in';
+    sheet.style.transition = 'transform 0.22s cubic-bezier(0.4, 0, 1, 1)';
     backdrop.style.opacity = '0';
     sheet.style.transform = 'translateY(100%)';
-    setTimeout(() => backdrop.remove(), 280);
+    setTimeout(() => backdrop.remove(), 240);
     onClose?.();
   };
   document.addEventListener('keydown', onKey);

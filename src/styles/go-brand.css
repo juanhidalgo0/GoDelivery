@@ -891,3 +891,20 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
   background: var(--go-ink) !important;
   box-shadow: none !important;
 }
+
+/* ---------- Movimiento GO! ----------
+   Hojas: suben desde abajo (acciones y detalles del momento).
+   Páginas: entran desde la derecha y vuelven hacia la derecha.
+   Menú ☰: sale del lado donde está su botón (izquierda).
+   Entrar: 300–350 ms, desacelerando. Salir: 220 ms, acelerando. */
+@keyframes springUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal, .modal-overlay, .slide-overlay, #delivery-drawer, [role="dialog"] {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
