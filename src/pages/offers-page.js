@@ -37,7 +37,8 @@ export async function renderOffersPage(container) {
       <!-- Header estilo Mis Chats (Sticky) -->
       <div class="go-page-header" style="background: var(--go-ink); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 200; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); flex-shrink: 0;">
 
-        <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 16px; position: relative; z-index: 2;">
+        <div style="height: 56px; padding: 0 16px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 2;">
+          <button type="button" class="go-icon-btn" aria-label="Volver" onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')">${icon('chevronLeft', 20)}</button>
           <span class="go-title" style="font-size: 22px; color: white;">Ofertas y Descuentos</span>
         </div>
       </div>
