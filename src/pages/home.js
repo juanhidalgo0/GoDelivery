@@ -115,14 +115,14 @@ export async function renderHome(content) {
         <!-- Big entry points (Comida & GoMarket) -->
         <div class="go-feature-grid">
           <a href="#/category/Comida" class="go-feature">
-            <img src="/images/categories/restaurants.png" alt="" loading="lazy" decoding="async" />
+            <img src="/images/categories/go-comida.webp" alt="" loading="lazy" decoding="async" />
             <span class="go-feature-text">
               <span class="go-eyebrow">Tus antojos, rápido</span>
               <span class="go-title">Comida</span>
             </span>
           </a>
           <a href="#/category/GoMarket" id="gomarket-card" class="go-feature">
-            <img src="/images/categories/gomarket.png" alt="" loading="lazy" decoding="async" />
+            <img src="/images/categories/go-gomarket.webp" alt="" loading="lazy" decoding="async" />
             <span class="go-feature-text">
               <span class="go-eyebrow">Tu súper en minutos</span>
               <span class="go-title">GoMarket</span>
@@ -1184,10 +1184,10 @@ function renderAppOnlySection(products, comercios, offers = []) {
 }
 
 const CATEGORY_IMAGE_MAP = {
-  'Restaurante': '/images/categories/restaurants.png',
-  'GoMarket': '/images/categories/gomarket.png',
-  'Súper': '/images/categories/supermarket.png',
-  'Supermercado': '/images/categories/supermarket.png',
+  'Restaurante': '/images/categories/go-comida.webp',
+  'GoMarket': '/images/categories/go-gomarket.webp',
+  'Súper': '/images/categories/go-super.webp',
+  'Supermercado': '/images/categories/go-super.webp',
   'Pollería': '/images/categories/polleria.png',
   'Polleria': '/images/categories/polleria.png',
   'Carnicería': '/images/categories/carniceria.png',
@@ -1195,22 +1195,22 @@ const CATEGORY_IMAGE_MAP = {
   'Verdulería': '/images/categories/verduleria.png',
   'Verduleria': '/images/categories/verduleria.png',
   'Farmacia': '/images/categories/farmacia.png',
-  'Kiosco': '/images/categories/kiosco.png',
-  'Almacén': '/images/categories/almacen.png',
-  'Almacen': '/images/categories/almacen.png',
+  'Kiosco': '/images/categories/go-kiosco.webp',
+  'Almacén': '/images/categories/go-super.webp',
+  'Almacen': '/images/categories/go-super.webp',
   'Librería': '/images/categories/libreria.png',
   'Libreria': '/images/categories/libreria.png',
   'Mascotas': '/images/categories/mascotas.png',
-  'Helados': '/images/categories/helados.png',
-  'Heladería': '/images/categories/heladeria.png',
-  'Heladeria': '/images/categories/heladeria.png',
+  'Helados': '/images/categories/go-heladeria.webp',
+  'Heladería': '/images/categories/go-heladeria.webp',
+  'Heladeria': '/images/categories/go-heladeria.webp',
   'Fiambrería': '/images/categories/fiambreria.png',
   'Fiambreria': '/images/categories/fiambreria.png',
   'Postres': '/images/categories/postres.png',
-  'Comida': '/images/categories/restaurants.png',
+  'Comida': '/images/categories/go-comida.webp',
   'Bazar': '/images/categories/bazar.png',
-  'Tecnología': '/assets/categories/technology.png',
-  'Tecnologia': '/assets/categories/technology.png',
+  'Tecnología': '/images/categories/go-tecnologia.webp',
+  'Tecnologia': '/images/categories/go-tecnologia.webp',
 };
 
 function renderCategories(categories, active) {
