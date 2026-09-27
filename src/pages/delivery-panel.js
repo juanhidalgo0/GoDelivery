@@ -1774,6 +1774,11 @@ export async function renderDeliveryPanel(containerArg) {
       <div class="dsheet-label">Ayuda</div>
       ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
       ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
+      <div class="dsheet-label">Jornada</div>
+      <button type="button" id="delivery-drawer-session-btn" class="dsheet-row go-drawer-session${user?.isOnline ? ' is-online' : ''}">
+        <div class="dsheet-tile go-drawer-session-tile">${icon('power', 20)}</div>
+        <div style="flex:1; min-width:0;"><div class="dsheet-row-title" data-session-title>${user?.isOnline ? 'Desconectarme' : 'Conectarme'}</div><div class="dsheet-row-sub" data-session-sub>${user?.isOnline ? 'Terminar la jornada de hoy' : 'Empezar a recibir pedidos'}</div></div>
+      </button>
       <div class="go-drawer-brand" aria-hidden="true">
         <span class="go-drawer-brand-ring"><img src="/logo-brand.jpg?v=2" alt="" /></span>
         <span class="go-drawer-brand-name">GO! Delivery</span>
@@ -1783,7 +1788,16 @@ export async function renderDeliveryPanel(containerArg) {
   `;
   document.body.appendChild(deliveryDrawerEl);
 
+  const syncDrawerSession = () => {
+    const online = getState().user?.isOnline === true;
+    const row = document.getElementById('delivery-drawer-session-btn');
+    if (!row) return;
+    row.classList.toggle('is-online', online);
+    row.querySelector('[data-session-title]').textContent = online ? 'Desconectarme' : 'Conectarme';
+    row.querySelector('[data-session-sub]').textContent = online ? 'Terminar la jornada de hoy' : 'Empezar a recibir pedidos';
+  };
   const openDeliveryDrawer = () => {
+    syncDrawerSession();
     deliveryDrawerEl.style.transition = 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)';
     deliveryDrawerEl.style.transform = 'translateX(0)';
     deliveryBackdropEl.style.opacity = '1';
@@ -1823,6 +1837,13 @@ export async function renderDeliveryPanel(containerArg) {
   // Close drawer on nav link click
   ['delivery-drawer-history','delivery-drawer-finances','delivery-drawer-config'].forEach(id => {
     document.getElementById(id)?.addEventListener('click', closeDeliveryDrawer);
+  });
+
+  document.getElementById('delivery-drawer-session-btn')?.addEventListener('click', () => {
+    closeDeliveryDrawer();
+    const current = getState().user || user;
+    if (current?.isOnline) promptEndSession(current);
+    else promptStartSession(current);
   });
 
   // Support button
@@ -6512,16 +6533,16 @@ function renderStatusBar(user) {
   } else {
     centerBadgeHtml = `
       <!-- CENTER: MINIMALIST JORNADA DE HOY PILL -->
-      <button id="status-today-pill" onclick="window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: 'finances' }));" aria-label="Ver mis ganancias de hoy" style="
+      <div id="status-today-pill" role="status" aria-label="Ganancias de hoy" style="
         height: 40px; padding: 0 14px; border-radius: 20px;
         background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'};
         border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
-        display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-family: inherit;
+        display: flex; align-items: center; gap: 6px; cursor: default; user-select: none; font-family: inherit; pointer-events: none;
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};
       ">
         <strong style="font-family: var(--font-display, 'Outfit', sans-serif); color: ${isLight ? '#0F172A' : '#F3F4F6'}; font-weight: 700; font-size: 16px;">${formatPrice(todayEarn)}</strong>
         <span style="color: ${isLight ? '#64748B' : '#8A929D'}; font-size: 12px;">hoy · ${todayCount} ${todayCount === 1 ? 'pedido' : 'pedidos'}</span>
-      </button>
+      </div>
     `;
   }
 
@@ -6537,8 +6558,8 @@ function renderStatusBar(user) {
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'}; display: flex; align-items: center; justify-content: center;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
       </button>
-      <!-- LEFT: STATUS BADGE -->
-      <div style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 20px;
+      <!-- LEFT: STATUS BADGE (tap to connect / disconnect) -->
+      <button type="button" id="session-toggle-btn" aria-label="${finalIsOnline ? 'Desconectarme' : 'Conectarme'}" style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; border-radius: 20px; cursor: pointer; font-family: inherit;
         background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'}; border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};">
         <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
@@ -6546,7 +6567,8 @@ function renderStatusBar(user) {
         <span style="font-size: 14px; font-weight: 600; color: ${isLight ? '#0F172A' : '#F3F4F6'};">
           ${finalIsOnline ? 'En línea' : 'Desconectado'}
         </span>
-      </div>
+        <span style="display:inline-flex; color: ${isLight ? '#64748B' : '#8A929D'};">${icon('power', 15)}</span>
+      </button>
       </div>
 
       ${centerBadgeHtml}

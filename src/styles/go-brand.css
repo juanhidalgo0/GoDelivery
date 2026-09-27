@@ -2154,3 +2154,10 @@ body.driver-light-mode .go-offline-connect { background: var(--go-ink); color: #
 @keyframes goChallengeFill { from { width: 0; } to { width: var(--to); } }
 .go-challenge small { display: block; margin-top: 8px; font-size: 12px; color: var(--go-text-2); }
 @media (prefers-reduced-motion: reduce) { .go-challenge.is-moved .go-challenge-track span { animation: none; } }
+
+/* Driver drawer: connect / disconnect row */
+.go-drawer-session .go-drawer-session-tile { background: var(--go-ink); color: #fff; }
+html.is-delivery-mode .go-drawer-session .go-drawer-session-tile { background: #f7f5f1; color: var(--go-ink); }
+.go-drawer-session.is-online .go-drawer-session-tile { background: rgba(225, 29, 72, 0.12) !important; color: var(--go-red) !important; }
+.go-drawer-session.is-online .dsheet-row-title { color: var(--go-red); }
+#session-toggle-btn:active { transform: scale(0.97); }
