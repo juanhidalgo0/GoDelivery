@@ -1,0 +1,16 @@
+{
+  "name": "go-reel",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.527",
+    "@remotion/google-fonts": "^4.0.527",
+    "jimp": "^1.6.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.527"
+  }
+}
