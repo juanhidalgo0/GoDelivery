@@ -1563,7 +1563,7 @@ async function fetchTurnByTurnRoute(startLng, startLat, endLng, endLat) {
   return generateStreetGridFallbackRoute(startLng, startLat, endLng, endLat);
 }
 
-export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetStage = 'pickup') {
+export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetStage = 'pickup', opts = {}) {
   const generation = ++routeGeneration; // a newer draw also supersedes this one
   window.lastDriverRouteArgs = { driverPos, pickupPos, dropoffPos, targetStage };
   lastActiveOrderRouteParams = { pickupPos, dropoffPos, targetStage };
@@ -1686,8 +1686,9 @@ export async function drawDriverRoute(driverPos, pickupPos, dropoffPos, targetSt
 
   if (effectiveDropoff) {
     const dLngLat = [Number(effectiveDropoff.lng), Number(effectiveDropoff.lat)];
-    // Mismo número que en el panel: 2 si todavía falta retirar, 1 si ya se retiró
-    const dropLabel = (targetStage === 'pickup' && effectivePickup) ? 2 : 1;
+    // Mismo número que en el panel: la entrega es la parada 2 (el retiro, hecho o no, es la 1);
+    // sin retiro (Go Cash) es la 1
+    const dropLabel = opts.dropLabel || ((targetStage === 'pickup' && effectivePickup) ? 2 : 1);
     if (dropoffMarker) dropoffMarker.getElement().innerHTML = stopPinHtml(false, dropLabel);
     if (!dropoffMarker) {
       const el = document.createElement('div');
@@ -1741,7 +1742,8 @@ export async function renderMultiStopRoute(stops = [], driverPos = null) {
   verifiedStops.forEach((stop, index) => {
     const lngLat = [Number(stop.coords[0]), Number(stop.coords[1])];
     const isPickup = stop.type === 'pickup';
-    const stopNumber = index + 1;
+    // El número del recorrido (igual que en el panel), aunque alguna parada no tenga ubicación
+    const stopNumber = stop.stepNumber || (stops.indexOf(stop) + 1);
 
     const el = document.createElement('div');
     el.style.cssText = `
@@ -2067,7 +2069,7 @@ function renderGpsSimulatorBar() {
   bar.id = 'driver-gps-simulator-bar';
   bar.style.cssText = `
     position: fixed;
-    top: max(235px, calc(220px + env(safe-area-inset-top, 0px)));
+    top: max(235px, calc(220px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))));
     left: 14px;
     z-index: 9995;
     background: ${isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(9, 13, 22, 0.94)'};

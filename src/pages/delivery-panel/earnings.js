@@ -255,7 +255,7 @@ export async function showBalanceManagementModal(user, debt) {
   const grossDebt = netDebt + totalCouponsCredit;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = `padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)) 20px; background:var(--driver-bg-panel); height:100%; display:flex; flex-direction:column; overflow:hidden; justify-content:space-between;`;
+  modalEl.style.cssText = `padding: 20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 20px; background:var(--driver-bg-panel); height:100%; display:flex; flex-direction:column; overflow:hidden; justify-content:space-between;`;
   
   modalEl.innerHTML = `
     <div style="flex:1; display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:2px;">
@@ -381,7 +381,7 @@ export async function showRegularizeModal(netDebt, grossDebt = netDebt, totalCou
   const isLight = currentTheme === 'light';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = `padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)) 20px; background:var(--driver-bg-panel); color:var(--driver-text-primary); height:100%; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden;`;
+  modalEl.style.cssText = `padding: 20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 20px; background:var(--driver-bg-panel); color:var(--driver-text-primary); height:100%; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden;`;
   
   const bankAlias = getState().bankAlias || 'godelivery.oficial';
   const bankOwner = getState().bankOwner || 'GoDelivery S.R.L.';

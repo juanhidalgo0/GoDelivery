@@ -13,7 +13,7 @@ export async function showDriverSafetyModal(user) {
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = `
-    padding: 16px 18px calc(24px + env(safe-area-inset-bottom, 16px)) 18px;
+    padding: 16px 18px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 18px;
     background: var(--driver-bg-panel);
     color: var(--driver-text-primary);
     display: flex;
@@ -207,7 +207,7 @@ export function showDriverHelpBottomSheet(user) {
     background: ${isLight ? '#ffffff' : '#0f172a'};
     border-top-left-radius: 28px; border-top-right-radius: 28px;
     border-top: 1.5px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.12)'};
-    padding: 14px 20px max(24px, calc(16px + env(safe-area-inset-bottom, 16px))) 20px;
+    padding: 14px 20px max(24px, calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px)))) 20px;
     box-sizing: border-box;
     transform: translateY(100%);
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);

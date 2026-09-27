@@ -18,7 +18,7 @@ export async function showDriverProfileEditModal(user) {
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = `
-    padding: 16px 20px calc(36px + env(safe-area-inset-bottom, 24px)) 20px;
+    padding: 16px 20px calc(36px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 24px))) 20px;
     background: var(--driver-bg-panel);
     color: var(--driver-text-primary);
     display: flex;

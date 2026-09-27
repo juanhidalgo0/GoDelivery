@@ -37,8 +37,8 @@ export function renderDriverBottomNav(activeTab, isLight) {
     <div id="driver-bottom-nav" style="
       position: fixed; left: 0; right: 0; bottom: 0;
       display: flex; align-items: stretch;
-      height: calc(${DRIVER_NAV_BAR_HEIGHT}px + env(safe-area-inset-bottom, 0px));
-      padding-bottom: env(safe-area-inset-bottom, 0px);
+      height: calc(${DRIVER_NAV_BAR_HEIGHT}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+      padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px));
       background: ${bg};
       border-top: 1px solid ${border};
       box-shadow: 0 -4px 20px ${shadow};

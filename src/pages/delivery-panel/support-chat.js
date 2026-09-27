@@ -56,7 +56,7 @@ export async function openDriverDirectSupportChat(user) {
     ">
       <!-- HEADER -->
       <div style="
-        padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px;
+        padding: calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px;
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
         color: white; display: flex; align-items: center; justify-content: space-between;
         box-shadow: 0 2px 10px rgba(2,132,199,0.25); z-index: 10;
@@ -120,7 +120,7 @@ export async function openDriverDirectSupportChat(user) {
 
       <!-- FOOTER / INPUT BAR -->
       <div style="
-        padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 10px)) 14px;
+        padding: 10px 14px calc(10px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px))) 14px;
         background: var(--driver-bg-panel-b);
         border-top: 1px solid var(--driver-border);
         position: relative;

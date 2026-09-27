@@ -83,7 +83,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       
       document.getElementById('reviewer-login-btn')?.addEventListener('click', () => {
         const modalEl = document.createElement('div');
-        modalEl.style.cssText = 'padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 16px)) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
+        modalEl.style.cssText = 'padding: 24px 24px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
         modalEl.innerHTML = `
           <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
           <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales proporcionadas para revisar la aplicación.</p>
@@ -222,7 +222,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     const isNative = !!window.Capacitor;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
     const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+    const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
     content.innerHTML = `
       <div class="profile-page" style="background:var(--color-bg); padding: 0 0 90px 0; width: 100%; min-height: 100%; box-sizing: border-box;">

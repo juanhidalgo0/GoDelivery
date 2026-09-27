@@ -1441,9 +1441,15 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       const clientTokens = await getUserTokens(after.userId);
       const driverName = after.driverName || "un repartidor";
       const title = after.isTrip ? "🚕 Chofer Asignado" : "🛵 Repartidor Asignado";
-      const body = (after.isFavor || after.isTrip)
+      // El código de entrega va desde el primer aviso: si se pierde el de "en camino" (app abierta,
+      // notificación descartada), el cliente igual lo tiene. Los viajes y encomiendas no lo usan.
+      const isEncomiendaOrder = after.favorType === "encomienda" || after.serviceType === "encomienda";
+      const codeLine = after.verificationCode && !after.isTrip && !isEncomiendaOrder
+        ? ` Tu código de entrega es ${after.verificationCode}.`
+        : "";
+      const body = ((after.isFavor || after.isTrip)
         ? `Tu servicio fue asignado a ${driverName} y está en camino.`
-        : `Tu pedido fue asignado a ${driverName}.`;
+        : `Tu pedido fue asignado a ${driverName}.`) + codeLine;
 
       await sendPush(clientTokens, {
         title,
@@ -1505,6 +1511,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
 
           try {
             // Find active orders (confirmed or ready) from the same commerce that have a driver assigned
+            if (!after.comercioId) throw Object.assign(new Error("sin comercio"), { skip: true });
             const assignedOrdersSnap = await db.collection("orders")
               .where("comercioId", "==", after.comercioId)
               .where("status", "in", ["confirmed", "ready"])
@@ -1542,7 +1549,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
               }
             }
           } catch (err) {
-            logger.error("Error in co-pickup targeted scan:", err);
+            if (!err.skip) logger.error("Error in co-pickup targeted scan:", err);
           }
 
           break;

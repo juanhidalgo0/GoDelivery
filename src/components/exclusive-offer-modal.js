@@ -470,7 +470,7 @@ export function showExclusiveOfferOverlay(batch, user) {
     <div class="exclusive-offer-card" style="
       max-width: 480px; width: 100%; box-sizing: border-box; position: relative;
       background: ${t.sheet}; border-top: 1px solid ${t.line}; border-radius: 24px 24px 0 0;
-      padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+      padding: 10px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
       display: flex; flex-direction: column; gap: 16px; box-shadow: ${t.shadow};
       max-height: 92vh; overflow-y: auto; color: ${t.tx};
       animation: goOfferUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);

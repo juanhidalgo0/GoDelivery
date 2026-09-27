@@ -909,7 +909,7 @@ function updateDirectCartBar(comercioId, activeOrder = currentActiveOrder) {
 
     bar.style.cssText = `
       position: fixed !important;
-      bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+      bottom: calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
       left: 16px !important;
       right: 16px !important;
       z-index: 99999999 !important;
@@ -964,7 +964,7 @@ function updateDirectCartBar(comercioId, activeOrder = currentActiveOrder) {
 
     bar.style.cssText = `
       position: fixed !important;
-      bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+      bottom: calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
       left: 16px !important;
       right: 16px !important;
       z-index: 99999999 !important;
@@ -1081,7 +1081,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
   content.innerHTML = `
     <div class="comercio-page" style="${isDirect ? 'padding-bottom: 120px;' : ''}">
       <!-- Minimal Sticky Navbar -->
-      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top, 0px)) 16px 0 16px; box-sizing: border-box; transition: background 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; background: transparent; border-bottom: 1px solid transparent;">
+      <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); display: flex; align-items: center; justify-content: space-between; padding: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 0 16px; box-sizing: border-box; transition: background 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; background: transparent; border-bottom: 1px solid transparent;">
         <div style="display: flex; align-items: center; min-width: 0; flex: 1;">
           ${isDirect ? `
             <div id="comercio-direct-badge" style="background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-radius: 100px; padding: 6px 12px; font-size: 11.5px; font-weight: 850; color: var(--color-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(225,29,72,0.15); flex-shrink: 0; transition: opacity 0.2s ease, transform 0.2s ease;">
@@ -1106,7 +1106,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
       </div>
 
       <!-- Banner Layer -->
-      <div class="comercio-header" style="position: relative; height: 50vw; max-height: 250px; margin-top: calc(-56px - env(safe-area-inset-top, 0px)); overflow: hidden;">
+      <div class="comercio-header" style="position: relative; height: 50vw; max-height: 250px; margin-top: calc(-56px - max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); overflow: hidden;">
         ${comercio.banner ? `<img id="comercio-banner-img" src="${comercio.banner}" alt="${comercio.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover; will-change: transform;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
         <div class="comercio-header-overlay" style="position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%);"></div>
       </div>
@@ -1164,7 +1164,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
       </div>
 
       <div class="comercio-products" style="min-height: 100vh; padding-top: 16px;">
-        <div id="comercio-sticky-filters" style="position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 90; background: var(--color-bg); padding-top: 8px; padding-bottom: 8px;">
+        <div id="comercio-sticky-filters" style="position: sticky; top: calc(56px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); z-index: 90; background: var(--color-bg); padding-top: 8px; padding-bottom: 8px;">
         <!-- Search bar -->
         <div class="comercio-search-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); margin-top: 12px;">
           <div style="position:relative; width: 100%; display:flex; align-items:center; background:var(--color-bg-secondary); border: 1.5px solid var(--color-border-light); border-radius:16px; padding:0 16px; height:46px; box-shadow:var(--shadow-xs); transition: all 0.2s;">

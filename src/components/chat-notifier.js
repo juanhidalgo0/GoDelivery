@@ -179,7 +179,7 @@ function updateGlobalFAB() {
     fab.id = 'chat-global-fab';
     fab.style.cssText = `
       position: fixed;
-      bottom: calc(var(--navbar-height, 60px) + 20px + env(safe-area-inset-bottom, 0px));
+      bottom: calc(var(--navbar-height, 60px) + 20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
       right: 20px;
       width: 56px;
       height: 56px;

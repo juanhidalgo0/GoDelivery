@@ -279,7 +279,7 @@ export async function initPushNotifications() {
           }
 
           if (title) {
-            showToast(`${title}: ${body}`, 'info');
+            showToast(`${title}: ${body}`, 'info', /c[oó]digo/i.test(`${title} ${body}`) ? 12000 : undefined); // con el código de entrega, que dure
             
             // Check if this is an exclusive offer notification to trigger continuous loops
             const isExclusive = title.includes("OFERTA") || title.includes("Oferta Exclusiva") || (notification.data && (notification.data.type === "exclusive_offer" || notification.data.tag?.includes("exclusive-offer")));
@@ -474,7 +474,7 @@ export async function initPushNotifications() {
 
           // Show in-app premium toast
           if (title) {
-            showToast(`${title}: ${body}`, 'info');
+            showToast(`${title}: ${body}`, 'info', /c[oó]digo/i.test(`${title} ${body}`) ? 12000 : undefined); // con el código de entrega, que dure
             AudioManager.playSound('/assets/sounds/notification.mp3');
             if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
           }
@@ -506,7 +506,7 @@ export async function initPushNotifications() {
           });
         }
         if (title) {
-          showToast(`${title}: ${body}`, 'info');
+          showToast(`${title}: ${body}`, 'info', /c[oó]digo/i.test(`${title} ${body}`) ? 12000 : undefined); // con el código de entrega, que dure
           AudioManager.playSound('/assets/sounds/notification.mp3');
           if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
         }

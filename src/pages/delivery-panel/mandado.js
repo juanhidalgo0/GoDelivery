@@ -268,7 +268,7 @@ export function openMandadoPurchaseModal({ order, isEdit = false, onConfirm, onC
       </div>
 
       <!-- ACTION BUTTONS -->
-      <div style="padding: 0 18px calc(18px + max(env(safe-area-inset-bottom, 0px), 24px)) 18px; display: flex; gap: 10px; flex-shrink: 0; background: ${isLight ? '#ffffff' : '#0b111e'};">
+      <div style="padding: 0 18px calc(18px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 24px)) 18px; display: flex; gap: 10px; flex-shrink: 0; background: ${isLight ? '#ffffff' : '#0b111e'};">
         <button id="mandado-modal-cancel-btn" style="
           flex: 1; height: 50px; border-radius: 16px;
           background: var(--driver-fill-subtle);

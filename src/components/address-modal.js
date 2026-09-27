@@ -230,7 +230,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
              </div>
 
              <!-- Bottom Details Panel -->
-             <div id="address-bottom-panel" style="flex-shrink: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 8px)); background: var(--color-bg); z-index: 20; border-top: 1px solid var(--color-border-light); box-shadow: 0 -4px 16px rgba(0,0,0,0.04); width:100%; box-sizing:border-box;">
+             <div id="address-bottom-panel" style="flex-shrink: 0; padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 8px))); background: var(--color-bg); z-index: 20; border-top: 1px solid var(--color-border-light); box-shadow: 0 -4px 16px rgba(0,0,0,0.04); width:100%; box-sizing:border-box;">
                <!-- Dirección seleccionada -->
                <div id="current-selected-address-container" style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px; background: var(--color-bg-secondary); padding: 8px 12px; border-radius: 12px; border: 1.5px solid var(--color-border-light);">
                  <div style="color: var(--color-primary); margin-top: 2px; flex-shrink: 0;">${icon('mapPin', 16)}</div>
@@ -1201,7 +1201,7 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     </div>
 
     <!-- Sticky Footer -->
-    <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10;">
+    <div style="padding:20px; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0))); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10;">
        <button id="save-address-final" class="btn btn-primary" style="width:100%; height:56px; border-radius:18px; font-weight:900; font-size:16px; background:#E11D48; border:none; box-shadow: 0 8px 20px rgba(225, 29, 72, 0.2);">Guardar y continuar</button>
        ${config.editAddress ? `
          <button id="delete-address-btn" style="width:100%; height:48px; border:1.5px solid var(--color-border); border-radius:18px; font-weight:800; font-size:14px; background:transparent; color:#EF4444; border-color:#EF4444; cursor:pointer; transition:all 0.2s;">

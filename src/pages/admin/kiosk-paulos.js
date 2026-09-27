@@ -23,7 +23,7 @@ export async function renderAdminKioskPaulos() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 16px rgba(76,29,149,0.3); z-index:100;">
+      <div style="background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 16px rgba(76,29,149,0.3); z-index:100;">
         <a href="#/admin/settings" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;">
           ${icon('chevronLeft', 24)}
         </a>

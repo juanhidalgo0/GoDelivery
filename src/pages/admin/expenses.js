@@ -99,7 +99,7 @@ export function renderAdminExpenses(container) {
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;width:100%;position:fixed;top:0;left:0;z-index:1000;overflow:hidden;background:var(--color-bg-secondary);">
       
       <!-- Fixed Header standard with Safe Area padding -->
-      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:calc(12px + env(safe-area-inset-top, 0px)) 16px 12px 16px;background:linear-gradient(135deg, #18181b 0%, #09090b 100%);border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 12px 16px;background:linear-gradient(135deg, #18181b 0%, #09090b 100%);border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
         
         <div style="display:flex;align-items:center;gap:10px;min-width:0;">
           <a href="#/admin" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;">
@@ -1068,7 +1068,7 @@ function openExpenseModal(existingExpense = null) {
 
   const renderModalContent = () => {
     return `
-      <form id="expense-form" style="display: flex; flex-direction: column; gap: 16px; padding: 4px 4px calc(24px + env(safe-area-inset-bottom, 0px)) 4px; max-height: calc(82dvh - env(safe-area-inset-bottom, 0px)); overflow-y: auto; box-sizing: border-box; font-family:var(--font-body);">
+      <form id="expense-form" style="display: flex; flex-direction: column; gap: 16px; padding: 4px 4px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 4px; max-height: calc(82dvh - max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); overflow-y: auto; box-sizing: border-box; font-family:var(--font-body);">
         
         <!-- Tab selector for Income vs Expense -->
         <div>
@@ -1688,7 +1688,7 @@ window.showModalReceiptFullscreen = (url) => {
   
   const closeBtn = document.createElement('div');
   closeBtn.innerHTML = '✕';
-  closeBtn.style.cssText = 'position:absolute; top:calc(20px + env(safe-area-inset-top, 0px)); right:20px; color:white; font-size:24px; font-weight:900; background:rgba(255,255,255,0.1); width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.15); cursor:pointer;';
+  closeBtn.style.cssText = 'position:absolute; top:calc(20px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); right:20px; color:white; font-size:24px; font-weight:900; background:rgba(255,255,255,0.1); width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.15); cursor:pointer;';
   
   overlay.appendChild(img);
   overlay.appendChild(closeBtn);

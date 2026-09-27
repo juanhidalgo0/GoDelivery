@@ -23,7 +23,7 @@ export async function renderMarketplace(content) {
     </style>
     <div class="marketplace-container" style="display:flex; flex-direction:column; height:100%; background:var(--color-bg); position:relative;">
       <!-- Header (Green Premium style) -->
-      <div style="background:linear-gradient(135deg, #10B981 0%, #059669 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(16, 185, 129, 0.2); z-index:100;">
+      <div style="background:linear-gradient(135deg, #10B981 0%, #059669 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(16, 185, 129, 0.2); z-index:100;">
         <a href="#/" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s;">
           ${icon('chevronLeft', 24)}
         </a>

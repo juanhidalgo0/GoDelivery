@@ -229,7 +229,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         <div id="v5-header-driver-card" style="flex:1; margin-left:10px; pointer-events:auto; min-width:0;"></div>
       </div>
       
-      <div style="position:absolute; top:calc(82px + env(safe-area-inset-top, 0px)); right:16px; z-index:100; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto;">
+      <div style="position:absolute; top:calc(82px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); right:16px; z-index:100; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto;">
         <div id="v5-driver-map-tip-badge" style="background:#10b981; color:white; font-size:12.5px; font-weight:900; padding:10px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.25); white-space:nowrap; box-shadow:0 4px 14px rgba(16,185,129,0.35); display:none; align-items:center; gap:6px; font-family:system-ui, -apple-system, sans-serif;">
           💵 Propina: <span id="v5-driver-map-tip-value">$0</span>
         </div>
@@ -305,7 +305,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       .map-container-v5 { position: absolute; inset: 0; z-index: 1; background: #12161f !important; }
       .map-container-v5 .maplibregl-canvas { filter: none !important; }
       
-      .tracking-v5-nav { position: absolute; top: calc(16px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
+      .tracking-v5-nav { position: absolute; top: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
       .v5-back-btn { pointer-events: auto; width: 44px; height: 44px; background: var(--color-surface); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--color-text); box-shadow: var(--shadow-md); border: 1px solid var(--color-border); }
       .v5-live-pill { background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: 8px 14px; border-radius: 100px; display: flex; align-items: center; gap: 6px; font-weight: 900; font-size: 11px; color: var(--color-danger); box-shadow: var(--shadow-sm); border: 1px solid var(--glass-border); }
       .v5-pulse-dot { width: 7px; height: 7px; background: var(--color-danger); border-radius: 50%; animation: pulse-v5 1.5s infinite; }
@@ -371,7 +371,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
 
       .v5-info-panel {
         position: absolute;
-        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
         left: 12px;
         right: 12px;
         background: var(--glass-bg, rgba(255, 255, 255, 0.96));
@@ -2896,7 +2896,7 @@ window.openOrderDetailsModal = function(order) {
 
   container.innerHTML = `
     <div id="v5-details-modal-backdrop" onclick="window.closeOrderDetailsModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
-    <div id="v5-details-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + env(safe-area-inset-bottom, 14px));">
+    <div id="v5-details-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 14px)));">
       
       <!-- Premium Red Header Bar -->
       <div style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center;">
@@ -2923,7 +2923,7 @@ window.openOrderDetailsModal = function(order) {
       </div>
  
       <!-- Content -->
-      <div style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 70px - env(safe-area-inset-bottom, 14px)); box-sizing: border-box;">
+      <div style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 70px - max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 14px))); box-sizing: border-box;">
         ${detailsHtml}
         ${isPending ? `
           <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; gap: 8px; width: 100%;">
@@ -2985,7 +2985,7 @@ window.openPriceBreakdownModal = function(order) {
 
   container.innerHTML = `
     <div id="v5-price-modal-backdrop" onclick="window.closePriceBreakdownModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
-    <div id="v5-price-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + env(safe-area-inset-bottom, 14px));">
+    <div id="v5-price-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 14px)));">
       
       <!-- Premium Red Header Bar -->
       <div style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center;">

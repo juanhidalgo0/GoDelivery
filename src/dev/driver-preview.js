@@ -1,7 +1,7 @@
 // SOLO DESARROLLO: vista previa del panel del repartidor con pedidos simulados.
 // Abrir con el servidor de desarrollo: /driver-preview.html (tamaño de celular).
 // No escribe nada en la base: aceptar, rechazar y deslizar solo avanzan el caso en pantalla.
-import { renderBottomDockContent, renderDriverStatusBarForPreview, calculateOptimalMultiStopSequence, confirmPickupDistance } from '../pages/delivery-panel.js';
+import { renderBottomDockContent, renderDriverStatusBarForPreview, calculateOptimalMultiStopSequence, confirmPickupDistance, numberRoute } from '../pages/delivery-panel.js';
 import { initDriverNavigationMap, updateDriverMapLocation, renderMultiStopRoute, clearDriverRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { showExclusiveOfferOverlay, hideExclusiveOfferOverlay, stopExclusiveOfferAlert } from '../components/exclusive-offer-modal.js';
 import { setState } from '../state.js';
@@ -113,7 +113,7 @@ const dock = document.getElementById('driver-footer-dock-container');
 
 function drawRoute() {
   if (!orders.length) { clearDriverRoute(); clearMultiStopMarkers(); return; }
-  const stops = calculateOptimalMultiStopSequence(DRIVER_POS, orders);
+  const stops = numberRoute(calculateOptimalMultiStopSequence(DRIVER_POS, orders), orders);
   renderMultiStopRoute(stops, DRIVER_POS).catch(() => {});
 }
 

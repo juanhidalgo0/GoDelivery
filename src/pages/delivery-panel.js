@@ -103,7 +103,7 @@ function showDriverPushWarning(permission) {
     banner.id = 'driver-push-warning';
     banner.setAttribute('role', 'alert');
     banner.style.cssText = `
-      position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 72px);
+      position: fixed; left: 12px; right: 12px; top: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 72px);
       z-index: 9000; display: flex; align-items: center; gap: 10px;
       padding: 10px 12px; border-radius: 14px;
       background: #7f1d1d; color: #fff; border: 1px solid rgba(255,255,255,0.18);
@@ -573,6 +573,20 @@ onPlacesChange(() => {
     syncDriverNavigationWithOrders(activeOrdersList);
   }, 250);
 });
+
+/**
+ * Numeración del recorrido completo: lo ya hecho cuenta. Con un pedido retirado, "Retiraste en X"
+ * es la parada 1 y la entrega la 2 (antes la entrega aparecía como 1 debajo del retiro hecho).
+ * Mismo número en la lista, los pines del mapa y el cartel de arriba.
+ */
+export function doneStepsOf(activeOrders = []) {
+  return activeOrders.filter(o => !dockOrderStage(o) && !isGoCashOrder(o)).length;
+}
+
+export function numberRoute(route = [], activeOrders = []) {
+  const done = doneStepsOf(activeOrders);
+  return route.map((s, i) => ({ ...s, stepNumber: done + i + 1, stepTotal: done + route.length }));
+}
 
 export function calculateOptimalMultiStopSequence(driverPos, activeOrders = []) {
   if (!Array.isArray(activeOrders) || activeOrders.length === 0) return [];
@@ -1056,7 +1070,7 @@ function adjustTabContentSpacing(wrapperEl) {
       const topPx = Math.round(statusBar.getBoundingClientRect().bottom) + 12;
       wrapperEl.style.paddingTop = `${topPx}px`;
     } else {
-      wrapperEl.style.paddingTop = `calc(20px + env(safe-area-inset-top, 0px))`;
+      wrapperEl.style.paddingTop = `calc(20px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))`;
     }
 
     const dock = document.getElementById('driver-footer-dock-container');
@@ -1065,7 +1079,7 @@ function adjustTabContentSpacing(wrapperEl) {
       const dockTop = dock.getBoundingClientRect().top;
       bottomPx = Math.max(bottomPx, Math.round(window.innerHeight - dockTop) + 16);
     }
-    wrapperEl.style.paddingBottom = `calc(${bottomPx}px + env(safe-area-inset-bottom, 0px))`;
+    wrapperEl.style.paddingBottom = `calc(${bottomPx}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)))`;
   });
 }
 
@@ -1551,7 +1565,7 @@ export async function renderDeliveryPanel(containerArg) {
     <div id="session-status-bar-container" style="
       position: fixed;
       top: 0; left: 0; right: 0;
-      padding: max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) 12px 10px 12px;
+      padding: max(16px, calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 12px)) 12px 10px 12px;
       z-index: 9999;
       pointer-events: none;
       background: transparent;
@@ -1570,7 +1584,7 @@ export async function renderDeliveryPanel(containerArg) {
       return `
         <div id="driver-map-controls-group" style="
           position: fixed; right: 12px;
-          top: calc(max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) + 96px);
+          top: calc(max(16px, calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 12px)) + 96px);
           display: flex; flex-direction: column; gap: 10px; z-index: 9990; pointer-events: auto;
         ">
           <div id="driver-speedometer-pill" style="
@@ -1611,7 +1625,7 @@ export async function renderDeliveryPanel(containerArg) {
 
     <!-- LAYER 3: CENTERED OFFLINE HERO (SHOWN WHEN OFFLINE) -->
     ${!isOnline ? `
-      <div id="driver-offline-hero" style="position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(36px, calc(24px + env(safe-area-inset-top, 24px))) 24px calc(${DRIVER_NAV_BAR_HEIGHT}px + max(36px, calc(28px + env(safe-area-inset-bottom, 24px)))) 24px; box-sizing:border-box; z-index:900; pointer-events:auto; background:${isLight ? '#f8fafc' : '#04070d'};">
+      <div id="driver-offline-hero" style="position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(36px, calc(24px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 24px)))) 24px calc(${DRIVER_NAV_BAR_HEIGHT}px + max(36px, calc(28px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 24px))))) 24px; box-sizing:border-box; z-index:900; pointer-events:auto; background:${isLight ? '#f8fafc' : '#04070d'};">
         <div style="width:100%; max-width:340px; display:flex; flex-direction:column; align-items:center; text-align:center;">
           <div style="font-size:44px; margin-bottom:8px;">💤</div>
           <h3 style="font-family:var(--font-display, sans-serif); font-size:21px; font-weight:900; color:var(--driver-text-primary); margin:0 0 8px 0; letter-spacing:0.2px;">Estás desconectado</h3>
@@ -1644,7 +1658,7 @@ export async function renderDeliveryPanel(containerArg) {
 
     <!-- LAYER 4: FLOATING RADAR DOCK (ALWAYS VISIBLE WHEN ONLINE WITH AUTO-ACCEPT) -->
     ${isOnline ? `
-      <div id="driver-footer-dock-container" style="position:fixed; bottom:calc(${DRIVER_NAV_BAR_HEIGHT}px + max(24px, calc(16px + max(env(safe-area-inset-bottom, 0px), 20px)))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
+      <div id="driver-footer-dock-container" style="position:fixed; bottom:calc(${DRIVER_NAV_BAR_HEIGHT}px + max(24px, calc(16px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 20px)))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
         ${renderBottomDockContent(user, activeOrdersList)}
       </div>
     ` : ''}
@@ -1744,7 +1758,7 @@ export async function renderDeliveryPanel(containerArg) {
             background: var(--color-bg);
             border-top-left-radius: 24px;
             border-top-right-radius: 24px;
-            padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5);
+            padding: var(--space-6) var(--space-5) calc(var(--space-6) + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) var(--space-5);
             box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
             transform: translateY(100%);
             transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1928,7 +1942,7 @@ export async function renderDeliveryPanel(containerArg) {
       overlay.id = 'info-bottom-sheet';
       overlay.style.cssText = `position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.4); display: flex; flex-direction: column; justify-content: flex-end; opacity: 0; transition: opacity 0.3s ease;`;
       overlay.innerHTML = `
-        <div id="info-bottom-sheet-card" style="background: var(--color-bg); border-top-left-radius: 24px; border-top-right-radius: 24px; padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5); box-shadow: 0 -8px 32px rgba(0,0,0,0.15); transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; gap: var(--space-4); max-height: 85vh;">
+        <div id="info-bottom-sheet-card" style="background: var(--color-bg); border-top-left-radius: 24px; border-top-right-radius: 24px; padding: var(--space-6) var(--space-5) calc(var(--space-6) + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) var(--space-5); box-shadow: 0 -8px 32px rgba(0,0,0,0.15); transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; gap: var(--space-4); max-height: 85vh;">
           <div style="width: 36px; height: 5px; background: var(--color-border-light, #e5e7eb); border-radius: 3px; align-self: center; margin-bottom: 8px;"></div>
           <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6); text-align: left;">Funcionamiento del Sistema</h3>
           <div style="font-size: 14px; line-height: 1.6; color: var(--color-text-secondary); font-weight: 550; display:flex; flex-direction:column; gap:16px; max-height:55vh; overflow-y:auto; padding-right:6px; text-align: left;">
@@ -4470,7 +4484,7 @@ function loadTabContent(tab, container, user) {
                     `;
                     overlayEl.innerHTML = `
                       <!-- Top Translucent Header -->
-                      <div style="padding: calc(16px + env(safe-area-inset-top, 16px)) 20px 16px; text-align: center; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); z-index: 10;">
+                      <div style="padding: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 16px))) 20px 16px; text-align: center; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); z-index: 10;">
                         <h3 style="margin: 0; font-size: 19px; font-weight: 950; letter-spacing: -0.5px; color: white;">Comprobante de Pago</h3>
                         <p style="margin: 4px 0 0; font-size: 12.5px; color: #94a3b8; font-weight: 550;">Asegúrate de que la foto sea totalmente legible</p>
                       </div>
@@ -4481,7 +4495,7 @@ function loadTabContent(tab, container, user) {
                       </div>
 
                       <!-- Bottom Translucent Controls -->
-                      <div style="padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 16px)); background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0)); display: grid; grid-template-columns: 1fr 1fr; gap: 16px; z-index: 10; width: 100%; box-sizing: border-box;">
+                      <div style="padding: 20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0)); display: grid; grid-template-columns: 1fr 1fr; gap: 16px; z-index: 10; width: 100%; box-sizing: border-box;">
                         <button id="cancel-preview-btn" style="height: 54px; border-radius: 18px; background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); color: white; border: 1.5px solid rgba(255,255,255,0.15); font-weight: 900; cursor: pointer; text-transform: uppercase; font-size: 14px; transition: all 0.2s;">
                           Cancelar
                         </button>
@@ -5022,7 +5036,7 @@ function loadTabContent(tab, container, user) {
             background: ${isLight ? '#f8fafc' : '#04070d'};
             overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y;
             pointer-events: auto;
-            padding: calc(76px + env(safe-area-inset-top, 0px)) 16px calc(${DRIVER_NAV_BAR_HEIGHT + 24}px + env(safe-area-inset-bottom, 0px)) 16px;
+            padding: calc(76px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px calc(${DRIVER_NAV_BAR_HEIGHT + 24}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 16px;
           ">
             <!-- Active Session Card -->
             <div style="background:var(--driver-bg-elevated); border:1.5px solid ${online ? 'rgba(16,185,129,0.3)' : 'var(--driver-border)'}; border-radius:24px; padding:18px 20px; position:relative; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,0.04); transition:all 0.4s ease;">
@@ -5791,7 +5805,7 @@ export async function showEditFavorPriceModal(order, isPersistent = false) {
 
   const sheet = document.createElement('div');
   sheet.id = 'v5-price-edit-sheet';
-  sheet.style.cssText = "position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; box-shadow: 0 -12px 30px rgba(0,0,0,0.15); z-index: 99999; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 85vh; display: flex; flex-direction: column; padding-bottom: calc(20px + env(safe-area-inset-bottom, 16px)); overflow: hidden;";
+  sheet.style.cssText = "position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; box-shadow: 0 -12px 30px rgba(0,0,0,0.15); z-index: 99999; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 85vh; display: flex; flex-direction: column; padding-bottom: calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); overflow: hidden;";
 
   const titleText = order.favorType === 'pagodeservicios' ? 'Monto de Servicios' : 'Precios por Comercio';
   const subtitleText = order.favorType === 'pagodeservicios' ? 'Ingresá el valor total de las facturas pagadas.' : 'Ingresá el valor de los productos de cada local.';
@@ -5868,7 +5882,7 @@ export async function showEditFavorPriceModal(order, isPersistent = false) {
     </div>
 
     <!-- Action Buttons Footer -->
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px 20px calc(14px + max(env(safe-area-inset-bottom, 0px), 24px)) 20px; background:var(--color-bg); border-top:1.5px solid var(--color-border-light); flex-shrink:0;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px 20px calc(14px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 24px)) 20px; background:var(--color-bg); border-top:1.5px solid var(--color-border-light); flex-shrink:0;">
       <button id="cancel-edit-price" style="height:48px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1.5px solid var(--color-border-light); font-weight:900; font-size:13.5px; cursor:pointer;">CANCELAR</button>
       <button id="confirm-edit-price" style="height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:950; font-size:13.5px; cursor:pointer; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.25);">GUARDAR</button>
     </div>
@@ -6544,9 +6558,10 @@ function renderStatusBar(user) {
 
     // Un solo cartel arriba: qué hacer, dónde, la próxima indicación y la llegada
     const tk = driverTokens(isLight);
-    const stepTotal = optimalSequence.length;
+    const doneSteps = doneStepsOf(activeOrdersList);
+    const stepTotal = doneSteps + optimalSequence.length;
     const orderCode = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
-    const stepLabel = stepTotal > 1 ? `Parada 1 de ${stepTotal} · Pedido ${orderCode}` : `Pedido ${orderCode}`;
+    const stepLabel = stepTotal > 1 ? `Parada ${doneSteps + 1} de ${stepTotal} · Pedido ${orderCode}` : `Pedido ${orderCode}`;
     // Mandado sin ubicación del comercio: no hay ruta, se indica cómo encontrarlo
     const noGpsMandado = isFavor && !o.comercioId && isPickupStage && !isEncomienda && !isTrip && !isGoCash && !(shoppingStop && shoppingStop.coords);
     const m = window.lastDriverManeuver || {};
@@ -6673,7 +6688,7 @@ function dockStopText(o, isPickup) {
       const plan = shoppingPlanOf(o);
       const cur = plan.current;
       const isPago = o.favorType === 'pagodeservicios';
-      const step = plan.total > 1 ? ` · ${Math.min(plan.doneCount + 1, plan.total)} de ${plan.total}` : '';
+      const step = plan.total > 1 ? ` (comercio ${Math.min(plan.doneCount + 1, plan.total)} de ${plan.total})` : '';
       const verb = (isPago ? 'Pagar servicios en' : (cur && cur.nearest ? `Comprar en la ${categoryLabel(cur.nearest)} más cercana` : 'Comprar en')) + step;
       const title = cur ? (cur.placeName || cur.store) : (o.comercioName || 'Comercio indicado');
       const where = cur && !cur.coords ? 'Ubicación a confirmar' : (cur && cur.approx ? 'Ubicación aproximada' : ((cur && cur.placeAddress) || ''));
@@ -6878,7 +6893,8 @@ export function renderBottomDockContent(user, activeOrders = []) {
   const kind = orderKind(o, { isEncomienda: isOrderEncomienda(o) });
   const txt = dockStopText(o, currentIsPickup);
   const code = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
-  const meta = totalStops > 1 && stopIndex >= 0 ? `${code} · parada ${stopIndex + 1} de ${totalStops}` : code;
+  const doneSteps = doneStepsOf(activeOrders);
+  const meta = doneSteps + totalStops > 1 && stopIndex >= 0 ? `${code} · parada ${doneSteps + stopIndex + 1} de ${doneSteps + totalStops}` : code;
 
   const expandBtn = `<button id="dock-expand-toggle-btn" aria-label="${isExpanded ? 'Ver menos' : 'Ver el detalle y el recorrido'}" title="${isExpanded ? 'Menos' : 'Detalle'}" style="height:36px;padding:0 10px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">${dIcon(isExpanded ? 'chevDown' : 'chevUp', 16)}${isExpanded ? 'Menos' : 'Detalle'}</button>`;
   const sosBtn = `<button id="driver-quick-sos-btn" aria-label="Centro de seguridad SOS" title="SOS" style="width:36px;height:36px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">${dIcon('shield', 17, t.brandTx)}</button>`;
@@ -6914,7 +6930,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
   // Vista ampliada: recorrido completo (tocás una parada para verla) + detalle del pedido
   let expanded = '';
   if (isExpanded) {
-    const doneStops = activeOrders.filter(x => !dockOrderStage(x)).map(x => ({ kind: dockStopKind(x, true), title: `${x.isTrip ? 'Buscaste a' : 'Retiraste en'} ${dockStopText(x, true).title}`, sub: '', state: 'done', orderId: x.id }));
+    const doneStops = activeOrders.filter(x => !dockOrderStage(x) && !isGoCashOrder(x)).map(x => ({ kind: dockStopKind(x, true), title: `${x.isTrip ? 'Buscaste a' : 'Retiraste en'} ${dockStopText(x, true).title}`, sub: '', state: 'done', orderId: x.id }));
     const list = route.map((s, i) => {
       const so = s.order || activeOrders.find(x => x.id === s.orderId) || {};
       const st = dockStopText(so, s.type === 'pickup');
@@ -6923,7 +6939,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
       return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : `Cobrá ${money(so.totalAmount || so.total)} ${isCashPayment(so) ? 'en efectivo' : 'por transferencia'}`, state: isNow ? 'now' : 'next', orderId: so.id };
     });
     // Las paradas pendientes llevan el mismo número que en el mapa; con varios pedidos se pueden tocar
-    const all = [...doneStops, ...list.map((s, i) => ({ ...s, num: i + 1, tab: activeOrders.length > 1 ? { index: activeOrders.findIndex(x => x.id === s.orderId), orderId: s.orderId } : null }))];
+    const all = [...doneStops, ...list.map((s, i) => ({ ...s, num: doneStops.length + i + 1, tab: activeOrders.length > 1 ? { index: activeOrders.findIndex(x => x.id === s.orderId), orderId: s.orderId } : null }))];
     const tabs = stopsList(all, isLight);
     const items = Array.isArray(o.items) ? o.items : (Array.isArray(o.products) ? o.products : []);
     const itemsHtml = items.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
@@ -7003,7 +7019,7 @@ export function syncDriverNavigationWithOrders(activeOrders = []) {
         setMap3DPerspective(false);
       } else {
         setMap3DPerspective(true, 0, driverLoc);
-        renderMultiStopRoute(multiStops, driverLoc);
+        renderMultiStopRoute(numberRoute(multiStops, activeOrders), driverLoc);
       }
     }
   } else if (primaryOrder) {
@@ -7026,7 +7042,7 @@ export function syncDriverNavigationWithOrders(activeOrders = []) {
     if (isGoCashOrder(primaryOrder)) {
       // Go Cash: directo al cliente
       setMap3DPerspective(true, 0, driverLoc);
-      drawDriverRoute(driverLoc, null, dropoffLoc, 'delivery');
+      drawDriverRoute(driverLoc, null, dropoffLoc, 'delivery', { dropLabel: 1 });
     } else if (isShoppingFavor(primaryOrder) && stage === 'pickup') {
       // Mandado: al comercio que toca, si la app sabe dónde queda
       const cur = shoppingPlanOf(primaryOrder, driverLoc).current;
@@ -7045,7 +7061,7 @@ export function syncDriverNavigationWithOrders(activeOrders = []) {
         setMap3DPerspective(false);
       } else {
         setMap3DPerspective(true, 0, driverLoc);
-        drawDriverRoute(driverLoc, pickupLoc, dropoffLoc, stage);
+        drawDriverRoute(driverLoc, pickupLoc, dropoffLoc, stage, { dropLabel: 2 });
       }
     }
   }
@@ -7076,8 +7092,8 @@ export function updateDriverHudPositions(activeOrders = []) {
 
   const compassBottomPx = baseBottomPx + 58;
 
-  const badgeBottom = `max(${baseBottomPx}px, calc(${baseBottomPx - 10}px + env(safe-area-inset-bottom, 16px)))`;
-  const compassBottom = `max(${compassBottomPx}px, calc(${compassBottomPx - 10}px + env(safe-area-inset-bottom, 16px)))`;
+  const badgeBottom = `max(${baseBottomPx}px, calc(${baseBottomPx - 10}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))))`;
+  const compassBottom = `max(${compassBottomPx}px, calc(${compassBottomPx - 10}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))))`;
 
   if (speedPill) {
     speedPill.style.bottom = badgeBottom;
@@ -7213,7 +7229,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
       const { showModal, closeModal } = await import('../components/modal.js');
 
       const modalEl = document.createElement('div');
-      modalEl.style.cssText = `padding: 28px 20px calc(24px + env(safe-area-inset-bottom, 20px)) 20px; font-family: var(--font-body, sans-serif); color: var(--driver-text-primary);`;
+      modalEl.style.cssText = `padding: 28px 20px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 20px))) 20px; font-family: var(--font-body, sans-serif); color: var(--driver-text-primary);`;
 
       const renderFilterCards = () => `
         <div style="display: flex; flex-direction: column; gap: 10px; margin: 16px 0 20px 0;">
@@ -7972,7 +7988,7 @@ function renderPerfilTabHTML(user) {
       background: ${isLight ? '#f8fafc' : '#04070d'};
       overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y;
       pointer-events: auto;
-      padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(${DRIVER_NAV_BAR_HEIGHT + 16}px + env(safe-area-inset-bottom, 0px)) 16px;
+      padding: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px calc(${DRIVER_NAV_BAR_HEIGHT + 16}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 16px;
       display: flex; flex-direction: column; gap: 8px;
       color: var(--driver-text-primary);
       font-family: var(--font-body, sans-serif);
@@ -9854,7 +9870,7 @@ async function renderSubPage(tab, title) {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; overflow:hidden; background:var(--color-bg-secondary);">
       <!-- Header -->
-      <div style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:14px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; background:var(--color-primary); flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
+      <div style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:14px; padding: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px 20px; background:var(--color-primary); flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
@@ -10121,7 +10137,7 @@ function openTodayOrdersSheet(orders) {
       <!-- Scrollable list -->
       <div style="overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; -webkit-overflow-scrolling:touch;">
         ${ordersHtml || '<div style="text-align:center; color:var(--color-text-tertiary); font-size:13px; padding:20px;">No hay pedidos entregados hoy</div>'}
-        <div style="height: env(safe-area-inset-bottom, 12px);"></div>
+        <div style="height: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 12px));"></div>
       </div>
     </div>
   `;
@@ -10254,7 +10270,7 @@ function showStopDetailsBottomSheet(stop) {
 
   const sheet = document.createElement('div');
   sheet.id = 'v5-stop-details-sheet';
-  sheet.style.cssText = "position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; box-shadow: 0 -12px 30px rgba(0,0,0,0.15); z-index: 99999; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 85vh; display: flex; flex-direction: column; padding-bottom: calc(20px + env(safe-area-inset-bottom, 16px));";
+  sheet.style.cssText = "position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-bg); border-top-left-radius: 28px; border-top-right-radius: 28px; box-shadow: 0 -12px 30px rgba(0,0,0,0.15); z-index: 99999; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 85vh; display: flex; flex-direction: column; padding-bottom: calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px)));";
 
   const isPickup = stop.type === 'PICKUP';
   const firstOrder = stop.orders?.[0] || {};

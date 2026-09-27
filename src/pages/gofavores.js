@@ -130,11 +130,11 @@ export async function renderGoFavores(content) {
       <div class="home-blob home-blob-2" style="position: absolute; bottom: 10%; right: -20%; width: 250px; height: 250px; background: rgba(99, 102, 241, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
 
       <!-- Floating Info Helper Button -->
-      <button id="gofavores-help-header-btn" style="position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px); right: 16px; width: 36px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.25); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); transition: all 0.2s;" onactive="transform: scale(0.95);">
+      <button id="gofavores-help-header-btn" style="position: absolute; top: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 12px); right: 16px; width: 36px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.25); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); transition: all 0.2s;" onactive="transform: scale(0.95);">
         ${icon('info', 18)}
       </button>
 
-      <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
+      <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
         
         <!-- Cards Grouped Together -->
         <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; box-sizing: border-box; flex-shrink: 0;">
@@ -310,7 +310,7 @@ export async function renderGoFavores(content) {
       @media (max-height: 700px) {
         .gofavores-page > div {
           padding-top: calc(var(--header-height, 60px) + 4px) !important;
-          padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+          padding-bottom: calc(8px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
         }
         .gofavores-card {
           padding: 8px 12px !important;
@@ -595,7 +595,7 @@ export async function showMandadoForm(targetContainer = null) {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
+  modalEl.style.cssText = 'padding: 14px 18px calc(18px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 12px))); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
   modalEl.innerHTML = `
     <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0;">
       <!-- Paso 1 Container -->
@@ -1212,7 +1212,7 @@ export async function showCompraForm(targetContainer = null) {
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 10px)); background: var(--color-bg); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; overflow: hidden; height: 100%; width: 100%; flex: 1; min-height: 0; position: relative;';
+  modalEl.style.cssText = 'padding: 12px 16px calc(14px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px))); background: var(--color-bg); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; overflow: hidden; height: 100%; width: 100%; flex: 1; min-height: 0; position: relative;';
   modalEl.innerHTML = `
      <!-- Step Indicator -->
     <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-shrink:0; margin-bottom: 2px;">
@@ -2029,7 +2029,7 @@ export async function showGoCashForm(targetContainer = null) {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(20px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
   modalEl.innerHTML = `
     <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0; justify-content: space-between;">
       
@@ -2777,7 +2777,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 export async function showPagoServiciosForm(targetContainer = null) {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(20px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
 
   let currentAddress = '';
   let deliveryData = null;
@@ -3326,7 +3326,7 @@ export function openMandadosWizard(initialServiceType = null) {
     <div class="wizard-wrapper" style="flex:1; width: 100%; overflow: hidden; position: relative;">
       <div id="wizard-slides-container" style="display: flex; width: 200%; height: 100%; transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1); will-change: transform; transform: translateZ(0);">
           <!-- Slide 1: Menu Selector -->
-          <div id="wizard-slide-selector" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 16px)) 16px; display: flex; flex-direction: column; gap: 6px;">
+          <div id="wizard-slide-selector" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 16px; display: flex; flex-direction: column; gap: 6px;">
             <!-- Option 1: Encomienda -->
             <div id="wizard-favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
               <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
@@ -3409,7 +3409,7 @@ export function openMandadosWizard(initialServiceType = null) {
                 ${icon('chevronRight', 12)}
               </div>
             </div>
-            <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: env(safe-area-inset-bottom, 10px);"></div>
+            <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px));"></div>
           </div>
          <!-- Slide 2: Form Container -->
          <div id="wizard-slide-form" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; position: relative; background: var(--color-bg); display: flex; flex-direction: column;">

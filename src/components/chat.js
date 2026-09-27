@@ -197,7 +197,7 @@ export async function openChat(options) {
   const chatContainer = document.createElement('div');
   chatContainer.className = 'chat-container';
   chatContainer.innerHTML = `
-    <div class="chat-header-bar" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; border-radius: 0; padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.15); box-sizing: border-box;">
+    <div class="chat-header-bar" style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; border-radius: 0; padding: calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.15); box-sizing: border-box;">
       <button class="chat-back-btn" id="chat-back-${chatId}" style="background: none; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; margin-right: 2px; transition: transform 0.2s;" onmousedown="this.style.transform='scale(0.85)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.85)'" ontouchend="this.style.transform='scale(1)'">
         ${icon('chevronLeft', 24)}
       </button>
@@ -1022,7 +1022,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     showModal({
       title: 'Enviar imagen',
       content: `
-        <div style="padding: 24px 20px calc(24px + env(safe-area-inset-bottom, 0px)) 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="padding: 24px 20px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px; display: flex; flex-direction: column; gap: 16px;">
           <button id="btn-use-camera-${chatId}" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
             ${icon('camera', 20)} Tomar Foto (Cámara)
           </button>

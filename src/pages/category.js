@@ -49,13 +49,13 @@ export async function renderCategoryPage(categoryName, content) {
     <div class="category-page" style="display:flex; flex-direction:column; min-height: 100%; background: var(--color-bg); opacity: 1;">
 
       <!-- Red Brand Title Bar (respects the phone's status bar / notch) -->
-      <div style="display:flex; align-items:center; gap:10px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; background: var(--color-primary); z-index: 10; position: sticky; top: 0;">
+      <div style="display:flex; align-items:center; gap:10px; padding: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px 20px; background: var(--color-primary); z-index: 10; position: sticky; top: 0;">
         <button id="category-back-btn" aria-label="Volver" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; flex-shrink:0; border:none; background:rgba(255,255,255,0.18); border-radius:12px; color:white; cursor:pointer;">${icon('chevronLeft', 22)}</button>
         <h2 style="margin:0; font-family:var(--font-display); font-size:19px; font-weight:900; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${categoryName}</h2>
       </div>
 
       <!-- Search Bar & Filters (Now in Content) -->
-      <div style="padding: 16px 20px 8px 20px; background: var(--color-bg); z-index: 9; position: sticky; top: calc(72px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--color-border-light);">
+      <div style="padding: 16px 20px 8px 20px; background: var(--color-bg); z-index: 9; position: sticky; top: calc(72px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--color-border-light);">
          <div style="position: relative;">
            <input type="text" id="category-search" placeholder="Buscar en ${categoryName}..." style="width: 100%; height: 48px; border-radius: 14px; border: 1px solid var(--color-border); background: var(--color-surface); padding: 0 44px; color: var(--color-text); font-size: 14px; font-weight: 600; outline: none; transition: all 0.3s; box-shadow: var(--shadow-sm);">
            <div style="position: absolute; left: 14px; top: 14px; color: var(--color-text-tertiary);">${icon('search', 18)}</div>

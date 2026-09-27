@@ -34,7 +34,7 @@ foreach ($f in $files) { Copy-Item $f (Join-Path $backup ($f -replace '/', '_'))
 
 try {
   foreach ($f in $files) { git checkout $tag -- $f }
-  $only = 'functions:default:createFavorOrder'
+  $only = 'functions:default:createFavorOrder,functions:default:onOrderStatusChange'
   if (-not $SoloFuncion) { $only += ',firestore:rules' }
   Write-Host "Publicando la version anterior de: $only" -ForegroundColor Yellow
   npx firebase deploy --only $only --project godelivery-magdalena

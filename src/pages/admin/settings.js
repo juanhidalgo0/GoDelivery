@@ -20,7 +20,7 @@ export async function renderAdminSettings() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         <a href="#/admin" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;position:relative;z-index:2;">
           ${icon("chevronLeft", 24)}
@@ -131,7 +131,7 @@ export async function renderAdminLogisticsSettings(container) {
     container.innerHTML = `
       <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
         <!-- Header -->
-        <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
+        <div style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(126, 34, 206, 0.25); z-index:100;">
           <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
             ${icon("chevronLeft", 24)}
           </a>
@@ -519,7 +519,7 @@ export async function renderAdminEconomySettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #10b981 0%, #059669 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(16, 185, 129, 0.25); z-index:100;">
+      <div style="background:linear-gradient(135deg, #10b981 0%, #059669 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(16, 185, 129, 0.25); z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -779,7 +779,7 @@ export async function renderAdminDeliveriesSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Minimalist 1-Row Header (sticky) -->
-      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
+      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
         <div style="display:flex; align-items:center; gap:10px; min-width:0;">
           <a href="#/admin" style="width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; flex-shrink:0; transition:all 0.2s;">
             ${icon("chevronLeft", 20)}
@@ -1562,7 +1562,7 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
       img.style.cssText = "max-width:94%; max-height:85%; border-radius:24px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.6); border:1.5px solid rgba(255,255,255,0.15); transform:scale(0.95); transition:transform 0.2s ease;";
       const closeBtn = document.createElement("div");
       closeBtn.innerHTML = "\u2715";
-      closeBtn.style.cssText = "position:absolute; top:calc(20px + env(safe-area-inset-top, 0px)); right:20px; color:white; font-size:24px; font-weight:900; background:rgba(255,255,255,0.1); width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.15); cursor:pointer;";
+      closeBtn.style.cssText = "position:absolute; top:calc(20px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); right:20px; color:white; font-size:24px; font-weight:900; background:rgba(255,255,255,0.1); width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.15); cursor:pointer;";
       overlay.appendChild(img);
       overlay.appendChild(closeBtn);
       document.body.appendChild(overlay);
@@ -1966,7 +1966,7 @@ export async function renderAdminDynamicSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(79, 70, 229, 0.25); z-index:100;">
+      <div style="background:linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(79, 70, 229, 0.25); z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -2110,7 +2110,7 @@ export async function renderAdminGoPointsSettings(container) {
     container.innerHTML = `
       <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
         <!-- Header -->
-        <div style="background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(245, 158, 11, 0.25); z-index:100;">
+        <div style="background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(245, 158, 11, 0.25); z-index:100;">
           <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
             ${icon("chevronLeft", 24)}
           </a>
@@ -2315,7 +2315,7 @@ export async function renderAdminPushSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(59, 130, 246, 0.25); z-index:100;">
+      <div style="background:linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(59, 130, 246, 0.25); z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -2397,7 +2397,7 @@ export async function renderAdminMaintenanceSettings(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Header -->
-      <div style="background:linear-gradient(135deg, #ef4444 0%, #991b1b 100%); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(239, 68, 68, 0.25); z-index:100;">
+      <div style="background:linear-gradient(135deg, #ef4444 0%, #991b1b 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 20px rgba(239, 68, 68, 0.25); z-index:100;">
         <a href="#/admin/settings" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.18); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; text-decoration:none;">
           ${icon("chevronLeft", 24)}
         </a>
@@ -3021,7 +3021,7 @@ async function showDriverOrderHistoryModal(driver, db2) {
               <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.02em;">Ganado</div>
             </div>
           </div>
-          <div id="driver-orders-list-container" style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:calc(24px + env(safe-area-inset-bottom, 24px)); box-sizing:border-box;">
+          <div id="driver-orders-list-container" style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 24px))); box-sizing:border-box;">
             ${listHTML}
           </div>
         </div>
@@ -3117,7 +3117,7 @@ async function showDriverPaymentHistoryModal(driver, db2) {
     if (wrapper) {
       wrapper.innerHTML = `
         <div style="display:flex; flex-direction:column; height:100%; width:100%; overflow:hidden;">
-          <div style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 0 calc(24px + env(safe-area-inset-bottom, 24px)); box-sizing:border-box; background:var(--color-bg);">
+          <div style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 0 calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 24px))); box-sizing:border-box; background:var(--color-bg);">
             ${listHTML}
           </div>
         </div>

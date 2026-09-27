@@ -143,8 +143,8 @@ export function updateGlobalDriverReturnBadge() {
                               !document.body.classList.contains('is-direct-store-mode');
     
     const bottomOffset = isBottomNavVisible 
-      ? 'calc(var(--navbar-height, 68px) + 16px + max(env(safe-area-inset-bottom, 0px), 16px))' 
-      : 'max(20px, calc(16px + max(env(safe-area-inset-bottom, 0px), 16px)))';
+      ? 'calc(var(--navbar-height, 68px) + 16px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 16px))' 
+      : 'max(20px, calc(16px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 16px)))';
 
     floatingDriverBtn.style.cssText = `
       position: fixed !important;
@@ -207,7 +207,7 @@ export function updateGlobalCartFAB() {
 
     btn.style.cssText = `
       position: fixed !important;
-      bottom: calc(${bottomVal} + env(safe-area-inset-bottom, 0px)) !important;
+      bottom: calc(${bottomVal} + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
       right: 20px !important;
       z-index: 99999999 !important;
       width: 60px !important;

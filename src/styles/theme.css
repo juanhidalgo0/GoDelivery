@@ -1521,7 +1521,7 @@ body.is-delivery-mode.driver-light-mode #driver-offline-hero p {
 body.is-delivery-mode #delivery-scroll-area {
   position: fixed !important;
   top: auto !important;
-  bottom: max(14px, calc(10px + env(safe-area-inset-bottom, 10px))) !important;
+  bottom: max(14px, calc(10px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px)))) !important;
   left: 14px !important;
   right: 14px !important;
   max-height: 52vh !important;
@@ -2096,7 +2096,7 @@ body.is-delivery-mode.driver-light-mode #driver-fullscreen-map {
 /* Floating Driver Top Bar */
 .driver-top-floating-bar {
   position: fixed;
-  top: calc(12px + env(safe-area-inset-top, 0px));
+  top: calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)));
   left: 16px;
   right: 16px;
   z-index: 99;
@@ -2125,7 +2125,7 @@ body.is-delivery-mode.driver-light-mode #driver-fullscreen-map {
   border-top-left-radius: 28px;
   border-top-right-radius: 28px;
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.8);
-  padding: 16px 20px calc(24px + env(safe-area-inset-bottom, 0px)) 20px;
+  padding: 16px 20px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px;
   max-height: 80vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;

@@ -16,7 +16,7 @@ export async function renderAdminComercios() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); overflow:hidden;">
       <!-- Minimalist 1-Row Header (sticky, identical to Repartidores) -->
-      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
+      <div style="background:linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); padding:calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; position:relative; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:100; border-bottom:1px solid rgba(255,255,255,0.08);">
         <div style="display:flex; align-items:center; gap:10px; min-width:0;">
           <a href="#/admin" style="width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; flex-shrink:0; transition:all 0.2s;">
             ${icon('chevronLeft', 20)}
@@ -492,7 +492,7 @@ async function openComercioEditor(comercio, onSaved) {
     </div>
   </div>
 
-  <div style="padding:20px; padding-bottom:calc(20px + env(safe-area-inset-bottom, 0)); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box;">
+  <div style="padding:20px; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0))); display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--color-border-light); background:var(--color-bg); flex-shrink:0; z-index:10; box-sizing:border-box;">
     <button id="save-com-btn" style="width:100%; height:56px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:16px; cursor:pointer; box-shadow:0 10px 30px rgba(var(--color-primary-rgb),0.25);">
       Guardar Cambios
     </button>
