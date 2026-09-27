@@ -9,13 +9,14 @@
 # copiarla otra vez a la dirección real. También se puede desde la consola de Firebase: Hosting >
 # historial de versiones > Revertir.
 # La función y las reglas vuelven a como estaban en la etiqueta "antes-de-mandados"; tus archivos quedan igual.
-param([switch]$SoloFuncion, [switch]$SoloApp)
+# -Copia: 'respaldo-antes-mapas' (27/09, antes de mapas propios y seguimiento nuevo) o 'respaldo-antes-mandados' (versión anterior)
+param([switch]$SoloFuncion, [switch]$SoloApp, [string]$Copia = 'respaldo-antes-mapas')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
 if (-not $SoloFuncion) {
   Write-Host 'Volviendo la app a la version anterior...' -ForegroundColor Yellow
-  npx firebase hosting:clone godelivery-magdalena:respaldo-antes-mandados godelivery-magdalena:live --project godelivery-magdalena
+  npx firebase hosting:clone "godelivery-magdalena:$Copia" godelivery-magdalena:live --project godelivery-magdalena
   if ($LASTEXITCODE -ne 0) { throw "No se pudo volver la app (codigo $LASTEXITCODE)" }
   Write-Host 'App: lista.' -ForegroundColor Green
   if ($SoloApp) { return }
