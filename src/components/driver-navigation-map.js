@@ -28,15 +28,20 @@ let routeGeneration = 0;
 
 
 import { getDeepOledDarkStyle, MAPTILER_STREETS, MAPTILER_OLED_DARK, MAPTILER_API_KEY } from '../utils/map-styles.js';
+import { goMapStyle } from '../utils/go-map-style.js';
 
 export { MAPTILER_API_KEY };
-export const LIGHT_MAP_STYLE = MAPTILER_STREETS;
-export const DARK_MAP_STYLE = MAPTILER_OLED_DARK;
+// Mapa propio de Magdalena (utils/go-map-style.js): gratis, sin límites ni claves.
+// Antes era MapTiler, cuyo plan gratis no permite uso comercial.
+export const LIGHT_MAP_STYLE = goMapStyle('light');
+export const DARK_MAP_STYLE = goMapStyle('dark');
 
 // Paleta GO sobre el estilo oscuro de MapTiler: fondo gris azulado, calles legibles,
 // agua y parques apenas distintos y etiquetas suaves (el "darkmatter" original es casi negro).
 export function applyGoMapLook(map) {
+  // El mapa propio ya viene con la paleta GO: solo se retoca un estilo de terceros
   if (!map || getDriverMapTheme() === 'light') return;
+  try { if (map.getStyle().sources?.protomaps) return; } catch (e) { return; }
   let layers = [];
   try { layers = map.getStyle().layers || []; } catch (e) { return; }
   const set = (id, prop, val) => { try { map.setPaintProperty(id, prop, val); } catch (e) {} };
@@ -549,7 +554,10 @@ export async function initDriverNavigationMap(container) {
     driverMap.on('style.load', () => applyGoMapLook(driverMap));
 
     // User touch / pan / zoom interaction tracking (pauses auto-follow for 7 seconds)
-    const onUserInteract = () => {
+    const onUserInteract = (e) => {
+      // Solo cuenta si lo movió el repartidor (no los movimientos automáticos del seguimiento)
+      if (e && e.type === 'movestart' && !e.originalEvent) return;
+      if (e && e.originalEvent) window.dispatchEvent(new CustomEvent('driver-map-user-moved'));
       isUserInteracting = true;
       if (autoRecenterTimer) clearTimeout(autoRecenterTimer);
       autoRecenterTimer = setTimeout(() => {
@@ -824,6 +832,7 @@ export function zoomOutDriverMap() {
 export function recenterOnDriver() {
   if (!driverMap || !driverMap.getContainer()) return;
   isUserInteracting = false;
+  window.dispatchEvent(new CustomEvent('driver-map-recentered'));
   if (autoRecenterTimer) clearTimeout(autoRecenterTimer);
 
   const target = lastDriverPos || window.lastRiderPos || { lat: -35.0815, lng: -57.5147 };

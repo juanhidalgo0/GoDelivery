@@ -1,4 +1,5 @@
 // GoDelivery — Address Modal Component with Google Maps & MapLibre Fallback
+import { goMapStyle } from '../utils/go-map-style.js';
 import { getMapLibre } from '../utils/map-loader.js';
 import { DEFAULT_MAP_STYLE, getAppMapStyle, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { showModal, closeModal, closeMultipleModals } from './modal.js';
@@ -463,7 +464,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
       googleMap = new MapConstructor({
         container: mapContainer,
-        style: OSM_MAP_STYLE,
+        style: goMapStyle('light'), // plan B si falla Google: mapa propio
         center: [initialCenter.lng, initialCenter.lat],
         zoom: 17,
         attributionControl: false

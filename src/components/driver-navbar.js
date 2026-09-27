@@ -66,8 +66,15 @@ export function renderDriverBottomNav(activeTab, isLight) {
   `;
 }
 
+/** En el mapa no hay barra abajo (como Uber/DiDi): se entra al menú con el botón de arriba. */
+export function syncDriverBottomNavVisibility(activeTab) {
+  const c = document.getElementById('driver-bottom-nav-container');
+  if (c) c.style.display = driverNavTabForActiveTab(activeTab) === 'available' ? 'none' : '';
+}
+
 export function updateDriverBottomNavUI(activeTab) {
   const effective = driverNavTabForActiveTab(activeTab);
+  syncDriverBottomNavVisibility(activeTab);
   document.querySelectorAll('.driver-nav-tab-btn').forEach(btn => {
     const isActive = btn.dataset.navTab === effective;
     const isLight = document.getElementById('driver-bottom-nav')?.style.background === 'rgb(255, 255, 255)';

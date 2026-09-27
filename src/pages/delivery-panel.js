@@ -23,7 +23,7 @@ export {
 
 import { isDelivery } from '../auth.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
-import { renderDriverBottomNav, updateDriverBottomNavUI, driverNavTabForActiveTab, DRIVER_NAV_BAR_HEIGHT } from '../components/driver-navbar.js';
+import { renderDriverBottomNav, updateDriverBottomNavUI, driverNavTabForActiveTab, DRIVER_NAV_BAR_HEIGHT, syncDriverBottomNavVisibility } from '../components/driver-navbar.js';
 
 export function getOrderDriverEarnings(o) {
   if (!o) return 0;
@@ -1587,29 +1587,8 @@ export async function renderDeliveryPanel(containerArg) {
           top: calc(max(16px, calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 12px)) + 96px);
           display: flex; flex-direction: column; gap: 10px; z-index: 9990; pointer-events: auto;
         ">
-          <div id="driver-speedometer-pill" style="
-            width: 44px; height: 44px; border-radius: 14px; background: ${cardBg}; border: 1px solid ${cardBd};
-            box-shadow: ${shadow}; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
-          " aria-label="Velocidad">
-            <span id="driver-speed-value" style="font-family: var(--font-display, 'Outfit', sans-serif); font-size: 15px; font-weight: 700; color: ${txt};">${window.currentDriverSpeedKmh || 0}</span>
-            <span style="font-size: 9px; font-weight: 600; color: ${sub}; margin-top: 2px;">km/h</span>
-          </div>
-          <div id="driver-zoom-controls-wrapper" style="
-            display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
-            background: ${cardBg}; border: 1px solid ${cardBd}; box-shadow: ${shadow};
-          ">
-            <button type="button" id="driver-zoom-in-btn" aria-label="Acercar mapa" title="Acercar mapa" style="
-              width: 44px; height: 44px; background: transparent; border: none; border-bottom: 1px solid ${cardBd};
-              display: flex; align-items: center; justify-content: center; cursor: pointer; color: ${txt};">
-              ${icon('plus', 18)}
-            </button>
-            <button type="button" id="driver-zoom-out-btn" aria-label="Alejar mapa" title="Alejar mapa" style="
-              width: 44px; height: 44px; background: transparent; border: none;
-              display: flex; align-items: center; justify-content: center; cursor: pointer; color: ${txt};">
-              ${icon('minus', 18)}
-            </button>
-          </div>
-          <button id="driver-recenter-compass-btn" aria-label="Recentrar mi ubicación" title="Recentrar mi ubicación" style="
+          <!-- Sin +/− ni velocidad (como Uber/Google Maps: zoom con dos dedos). "Centrar" aparece solo si el repartidor movió el mapa. -->
+          <button id="driver-recenter-compass-btn" aria-label="Recentrar mi ubicación" title="Recentrar mi ubicación" style="display: none; 
             width: 44px; height: 44px; border-radius: 14px; background: ${cardBg}; border: 1px solid ${cardBd};
             color: ${txt}; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: ${shadow};">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1658,7 +1637,7 @@ export async function renderDeliveryPanel(containerArg) {
 
     <!-- LAYER 4: FLOATING RADAR DOCK (ALWAYS VISIBLE WHEN ONLINE WITH AUTO-ACCEPT) -->
     ${isOnline ? `
-      <div id="driver-footer-dock-container" style="position:fixed; bottom:calc(${DRIVER_NAV_BAR_HEIGHT}px + max(24px, calc(16px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 20px)))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
+      <div id="driver-footer-dock-container" style="position:fixed; bottom:calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); left:12px; right:12px; z-index:9999; pointer-events:auto;">
         ${renderBottomDockContent(user, activeOrdersList)}
       </div>
     ` : ''}
@@ -1669,7 +1648,7 @@ export async function renderDeliveryPanel(containerArg) {
     </div>
 
     <!-- LAYER 6: FIXED BOTTOM TAB BAR (primary navigation) -->
-    <div id="driver-bottom-nav-container" style="position:fixed; left:0; right:0; bottom:0; z-index:9990; pointer-events:auto;">
+    <div id="driver-bottom-nav-container" style="position:fixed; left:0; right:0; bottom:0; z-index:9990; pointer-events:auto; ${driverNavTabForActiveTab(activeTab) === 'available' ? 'display:none;' : ''}">
       ${renderDriverBottomNav(activeTab, isLight)}
     </div>
   `;
@@ -1882,6 +1861,7 @@ export async function renderDeliveryPanel(containerArg) {
     deliveryBackdropEl.style.opacity = '1';
     deliveryBackdropEl.style.pointerEvents = 'auto';
   };
+  window.__openDeliveryDrawer = openDeliveryDrawer;
   const closeDeliveryDrawer = () => {
     deliveryDrawerEl.style.transform = 'translateX(100%)';
     deliveryBackdropEl.style.opacity = '0';
@@ -6620,6 +6600,12 @@ function renderStatusBar(user) {
       display: flex; align-items: center; justify-content: space-between;
       gap: 8px;
     ">
+      <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+      <button id="driver-menu-btn" aria-label="Menú: ganancias, historial, perfil y ayuda" style="width: 40px; height: 40px; border-radius: 20px; flex-shrink: 0; cursor: pointer; padding: 0;
+        background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'}; border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'}; color: ${isLight ? '#0F172A' : '#F3F4F6'};
+        box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'}; display: flex; align-items: center; justify-content: center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
       <!-- LEFT: STATUS BADGE -->
       <div style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 20px;
         background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'}; border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
@@ -6629,6 +6615,7 @@ function renderStatusBar(user) {
         <span style="font-size: 14px; font-weight: 600; color: ${isLight ? '#0F172A' : '#F3F4F6'};">
           ${finalIsOnline ? 'En línea' : 'Desconectado'}
         </span>
+      </div>
       </div>
 
       ${centerBadgeHtml}
@@ -8351,6 +8338,7 @@ function attachPerfilTabListeners(user, container) {
       const bottomNavContainer = document.getElementById('driver-bottom-nav-container');
       if (bottomNavContainer) {
         bottomNavContainer.innerHTML = renderDriverBottomNav(window.__gd_driverActiveTab || 'available', newTheme === 'light');
+        syncDriverBottomNavVisibility(window.__gd_driverActiveTab || 'available');
         document.querySelectorAll('.driver-nav-tab-btn').forEach(navBtn => {
           navBtn.onclick = () => {
             window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: navBtn.dataset.navTab }));
@@ -8578,8 +8566,20 @@ export async function promptStartSession(user) {
   });
 }
 
+if (!window.__goRecenterBtnBound) {
+  window.__goRecenterBtnBound = true;
+  const setRecenterVisible = (on) => {
+    const b = document.getElementById('driver-recenter-compass-btn');
+    if (b) b.style.display = on ? 'flex' : 'none';
+  };
+  window.addEventListener('driver-map-user-moved', () => setRecenterVisible(true));
+  window.addEventListener('driver-map-recentered', () => setRecenterVisible(false));
+}
+
 function attachStatusBarListeners(user) {
   const latestUser = getState().user || user;
+  const menuBtn = document.getElementById('driver-menu-btn');
+  if (menuBtn) menuBtn.onclick = (e) => { e.stopPropagation(); window.__openDeliveryDrawer && window.__openDeliveryDrawer(); };
   const btn = document.getElementById('session-toggle-btn');
 
   const driverZoomInBtn = document.getElementById('driver-zoom-in-btn');

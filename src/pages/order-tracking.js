@@ -11,6 +11,7 @@ import { getState } from '../state.js';
 import { openChat } from '../components/chat.js';
 import { GOOGLE_MAPS_STYLE, getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { createRiderMotion } from '../utils/rider-motion.js';
+import { goMapStyle } from '../utils/go-map-style.js';
 import { renderClientPanel, setClientEta, trackingModel, CLIENT_PANEL_CSS } from './order-tracking/client-panel.js';
 import { openClientOrderSheet } from './order-tracking/order-sheet.js';
 
@@ -2134,7 +2135,8 @@ async function updateMap(order) {
     const initialCenter = destPos ? [destPos.lng, destPos.lat] : (riderPos ? [riderPos.lng, riderPos.lat] : magCenterLngLat);
 
     const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
-    const activeMapStyle = GOOGLE_MAPS_STYLE;
+    // Mapa propio (gratis y autorizado). Antes: imágenes de Google tomadas sin clave.
+    const activeMapStyle = goMapStyle('light');
 
     liveMap = new MapConstructor({
       container,

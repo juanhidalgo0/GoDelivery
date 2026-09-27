@@ -1,4 +1,5 @@
 // GoDelivery — Location Picker Modal (Refined with MapLibre GL)
+import { goMapStyle } from '../utils/go-map-style.js';
 import { getMapLibre } from '../utils/map-loader.js';
 import { DEFAULT_MAP_STYLE, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { icon } from '../utils/icons.js';
@@ -181,7 +182,7 @@ export async function showLocationPicker({ onSelect, initialCoords = null, initi
 
         map = new MapConstructor({
           container: mapContainer,
-          style: OSM_MAP_STYLE,
+          style: goMapStyle('light'), // plan B si falla Google: mapa propio
           center: [mapCenter.lng, mapCenter.lat],
           zoom: initialCoords ? 17 : 15,
           attributionControl: false

@@ -125,6 +125,8 @@ export function renderClientPanel(o, status, flags = {}) {
   const store = o.comercioRealName || o.comercioName || '';
   const hasDriver = Boolean(o.driverId);
   const phone = String(o.driverPhone || '').replace(/[^\d+]/g, '');
+  // Llamar solo cuando ya viene hacia vos (el chat es el canal principal y cuida el número del repartidor)
+  const canCall = Boolean(phone) && (status === 'delivering' || o.isAtDoor || (o.isTrip && hasDriver));
 
   // 1. Lo principal: cuándo llega / qué pasa
   const hero = `
@@ -158,7 +160,7 @@ export function renderClientPanel(o, status, flags = {}) {
         <div class="gt-driver-meta">${esc(o.isTrip ? (o.tripType === 'auto' ? 'Chofer · Auto' : 'Chofer · Moto') : 'Repartidor de GO')}<span class="gt-live-dot" id="gt-live-dot" title="Ubicación en vivo"></span></div>
       </div>
       <div class="gt-driver-actions">
-        ${phone ? `<a class="gt-round" href="tel:${esc(phone)}" aria-label="Llamar a ${esc(o.driverName || 'tu repartidor')}">${icon('phone', 19)}</a>` : ''}
+        ${canCall ? `<a class="gt-round" href="tel:${esc(phone)}" aria-label="Llamar a ${esc(o.driverName || 'tu repartidor')}">${icon('phone', 19)}</a>` : ''}
         <button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear">${icon('chatBubble', 19)}</button>
       </div>
     </div>` : (!hasDriver && !final && store && !o.isTrip && !o.isFavor ? `
