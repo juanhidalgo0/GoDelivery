@@ -71,7 +71,9 @@ export function openOrderBreakdownModal(order) {
   modalOverlay.innerHTML = `
     <div id="order-breakdown-modal-card" style="
       width: 100%; max-width: 500px;
-      max-height: 90vh;
+      max-height: 90vh; max-height: 90dvh;
+      /* Respeta la barra de navegación de Android / el indicador de iPhone */
+      padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px));
       background: ${isLight ? '#ffffff' : '#0b111e'};
       border: 1.5px solid ${isLight ? 'rgba(225,29,72,0.25)' : 'rgba(225,29,72,0.45)'};
       border-radius: 28px 28px 0 0;

@@ -114,7 +114,7 @@ export async function openDriverDirectSupportChat(user) {
 
       <!-- FOOTER / INPUT BAR -->
       <div style="
-        padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 10px)) 14px;
+        padding: 10px 14px calc(10px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px))) 14px;
         background: var(--driver-bg-panel-b);
         border-top: 1px solid var(--driver-border);
         position: relative;

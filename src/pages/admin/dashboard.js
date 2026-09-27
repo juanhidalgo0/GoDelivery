@@ -14,7 +14,7 @@ export async function renderAdminDashboard() {
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; background:var(--color-bg); overflow:hidden;">
       
       <!-- Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
@@ -31,7 +31,7 @@ export async function renderAdminDashboard() {
       </div>
 
       <!-- Main Body — Fills space symmetrically -->
-      <div style="flex:1; display:flex; flex-direction:column; padding:20px 20px calc(20px + env(safe-area-inset-bottom, 0px)); gap:20px; overflow-y:auto; -webkit-overflow-scrolling:touch;">
+      <div style="flex:1; display:flex; flex-direction:column; padding:20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); gap:20px; overflow-y:auto; -webkit-overflow-scrolling:touch;">
         
         <div id="pending-requests-alert"></div>
 
@@ -160,6 +160,15 @@ export async function renderAdminDashboard() {
               <div style="flex:1;">
                 <div style="font-weight:800; font-size:16px; color:var(--color-text);">Cupones</div>
                 <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Generar y gestionar cupones</div>
+              </div>
+              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
+            </a>
+
+            <a href="#/admin/lugares" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
+              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#ccfbf1,#5eead4); color:#0f766e; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('mapPin', 24)}</div>
+              <div style="flex:1;">
+                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Lugares de mandados</div>
+                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Dónde queda cada comercio que piden los clientes</div>
               </div>
               <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
             </a>

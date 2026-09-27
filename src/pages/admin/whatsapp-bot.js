@@ -16,7 +16,7 @@ export async function renderAdminWhatsAppBot(content) {
   const isNative = !!window.Capacitor;
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+  const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
   content.innerHTML = `
     <div class="admin-page page-enter" style="display: flex; flex-direction: column; height: 100%; width: 100%; background: var(--color-bg); overflow: hidden; position: relative;">
@@ -48,7 +48,7 @@ export async function renderAdminWhatsAppBot(content) {
       </div>
 
       <!-- Main Content Container -->
-      <div id="wsp-admin-content" style="flex:1; overflow-y:auto; padding: 20px 20px calc(40px + env(safe-area-inset-bottom, 0px)); display:flex; flex-direction:column; gap:14px; background:var(--color-bg);">
+      <div id="wsp-admin-content" style="flex:1; overflow-y:auto; padding: 20px 20px calc(40px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display:flex; flex-direction:column; gap:14px; background:var(--color-bg);">
         <div style="text-align:center; padding:60px 20px; opacity:0.6;">
           <div class="spinner-mini" style="margin: 0 auto 12px;"></div>
           <span>Cargando datos del bot...</span>

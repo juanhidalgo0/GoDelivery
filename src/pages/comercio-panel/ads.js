@@ -30,7 +30,7 @@ export async function renderComercioAds(container) {
   const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const topPadding = isNative 
     ? 'var(--status-bar-height, 24px)' 
-    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+    : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">

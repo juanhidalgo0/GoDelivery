@@ -42,7 +42,7 @@ function showLockScreen() {
     flex-direction: column;
     justify-content: space-between;
     align-items: center;
-    padding: calc(env(safe-area-inset-top, 24px) + 20px) 24px calc(env(safe-area-inset-bottom, 20px) + 16px) 24px;
+    padding: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 24px)) + 20px) 24px calc(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 20px)) + 16px) 24px;
     box-sizing: border-box;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;

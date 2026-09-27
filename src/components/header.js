@@ -33,7 +33,7 @@ export function renderHeader() {
   const isIosDevice = isIOS();
   const topPadding = isNative 
     ? 'var(--status-bar-height, 24px)' 
-    : (isIosDevice ? 'calc(12px + env(safe-area-inset-top, 20px))' : 'env(safe-area-inset-top, 0px)');
+    : (isIosDevice ? 'calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 20px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
   const hash = window.location.hash || '#/';
   const isHome = hash === '#/' || hash === '#' || hash === '';

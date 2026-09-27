@@ -29,7 +29,7 @@ export async function renderPendingCommissionStickyFooter(comercioId, parentEl) 
       width: 100%;
       background: var(--color-primary);
       color: white;
-      padding: 10px 18px calc(10px + env(safe-area-inset-bottom, 0px)) 18px;
+      padding: 10px 18px calc(10px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 18px;
       display: flex;
       align-items: center;
       justify-content: space-between;

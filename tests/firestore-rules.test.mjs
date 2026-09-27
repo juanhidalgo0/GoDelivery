@@ -229,8 +229,8 @@ await check('cadete se conecta (isOnline)',
   assertSucceeds(updateDoc(doc(cadete1, 'users/cadete1'), { isOnline: true, currentLocation: { lat: -35, lng: -57 } })));
 await check('cadete abre una sesion de trabajo',
   assertSucceeds(setDoc(doc(cadete1, 'deliverySessions/sess1'), { driverId: 'cadete1', startedAt: 'hoy' })));
-await check('cadete registra el pago del canon',
-  assertSucceeds(setDoc(doc(cadete1, 'delivery_canon_payments/c1'), { driverId: 'cadete1', amount: 5000 })));
+await check('cadete NO registra su cuota diaria (la cobra el servidor)',
+  assertFails(setDoc(doc(cadete1, 'delivery_canon_payments/c1'), { driverId: 'cadete1', amount: 5000 })));
 await check('cadete busca a los admins para avisarles',
   assertSucceeds(getDocs(query(collection(cadete1, 'users'), where('role', '==', 'admin')))));
 await check('cadete califica al cliente',
@@ -376,6 +376,86 @@ await check('cadete NO mete campos extra en la ubicacion',
   assertFails(setDoc(doc(cadete1, 'orders/o4/live/driver'), { ...livePos(), status: 'completed' })));
 await check('cadete NO escribe otro doc que no sea "driver"',
   assertFails(setDoc(doc(cadete1, 'orders/o4/live/otro'), livePos())));
+
+console.log('=========== LIQUIDACIONES Y DEUDA DEL CADETE ===========');
+
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await updateDoc(doc(db, 'users/cadete1'), { deliveryDebt: 5000 });
+  await setDoc(doc(db, 'delivery_debt_settlements/ds1'), { driverId: 'cadete1', amount: 1000 });
+  await setDoc(doc(db, 'delivery_debt_settlements/ds2'), { driverId: 'otroCadete', amount: 1000 });
+});
+await check('admin registra una liquidacion de deuda',
+  assertSucceeds(setDoc(doc(jefe, 'delivery_debt_settlements/ds3'), { driverId: 'cadete1', amount: 5000 })));
+await check('admin lista el historial de liquidaciones',
+  assertSucceeds(getDocs(collection(jefe, 'delivery_debt_settlements'))));
+await check('cadete lee su propia liquidacion',
+  assertSucceeds(getDoc(doc(cadete1, 'delivery_debt_settlements/ds1'))));
+await check('cadete NO lee la liquidacion de otro',
+  assertFails(getDoc(doc(cadete1, 'delivery_debt_settlements/ds2'))));
+await check('cadete NO se registra una liquidacion a si mismo',
+  assertFails(setDoc(doc(cadete1, 'delivery_debt_settlements/trampa'), { driverId: 'cadete1', amount: 99999 })));
+await check('cliente NO lee liquidaciones',
+  assertFails(getDoc(doc(cliente1, 'delivery_debt_settlements/ds1'))));
+await check('cadete NO se toca la deuda, ni siquiera para subirla',
+  assertFails(updateDoc(doc(cadete1, 'users/cadete1'), { deliveryDebt: 7000 })));
+await check('cadete NO marca la cuota de hoy como cobrada',
+  assertFails(updateDoc(doc(cadete1, 'users/cadete1'), { lastCanonChargeDate: '2026-09-25' })));
+await check('cadete sigue pudiendo conectarse',
+  assertSucceeds(updateDoc(doc(cadete1, 'users/cadete1'), { isOnline: true })));
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), 'delivery_canon_payments/cadete1_2026-09-25'), { driverId: 'cadete1', amount: 2000, status: 'pending', settled: false });
+});
+await check('cadete lee su cuota diaria',
+  assertSucceeds(getDoc(doc(cadete1, 'delivery_canon_payments/cadete1_2026-09-25'))));
+await check('cadete NO se marca la cuota como pagada',
+  assertFails(updateDoc(doc(cadete1, 'delivery_canon_payments/cadete1_2026-09-25'), { settled: true, status: 'paid' })));
+await check('cadete NO inventa movimientos',
+  assertFails(setDoc(doc(cadete1, 'delivery_transactions/trampa'), { driverId: 'cadete1', type: 'liquidation', amount: -5000 })));
+await check('admin marca la cuota de hoy como pagada',
+  assertSucceeds(updateDoc(doc(jefe, 'delivery_canon_payments/cadete1_2026-09-25'), { settled: true, status: 'paid' })));
+await check('admin registra un movimiento',
+  assertSucceeds(setDoc(doc(jefe, 'delivery_transactions/t1'), { driverId: 'cadete1', type: 'liquidation', amount: -2000 })));
+await check('cadete NO se borra la deuda',
+  assertFails(updateDoc(doc(cadete1, 'users/cadete1'), { deliveryDebt: 0 })));
+await check('cadete NO se baja la deuda',
+  assertFails(updateDoc(doc(cadete1, 'users/cadete1'), { deliveryDebt: 6999 })));
+await check('admin baja la deuda al liquidar',
+  assertSucceeds(updateDoc(doc(jefe, 'users/cadete1'), { deliveryDebt: 0 })));
+
+console.log('');
+console.log('=========== LUGARES DE MANDADOS ===========');
+const lugar = (extra = {}) => ({ name: 'Farmacia Pasteur', slug: 'farmacia-pasteur', category: 'farmacia', lat: -35.08, lng: -57.515, samples: [{ lat: -35.08, lng: -57.515, at: 1 }], visits: 1, verified: false, lastDriverUid: 'cadete1', support: 1, conflict: false, ...extra });
+await check('cadete aprende un lugar nuevo',
+  assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar())));
+await check('cadete suma una visita',
+  assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ visits: 2, lat: -35.0801 }))));
+await check('cliente lee los lugares (para las sugerencias)',
+  assertSucceeds(getDocs(collection(cliente1, 'mandadoPlaces'))));
+await check('anonimo NO lee los lugares',
+  assertFails(getDocs(collection(anon, 'mandadoPlaces'))));
+await check('cliente NO escribe lugares',
+  assertFails(setDoc(doc(cliente2, 'mandadoPlaces/trampa'), lugar({ slug: 'trampa', lastDriverUid: 'cliente2' }))));
+await check('cadete NO confirma un lugar',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true }))));
+await check('cadete NO firma por otro',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ lastDriverUid: 'otro' }))));
+await check('cadete NO renombra un lugar',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ name: 'Otra cosa' }))));
+await check('cadete NO pone un lugar fuera de Magdalena',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/lejos'), lugar({ slug: 'lejos', lat: -34.6037, lng: -58.3816 }))));
+await check('cadete NO agrega campos raros',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ precio: 1 }))));
+await check('cadete NO borra lugares',
+  assertFails(deleteDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'))));
+await check('admin confirma un lugar',
+  assertSucceeds(updateDoc(doc(jefe, 'mandadoPlaces/farmacia-pasteur'), { verified: true })));
+await check('cadete NO mueve un lugar confirmado',
+  assertFails(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true, lat: -35.09 }))));
+await check('cadete suma visita a un lugar confirmado sin moverlo',
+  assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true, lat: -35.0801, visits: 3 }))));
+await check('admin borra un lugar',
+  assertSucceeds(deleteDoc(doc(jefe, 'mandadoPlaces/farmacia-pasteur'))));
 
 console.log('');
 console.log('================================================');

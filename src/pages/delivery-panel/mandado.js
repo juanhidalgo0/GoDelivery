@@ -5,12 +5,12 @@ import { closeModal } from '../../components/modal.js';
 import { getState } from '../../state.js';
 import { icon } from '../../utils/icons.js';
 import { getDriverMapTheme } from '../../components/driver-navigation-map.js';
-import { cleanMandadoText, parseMandadoDetails } from '../delivery-panel.js';
+import { parseMandadoDetails } from '../delivery-panel.js';
+import { mandadoStoresOf } from '../../utils/mandado-places.js';
 
 export function getMandadoStopsList(order) {
   if (!order) return [];
   const text = order.description || order.itemsText || order.details || order.notes || '';
-  const clean = cleanMandadoText(text);
 
   if (Array.isArray(order.stopsPurchases) && order.stopsPurchases.length > 0) {
     return order.stopsPurchases.map(sp => ({
@@ -20,16 +20,9 @@ export function getMandadoStopsList(order) {
     }));
   }
 
-  const regex = /(?:(\d+)\.\s*)?(?:Comercio|Lugar|Local)\s*:\s*([^📦📝\n]+)(?:[\s\S]*?(?:Pedido|Detalle|Instrucción|Compra)\s*:\s*([^1-9\n\r]+))?/gi;
-  const stops = [];
-  let match;
-  while ((match = regex.exec(clean)) !== null) {
-    let store = (match[2] || '').trim().replace(/^comercio:\s*/i, '');
-    let items = (match[3] || '').trim() || 'Ver productos';
-    if (store) {
-      stops.push({ store, items, amount: 0 });
-    }
-  }
+  // Comercios del mandado (el lector anterior cortaba el detalle en el primer número:
+  // "2 alfajores" quedaba vacío y el comercio siguiente se perdía)
+  const stops = mandadoStoresOf(order).map(s => ({ store: s.store, items: s.items || 'Ver productos', amount: 0 }));
 
   if (stops.length === 0) {
     const parsed = parseMandadoDetails(text, order.comercioName || order.pickupAddress || 'Comercio / Kiosco');
@@ -275,7 +268,7 @@ export function openMandadoPurchaseModal({ order, isEdit = false, onConfirm, onC
       </div>
 
       <!-- ACTION BUTTONS -->
-      <div style="padding: 0 18px calc(18px + max(env(safe-area-inset-bottom, 0px), 24px)) 18px; display: flex; gap: 10px; flex-shrink: 0; background: ${isLight ? '#ffffff' : '#0b111e'};">
+      <div style="padding: 0 18px calc(18px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 24px)) 18px; display: flex; gap: 10px; flex-shrink: 0; background: ${isLight ? '#ffffff' : '#0b111e'};">
         <button id="mandado-modal-cancel-btn" style="
           flex: 1; height: 50px; border-radius: 16px;
           background: var(--driver-fill-subtle);

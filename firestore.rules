@@ -97,7 +97,9 @@ service cloud.firestore {
         return [
           'role', 'isAdmin', 'isComercio', 'isDelivery', 'isCanonExempt',
           'commissionRate', 'saldo', 'balance', 'settled',
-          'blocked', 'isBlocked', 'suspended', 'ratings'
+          'blocked', 'isBlocked', 'suspended', 'ratings',
+          // Deuda y cuota diaria: las maneja el servidor (cobro al conectarse) y el admin.
+          'deliveryDebt', 'lastCanonChargeDate', 'lastCanonDate', 'lastLiquidationAt'
         ];
       }
 
@@ -368,6 +370,36 @@ service cloud.firestore {
       allow write: if isAdmin() || isComercioUser();
     }
 
+    // Dónde queda cada comercio de los mandados (el cliente lo escribe a mano). Lo aprende la app
+    // con la ubicación del repartidor al terminar de comprar; el admin lo revisa y lo corrige.
+    match /mandadoPlaces/{placeId} {
+      function validPlace() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['name', 'slug', 'category', 'lat', 'lng', 'samples', 'visits', 'verified',
+                                 'support', 'conflict',
+                                 'lastDriverUid', 'updatedAt', 'createdAt', 'address', 'hidden', 'reviewedAt']) &&
+          d.name is string && d.name.size() > 0 && d.name.size() <= 80 &&
+          d.slug == placeId &&
+          d.lat is number && d.lat > -35.6 && d.lat < -34.6 &&
+          d.lng is number && d.lng > -58.1 && d.lng < -57.0 &&
+          (!('samples' in d) || (d.samples is list && d.samples.size() <= 8));
+      }
+      // El repartidor solo suma visitas: no puede verificar, ocultar ni firmar por otro
+      function driverWrite() {
+        let d = request.resource.data;
+        return isDriver() && validPlace() &&
+          d.get('lastDriverUid', '') == uid() &&
+          (resource == null || d.name == resource.data.name) &&
+          (resource == null || !resource.data.get('verified', false) ||
+            (d.lat == resource.data.lat && d.lng == resource.data.lng)) &&
+          d.get('verified', false) == (resource == null ? false : resource.data.get('verified', false)) &&
+          d.get('hidden', false) == (resource == null ? false : resource.data.get('hidden', false));
+      }
+      allow read: if isSignedIn();
+      allow create, update: if (isAdmin() && validPlace()) || driverWrite();
+      allow delete: if isAdmin();
+    }
+
     match /banners_mandados/{bannerId} {
       allow read:   if true;
       allow create: if isAdmin() || isComercioUser();
@@ -424,17 +456,23 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Movimientos y cuotas: los escriben el servidor (cobro de la cuota al
+    // conectarse, tarifas al completar) y el admin. El cadete sólo los lee:
+    // si pudiera marcar su cuota como pagada, el servidor no se la cobraría.
     match /delivery_transactions/{transactionId} {
-      allow read:   if isAdmin() || isOwnerField('driverId');
-      allow create: if isAdmin() || isDriver();
-      allow update, delete: if isAdmin();
+      allow read:  if isAdmin() || isOwnerField('driverId');
+      allow write: if isAdmin();
     }
 
     match /delivery_canon_payments/{paymentId} {
-      allow read:   if isAdmin() || isOwnerField('driverId');
-      allow create: if isAdmin() || isDriver();
-      allow update: if isAdmin() || isOwnerField('driverId');
-      allow delete: if isAdmin();
+      allow read:  if isAdmin() || isOwnerField('driverId');
+      allow write: if isAdmin();
+    }
+
+    // Liquidaciones de deuda que registra el admin (historial de cobros).
+    match /delivery_debt_settlements/{settlementId} {
+      allow read:  if isAdmin() || isOwnerField('driverId');
+      allow write: if isAdmin();
     }
 
     match /delivery_settlement_proofs/{proofId} {

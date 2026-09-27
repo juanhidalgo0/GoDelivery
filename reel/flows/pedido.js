@@ -1,0 +1,27 @@
+// Pedido real: Inicio → Comida → Rey del pollo → Milanesa napolitana → carrito → confirmar.
+const { startRecording } = await import('file:///C:/Users/PC/Desktop/GoDelivery/reel/recorder.mjs');
+const r = await startRecording(ctx, page, 'pedido');
+await page.waitForTimeout(1300);
+r.mark('home');
+await r.tap(page.locator('a[href="#/category/Comida"]').first(), { pause: 2600 });
+r.mark('comida');
+const card = page.locator('#category-comercios-grid a[href="#/comercio/miZhd86ppRUVvLaWqOp0AzAV0k13"]');
+const box = await card.boundingBox();
+await r.swipe(Math.round(box.y - 230), { speed: 1600 });
+await page.waitForTimeout(900);
+await r.tap(card, { pause: 2200 });
+r.mark('tienda');
+await r.tap(page.locator('.product-card', { hasText: 'Milanesa napolitana' }).first(), { pause: 1400 });
+r.mark('producto');
+await r.tap(page.getByText('Napolitana', { exact: true }).first(), { pause: 900 });
+await r.tap(page.locator('button', { hasText: 'Agregar' }).last(), { pause: 1500 });
+r.mark('agregado');
+await r.tap([342, 745], { pause: 2200 });
+r.mark('carrito');
+await r.tap(page.locator('button', { hasText: 'SIGUIENTE' }).last(), { pause: 1800 });
+r.mark('confirmar');
+await r.tap(page.locator('button', { hasText: 'CONFIRMAR' }).last(), { pause: 7000 });
+r.mark('tracking');
+const meta = await r.stop();
+await page.screenshot({ path: 'captures/pedido-end.png', scale: 'css' });
+return { frames: meta.frames.length, secs: meta.frames.at(-1).t, marks: meta.marks, url: page.url() };

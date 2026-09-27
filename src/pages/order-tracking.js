@@ -10,6 +10,10 @@ import { showToast } from '../components/toast.js';
 import { getState } from '../state.js';
 import { openChat } from '../components/chat.js';
 import { GOOGLE_MAPS_STYLE, getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
+import { createRiderMotion } from '../utils/rider-motion.js';
+import { goMapStyle } from '../utils/go-map-style.js';
+import { renderClientPanel, setClientEta, trackingModel, CLIENT_PANEL_CSS } from './order-tracking/client-panel.js';
+import { openClientOrderSheet } from './order-tracking/order-sheet.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -64,6 +68,13 @@ function formatFavorDetailsHTML(detailsStr) {
 
 let liveMap = null;
 let riderMarker = null;
+let riderMotion = null;      // movimiento fluido de la moto (utils/rider-motion.js)
+let lastUserMapMove = 0;     // si el cliente movió el mapa a mano, la cámara no lo pelea un rato
+let gtSheetCollapsed = false; // hoja del cliente achicada (para ver más mapa)
+let gtRouteEta = false;       // el tiempo del cliente sale de la ruta en vivo (repartidor → casa)
+// Distancia máxima para dibujar la moto sobre la línea de la ruta (antes 350 m: la ponía en
+// calles por las que no iba)
+const ROUTE_SNAP_METERS = 40;
 let freshnessTimer = null;
 
 // The driver's position only means "live" if it's recent. With no signal, or the OS killing
@@ -71,30 +82,44 @@ let freshnessTimer = null;
 // timer too, because a stale driver is exactly when no new snapshot arrives.
 function refreshDriverLocationFreshness(order) {
   const livePill = document.querySelector('.v5-live-pill');
+  const liveDot = document.getElementById('gt-live-dot');
   const status = (order?.status || '').toString().toLowerCase();
-  if (!livePill || !order?.driverId || ['completed', 'cancelled'].includes(status)) return;
+  if ((!livePill && !liveDot) || !order?.driverId || ['completed', 'cancelled'].includes(status)) return;
 
   const updatedAt = order.driverLocation?.updatedAt;
   const updatedMs = updatedAt?.toMillis ? updatedAt.toMillis() : (updatedAt ? new Date(updatedAt).getTime() : 0);
   const ageMs = updatedMs ? Date.now() - updatedMs : Infinity;
   const isStale = ageMs > 60 * 1000;
+  const mins = Number.isFinite(ageMs) ? Math.max(1, Math.round(ageMs / 60000)) : null;
 
-  if (isStale) {
-    const mins = Number.isFinite(ageMs) ? Math.max(1, Math.round(ageMs / 60000)) : null;
-    livePill.innerHTML = mins ? `📶 Ubicación de hace ${mins} min` : '📶 Esperando ubicación';
-    livePill.style.color = '#b45309';
-    livePill.style.background = 'rgba(245, 158, 11, 0.14)';
-  } else if (!livePill.querySelector('.v5-pulse-dot')) {
-    livePill.innerHTML = `<span class="v5-pulse-dot"></span> EN VIVO`;
-    livePill.style.color = '';
-    livePill.style.background = '';
+  if (livePill) {
+    if (isStale) {
+      livePill.innerHTML = mins ? `📶 Ubicación de hace ${mins} min` : '📶 Esperando ubicación';
+      livePill.style.color = '#b45309';
+      livePill.style.background = 'rgba(245, 158, 11, 0.14)';
+    } else if (!livePill.querySelector('.v5-pulse-dot')) {
+      livePill.innerHTML = `<span class="v5-pulse-dot"></span> EN VIVO`;
+      livePill.style.color = '';
+      livePill.style.background = '';
+    }
+  }
+  // Hoja del cliente: el punto verde se apaga y se avisa desde cuándo no hay señal
+  if (liveDot) {
+    liveDot.classList.toggle('stale', isStale);
+    liveDot.title = isStale ? (mins ? `Ubicación de hace ${mins} min` : 'Esperando ubicación') : 'Ubicación en vivo';
+    const meta = liveDot.parentElement;
+    let note = meta && meta.querySelector('.gt-stale-note');
+    if (isStale && meta) {
+      if (!note) { note = document.createElement('span'); note.className = 'gt-stale-note'; note.style.cssText = 'color:var(--gt-amber);font-weight:600'; meta.appendChild(note); }
+      note.textContent = mins ? `sin señal hace ${mins} min` : 'esperando señal';
+    } else if (note) note.remove();
   }
   const markerEl = riderMarker?.getElement?.();
   if (markerEl) markerEl.style.opacity = isStale ? '0.55' : '1';
 
   if (!freshnessTimer) {
     freshnessTimer = setInterval(() => {
-      if (!document.querySelector('.v5-live-pill')) {
+      if (!document.querySelector('.v5-live-pill') && !document.getElementById('gt-live-dot')) {
         clearInterval(freshnessTimer);
         freshnessTimer = null;
         return;
@@ -175,6 +200,11 @@ const parseCoords = (c) => {
 export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false, isDirectMode = false) {
   // Reset all module-level map references to prevent DOM pollution when modal is opened/closed
   liveMap = null;
+  if (riderMotion) riderMotion.stop();
+  riderMotion = null;
+  lastUserMapMove = 0;
+  gtSheetCollapsed = false;
+  gtRouteEta = false;
   riderMarker = null;
   homeMarker = null;
   pickupMarker = null;
@@ -185,6 +215,8 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   isFirstFit = true;
   isDetailsExpanded = false;
   lastRouteFetchTime = 0;
+  clearTimeout(routeTrailingTimer); // la ruta agendada del pedido anterior no se dibuja acá
+  currentRouteCoordinates = null;
   lastRouteStartCoords = null;
   lastRouteEndCoords = null;
 
@@ -229,7 +261,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         <div id="v5-header-driver-card" style="flex:1; margin-left:10px; pointer-events:auto; min-width:0;"></div>
       </div>
       
-      <div style="position:absolute; top:calc(82px + env(safe-area-inset-top, 0px)); right:16px; z-index:100; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto;">
+      <div style="position:absolute; top:calc(82px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); right:16px; z-index:100; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:auto;">
         <div id="v5-driver-map-tip-badge" style="background:#10b981; color:white; font-size:12.5px; font-weight:900; padding:10px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.25); white-space:nowrap; box-shadow:0 4px 14px rgba(16,185,129,0.35); display:none; align-items:center; gap:6px; font-family:system-ui, -apple-system, sans-serif;">
           💵 Propina: <span id="v5-driver-map-tip-value">$0</span>
         </div>
@@ -305,7 +337,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       .map-container-v5 { position: absolute; inset: 0; z-index: 1; background: #12161f !important; }
       .map-container-v5 .maplibregl-canvas { filter: none !important; }
       
-      .tracking-v5-nav { position: absolute; top: calc(16px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
+      .tracking-v5-nav { position: absolute; top: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 100; pointer-events: none; }
       .v5-back-btn { pointer-events: auto; width: 44px; height: 44px; background: var(--color-surface); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--color-text); box-shadow: var(--shadow-md); border: 1px solid var(--color-border); }
       .v5-live-pill { background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: 8px 14px; border-radius: 100px; display: flex; align-items: center; gap: 6px; font-weight: 900; font-size: 11px; color: var(--color-danger); box-shadow: var(--shadow-sm); border: 1px solid var(--glass-border); }
       .v5-pulse-dot { width: 7px; height: 7px; background: var(--color-danger); border-radius: 50%; animation: pulse-v5 1.5s infinite; }
@@ -371,7 +403,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
 
       .v5-info-panel {
         position: absolute;
-        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
         left: 12px;
         right: 12px;
         background: var(--glass-bg, rgba(255, 255, 255, 0.96));
@@ -1025,7 +1057,10 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     try { if (liveMap) liveMap.zoomOut({ duration: 300 }); } catch(e) {}
   });
 
-  document.getElementById('recenter-map-btn').onclick = () => {
+  // Si la pantalla se volvió a dibujar mientras tanto (doble ruteo al abrir desde una notificación),
+  // el botón ya no existe: no tiene que romper el resto
+  const recenterBtn = document.getElementById('recenter-map-btn');
+  if (recenterBtn) recenterBtn.onclick = () => {
     if (!liveMap) return;
     
     const order = window.lastOrderData;
@@ -1044,7 +1079,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         const maxLng = Math.max(riderPos.lng, destPos.lng);
         const minLat = Math.min(riderPos.lat, destPos.lat);
         const maxLat = Math.max(riderPos.lat, destPos.lat);
-        liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 260, left: 50, right: 50 } });
+        liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 90, bottom: bottomSheetPad(), left: 50, right: 50 }, maxZoom: 17 });
       } else if (destPos) {
         liveMap.easeTo({ center: [destPos.lng, destPos.lat], zoom: 17 });
       } else if (riderPos) {
@@ -1415,342 +1450,404 @@ function updateUI(order, isDriverViewOverride = false) {
     </div>
   ` : '';
 
+  if (!isDriverView) {
+    // Estilos de la hoja (una vez) y modo cliente en la pantalla
+    if (!document.getElementById('gt-client-panel-css')) {
+      const st = document.createElement('style');
+      st.id = 'gt-client-panel-css';
+      st.textContent = CLIENT_PANEL_CSS;
+      document.head.appendChild(st);
+    }
+    container.closest('.tracking-v5-viewport')?.classList.add('gt-client-view');
+    container.classList.add('gt-client');
+    const canCancel = normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
+    container.innerHTML = renderClientPanel(order, normalizedStatus, { canCancel, isDirectStore, collapsed: gtSheetCollapsed });
+
+    // Arriba: solo qué pedido es (el repartidor y el chat están en la hoja)
+    if (headerDriverCard) {
+      const label = order.isTrip ? 'Tu viaje' : (order.isFavor ? 'Tu mandado' : (order.comercioRealName || order.comercioName || 'Tu pedido'));
+      headerDriverCard.innerHTML = `
+        <div style="display:inline-flex; max-width:100%; align-items:center; gap:8px; background:var(--color-surface, #fff); border-radius:22px; padding:0 14px; height:44px; box-shadow:0 4px 16px rgba(15,23,42,.12); font-family:'Inter',system-ui,sans-serif;">
+          <span style="font-size:14.5px; font-weight:700; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${label.replace(/[<>&"]/g, '')}</span>
+          ${order.orderId ? `<span style="font-size:13px; color:var(--color-text-tertiary); font-weight:500; flex-shrink:0;">#${String(order.orderId).replace(/[<>&"]/g, '')}</span>` : ''}
+        </div>`;
+    }
+
+    // Chat: con el repartidor si ya hay uno; si no, con el comercio
+    const sheetChat = document.getElementById('header-chat-v5-btn');
+    if (sheetChat) {
+      sheetChat.onclick = (e) => {
+        e.stopPropagation();
+        const t = window.lastOrderData || order;
+        if (t.driverId) openChat({ orderId: t.id, type: 'client-delivery', otherName: t.driverName || 'Repartidor', orderNum: t.orderId });
+        else openChat({ orderId: t.id, type: 'client-commerce', otherName: t.comercioName || 'Comercio', orderNum: t.orderId });
+      };
+    }
+    document.getElementById('gt-help-btn')?.addEventListener('click', async () => {
+      try {
+        const { openSupportTicketModal } = await import('../components/support-bot.js');
+        await openSupportTicketModal(order.id, order.orderId || order.id);
+      } catch (err) {
+        console.error('Error opening support:', err);
+        showToast('No se pudo abrir la ayuda. Probá de nuevo.', 'error');
+      }
+    });
+    const handle = document.getElementById('gt-handle');
+    if (handle) {
+      handle.onclick = () => {
+        gtSheetCollapsed = !gtSheetCollapsed;
+        document.getElementById('gt-sheet')?.classList.toggle('collapsed', gtSheetCollapsed);
+        handle.setAttribute('aria-label', gtSheetCollapsed ? 'Ver más' : 'Ver menos');
+        // Que la moto no quede tapada por la hoja
+        const t = window.lastOrderData || order;
+        const rp = parseCoords(riderMotion?.current() || t.driverLocation);
+        const dp = parseCoords(t.isTrip && !['delivering', 'en camino'].includes(String(t.status || '').toLowerCase()) ? t.pickupCoords : t.deliveryCoords);
+        if (rp && dp) { lastUserMapMove = 0; setTimeout(() => followRiderCamera(rp, dp), 50); }
+      };
+    }
+    // El tiempo en vivo sale de la ruta del repartidor a tu casa cuando ya va hacia vos
+    const md = trackingModel(order, normalizedStatus);
+    gtRouteEta = md.eta && (normalizedStatus === 'delivering' || (order.isTrip && !!order.driverId));
+    if (md.eta && gtRouteEta && currentETA && currentETA !== '--') setClientEta(Number(currentETA));
+    refreshDriverLocationFreshness(order);
+  } else {
   container.innerHTML = `
-    ${getStatusBannerHTML(order, normalizedStatus, isDriverView)}
-    <div class="v5-status-header">
-      <div class="v5-status-content">
-        ${titleText ? `
-        <h2 class="v5-status-title">
-          ${titleText.includes('Buscando') ? `
-            <div class="radar-search-wrapper">
-              <div class="radar-search-wave"></div>
-              <div class="radar-search-wave"></div>
-              <div class="radar-search-dot"></div>
-            </div>
+      ${getStatusBannerHTML(order, normalizedStatus, isDriverView)}
+      <div class="v5-status-header">
+        <div class="v5-status-content">
+          ${titleText ? `
+          <h2 class="v5-status-title">
+            ${titleText.includes('Buscando') ? `
+              <div class="radar-search-wrapper">
+                <div class="radar-search-wave"></div>
+                <div class="radar-search-wave"></div>
+                <div class="radar-search-dot"></div>
+              </div>
+            ` : ''}
+            ${titleText}
+          </h2>
           ` : ''}
-          ${titleText}
-        </h2>
-        ` : ''}
-        ${subtitleHtml}
-        <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
-      </div>
-    </div>
-    
-    ${order.isTrip ? `
-      <div class="v5-stepper-container">
-        <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getTripStepperLinePercent(order)}%;"></div>
-        </div>
-        
-        <div class="v5-stepper-step ${getTripStepClass(order, 0)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Buscando</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 1)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Asignado</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 2)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">En camino</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 3)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">En viaje</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 4)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Llegaste</span>
+          ${subtitleHtml}
+          <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
         </div>
       </div>
-    ` : (isTakeaway ? `
-      <!-- Stepper Retiro en el Local (Take Away) -->
-      <div class="v5-stepper-container">
-        <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getTakeawayStepperLinePercent(normalizedStatus)}%;"></div>
-        </div>
-        
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 0)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
+      
+      ${order.isTrip ? `
+        <div class="v5-stepper-container">
+          <div class="v5-stepper-line">
+            <div class="v5-stepper-line-fill" style="width: ${getTripStepperLinePercent(order)}%;"></div>
           </div>
-          <span class="v5-step-label">Recibido</span>
-        </div>
-
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 1)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Preparando</span>
-        </div>
-
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 2)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Listo para retirar</span>
-        </div>
-
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 3)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Entregado</span>
-        </div>
-      </div>
-    ` : `
-      <div class="v5-stepper-container">
-        <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus, order.isFavor, order)}%;"></div>
-        </div>
-        
-        ${order.isFavor ? `
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, true, order)}">
+          
+          <div class="v5-stepper-step ${getTripStepClass(order, 0)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, true, order), true)}
-              <span class="v5-step-pulse"></span>
-            </div>
-            <span class="v5-step-label">Solicitado</span>
-          </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, true, order)}">
-            <div class="v5-step-circle">
-              ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
             <span class="v5-step-label">Buscando</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, true, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 1)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Yendo al punto</span>
+            <span class="v5-step-label">Asignado</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, true, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 2)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
             <span class="v5-step-label">En camino</span>
           </div>
-        ` : `
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, false, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 3)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Pendiente</span>
+            <span class="v5-step-label">En viaje</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, false, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 4)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Aprobado</span>
+            <span class="v5-step-label">Llegaste</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, false, order)}">
+        </div>
+      ` : (isTakeaway ? `
+        <!-- Stepper Retiro en el Local (Take Away) -->
+        <div class="v5-stepper-container">
+          <div class="v5-stepper-line">
+            <div class="v5-stepper-line-fill" style="width: ${getTakeawayStepperLinePercent(normalizedStatus)}%;"></div>
+          </div>
+          
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 0)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
+              <span class="v5-step-pulse"></span>
+            </div>
+            <span class="v5-step-label">Recibido</span>
+          </div>
+  
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 1)}">
+            <div class="v5-step-circle">
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
             <span class="v5-step-label">Preparando</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, false, order)}">
+  
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 2)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Listo</span>
+            <span class="v5-step-label">Listo para retirar</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4, false, order)}">
+  
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 3)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 4, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">En camino</span>
-          </div>
-        `}
-      </div>
-    `)}
-
-    ${order.isTrip ? `
-      <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
-        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:16px;">${order.tripType === 'moto' ? '🏍️' : '🚗'}</span>
-          <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
-          <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
-            <span style="color:#22c55e;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
-          </div>
-          <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
-            <span style="color:#ef4444;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino:</span> ${order.deliveryAddress}
+            <span class="v5-step-label">Entregado</span>
           </div>
         </div>
-      </div>
-    ` : ''}
-
-    ${isTakeaway ? `
-      <!-- Card Retiro en el Local -->
-      <div style="background:var(--color-surface); border:1.5px solid #10b981; border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(16,185,129,0.08); width:100%; box-sizing:border-box;">
-        <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-          <span style="font-size:10px; font-weight:800; color:#10b981; text-transform:uppercase; margin-bottom:2px;">🏬 Retiro por el Local</span>
-          <span style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${order.comercioRealName || order.comercioName || 'Comercio'}</span>
-          <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; margin-top:2px;">¡Sin costo de envío! ($0)</span>
+      ` : `
+        <div class="v5-stepper-container">
+          <div class="v5-stepper-line">
+            <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus, order.isFavor, order)}%;"></div>
+          </div>
+          
+          ${order.isFavor ? `
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Solicitado</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Buscando</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Yendo al punto</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">En camino</span>
+            </div>
+          ` : `
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Pendiente</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Aprobado</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Preparando</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Listo</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 4, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">En camino</span>
+            </div>
+          `}
         </div>
-      </div>
-    ` : ''}
-
-    ${(() => {
-      const isCommerceOrder = !order.isFavor && !order.isTrip;
-      const isEncomiendaOrder = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
-      const showCode = !isDriverView && !order.isTrip && !isTakeaway && !isEncomiendaOrder && !!order.verificationCode && (
-        isCommerceOrder ? order.status === 'delivering' : !['delivered', 'cancelled', 'completed'].includes(order.status)
-      );
-      return showCode ? `
-        <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
-      ` : '';
-    })()}
-
-    ${(!isDriverView && !isTakeaway && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
-      <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
-      <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
-        <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
-          <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias de Transferencia (${order.driverName || 'Repartidor'})</span>
-          <span style="font-size:14px; font-weight:800; color:${order.driverAlias ? 'var(--color-primary)' : 'var(--color-text-primary)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || (order.driverId ? 'Alias no registrado (consultar por chat)' : 'Esperando asignación...')}</span>
+      `)}
+  
+      ${order.isTrip ? `
+        <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
+          <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:16px;">${order.tripType === 'moto' ? '🏍️' : '🚗'}</span>
+            <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
+            <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+              <span style="color:#22c55e;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
+            </div>
+            <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+              <span style="color:#ef4444;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino:</span> ${order.deliveryAddress}
+            </div>
+          </div>
         </div>
-        ${order.driverAlias ? `
-          <button id="v5-copy-alias-btn" style="background:var(--color-primary); color:white; border:none; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:900; cursor:pointer; flex-shrink:0; transition:all 0.2s; box-shadow:0 2px 8px rgba(225,29,72,0.3);">
-            Copiar
-          </button>
-        ` : ''}
-      </div>
-    ` : ''}
-
-    ${(isDriverView && !isCompleted && !isCancelled) ? `
-      <!-- Botones de Acción del Repartidor -->
-      <div class="driver-actions-container" style="display:flex; flex-direction:column; gap:10px; width:100%; margin-top:6px; margin-bottom:6px; box-sizing:border-box;">
-        ${!isDelivering ? `
-          <button id="v5-driver-pickup-btn" style="background:var(--color-primary); color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(225, 29, 72, 0.35); display:flex; align-items:center; justify-content:center; gap:8px;">
-            ${icon('bike', 18)} ${order.isTrip ? 'INICIAR VIAJE' : 'RETIRAR PEDIDO'}
-          </button>
-          ${(order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
-            <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('creditCard', 14)} ${order.favorType === 'pagodeservicios' ? 'Ingresar Valor de Facturas' : 'Ingresar Valor de Compra'} (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+      ` : ''}
+  
+      ${isTakeaway ? `
+        <!-- Card Retiro en el Local -->
+        <div style="background:var(--color-surface); border:1.5px solid #10b981; border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(16,185,129,0.08); width:100%; box-sizing:border-box;">
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+            <span style="font-size:10px; font-weight:800; color:#10b981; text-transform:uppercase; margin-bottom:2px;">🏬 Retiro por el Local</span>
+            <span style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${order.comercioRealName || order.comercioName || 'Comercio'}</span>
+            <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; margin-top:2px;">¡Sin costo de envío! ($0)</span>
+          </div>
+        </div>
+      ` : ''}
+  
+      ${(() => {
+        const isCommerceOrder = !order.isFavor && !order.isTrip;
+        const isEncomiendaOrder = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
+        const showCode = !isDriverView && !order.isTrip && !isTakeaway && !isEncomiendaOrder && !!order.verificationCode && (
+          isCommerceOrder ? order.status === 'delivering' : !['delivered', 'cancelled', 'completed'].includes(order.status)
+        );
+        return showCode ? `
+          <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
+        ` : '';
+      })()}
+  
+      ${(!isDriverView && !isTakeaway && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
+        <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
+        <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
+            <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias de Transferencia (${order.driverName || 'Repartidor'})</span>
+            <span style="font-size:14px; font-weight:800; color:${order.driverAlias ? 'var(--color-primary)' : 'var(--color-text-primary)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || (order.driverId ? 'Alias no registrado (consultar por chat)' : 'Esperando asignación...')}</span>
+          </div>
+          ${order.driverAlias ? `
+            <button id="v5-copy-alias-btn" style="background:var(--color-primary); color:white; border:none; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:900; cursor:pointer; flex-shrink:0; transition:all 0.2s; box-shadow:0 2px 8px rgba(225,29,72,0.3);">
+              Copiar
             </button>
           ` : ''}
-        ` : `
-          <div style="display:flex; gap:10px; width:100%;">
-            ${!order.isAtDoor ? `
-              <button id="v5-driver-notify-door-btn" style="background:#f59e0b; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:14.5px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap;">
-                ${icon('bell', 16)} AVISAR AFUERA
+        </div>
+      ` : ''}
+  
+      ${(isDriverView && !isCompleted && !isCancelled) ? `
+        <!-- Botones de Acción del Repartidor -->
+        <div class="driver-actions-container" style="display:flex; flex-direction:column; gap:10px; width:100%; margin-top:6px; margin-bottom:6px; box-sizing:border-box;">
+          ${!isDelivering ? `
+            <button id="v5-driver-pickup-btn" style="background:var(--color-primary); color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(225, 29, 72, 0.35); display:flex; align-items:center; justify-content:center; gap:8px;">
+              ${icon('bike', 18)} ${order.isTrip ? 'INICIAR VIAJE' : 'RETIRAR PEDIDO'}
+            </button>
+            ${(order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
+              <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('creditCard', 14)} ${order.favorType === 'pagodeservicios' ? 'Ingresar Valor de Facturas' : 'Ingresar Valor de Compra'} (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
               </button>
-            ` : `
-              <button id="v5-driver-deliver-btn" style="background:#10b981; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); display:flex; align-items:center; justify-content:center; gap:6px;">
-                ${icon('checkCircle', 16)} ${order.isTrip ? 'FINALIZAR VIAJE' : 'ENTREGAR'}
-              </button>
-            `}
-          </div>
-        `}
-        ${isDelivering && (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
-          <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px;">
-            ${icon('creditCard', 14)} Modificar precio (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+            ` : ''}
+          ` : `
+            <div style="display:flex; gap:10px; width:100%;">
+              ${!order.isAtDoor ? `
+                <button id="v5-driver-notify-door-btn" style="background:#f59e0b; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:14.5px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap;">
+                  ${icon('bell', 16)} AVISAR AFUERA
+                </button>
+              ` : `
+                <button id="v5-driver-deliver-btn" style="background:#10b981; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); display:flex; align-items:center; justify-content:center; gap:6px;">
+                  ${icon('checkCircle', 16)} ${order.isTrip ? 'FINALIZAR VIAJE' : 'ENTREGAR'}
+                </button>
+              `}
+            </div>
+          `}
+          ${isDelivering && (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
+            <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px;">
+              ${icon('creditCard', 14)} Modificar precio (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
+  
+      <!-- Total Price Pill & Details Toggle -->
+      <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:12px 16px; background:linear-gradient(to right, rgba(255,255,255,0.7), rgba(255,255,255,0.55)); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-radius:20px; border:1px solid rgba(255,255,255,0.6); margin-top:6px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:11.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Total:</span>
+          <strong id="v5-footer-total-val" style="font-size:20px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;">
+            $${Math.round(totalAmount).toLocaleString('es-AR')}
+          </strong>
+          <button id="v5-price-breakdown-info-btn" style="background:var(--color-primary); color:#ffffff; border:none; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900; cursor:pointer; margin-left:2px; transition:all 0.2s;" title="Ver desglose del importe">
+            i
           </button>
-        ` : ''}
-      </div>
-    ` : ''}
-
-    <!-- Total Price Pill & Details Toggle -->
-    <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:12px 16px; background:linear-gradient(to right, rgba(255,255,255,0.7), rgba(255,255,255,0.55)); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-radius:20px; border:1px solid rgba(255,255,255,0.6); margin-top:6px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); box-sizing:border-box;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Total:</span>
-        <strong id="v5-footer-total-val" style="font-size:20px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;">
-          $${Math.round(totalAmount).toLocaleString('es-AR')}
-        </strong>
-        <button id="v5-price-breakdown-info-btn" style="background:var(--color-primary); color:#ffffff; border:none; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900; cursor:pointer; margin-left:2px; transition:all 0.2s;" title="Ver desglose del importe">
-          i
+        </div>
+        <button id="v5-toggle-details-btn" class="v5-toggle-btn" style="margin:0; padding:8px 16px; font-size:12px; font-weight:800; width:auto; border-radius:12px; background:var(--color-primary); color:#ffffff; border:none; display:flex; align-items:center; gap:6px; transition:all 0.2s;">
+          <span>Ver Detalles</span>
+          ${icon('clipboard', 12)}
         </button>
       </div>
-      <button id="v5-toggle-details-btn" class="v5-toggle-btn" style="margin:0; padding:8px 16px; font-size:12px; font-weight:800; width:auto; border-radius:12px; background:var(--color-primary); color:#ffffff; border:none; display:flex; align-items:center; gap:6px; transition:all 0.2s;">
-        <span>Ver Detalles</span>
-        ${icon('clipboard', 12)}
-      </button>
-    </div>
-
-    <!-- Contenedor expandible -->
-    <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
-      ${order.isFavor ? `
-        <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left;">
-          <div style="font-size:9px; font-weight:900; color:${getFavorTypeMeta(order.favorType).textColor}; text-transform:uppercase; margin-bottom:8px;">${getFavorTypeMeta(order.favorType).headerText}</div>
-          <div style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${formatFavorDetailsHTML(order.details)}</div>
-          ${order.pickupAddress ? `
-            <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
-              ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
-      ${(!order.isFavor && !order.isTrip && order.items && order.items.length > 0) ? `
-        <div style="background:var(--color-surface); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left; display:flex; flex-direction:column; gap:8px;">
-          <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Detalle del Pedido</div>
-          ${order.items.map(item => `
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.04);">
-              <div style="flex:1;">
-                <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${item.qty}x</span> ${item.name}</div>
-                ${item.notes ? `<div style="font-size:10px; color:var(--color-text-secondary); margin-top:2px; font-style:italic;">"${item.notes}"</div>` : ''}
+  
+      <!-- Contenedor expandible -->
+      <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
+        ${order.isFavor ? `
+          <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left;">
+            <div style="font-size:9px; font-weight:900; color:${getFavorTypeMeta(order.favorType).textColor}; text-transform:uppercase; margin-bottom:8px;">${getFavorTypeMeta(order.favorType).headerText}</div>
+            <div style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${formatFavorDetailsHTML(order.details)}</div>
+            ${order.pickupAddress ? `
+              <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
+                ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
               </div>
-              <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
-            </div>
-          `).join('')}
-        </div>
-      ` : ''}
-      ${(normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus))) ? `
-        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; align-items: flex-end; width: 100%;">
-          <button id="v5-cancel-order-btn" class="v5-cancel-btn" style="margin: 0; padding: 6px 14px; font-size: 11.5px; font-weight: 800; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
-            ${icon('trash', 13)} ${order.isTrip ? 'Cancelar Viaje' : 'Cancelar Pedido'}
-          </button>
-          ${order.pointsRedeemed > 0 ? `
-            <div style="display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; margin-top: 4px;">
-              ${icon('goPointsLogo', 11)} Go Points canjeados serán reintegrados
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
-    </div>
-
-    ${viralBannerHTML}
-  `;
+            ` : ''}
+          </div>
+        ` : ''}
+        ${(!order.isFavor && !order.isTrip && order.items && order.items.length > 0) ? `
+          <div style="background:var(--color-surface); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left; display:flex; flex-direction:column; gap:8px;">
+            <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Detalle del Pedido</div>
+            ${order.items.map(item => `
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.04);">
+                <div style="flex:1;">
+                  <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${item.qty}x</span> ${item.name}</div>
+                  ${item.notes ? `<div style="font-size:10px; color:var(--color-text-secondary); margin-top:2px; font-style:italic;">"${item.notes}"</div>` : ''}
+                </div>
+                <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+        ${(normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus))) ? `
+          <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; align-items: flex-end; width: 100%;">
+            <button id="v5-cancel-order-btn" class="v5-cancel-btn" style="margin: 0; padding: 6px 14px; font-size: 11.5px; font-weight: 800; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
+              ${icon('trash', 13)} ${order.isTrip ? 'Cancelar Viaje' : 'Cancelar Pedido'}
+            </button>
+            ${order.pointsRedeemed > 0 ? `
+              <div style="display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; margin-top: 4px;">
+                ${icon('goPointsLogo', 11)} Go Points canjeados serán reintegrados
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+      </div>
+  
+      ${viralBannerHTML}
+    `;
+  }
 
   const directBackBtn = document.getElementById('v5-direct-back-btn');
   if (directBackBtn) {
@@ -1789,7 +1886,11 @@ function updateUI(order, isDriverViewOverride = false) {
   });
 
   document.getElementById('v5-toggle-details-btn')?.addEventListener('click', () => {
-    window.openOrderDetailsModal(order);
+    // Cliente: una sola hoja con productos, precio línea por línea y entrega
+    if (!isDriverView) {
+      const canCancel = normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
+      openClientOrderSheet(window.lastOrderData || order, { canCancel });
+    } else window.openOrderDetailsModal(order);
   });
 
   document.getElementById('chat-v5-btn')?.addEventListener('click', () => {
@@ -1874,6 +1975,11 @@ function updateUI(order, isDriverViewOverride = false) {
   // Trigger Asynchronous Predictive and Weather-Adaptive ETA calculation
   setTimeout(() => {
     calculatePredictiveETA(order).then(eta => {
+      if (!isDriverView) {
+        // Si ya hay tiempo de la ruta en vivo, manda ese (es más preciso)
+        if (!(gtRouteEta && currentETA && currentETA !== '--')) setClientEta(eta.min, eta.label.includes('Llega') ? null : eta.max);
+        return;
+      }
       const etaContainer = document.getElementById('v5-dynamic-eta-container');
       if (etaContainer) {
         if (isDriverView || order.status === 'completed' || order.status === 'cancelled' || isWaitingConfirmation || isSearchingRider) {
@@ -2029,7 +2135,8 @@ async function updateMap(order) {
     const initialCenter = destPos ? [destPos.lng, destPos.lat] : (riderPos ? [riderPos.lng, riderPos.lat] : magCenterLngLat);
 
     const MapConstructor = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
-    const activeMapStyle = GOOGLE_MAPS_STYLE;
+    // Mapa propio (gratis y autorizado). Antes: imágenes de Google tomadas sin clave.
+    const activeMapStyle = goMapStyle('light');
 
     liveMap = new MapConstructor({
       container,
@@ -2046,6 +2153,7 @@ async function updateMap(order) {
       antialias: true
     });
 
+    if (import.meta.env.DEV) window.__trackingMap = liveMap; // solo para depurar en desarrollo
     liveMap.on('error', () => {
       try {
         if (liveMap && liveMap.getStyle() !== activeMapStyle) {
@@ -2053,6 +2161,8 @@ async function updateMap(order) {
         }
       } catch(e) {}
     });
+
+    ['dragstart', 'zoomstart', 'rotatestart'].forEach(ev => liveMap.on(ev, (e) => { if (e && e.originalEvent) lastUserMapMove = Date.now(); }));
 
     liveMap.on('load', () => {
       try { liveMap.resize(); } catch(e) {}
@@ -2103,19 +2213,8 @@ async function updateMap(order) {
     }
   }
 
-  // Snap Rider Marker directly onto the route lineString if available
-  let effectiveRiderPos = riderPos;
-  let snappedBearing = null;
-  if (riderPos && currentRouteCoordinates && currentRouteCoordinates.length >= 2) {
-    const snap = snapPointToLineString(riderPos, currentRouteCoordinates, 350);
-    if (snap.isSnapped) {
-      effectiveRiderPos = snap.snappedPoint;
-      snappedBearing = snap.bearing;
-    }
-  }
-
-  // Rider Marker
-  if (effectiveRiderPos) {
+  // La moto: la mueve el motor de movimiento (sin tirones, por las calles, girando suave)
+  if (riderPos) {
     if (!riderMarker) {
       const el = document.createElement('div');
       el.className = 'v5-marker-shadow';
@@ -2125,50 +2224,30 @@ async function updateMap(order) {
           <div class="sonar-pulse-ring-1"></div>
           <div class="sonar-pulse-ring-2"></div>
           <div class="moto-base-glow" style="position:absolute; width:24px; height:6px; background:rgba(225, 29, 72, 0.5); border-radius:50%; bottom:2px; left:50%; transform:translateX(-50%); filter:blur(2px); z-index:1;"></div>
-          <div class="rider-marker-avatar" style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.4s ease;">
+          <div class="rider-marker-avatar" style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; will-change:transform;">
             <img src="/go-delivery-moto.png?v=2" style="width:44px; height:44px; object-fit:contain;" />
           </div>
         </div>`;
       riderMarker = new maplibregl.Marker({ element: el })
-        .setLngLat([effectiveRiderPos.lng, effectiveRiderPos.lat])
+        .setLngLat([riderPos.lng, riderPos.lat])
         .addTo(liveMap);
-      riderMarker.lastPos = effectiveRiderPos;
-      riderMarker.angle = snappedBearing !== null ? snappedBearing : 0;
-      if (snappedBearing !== null) {
-        const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
-        if (avatar) avatar.style.transform = `rotate(${snappedBearing}deg)`;
-      }
-    } else {
-      let bearing = snappedBearing;
-      if (bearing === null && riderMarker.lastPos && (riderMarker.lastPos.lat !== effectiveRiderPos.lat || riderMarker.lastPos.lng !== effectiveRiderPos.lng)) {
-        const lat1 = riderMarker.lastPos.lat * Math.PI / 180;
-        const lat2 = effectiveRiderPos.lat * Math.PI / 180;
-        const dLon = (effectiveRiderPos.lng - riderMarker.lastPos.lng) * Math.PI / 180;
-        const y = Math.sin(dLon) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-        bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-      }
-
-      if (bearing !== null) {
-        let delta = bearing - (riderMarker.angle % 360);
-        if (delta > 180) delta -= 360;
-        if (delta < -180) delta += 360;
-        riderMarker.angle += delta;
-
-        const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
-        if (avatar) {
-          avatar.style.transform = `rotate(${riderMarker.angle}deg)`;
-        }
-      }
-      riderMarker.lastPos = effectiveRiderPos;
-      animateRiderMarkerTo(effectiveRiderPos);
+      const avatar = el.querySelector('.rider-marker-avatar');
+      if (riderMotion) riderMotion.stop();
+      riderMotion = createRiderMotion({
+        setPosition: (p) => { if (riderMarker) riderMarker.setLngLat([p.lng, p.lat]); },
+        setHeading: (deg) => { if (avatar) avatar.style.transform = `rotate(${deg}deg)`; },
+        setRemainingRoute: (coords) => setTrackingRouteLine(coords),
+      });
+      if (currentRouteCoordinates) riderMotion.setRoute(currentRouteCoordinates);
     }
+    riderMotion.push(riderPos);
   }
 
   // Update Route Polyline & ETA
   const targetPos = destPos || pickupPos;
   if (riderPos && targetPos) {
     updateRoute(riderPos, targetPos);
+    followRiderCamera(riderPos, targetPos);
   }
 
   if (isFirstFit) {
@@ -2177,13 +2256,38 @@ async function updateMap(order) {
       const maxLng = Math.max(riderPos.lng, targetPos.lng);
       const minLat = Math.min(riderPos.lat, targetPos.lat);
       const maxLat = Math.max(riderPos.lat, targetPos.lat);
-      liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 260, left: 50, right: 50 } });
+      liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 90, bottom: bottomSheetPad(), left: 50, right: 50 }, maxZoom: 17 });
       isFirstFit = false;
     } else if (destPos) {
       liveMap.easeTo({ center: [destPos.lng, destPos.lat], zoom: 16.5 });
       isFirstFit = false;
     }
   }
+}
+
+// Lo que tapa la hoja de abajo (mide la real: cambia según el estado y si está achicada)
+function bottomSheetPad() {
+  const el = document.getElementById('gt-sheet') || document.getElementById('tracking-info-panel');
+  const h = el ? el.getBoundingClientRect().height : 260;
+  const box = liveMap ? liveMap.getContainer().getBoundingClientRect().height : 800;
+  return Math.round(Math.min(Math.max(h + 24, 120), box * 0.7));
+}
+
+// Como Uber: si la moto se va del área visible, la cámara se acomoda para ver moto y destino.
+// Si el cliente movió el mapa hace poco, no se toca.
+function followRiderCamera(riderPos, targetPos) {
+  if (!liveMap || isFirstFit || Date.now() - lastUserMapMove < 12000) return;
+  try {
+    const box = liveMap.getContainer().getBoundingClientRect();
+    const pt = liveMap.project([riderPos.lng, riderPos.lat]);
+    const margin = { top: 80, bottom: bottomSheetPad(), side: 40 }; // abajo está la hoja del pedido
+    const inside = pt.x > margin.side && pt.x < box.width - margin.side && pt.y > margin.top && pt.y < box.height - margin.bottom;
+    if (inside) return;
+    liveMap.fitBounds([
+      [Math.min(riderPos.lng, targetPos.lng), Math.min(riderPos.lat, targetPos.lat)],
+      [Math.max(riderPos.lng, targetPos.lng), Math.max(riderPos.lat, targetPos.lat)],
+    ], { padding: { top: 90, bottom: bottomSheetPad(), left: 60, right: 60 }, maxZoom: 17, duration: 900 });
+  } catch (e) { /* mapa todavía cargando */ }
 }
 
 function getTripStepClass(order, index) {
@@ -2288,78 +2392,78 @@ function snapPointToLineString(point, coordinates, maxThresholdMeters = 350) {
   return { snappedPoint: point, bearing: 0, distance: minDistance, isSnapped: false };
 }
 
+// La ruta se recalcula como mucho cada 8 s (servicio gratuito de rutas), pero siempre termina
+// usando la última posición: antes, si la posición llegaba antes de los 8 s, se descartaba y la
+// línea quedaba saliendo de un punto viejo, lejos de la moto (y así hasta el próximo movimiento).
+// Si el repartidor se salió de la ruta, se recalcula enseguida (sin esperar los 8 s).
+const ROUTE_MIN_INTERVAL_MS = 8000;
+const ROUTE_OFF_TRACK_MIN_MS = 2500;
+let routeTrailingTimer = null;
+let routeRequestSeq = 0;
+
+function setTrackingRouteLine(coords) {
+  if (!liveMap) return;
+  ensureTrackingRouteLayers();
+  const src = liveMap.getSource('tracking-route-source');
+  if (src) src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } });
+}
+
 async function updateRoute(start, end) {
   const now = Date.now();
   const timeElapsed = now - lastRouteFetchTime;
-  
+
   let shouldFetch = false;
+  let offTrack = false;
   if (!lastRouteStartCoords || !lastRouteEndCoords) {
     shouldFetch = true;
   } else {
     const startMoved = getHaversineDistance(start.lat, start.lng, lastRouteStartCoords.lat, lastRouteStartCoords.lng);
     const endMoved = getHaversineDistance(end.lat, end.lng, lastRouteEndCoords.lat, lastRouteEndCoords.lng);
-    
-    if (timeElapsed >= 8000 && (startMoved >= 10 || endMoved >= 8)) {
+    const moved = startMoved >= 10 || endMoved >= 8;
+    // ¿Sigue sobre la ruta dibujada? Si no, la línea ya no sale de la moto
+    offTrack = endMoved >= 8 || !(currentRouteCoordinates && currentRouteCoordinates.length >= 2 &&
+      snapPointToLineString(start, currentRouteCoordinates, ROUTE_SNAP_METERS).isSnapped);
+
+    if (moved && (timeElapsed >= ROUTE_MIN_INTERVAL_MS || (offTrack && timeElapsed >= ROUTE_OFF_TRACK_MIN_MS))) {
       shouldFetch = true;
+    } else if (moved) {
+      // Muy pronto: se deja agendado con la última posición (nunca se pierde la última)
+      clearTimeout(routeTrailingTimer);
+      const wait = (offTrack ? ROUTE_OFF_TRACK_MIN_MS : ROUTE_MIN_INTERVAL_MS) - timeElapsed;
+      routeTrailingTimer = setTimeout(() => updateRoute(start, end), Math.max(250, wait));
     }
   }
 
-  // Draw optimistic line immediately
-  if (liveMap) {
-    ensureTrackingRouteLayers();
-    const src = liveMap.getSource('tracking-route-source');
-    if (src && (!lastRouteStartCoords || shouldFetch)) {
-      src.setData({
-        type: 'Feature',
-        geometry: {
-          type: 'LineString',
-          coordinates: [[start.lng, start.lat], [end.lng, end.lat]]
-        }
-      });
-    }
+  // Mientras llega la ruta por calles, una línea recta desde donde está la moto
+  if (!lastRouteStartCoords || (shouldFetch && offTrack) || (offTrack && !shouldFetch)) {
+    if (offTrack && riderMotion) riderMotion.setRoute(null);
+    const from = (riderMotion && riderMotion.current()) || start;
+    setTrackingRouteLine([[from.lng, from.lat], [end.lng, end.lat]]);
+    if (offTrack) currentRouteCoordinates = null;
   }
 
   if (!shouldFetch) return;
 
+  clearTimeout(routeTrailingTimer);
   lastRouteFetchTime = now;
   lastRouteStartCoords = { lat: start.lat, lng: start.lng };
   lastRouteEndCoords = { lat: end.lat, lng: end.lng };
+  const seq = ++routeRequestSeq;
 
   try {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`);
     const data = await res.json();
+    if (seq !== routeRequestSeq) return; // llegó tarde: ya se pidió una ruta más nueva
     if (data.routes?.[0] && liveMap) {
       let coords = data.routes[0].geometry.coordinates;
       currentRouteCoordinates = coords;
-      
-      ensureTrackingRouteLayers();
-      const src = liveMap.getSource('tracking-route-source');
-      if (src) {
-        src.setData({
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: coords
-          }
-        });
-      }
-
-      // Snap rider marker immediately onto newly received route geometry
-      if (riderMarker && start) {
-        const snap = snapPointToLineString(start, coords, 350);
-        if (snap.isSnapped) {
-          riderMarker.setLngLat([snap.snappedPoint.lng, snap.snappedPoint.lat]);
-          riderMarker.lastPos = snap.snappedPoint;
-          const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
-          if (avatar && snap.bearing !== null) {
-            avatar.style.transform = `rotate(${snap.bearing}deg)`;
-          }
-        }
-      }
+      if (riderMotion) riderMotion.setRoute(coords);
+      else setTrackingRouteLine(coords);
 
       const durationSec = data.routes[0].duration;
       const minutes = Math.ceil(durationSec / 60) + 1;
       currentETA = minutes;
+      if (gtRouteEta) setClientEta(minutes);
       const etaValEl = document.querySelector('#v5-dynamic-eta-container b');
       if (etaValEl) {
         etaValEl.textContent = `${minutes} min`;
@@ -2896,7 +3000,7 @@ window.openOrderDetailsModal = function(order) {
 
   container.innerHTML = `
     <div id="v5-details-modal-backdrop" onclick="window.closeOrderDetailsModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
-    <div id="v5-details-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + env(safe-area-inset-bottom, 14px));">
+    <div id="v5-details-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 14px)));">
       
       <!-- Premium Red Header Bar -->
       <div style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center;">
@@ -2923,7 +3027,7 @@ window.openOrderDetailsModal = function(order) {
       </div>
  
       <!-- Content -->
-      <div style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 70px - env(safe-area-inset-bottom, 14px)); box-sizing: border-box;">
+      <div style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 70px - max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 14px))); box-sizing: border-box;">
         ${detailsHtml}
         ${isPending ? `
           <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; gap: 8px; width: 100%;">
@@ -2985,7 +3089,7 @@ window.openPriceBreakdownModal = function(order) {
 
   container.innerHTML = `
     <div id="v5-price-modal-backdrop" onclick="window.closePriceBreakdownModal()" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:9998; opacity:0; transition:opacity 0.25s ease;"></div>
-    <div id="v5-price-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + env(safe-area-inset-bottom, 14px));">
+    <div id="v5-price-modal-sheet" style="position:fixed; bottom:0; left:50%; transform:translate(-50%, 100%); width:100%; max-width:440px; background:var(--color-surface); border-radius:28px 28px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,0.22); border-top:1px solid var(--color-border); z-index:9999; box-sizing:border-box; transition:transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); overflow:hidden; max-height:85vh; padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 14px)));">
       
       <!-- Premium Red Header Bar -->
       <div style="background: linear-gradient(135deg, var(--color-primary) 0%, #be123c 100%); color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center;">

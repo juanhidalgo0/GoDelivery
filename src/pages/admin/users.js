@@ -427,35 +427,14 @@ export async function renderAdminUsers() {
       const targetUser = users.find(u => u.uid === uid);
       if (!targetUser) return;
 
-      const todayStr = new Date().toISOString().split('T')[0];
-      const isCurrentlyActive = targetUser.lastCanonDate === todayStr;
-      const newStatus = isCurrentlyActive ? null : todayStr;
-
       showConfirm({
-        title: isCurrentlyActive ? 'Bloquear Jornada' : 'Habilitar Jornada',
-        message: `¿Querés ${isCurrentlyActive ? 'BLOQUEAR' : 'HABILITAR'} la jornada de hoy (${todayStr}) para ${targetUser.displayName}?`,
+        title: 'Cuota Diaria',
+        message: `¿Registrar (o deshacer) el pago en mano de la cuota de hoy de ${targetUser.displayName}?`,
         onConfirm: async () => {
           try {
-            const canonDocRef = doc(db, 'delivery_canon_payments', `${uid}_${todayStr}`);
-            if (newStatus) {
-              await setDoc(canonDocRef, {
-                driverId: uid,
-                dateStr: todayStr,
-                status: 'approved',
-                amount: 2000,
-                updatedAt: serverTimestamp()
-              }, { merge: true });
-              await updateDoc(doc(db, 'users', uid), { lastCanonDate: todayStr, lastCanonChargeDate: todayStr });
-              targetUser.lastCanonDate = todayStr;
-              targetUser.lastCanonChargeDate = todayStr;
-              showToast(`Jornada habilitada para ${targetUser.displayName}`, 'success');
-            } else {
-              await setDoc(canonDocRef, { status: 'revoked', updatedAt: serverTimestamp() }, { merge: true });
-              await updateDoc(doc(db, 'users', uid), { lastCanonDate: null, lastCanonChargeDate: null });
-              targetUser.lastCanonDate = null;
-              targetUser.lastCanonChargeDate = null;
-              showToast(`Jornada bloqueada / reseteada para ${targetUser.displayName}`, 'info');
-            }
+            const { toggleCanonPaidToday } = await import('../../utils/canon.js');
+            const result = await toggleCanonPaidToday({ db, driverId: uid, canonAmount: getState().canonAmount || 2000, adminEmail: getState().user?.email || 'Admin' });
+            showToast(result === 'undone' ? 'Pago de cuota deshecho' : 'Cuota de hoy registrada como pagada', 'success');
             renderUsersList(users, document.getElementById('users-search')?.value || '', currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal());
           } catch (err) {
             console.error('Error toggling canon:', err);

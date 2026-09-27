@@ -79,6 +79,19 @@
       ],
       "headers": [
         {
+          "source": "/map/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=2592000"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ]
+        },
+        {
           "source": "/*.@(png|jpg|jpeg|gif|svg|ico)",
           "headers": [
             {

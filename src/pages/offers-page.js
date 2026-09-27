@@ -30,7 +30,7 @@ export async function renderOffersPage(container) {
   const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const topPadding = isNative 
     ? 'var(--status-bar-height, 24px)' 
-    : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+    : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
   container.innerHTML = `
     <div class="offers-page" style="display:flex; flex-direction:column; min-height:100vh; background:var(--color-bg); padding-bottom: 90px;">

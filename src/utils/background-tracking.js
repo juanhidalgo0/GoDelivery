@@ -1,5 +1,7 @@
 // GoDelivery — Global Background Geolocation Tracking for Delivery Drivers
 import { db } from '../firebase.js';
+import { recordDriverPosition } from './driver-dwell.js';
+import { isPlaceholderCoords } from './mandado-places.js';
 import { collection, query, where, onSnapshot, doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { subscribe, getState } from '../state.js';
 import { isDelivery } from '../auth.js';
@@ -174,6 +176,9 @@ async function handleLocationUpdate(pos) {
   
   // Cache position in global window context for instant access across modals/maps
   window.lastRiderPos = { lat: latitude, lng: longitude };
+  window.lastRiderPosAt = Date.now();
+  window.lastRiderAccuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
+  recordDriverPosition(latitude, longitude, window.lastRiderAccuracy); // para detectar dónde se quedó comprando
   
   const tickDetail = {
     coords: { lat: latitude, lng: longitude, speed: (typeof speed === 'number' && speed >= 0) ? speed : 0 },
@@ -200,8 +205,8 @@ async function handleLocationUpdate(pos) {
     }
 
     // 1. Check distance to commerce (<= 80m)
-    if (o.pickupCoords || o.comercioCoords) {
-      const pCoords = o.pickupCoords || o.comercioCoords;
+    const pCoords = o.comercioCoords || (isPlaceholderCoords(o.pickupCoords) ? null : o.pickupCoords);
+    if (pCoords && typeof pCoords.lat === 'number' && typeof pCoords.lng === 'number') {
       const distToCommerce = getHaversineDistance(latitude, longitude, pCoords.lat, pCoords.lng);
       if (distToCommerce < minDist) minDist = distToCommerce;
 

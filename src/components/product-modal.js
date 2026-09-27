@@ -509,7 +509,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       </div>
     </div>
 
-    <div class="pm-footer" style="flex-shrink:0 !important; position:relative !important; bottom:0 !important; background:var(--color-surface) !important; padding:12px 16px calc(14px + env(safe-area-inset-bottom, 0px)) 16px !important; border-top:1px solid var(--color-border-light) !important; display:flex !important; gap:12px !important; align-items:center !important; z-index:100 !important; box-shadow:0 -4px 20px rgba(0,0,0,0.08) !important;">
+    <div class="pm-footer" style="flex-shrink:0 !important; position:relative !important; bottom:0 !important; background:var(--color-surface) !important; padding:12px 16px calc(14px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 16px !important; border-top:1px solid var(--color-border-light) !important; display:flex !important; gap:12px !important; align-items:center !important; z-index:100 !important; box-shadow:0 -4px 20px rgba(0,0,0,0.08) !important;">
         <div class="pm-qty-main" style="${(!isCommerceOpen || isOutOfStock) ? 'opacity: 0.5; pointer-events: none;' : ''}">
           <button class="pm-main-qty-btn" id="pm-qty-minus">${icon('minus', 18)}</button>
           <span class="pm-main-qty-val">${qty}</span>
@@ -714,7 +714,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         `;
 
         viewer.innerHTML = `
-          <button style="position: absolute; top: calc(20px + env(safe-area-inset-top, 0px)); right: 20px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.2); color: white; border: 1.5px solid rgba(255,255,255,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; z-index: 1000000000; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+          <button style="position: absolute; top: calc(20px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); right: 20px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.2); color: white; border: 1.5px solid rgba(255,255,255,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; z-index: 1000000000; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
             ${icon('close', 24)}
           </button>
           <img src="${displayBannerImage || productImage || product.image}" alt="${product.name}" style="max-width: 95%; max-height: 85%; object-fit: contain; border-radius: 16px; transform: scale(0.9); transition: transform 0.25s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.8);" />

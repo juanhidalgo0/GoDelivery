@@ -172,7 +172,7 @@ export async function showDeliveryHistoryModal(user) {
           display: flex;
           flex-direction: column;
           gap: 10px;
-          padding-bottom: calc(48px + max(env(safe-area-inset-bottom, 0px), 28px));
+          padding-bottom: calc(48px + max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 28px));
           padding-right: 2px;
         ">
           ${filteredOrders.length === 0 ? `
@@ -387,7 +387,7 @@ export async function openCompletedOrderDetailsModal(order, user) {
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = `
-    padding: 16px 18px calc(24px + env(safe-area-inset-bottom, 16px)) 18px;
+    padding: 16px 18px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 18px;
     background: var(--driver-bg-panel);
     color: var(--driver-text-primary);
     display: flex;

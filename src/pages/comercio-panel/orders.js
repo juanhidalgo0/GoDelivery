@@ -95,7 +95,7 @@ export async function renderComercioOrders(manualId = null) {
       const isNative = !!window.Capacitor;
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
       const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
       const renderHeaderContent = () => {
         headerContainer.innerHTML = `
@@ -323,7 +323,7 @@ export async function renderComercioOrders(manualId = null) {
       const isNative = !!window.Capacitor;
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
       const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
       headerContainer.innerHTML = `
         <div class="orders-sticky-header-container" style="padding-top: ${topPadding};">
@@ -2147,7 +2147,7 @@ function getOrderStyles() {
     .detail-address-box { background:var(--color-bg-card); border:1px solid var(--color-border-light); padding:18px; border-radius:20px; display:flex; gap:14px; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,0.02); }
     .address-text { font-size:14px; color:var(--color-text-secondary); font-weight:600; line-height:1.5; word-break:break-word; flex:1; }
 
-    .detail-footer-dock { flex-shrink:0; background:var(--color-bg-card); border-top:1.5px solid var(--color-border-light); padding:16px 24px calc(16px + env(safe-area-inset-bottom, 20px)) 24px; }
+    .detail-footer-dock { flex-shrink:0; background:var(--color-bg-card); border-top:1.5px solid var(--color-border-light); padding:16px 24px calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 20px))) 24px; }
     .price-summary-card { display:flex; flex-direction:column; gap:6px; }
     .summary-row { display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-tertiary); font-weight:700; }
     .total-row { font-size:20px; font-weight:900; color:var(--color-text-primary); margin-top:4px; padding-top:8px; border-top:1.5px solid var(--color-border-light); }
@@ -2193,7 +2193,7 @@ function getOrderStyles() {
     .address-label { font-size:10px; font-weight:800; text-transform:uppercase; color:var(--color-text-tertiary); letter-spacing:0.05em; }
     .address-text { font-size:13px; font-weight:600; color:var(--color-text); line-height:1.3; }
 
-    .detail-footer-dock-premium { background:var(--color-bg); padding:10px 16px calc(28px + env(safe-area-inset-bottom, 0px)) 16px; border-top:1px solid var(--color-border-light); box-shadow:0 -10px 30px rgba(0,0,0,0.05); position:relative; z-index:10; }
+    .detail-footer-dock-premium { background:var(--color-bg); padding:10px 16px calc(28px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 16px; border-top:1px solid var(--color-border-light); box-shadow:0 -10px 30px rgba(0,0,0,0.05); position:relative; z-index:10; }
     .price-summary-card-premium { background:var(--color-bg-secondary); padding:10px 14px; border-radius:14px; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; border:1px solid var(--color-border-light); }
     .summary-row { display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary); font-weight:600; }
     .summary-divider { height:1px; background:var(--color-border-light); margin:2px 0; }
@@ -2642,7 +2642,7 @@ function getOrderStyles() {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 24px calc(16px + env(safe-area-inset-bottom, 0)) 24px;
+      padding: 16px 24px calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0))) 24px;
       border-top: 1.5px solid var(--color-border-light);
       background: var(--color-bg-card);
       box-shadow: 0 -10px 30px rgba(0,0,0,0.04);

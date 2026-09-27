@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
+import { devMaplibreAssets } from './dev-maplibre-assets.js';
 
 export default defineConfig({
+  plugins: [devMaplibreAssets()],
   define: {
     __APP_BUILD_TIME__: JSON.stringify(Date.now()),
   },

@@ -4,13 +4,14 @@ import { formatPrice, formatDate } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../../components/modal.js';
+import { getState } from '../../state.js';
 
 export async function renderAdminCommissions() {
   const content = document.getElementById('app-content');
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg);">
       <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+      <div style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         <!-- Decorative Circles -->
         <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
         
@@ -886,46 +887,22 @@ async function settleDriver(driverId) {
     btn.innerHTML = icon('loader', 20, 'animate-spin') + ' PROCESANDO...';
 
     try {
-      const { doc, updateDoc, writeBatch, serverTimestamp, addDoc, increment, collection } = await import('firebase/firestore');
-      const batch = writeBatch(db);
-      
-      // 1. Subtract the entered amount from user debt
-      batch.update(doc(db, 'users', driverId), { 
-        deliveryDebt: increment(-amountToSettle),
-        lastLiquidationAt: serverTimestamp()
-      });
-
-      // 2. Register a settlement for platform revenue tracking (Admin history)
-      const settlementRef = doc(collection(db, 'settlements'));
-      batch.set(settlementRef, {
-        driverId: driverId,
+      // Same liquidation as the Repartidores screen: history, movements and settled flags stay in one place.
+      const { doc, getDoc } = await import('firebase/firestore');
+      const { settleDriverDebt } = await import('../../utils/driver-settlement.js');
+      const driverSnap = await getDoc(doc(db, 'users', driverId));
+      const driverData = driverSnap.exists() ? driverSnap.data() : {};
+      await settleDriverDebt({
+        db,
+        driverId,
         driverName: driver.name,
-        deliveryId: driver.deliveryId,
-        amountCollected: amountToSettle,
-        type: 'driver_debt',
-        createdAt: serverTimestamp()
+        driverEmail: driverData.email,
+        currentDebt: Math.max(0, driverData.deliveryDebt || 0),
+        amount: amountToSettle,
+        method: 'efectivo',
+        notes: 'Desde Comisiones',
+        adminEmail: getState().user?.email || 'Admin'
       });
-
-      // 3. Record transaction for driver history (Driver panel history)
-      const transRef = doc(collection(db, 'delivery_transactions'));
-      batch.set(transRef, {
-        driverId: driverId,
-        type: 'liquidation',
-        amount: -amountToSettle, // Negative to clear debt in history views
-        description: `Liquidación de deuda (${formatPrice(amountToSettle)})`,
-        createdAt: serverTimestamp()
-      });
-
-      // 4. Mark all driver orders as settled
-      driver.orders.forEach(o => {
-        batch.update(doc(db, 'orders', o.id), {
-          isSettledDriver: true,
-          driverCommissionStatus: 'paid',
-          driverSettledAt: serverTimestamp()
-        });
-      });
-
-      await batch.commit();
       showToast('Liquidación registrada', 'success');
       closeModal();
       

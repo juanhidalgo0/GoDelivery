@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Comparación de mapas · GO (desarrollo)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/maplibre-gl.css" />
+  <style>
+    html, body { margin: 0; height: 100%; font-family: Inter, system-ui, sans-serif; background: #0C0F13; }
+    #map { position: fixed; inset: 0; }
+    .bar { position: fixed; top: 12px; left: 12px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .tabs { display: flex; gap: 6px; background: rgba(255,255,255,.96); padding: 5px; border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,.18); pointer-events: auto; overflow-x: auto; }
+    .tabs button { flex: 1; min-width: 104px; border: 0; border-radius: 12px; padding: 9px 8px; font: 600 12.5px Inter, sans-serif; background: transparent; color: #334155; cursor: pointer; line-height: 1.25; }
+    .tabs button.on { background: #E11D48; color: #fff; }
+    .note { align-self: flex-start; background: rgba(15,23,42,.88); color: #fff; font-size: 13px; line-height: 1.4; padding: 9px 12px; border-radius: 12px; max-width: 520px; pointer-events: auto; }
+    .note b { color: #FDA4AF; }
+    .moto { width: 34px; height: 34px; border-radius: 17px; background: #fff; box-shadow: 0 0 0 6px rgba(37,99,235,.25), 0 4px 12px rgba(0,0,0,.3); display: flex; align-items: center; justify-content: center; }
+    .home { width: 36px; height: 36px; border-radius: 18px 18px 18px 4px; transform: rotate(-45deg); background: #0F172A; border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="bar">
+    <div class="tabs" id="tabs"></div>
+    <div class="note" id="note"></div>
+  </div>
+  <script type="module">
+    import * as mlMod from 'maplibre-gl';
+    const maplibregl = mlMod.default || mlMod;
+    import { goMapStyle, GO_MAP_CENTER } from '/src/utils/go-map-style.js';
+    import { GOOGLE_MAPS_STYLE, MAPTILER_OLED_DARK } from '/src/utils/map-styles.js';
+
+    const OPTIONS = [
+      { id: 'hoy-cliente', label: 'Cliente hoy\n(Google sin permiso)', style: () => GOOGLE_MAPS_STYLE, note: '<b>Hoy, pantalla del cliente.</b> Imágenes de Google tomadas sin clave: no autorizado, lo pueden cortar sin aviso.' },
+      { id: 'go-claro', label: 'Cliente nuevo\n(propio, claro)', style: () => goMapStyle('light'), note: '<b>Propuesto para el cliente.</b> Mapa propio de Magdalena en tu Firebase: gratis, sin límites y nadie lo puede cortar.' },
+      { id: 'hoy-repartidor', label: 'Repartidor hoy\n(MapTiler)', style: () => MAPTILER_OLED_DARK, note: '<b>Hoy, mapa del repartidor.</b> MapTiler: el plan gratis no permite uso comercial.' },
+      { id: 'go-oscuro', label: 'Repartidor nuevo\n(propio, GO oscuro)', style: () => goMapStyle('dark'), note: '<b>Propuesto para el repartidor.</b> Mismo mapa propio, con los colores de GO.' },
+    ];
+    const params = new URLSearchParams(location.search);
+    let current = OPTIONS.find(o => o.id === params.get('mapa')) || OPTIONS[1];
+
+    const map = new maplibregl.Map({ container: 'map', style: current.style(), center: GO_MAP_CENTER, zoom: 15.2, attributionControl: { compact: true } });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+    // Una ruta y dos marcadores de ejemplo, para ver cómo se lee el pedido sobre cada mapa
+    const ROUTE = [[-57.5100, -35.0760], [-57.5125, -35.0768], [-57.5131, -35.0790], [-57.5160, -35.0799], [-57.5176, -35.0822], [-57.5205, -35.0829], [-57.5230, -35.0835]];
+    const addRoute = () => {
+      if (map.getSource('demo-route')) return;
+      map.addSource('demo-route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: ROUTE } } });
+      map.addLayer({ id: 'demo-route-glow', type: 'line', source: 'demo-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#E11D48', 'line-width': 14, 'line-opacity': .22 } });
+      map.addLayer({ id: 'demo-route', type: 'line', source: 'demo-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#E11D48', 'line-width': 5 } });
+    };
+    map.on('style.load', addRoute);
+    const moto = document.createElement('div'); moto.className = 'moto'; moto.textContent = '🛵';
+    const home = document.createElement('div'); home.className = 'home';
+    new maplibregl.Marker({ element: moto }).setLngLat(ROUTE[0]).addTo(map);
+    new maplibregl.Marker({ element: home }).setLngLat(ROUTE[ROUTE.length - 1]).addTo(map);
+
+    const tabs = document.getElementById('tabs');
+    const note = document.getElementById('note');
+    const draw = () => {
+      tabs.innerHTML = OPTIONS.map(o => `<button data-id="${o.id}" class="${o.id === current.id ? 'on' : ''}">${o.label.replace('\n', '<br>')}</button>`).join('');
+      note.innerHTML = current.note;
+      tabs.querySelectorAll('button').forEach(b => b.onclick = () => {
+        current = OPTIONS.find(o => o.id === b.dataset.id);
+        map.setStyle(current.style(), { diff: false });
+        history.replaceState(null, '', `?mapa=${current.id}`);
+        draw();
+      });
+    };
+    draw();
+  </script>
+</body>
+</html>

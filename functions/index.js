@@ -13,6 +13,7 @@ const db = admin.firestore();
 
 const ORDER_AUTO_CANCEL_MS = 10 * 60 * 1000;
 const DRIVER_INACTIVITY_MS = 2 * 60 * 60 * 1000;
+const DRIVER_WARNING_GRACE_MS = 15 * 60 * 1000;
 
 function tsToMs(t) {
   if (!t) return 0;
@@ -1408,14 +1409,47 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       }
     }
 
+    // Admin assigned the order straight to a driver ("Liberar y Asignar"): the driver
+    // didn't accept anything, so without this push they never find out.
+    // Keyed on adminAssignedAt changing (not a flag) so a later normal acceptance of the
+    // same order by another driver doesn't re-send it.
+    if (after.driverId && tsToMs(after.adminAssignedAt) && tsToMs(after.adminAssignedAt) !== tsToMs(before.adminAssignedAt)) {
+      try {
+        const driverTokens = await getUserTokens(after.driverId);
+        const assignTitle = "🚨 ¡Pedido asignado!";
+        const assignBody = `Se te asignó el pedido #${orderNum}${after.comercioName ? ` de ${after.comercioName}` : ""}. Tocá para verlo.`;
+        if (driverTokens.length > 0) {
+          await sendPush(driverTokens, { title: assignTitle, body: assignBody }, {
+            tag: `direct-assign-${orderId}`,
+            url: "#/delivery",
+            type: "direct_assignment",
+            orderId: orderId,
+            sound: "cash.mp3",
+            channelId: "exclusive_offers"
+          }, after.driverId);
+          logger.info(`[DirectAssign] Push sent to driver ${after.driverId} for order ${orderId}`);
+        } else {
+          logger.warn(`[DirectAssign] Driver ${after.driverId} has no push tokens (order ${orderId}).`);
+        }
+      } catch (err) {
+        logger.error(`[DirectAssign] Push failed for order ${orderId}:`, err);
+      }
+    }
+
     // Driver Assignment Notification (Fires ONCE when a driver accepts an unassigned order/favor/trip)
     if (!before.driverId && after.driverId && after.userId) {
       const clientTokens = await getUserTokens(after.userId);
       const driverName = after.driverName || "un repartidor";
       const title = after.isTrip ? "🚕 Chofer Asignado" : "🛵 Repartidor Asignado";
-      const body = (after.isFavor || after.isTrip)
+      // El código de entrega va desde el primer aviso: si se pierde el de "en camino" (app abierta,
+      // notificación descartada), el cliente igual lo tiene. Los viajes y encomiendas no lo usan.
+      const isEncomiendaOrder = after.favorType === "encomienda" || after.serviceType === "encomienda";
+      const codeLine = after.verificationCode && !after.isTrip && !isEncomiendaOrder
+        ? ` Tu código de entrega es ${after.verificationCode}.`
+        : "";
+      const body = ((after.isFavor || after.isTrip)
         ? `Tu servicio fue asignado a ${driverName} y está en camino.`
-        : `Tu pedido fue asignado a ${driverName}.`;
+        : `Tu pedido fue asignado a ${driverName}.`) + codeLine;
 
       await sendPush(clientTokens, {
         title,
@@ -1477,6 +1511,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
 
           try {
             // Find active orders (confirmed or ready) from the same commerce that have a driver assigned
+            if (!after.comercioId) throw Object.assign(new Error("sin comercio"), { skip: true });
             const assignedOrdersSnap = await db.collection("orders")
               .where("comercioId", "==", after.comercioId)
               .where("status", "in", ["confirmed", "ready"])
@@ -1514,7 +1549,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
               }
             }
           } catch (err) {
-            logger.error("Error in co-pickup targeted scan:", err);
+            if (!err.skip) logger.error("Error in co-pickup targeted scan:", err);
           }
 
           break;
@@ -2878,6 +2913,21 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         }
       }
 
+      // Comercios del mandado tal como los eligió el cliente (con ubicación si eligió uno conocido).
+      // Solo sirven para guiar al repartidor: el precio sigue calculándose desde el centro.
+      const cleanStops = Array.isArray(req.body.mandadoStops) ? req.body.mandadoStops.slice(0, 10).map(st => {
+        const store = String((st && st.store) || "").replace(/\s+/g, " ").trim().slice(0, 80);
+        if (!store) return null;
+        const out = { store, items: String((st && st.items) || "").trim().slice(0, 600) };
+        const lat = Number(st && st.lat), lng = Number(st && st.lng);
+        if (isFinite(lat) && isFinite(lng) && lat > -35.6 && lat < -34.6 && lng > -58.1 && lng < -57.0) {
+          out.lat = Math.round(lat * 1e6) / 1e6;
+          out.lng = Math.round(lng * 1e6) / 1e6;
+        }
+        if (st && typeof st.nearest === "string" && /^[a-z]{3,20}$/.test(st.nearest)) out.nearest = st.nearest;
+        return out;
+      }).filter(Boolean) : [];
+
       const orderData = {
         orderId: lastId,
         isFavor: true,
@@ -2891,6 +2941,14 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         deliveryCoords: deliveryCoords || null,
         addressNotes: addressNotesVal,
         details: details,
+        ...(cleanStops.length ? { mandadoStops: cleanStops } : {}),
+        // Go Cash: el monto a cambiar y el sentido (antes no se guardaban y el repartidor veía
+        // el costo del envío como si fuera el efectivo a llevar)
+        ...(type === "gocash" ? {
+          isGoCash: true,
+          goCashAmount: Math.min(70000, Math.max(0, Math.round(Number(req.body.goCashAmount) || 0))),
+          goCashType: req.body.goCashType === "transfer_to_cash" ? "transfer_to_cash" : "cash_to_transfer",
+        } : {}),
         deliveryCost: finalDeliveryCost,
         isRaining: isRaining,
         rainSurcharge: activeRainSurcharge,
@@ -3186,6 +3244,77 @@ exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/
 });
 
 /**
+ * Endpoint: Admin-only test push to one user. Reports, per stored token, whether FCM
+ * accepted it and when/where it was registered, so an admin can tell whether the
+ * token belongs to the phone the person is holding right now.
+ */
+exports.adminTestPush = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+
+  const idToken = req.body?.idToken;
+  const targetUid = req.body?.targetUid;
+  if (!idToken || !targetUid) return res.status(400).json({ error: "Faltan datos" });
+
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(idToken);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+
+  try {
+    const callerSnap = await db.collection("users").doc(decoded.uid).get();
+    const caller = callerSnap.exists ? callerSnap.data() : {};
+    const isAdminUser = decoded.email === "kioscopaulos7@gmail.com" || caller.role === "admin" || caller.isAdmin === true;
+    if (!isAdminUser) return res.status(403).json({ error: "No tenés permisos para realizar esta acción" });
+
+    const [tokensSnap, userSnap] = await Promise.all([
+      db.collection("users").doc(targetUid).collection("fcmTokens").get(),
+      db.collection("users").doc(targetUid).get()
+    ]);
+    const info = new Map();
+    tokensSnap.docs.forEach(d => {
+      const t = d.data();
+      const token = t.token || d.id;
+      info.set(token, { platform: t.platform || "", updatedAtMs: tsToMs(t.updatedAt) || tsToMs(t.lastSession) });
+    });
+    if (userSnap.exists) {
+      const u = userSnap.data();
+      if (u.lastFcmToken && !info.has(u.lastFcmToken)) {
+        info.set(u.lastFcmToken, { platform: "", updatedAtMs: tsToMs(u.lastFcmTokenUpdatedAt) });
+      }
+      (Array.isArray(u.fcmTokens) ? u.fcmTokens : []).forEach(t => {
+        if (t && !info.has(t)) info.set(t, { platform: "", updatedAtMs: 0 });
+      });
+    }
+
+    const results = [];
+    for (const [token, meta] of info.entries()) {
+      try {
+        await admin.messaging().send({
+          token,
+          notification: { title: "🔔 Prueba de notificación", body: "Si ves esto, las notificaciones de GoDelivery te funcionan en este teléfono." },
+          data: { type: "test_push", url: `https://${process.env.GCLOUD_PROJECT || "godelivery-magdalena"}.web.app/#/delivery` },
+          android: { priority: "high", notification: { channelId: "exclusive_offers", sound: "default", priority: "max" } },
+          apns: { headers: { "apns-priority": "10", "apns-push-type": "alert", "apns-topic": "com.godelivery.magdalena" }, payload: { aps: { sound: "default" } } }
+        });
+        results.push({ ...meta, tail: token.slice(-8), ok: true });
+      } catch (err) {
+        results.push({ ...meta, tail: token.slice(-8), ok: false, error: err.code || err.message });
+        if (DEAD_TOKEN_ERROR_CODES.has(err.code)) await pruneDeadToken(targetUid, token);
+      }
+    }
+
+    results.sort((a, b) => (b.updatedAtMs || 0) - (a.updatedAtMs || 0));
+    logger.info(`[adminTestPush] ${decoded.uid} tested ${targetUid}: ${JSON.stringify(results)}`);
+    return res.json({ tokens: results });
+  } catch (err) {
+    logger.error("[adminTestPush] Error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * Endpoint: Perform a complete platform data reset (Admin only)
  */
 exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
@@ -3350,11 +3479,14 @@ async function getAllDeliveryDrivers() {
   return Array.from(driversMap.values());
 }
 
-// Disconnects online drivers after 2 hours without activity. "Activity" is the
+// After 2 hours without activity, online drivers get a reminder push; if they
+// don't answer it within 15 minutes, they are disconnected. "Activity" is the
 // same clock the driver panel shows as the live timer: connecting, accepting an
 // order or renewing the session (lastTripAcceptedAt). The heartbeat
-// (lastActivityAt) only proves the app is open, so it is just a fallback for
-// old profiles. Drivers with an order in progress are never disconnected.
+// (lastActivityAt) only proves the app is open, so it is just a fallback for old
+// profiles. Tapping the push opens #/delivery?action=renew_session, which resets
+// lastTripAcceptedAt and clears inactivityWarningSentAt. Drivers with an order
+// in progress are never reminded nor disconnected.
 exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
   try {
     const now = Date.now();
@@ -3365,7 +3497,15 @@ exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
       if (!isDeliveryDoc(data)) continue;
 
       const lastActivityMs = tsToMs(data.lastTripAcceptedAt) || tsToMs(data.lastActivityAt);
-      if (now - lastActivityMs < DRIVER_INACTIVITY_MS) continue;
+      const lastWarningMs = tsToMs(data.inactivityWarningSentAt);
+      // A warning newer than the last activity means the driver hasn't answered it yet.
+      const warningPending = lastWarningMs > lastActivityMs;
+
+      if (warningPending) {
+        if (now - lastWarningMs < DRIVER_WARNING_GRACE_MS) continue;
+      } else if (now - lastActivityMs < DRIVER_INACTIVITY_MS) {
+        continue;
+      }
 
       const activeOrdersSnap = await db.collection("orders")
         .where("driverId", "==", docSnap.id)
@@ -3374,24 +3514,66 @@ exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
         .get();
       if (!activeOrdersSnap.empty) continue;
 
-      await docSnap.ref.update({
-        isOnline: false,
-        currentSessionId: null,
-        disconnectedReason: "inactivity",
-        autoDisconnectedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+      if (warningPending) {
+        await docSnap.ref.update({
+          isOnline: false,
+          currentSessionId: null,
+          inactivityWarningSentAt: null,
+          disconnectedReason: "inactivity",
+          autoDisconnectedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
 
-      if (data.currentSessionId) {
-        try {
-          await db.collection("deliverySessions").doc(data.currentSessionId).update({
-            endTime: admin.firestore.FieldValue.serverTimestamp()
-          });
-        } catch (sessErr) {
-          logger.warn(`[autoDisconnectDrivers] Could not close session ${data.currentSessionId}:`, sessErr.message);
+        if (data.currentSessionId) {
+          try {
+            await db.collection("deliverySessions").doc(data.currentSessionId).update({
+              endTime: admin.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (sessErr) {
+            logger.warn(`[autoDisconnectDrivers] Could not close session ${data.currentSessionId}:`, sessErr.message);
+          }
         }
+
+        logger.info(`[autoDisconnectDrivers] Disconnected driver ${docSnap.id}: inactivity reminder unanswered.`);
+        continue;
       }
 
-      logger.info(`[autoDisconnectDrivers] Disconnected driver ${docSnap.id} after 2h of inactivity.`);
+      // Mark first so a failed push doesn't make every 5-minute run retry it.
+      await docSnap.ref.update({
+        inactivityWarningSentAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      const title = "⏰ ¿Seguís conectado?";
+      const body = "Pasaron 2 horas sin actividad. Tocá acá en los próximos 15 minutos para seguir en línea, o te desconectaremos.";
+      const url = "#/delivery?action=renew_session";
+
+      try {
+        const tokens = await getUserTokens(docSnap.id);
+        if (tokens.length > 0) {
+          await sendPush(tokens, { title, body }, {
+            tag: `inactivity-${docSnap.id}`,
+            url,
+            type: "inactivity_warning",
+            channelId: "default"
+          }, docSnap.id);
+        }
+      } catch (pushErr) {
+        logger.warn(`[autoDisconnectDrivers] Push failed for ${docSnap.id}:`, pushErr.message);
+      }
+
+      try {
+        await docSnap.ref.collection("notifications").add({
+          type: "inactivity_warning",
+          title,
+          body,
+          url,
+          status: "unread",
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (notifErr) {
+        logger.warn(`[autoDisconnectDrivers] In-app notification failed for ${docSnap.id}:`, notifErr.message);
+      }
+
+      logger.info(`[autoDisconnectDrivers] Sent inactivity reminder to driver ${docSnap.id}.`);
     }
   } catch (err) {
     logger.error("[autoDisconnectDrivers] Error:", err);
@@ -4257,10 +4439,10 @@ exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event)
 
     const byInactivity = after.disconnectedReason === "inactivity";
     const driverName = after.displayName || after.name || "Repartidor";
-    logger.info(`[DriverDisconnect] ${driverName} (${userId}) went offline (inactivity=${byInactivity}). Sending push notification.`);
+    logger.info(`[DriverDisconnect] ${driverName} (${userId}) went offline (reason=${after.disconnectedReason || "unknown"}). Sending push notification.`);
 
     const notifBody = byInactivity
-      ? "Te desconectamos porque pasaron 2 horas sin actividad. Volvé a conectarte desde el Panel de Repartidor cuando quieras."
+      ? "Te desconectamos porque no respondiste el aviso de inactividad. Volvé a conectarte desde el Panel de Repartidor cuando quieras."
       : "Tu sesión de repartidor fue cerrada. Volvé a conectarte desde el Panel de Repartidor.";
 
     // 1. Write in-app notification so it appears in the drawer
@@ -4340,6 +4522,97 @@ exports.onDriverOnlineStatusChanged = onDocumentWritten("users/{userId}", async 
     logger.error("[DriverAvailability] Error updating counter:", err);
     return null;
   }
+});
+
+// ═══════════════════════════════════════════════════
+// CUOTA DIARIA AUTOMÁTICA
+// La primera vez en el día (hora argentina) que un cadete pasa a online, se le
+// suma la cuota diaria a la deuda. Vive acá y no en la app para que nadie la
+// pueda saltear ni cobrar dos veces: el trigger puede dispararse más de una vez
+// y dos teléfonos pueden conectarse a la vez, pero la transacción revisa
+// lastCanonChargeDate antes de cobrar.
+// ═══════════════════════════════════════════════════
+function argentinaDateStr(date = new Date()) {
+  // en-CA formatea como YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(date);
+}
+
+// Modular import: admin.firestore.FieldValue is undefined under the emulator.
+const { FieldValue } = require("firebase-admin/firestore");
+
+function isCanonPaid(canon) {
+  return !!canon && (canon.settled === true || ["approved", "paid", "settled"].includes(canon.status));
+}
+
+exports.chargeDailyCanonOnConnect = onDocumentUpdated("users/{userId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (before.isOnline === true || after.isOnline !== true || !isDeliveryDoc(after)) return null;
+
+  const userId = event.params.userId;
+  const today = argentinaDateStr();
+  if (after.lastCanonChargeDate === today) return null;
+
+  try {
+    const settingsSnap = await db.collection("settings").doc("global").get();
+    const configured = Number(settingsSnap.exists ? settingsSnap.data().canonAmount : NaN);
+    const amount = configured > 0 ? configured : 2000;
+
+    const userRef = db.collection("users").doc(userId);
+    const canonRef = db.collection("delivery_canon_payments").doc(`${userId}_${today}`);
+
+    const outcome = await db.runTransaction(async (tx) => {
+      const [userSnap, canonSnap] = await Promise.all([tx.get(userRef), tx.get(canonRef)]);
+      if (!userSnap.exists) return "missing";
+      const u = userSnap.data();
+      if (u.isCanonExempt === true || u.role === "admin" || u.isAdmin === true) return "exempt";
+      if (u.lastCanonChargeDate === today) return "already";
+
+      // Prepaid today (cash to the admin or Mercado Pago): nothing to add to the debt.
+      if (isCanonPaid(canonSnap.exists ? canonSnap.data() : null)) {
+        tx.update(userRef, { lastCanonChargeDate: today });
+        return "prepaid";
+      }
+
+      tx.set(canonRef, {
+        driverId: userId,
+        driverName: u.displayName || u.name || "Repartidor",
+        dateStr: today,
+        amount,
+        status: "pending",
+        settled: false,
+        chargedToDebt: true,
+        createdAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+      tx.update(userRef, {
+        deliveryDebt: FieldValue.increment(amount),
+        lastCanonChargeDate: today
+      });
+      tx.set(db.collection("delivery_transactions").doc(), {
+        driverId: userId,
+        type: "canon_charge",
+        amount,
+        description: `Cuota diaria (${today})`,
+        createdAt: FieldValue.serverTimestamp()
+      });
+      return "charged";
+    });
+
+    logger.info(`[DailyCanon] ${userId} ${today}: ${outcome}`);
+    if (outcome === "charged") {
+      await userRef.collection("notifications").add({
+        title: "🛵 Cuota diaria registrada",
+        body: `Se sumaron $${amount.toLocaleString("es-AR")} de la cuota de hoy a tu saldo. Si te desconectás y volvés a conectar hoy, no se cobra de nuevo.`,
+        type: "canon_charge",
+        url: "#/delivery-panel",
+        status: "unread",
+        createdAt: FieldValue.serverTimestamp()
+      });
+    }
+  } catch (err) {
+    logger.error(`[DailyCanon] Error charging ${userId}:`, err);
+  }
+  return null;
 });
 
 // Red de seguridad: recalcula el contador cada 5 minutos por si algún

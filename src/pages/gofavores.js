@@ -9,6 +9,8 @@ import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn, isAdmin } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { getDistance, calculateDynamicFee } from '../utils/geo.js';
+import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel } from '../utils/mandado-places.js';
+import { loadMandadoPlaces } from '../utils/mandado-places-store.js';
 
 const BANNER_STORAGE_KEY = 'godelivery_active_banner_v2';
 let cachedActiveBanner = null;
@@ -128,11 +130,11 @@ export async function renderGoFavores(content) {
       <div class="home-blob home-blob-2" style="position: absolute; bottom: 10%; right: -20%; width: 250px; height: 250px; background: rgba(99, 102, 241, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
 
       <!-- Floating Info Helper Button -->
-      <button id="gofavores-help-header-btn" style="position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px); right: 16px; width: 36px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.25); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); transition: all 0.2s;" onactive="transform: scale(0.95);">
+      <button id="gofavores-help-header-btn" style="position: absolute; top: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 12px); right: 16px; width: 36px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.25); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); transition: all 0.2s;" onactive="transform: scale(0.95);">
         ${icon('info', 18)}
       </button>
 
-      <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
+      <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
         
         <!-- Cards Grouped Together -->
         <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; box-sizing: border-box; flex-shrink: 0;">
@@ -308,7 +310,7 @@ export async function renderGoFavores(content) {
       @media (max-height: 700px) {
         .gofavores-page > div {
           padding-top: calc(var(--header-height, 60px) + 4px) !important;
-          padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+          padding-bottom: calc(8px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
         }
         .gofavores-card {
           padding: 8px 12px !important;
@@ -593,7 +595,7 @@ export async function showMandadoForm(targetContainer = null) {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 12px)); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
+  modalEl.style.cssText = 'padding: 14px 18px calc(18px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 12px))); background: var(--color-bg); display: flex; flex-direction: column; gap:12px; box-sizing: border-box; overflow: hidden; height: 100%; flex: 1; min-height: 0;';
   modalEl.innerHTML = `
     <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0;">
       <!-- Paso 1 Container -->
@@ -1172,6 +1174,7 @@ async function createFavorOrder(data) {
     receiptDeliveryType: data.receiptDeliveryType || null,
     originBannerId: data.originBannerId || null
   };
+  if (Array.isArray(data.mandadoStops) && data.mandadoStops.length) body.mandadoStops = data.mandadoStops;
 
   // Inject direct driver assignment if admin selected one
   const directDriverUid = window._selectedDirectDriverUid;
@@ -1209,7 +1212,7 @@ export async function showCompraForm(targetContainer = null) {
   const purchaseFee = getState().favorPurchaseFee || 800;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 10px)); background: var(--color-bg); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; overflow: hidden; height: 100%; width: 100%; flex: 1; min-height: 0; position: relative;';
+  modalEl.style.cssText = 'padding: 12px 16px calc(14px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px))); background: var(--color-bg); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; overflow: hidden; height: 100%; width: 100%; flex: 1; min-height: 0; position: relative;';
   modalEl.innerHTML = `
      <!-- Step Indicator -->
     <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-shrink:0; margin-bottom: 2px;">
@@ -1652,7 +1655,7 @@ export async function showCompraForm(targetContainer = null) {
       isPaulosPreset = true;
       const nameInput = subformsContainer.querySelector('.store-name-input');
       const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
-      if (nameInput) nameInput.value = 'Maxikiosco Paulos';
+      if (nameInput) { nameInput.value = 'Maxikiosco Paulos'; loadMandadoPlaces().then(() => pickKnownPlace(nameInput)); }
       if (detailTextarea) {
         detailTextarea.value = '';
         setTimeout(() => detailTextarea.focus(), 100);
@@ -1685,6 +1688,7 @@ export async function showCompraForm(targetContainer = null) {
   const renderSubforms = () => {
     // 1. Preserve existing inputs and textareas before clearing
     const existingNames = Array.from(subformsContainer.querySelectorAll('.store-name-input')).map(input => input.value);
+    const existingPicks = Array.from(subformsContainer.querySelectorAll('.store-name-input')).map(input => ({ ...input.dataset }));
     const existingDetails = Array.from(subformsContainer.querySelectorAll('.store-detail-textarea')).map(textarea => textarea.value);
 
     subformsContainer.innerHTML = '';
@@ -1700,7 +1704,9 @@ export async function showCompraForm(targetContainer = null) {
           <div style="width:20px; height:20px; border-radius:50%; background:var(--color-primary); color:white; font-size:10px; font-weight:950; display:flex; align-items:center; justify-content:center;">${i + 1}</div>
           <span style="font-size:11px; font-weight:900; color:var(--color-text-primary); text-transform:uppercase; letter-spacing:0.5px;">Parada ${i + 1}</span>
         </div>
-        <input type="text" class="store-name-input" value="${prevName.replace(/"/g, '&quot;')}" placeholder="${pl.name}" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
+        <input type="text" class="store-name-input" value="${prevName.replace(/"/g, '&quot;')}" placeholder="${pl.name}" autocomplete="off" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
+        <div class="store-suggest-list" style="display:none; flex-direction:column; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-surface); overflow:hidden;"></div>
+        <div class="store-place-hint" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:#0d9488; padding:0 2px;"></div>
         <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:60px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:8px 12px; background:var(--color-bg-secondary); font-size:12.5px; font-weight:600; resize:none; outline:none; color:var(--color-text-primary); font-family:inherit; transition:all 0.2s;" required>${prevDetails}</textarea>
       `;
       subformsContainer.appendChild(stopDiv);
@@ -1709,7 +1715,83 @@ export async function showCompraForm(targetContainer = null) {
       const detailTextarea = stopDiv.querySelector('.store-detail-textarea');
       setupScrollFocus(nameInput);
       setupScrollFocus(detailTextarea);
+      Object.assign(nameInput.dataset, existingPicks[i] || {});
+      setupStorePicker(stopDiv, nameInput);
     }
+  };
+
+  // ── Comercio del mandado: sugerencias mientras se escribe ──
+  // Comercios adheridos y lugares que ya conocen los repartidores (con ubicación), y si se escribe
+  // un rubro, "cualquiera, el más cercano". Si no aparece, se escribe a mano como siempre.
+  loadMandadoPlaces();
+  const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const clearPick = (input) => { delete input.dataset.lat; delete input.dataset.lng; delete input.dataset.nearest; delete input.dataset.pick; };
+  const showPickHint = (stopDiv, input) => {
+    const hint = stopDiv.querySelector('.store-place-hint');
+    if (!hint) return;
+    if (input.dataset.nearest) {
+      hint.innerHTML = `${icon('mapPin', 13)} El repartidor va al más cercano a tu casa`;
+      hint.style.display = 'flex';
+    } else if (input.dataset.lat) {
+      hint.innerHTML = `${icon('mapPin', 13)} Ubicación del comercio confirmada`;
+      hint.style.display = 'flex';
+    } else {
+      hint.style.display = 'none';
+    }
+  };
+  function setupStorePicker(stopDiv, input) {
+    const list = stopDiv.querySelector('.store-suggest-list');
+    if (!list) return;
+    const hide = () => { list.style.display = 'none'; };
+    const choose = (opt) => {
+      clearPick(input);
+      input.value = opt.name;
+      if (opt.nearest) input.dataset.nearest = opt.nearest;
+      else if (typeof opt.lat === 'number') { input.dataset.lat = String(opt.lat); input.dataset.lng = String(opt.lng); }
+      input.dataset.pick = '1';
+      input.style.borderColor = 'var(--color-border-light)';
+      hide();
+      showPickHint(stopDiv, input);
+      const details = stopDiv.querySelector('.store-detail-textarea');
+      if (details && !details.value.trim()) setTimeout(() => details.focus(), 60);
+      updateCost();
+    };
+    const render = () => {
+      const q = input.value.trim();
+      if (q.length < 2) { hide(); return; }
+      const opts = [];
+      const cat = placeCategory(q);
+      if (cat) opts.push({ name: nearestLabel(cat), nearest: cat, sub: `El repartidor elige la ${categoryLabel(cat)} más cerca de tu casa` });
+      suggestPlaces(q).forEach(p => opts.push({ name: p.name, lat: p.lat, lng: p.lng, sub: p.address || (p.source === 'comercio' ? 'Comercio de GoDelivery' : 'Ubicación conocida por los repartidores') }));
+      if (!opts.length) { hide(); return; }
+      list.innerHTML = opts.map((o, k) => `
+        <button type="button" data-k="${k}" style="display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; background:transparent; border:none; ${k ? 'border-top:1px solid var(--color-border-light);' : ''} text-align:left; cursor:pointer; font-family:inherit; color:var(--color-text-primary);">
+          <span style="width:28px; height:28px; border-radius:9px; background:${o.nearest ? 'rgba(13,148,136,0.1)' : 'var(--color-bg-secondary)'}; color:${o.nearest ? '#0d9488' : 'var(--color-text-secondary)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon(o.nearest ? 'navigationArrow' : 'mapPin', 14)}</span>
+          <span style="min-width:0; display:flex; flex-direction:column; gap:1px;">
+            <span style="font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(o.name)}</span>
+            <span style="font-size:11px; font-weight:600; color:var(--color-text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(o.sub)}</span>
+          </span>
+        </button>`).join('');
+      list.style.display = 'flex';
+      list.querySelectorAll('button[data-k]').forEach(btn => {
+        // pointerdown: se elige antes de que el input pierda el foco y cierre la lista
+        btn.addEventListener('pointerdown', (e) => { e.preventDefault(); choose(opts[Number(btn.dataset.k)]); });
+      });
+    };
+    input.addEventListener('input', () => { clearPick(input); showPickHint(stopDiv, input); render(); });
+    input.addEventListener('focus', () => { if (!input.dataset.pick) render(); });
+    input.addEventListener('blur', () => setTimeout(hide, 150));
+    showPickHint(stopDiv, input);
+  }
+
+  // Ubicación conocida para un nombre cargado solo (Paulos, banner de un comercio)
+  const pickKnownPlace = (input) => {
+    if (!input) return;
+    clearPick(input);
+    const p = resolvePlaceByName(input.value);
+    if (p) { input.dataset.lat = String(p.lat); input.dataset.lng = String(p.lng); input.dataset.pick = '1'; }
+    const stopDiv = input.parentElement;
+    if (stopDiv) showPickHint(stopDiv, input);
   };
 
   renderSubforms();
@@ -1717,7 +1799,7 @@ export async function showCompraForm(targetContainer = null) {
   if (window._prefilledMerchantName) {
     const nameInput = subformsContainer.querySelector('.store-name-input');
     const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
-    if (nameInput) nameInput.value = window._prefilledMerchantName;
+    if (nameInput) { nameInput.value = window._prefilledMerchantName; loadMandadoPlaces().then(() => pickKnownPlace(nameInput)); }
     if (detailTextarea) {
       setTimeout(() => detailTextarea.focus(), 150);
     }
@@ -1843,7 +1925,18 @@ export async function showCompraForm(targetContainer = null) {
     for (let i = 0; i < stopsCount; i++) {
       const name = nameInputs[i] ? nameInputs[i].value.trim() : '';
       const details = detailTextareas[i] ? detailTextareas[i].value.trim() : '';
-      stopsList.push({ store: name, items: details });
+      const ds = nameInputs[i] ? nameInputs[i].dataset : {};
+      const stop = { store: name, items: details };
+      const nearest = ds.nearest || nearestCategoryOf(name);
+      if (nearest) stop.nearest = nearest;
+      else if (ds.lat && ds.lng) { stop.lat = Number(ds.lat); stop.lng = Number(ds.lng); }
+      else {
+        // Escrito a mano: si es un comercio adherido, se manda su ubicación (los aprendidos se
+        // buscan al momento en el panel del repartidor, así usan el punto más afinado)
+        const known = resolvePlaceByName(name);
+        if (known && known.source === 'comercio') { stop.lat = known.lat; stop.lng = known.lng; }
+      }
+      stopsList.push(stop);
     }
 
     if (!selectedPaymentMethod) {
@@ -1903,6 +1996,7 @@ export async function showCompraForm(targetContainer = null) {
             deliveryAddress: `${deliveryData.address} (Detalle: ${deliveryDetails})`,
             deliveryCoords: deliveryData.coords,
             details: packagedDetails,
+            mandadoStops: stopsList,
             deliveryCost: calculatedDistFee,
             rainSurcharge: rainSurcharge,
             purchaseFee: activePurchaseFee,
@@ -1935,7 +2029,7 @@ export async function showGoCashForm(targetContainer = null) {
   const currentAddress = '';
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(20px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
   modalEl.innerHTML = `
     <div style="display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0; justify-content: space-between;">
       
@@ -2683,7 +2777,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
 export async function showPagoServiciosForm(targetContainer = null) {
   const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(20px + env(safe-area-inset-bottom, 16px)); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
+  modalEl.style.cssText = 'padding: 20px 24px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
 
   let currentAddress = '';
   let deliveryData = null;
@@ -3232,7 +3326,7 @@ export function openMandadosWizard(initialServiceType = null) {
     <div class="wizard-wrapper" style="flex:1; width: 100%; overflow: hidden; position: relative;">
       <div id="wizard-slides-container" style="display: flex; width: 200%; height: 100%; transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1); will-change: transform; transform: translateZ(0);">
           <!-- Slide 1: Menu Selector -->
-          <div id="wizard-slide-selector" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 16px)) 16px; display: flex; flex-direction: column; gap: 6px;">
+          <div id="wizard-slide-selector" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 16px; display: flex; flex-direction: column; gap: 6px;">
             <!-- Option 1: Encomienda -->
             <div id="wizard-favor-mandado-btn" class="gofavores-card card-encomienda glow-hover spring-hover" style="border-radius: 16px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; display: flex; align-items: center; gap: 14px; width: 100%; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.015); transition: all 0.25s;">
               <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%); pointer-events: none;"></div>
@@ -3315,7 +3409,7 @@ export function openMandadosWizard(initialServiceType = null) {
                 ${icon('chevronRight', 12)}
               </div>
             </div>
-            <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: env(safe-area-inset-bottom, 10px);"></div>
+            <div id="wizard-banner-container" style="display:none; flex-direction:column; margin-top:6px; flex: 1.1; min-height: 0; padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 10px));"></div>
           </div>
          <!-- Slide 2: Form Container -->
          <div id="wizard-slide-form" style="width: 50%; height: 100%; flex-shrink: 0; box-sizing: border-box; overflow: hidden; position: relative; background: var(--color-bg); display: flex; flex-direction: column;">

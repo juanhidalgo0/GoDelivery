@@ -112,7 +112,7 @@ export function openDriverSheet({ id, iconName, tone = 'slate', title, subtitle 
     background: ${isLight ? '#ffffff' : '#111722'};
     border: 1px solid var(--driver-border); border-bottom: none;
     border-radius: 24px 24px 0 0;
-    padding: 10px 16px max(20px, calc(12px + env(safe-area-inset-bottom, 0px)));
+    padding: 10px 16px max(20px, calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))));
     box-shadow: 0 -12px 40px rgba(0,0,0,${isLight ? '0.12' : '0.5'});
     color: var(--driver-text-primary); font-family: var(--font-body, sans-serif);
     max-height: 88vh; max-height: 88dvh; display: flex; flex-direction: column;

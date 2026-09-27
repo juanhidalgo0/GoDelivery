@@ -325,7 +325,7 @@ select {
 }
 
 .page-content {
-  padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 16px) + 32px) !important;
+  padding-bottom: calc(var(--navbar-height) + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px)) + 32px) !important;
 }
 
 #app-navbar {
@@ -796,8 +796,8 @@ select {
    Capacitor Native Safe Area Adaptability
    ========================================================================== */
 body.platform-capacitor {
-  --status-bar-height: max(env(safe-area-inset-top, 0px), 28px);
-  --bottom-safe-area: max(env(safe-area-inset-bottom, 0px), 28px);
+  --status-bar-height: max(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)), 28px);
+  --bottom-safe-area: max(max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)), 28px);
 }
 
 /* Adjust Main Web Page Header padding when status bar overlaps */
@@ -942,4 +942,4 @@ body.modal-open #global-delivery-available-fab {
   -webkit-backdrop-filter: none !important;
 }
 
-
+

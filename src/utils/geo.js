@@ -202,6 +202,18 @@ export function isLocalAddress(desc) {
   return ALLOWED_LOCAL_ZONES.some(zone => lower.includes(zone));
 }
 
+// One autocomplete session per address search; Google bills the session, not each request,
+// when it ends with a Place Details call. Renewed after 3 minutes (Google expires them).
+let placesSession = null;
+function getPlacesSessionToken() {
+  if (!placesSession || Date.now() - placesSession.startedAt > 180000) {
+    placesSession = { token: new window.google.maps.places.AutocompleteSessionToken(), startedAt: Date.now() };
+  }
+  return placesSession.token;
+}
+// Typing, deleting and retyping the same text doesn't pay twice.
+const autocompleteCache = new Map();
+
 export async function searchAddressSuggestions(term) {
   if (!term || term.trim().length < 2) return [];
   
@@ -228,133 +240,43 @@ export async function searchAddressSuggestions(term) {
     }
   };
 
-  // 2. Google Maps Geocoder & Places Autocomplete (Rooftop & Parcel precision)
-  if (typeof window !== 'undefined' && window.google && window.google.maps) {
+  // 2. Google Places Autocomplete, the only paid call while typing. It runs inside a session
+  // (sessionToken) that geocodePlaceId closes when the user picks a suggestion, so the whole
+  // search costs one session instead of a charge per keystroke. Suggestions carry a placeId
+  // and no coordinates: those are fetched only for the one the user chooses.
+  // (Before this, every keystroke also ran a Geocoder query plus one Geocoder call per
+  // prediction: up to 8 paid calls per letter.)
+  if (typeof window !== 'undefined' && window.google?.maps?.places?.AutocompleteService) {
     try {
-      const magBounds = new window.google.maps.LatLngBounds(
-        new window.google.maps.LatLng(-35.35, -57.85),
-        new window.google.maps.LatLng(-34.95, -57.20)
-      );
-
-      // A. Direct Geocoder query (High accuracy for street + number like "Miguens 1340" or "San Martin 500")
-      if (window.google.maps.Geocoder) {
-        const geocoder = new window.google.maps.Geocoder();
-        let geocodeQuery = rawInput;
-        if (!geocodeQuery.toLowerCase().includes('magdalena') && !geocodeQuery.toLowerCase().includes('atalaya') && !geocodeQuery.toLowerCase().includes('bavio')) {
-          geocodeQuery += ', Magdalena';
-        }
-        geocodeQuery += ', Buenos Aires, Argentina';
-
-        try {
-          const geoData = await new Promise((resolve) => {
-            geocoder.geocode({
-              address: geocodeQuery,
-              componentRestrictions: { country: 'AR' },
-              bounds: magBounds
-            }, (res, status) => {
-              if (status === 'OK' && res && res.length > 0) resolve(res);
-              else resolve([]);
-            });
-          });
-
-          for (const item of geoData) {
-            if (isLocalAddress(item.formatted_address)) {
-              let street = '';
-              let number = '';
-              let neighborhood = '';
-              let city = 'Magdalena';
-              (item.address_components || []).forEach(comp => {
-                if (comp.types.includes('route')) street = comp.long_name;
-                if (comp.types.includes('street_number')) number = comp.long_name;
-                if (comp.types.includes('sublocality') || comp.types.includes('neighborhood')) neighborhood = comp.long_name;
-                if (comp.types.includes('locality')) city = comp.long_name;
-              });
-
-              let display = `${street} ${number}`.trim();
-              if (!display) display = item.formatted_address.split(',')[0];
-              if (city && !display.toLowerCase().includes(city.toLowerCase())) display += `, ${city}`;
-
-              addResult({
-                lat: item.geometry.location.lat(),
-                lng: item.geometry.location.lng(),
-                address: display,
-                displayName: item.formatted_address
-              });
-            }
-          }
-        } catch(gErr) {
-          console.warn('[searchAddressSuggestions] Direct geocoder error:', gErr);
-        }
-      }
-
-      // B. Places Autocomplete Service (Autocomplete street names as user types)
-      if (window.google.maps.places && window.google.maps.places.AutocompleteService) {
-        const service = new window.google.maps.places.AutocompleteService();
-        const queryWithZone = rawInput.toLowerCase().includes('magdalena') ? rawInput : `${rawInput}, Magdalena`;
-
-        const predictions = await new Promise((resolve) => {
-          service.getPlacePredictions({
+      const queryWithZone = rawInput.toLowerCase().includes('magdalena') ? rawInput : `${rawInput}, Magdalena`;
+      let predictions = autocompleteCache.get(queryWithZone.toLowerCase());
+      if (!predictions) {
+        const g = window.google.maps;
+        const magBounds = new g.LatLngBounds(new g.LatLng(-35.35, -57.85), new g.LatLng(-34.95, -57.20));
+        predictions = await new Promise((resolve) => {
+          new g.places.AutocompleteService().getPlacePredictions({
             input: queryWithZone,
+            sessionToken: getPlacesSessionToken(),
             locationBias: magBounds,
             componentRestrictions: { country: 'ar' }
           }, (preds, status) => {
-            if (status === window.google.maps.places.PlacesServiceStatus.OK && preds && preds.length > 0) {
-              resolve(preds);
-            } else {
-              service.getPlacePredictions({
-                input: rawInput,
-                locationBias: magBounds,
-                componentRestrictions: { country: 'ar' }
-              }, (fbPreds, fbStatus) => {
-                if (fbStatus === window.google.maps.places.PlacesServiceStatus.OK && fbPreds) {
-                  resolve(fbPreds);
-                } else {
-                  resolve([]);
-                }
-              });
-            }
+            resolve(status === g.places.PlacesServiceStatus.OK && preds ? preds : []);
           });
         });
-
-        const filteredPredictions = (predictions || []).filter(pred => isLocalAddress(pred.description));
-
-        if (filteredPredictions.length > 0 && window.google.maps.Geocoder) {
-          const geocoder = new window.google.maps.Geocoder();
-          await Promise.all(filteredPredictions.slice(0, 5).map(async (pred) => {
-            try {
-              const geoRes = await new Promise((res, rej) => {
-                geocoder.geocode({ placeId: pred.place_id }, (r, s) => {
-                  if (s === 'OK' && r && r[0]) res(r[0]);
-                  else rej(new Error(s));
-                });
-              });
-              if (geoRes) {
-                let street = '';
-                let number = '';
-                (geoRes.address_components || []).forEach(comp => {
-                  if (comp.types.includes('route')) street = comp.long_name;
-                  if (comp.types.includes('street_number')) number = comp.long_name;
-                });
-                let display = `${street} ${number}`.trim();
-                if (!display) display = pred.structured_formatting ? pred.structured_formatting.main_text : pred.description.split(',')[0];
-                if (!display.toLowerCase().includes('magdalena')) display += ', Magdalena';
-
-                addResult({
-                  lat: geoRes.geometry.location.lat(),
-                  lng: geoRes.geometry.location.lng(),
-                  address: display,
-                  displayName: pred.description
-                });
-              }
-            } catch(e) {}
-          }));
-        }
+        autocompleteCache.set(queryWithZone.toLowerCase(), predictions);
       }
 
-      if (results.length > 0) {
-        return results.slice(0, 6);
-      }
-    } catch(gErr) {
+      const googleResults = [];
+      const seenNames = new Set();
+      predictions.filter((pred) => isLocalAddress(pred.description)).forEach((pred) => {
+        let display = pred.structured_formatting?.main_text || pred.description.split(',')[0];
+        if (!display.toLowerCase().includes('magdalena')) display += ', Magdalena';
+        if (seenNames.has(display.toLowerCase())) return;
+        seenNames.add(display.toLowerCase());
+        googleResults.push({ placeId: pred.place_id, address: display, displayName: pred.description });
+      });
+      if (googleResults.length > 0) return googleResults.slice(0, 6);
+    } catch (gErr) {
       console.warn('Google Places suggestion error, using local fallback:', gErr);
     }
   }
@@ -402,8 +324,47 @@ export async function searchAddressSuggestions(term) {
 /**
  * Resolves an address place ID or coordinates on-demand.
  */
+// Reverse geocoding for the map pickers: one paid call each time the map stops moving.
+// Cached by ~10 m cell, so moving back to a spot already looked up is free.
+const reverseGeocodeCache = new Map();
+export async function reverseGeocodeGoogle(lat, lng) {
+  const key = `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+  if (reverseGeocodeCache.has(key)) return reverseGeocodeCache.get(key);
+  const result = await new Promise((resolve, reject) => {
+    new window.google.maps.Geocoder().geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === 'OK' && results && results[0]) resolve(results[0]);
+      else reject(new Error('Google Geocoder status: ' + status));
+    });
+  });
+  reverseGeocodeCache.set(key, result);
+  return result;
+}
+
 export async function geocodePlaceId(placeId) {
   if (!placeId) return null;
+  // Google place IDs are resolved with Place Details inside the autocomplete session, which
+  // closes it (one billed session for the whole search). Numeric IDs come from Nominatim.
+  if (!/^\d+$/.test(String(placeId))) {
+    try {
+      await loadGoogleMaps();
+      const g = window.google?.maps;
+      if (g?.places?.PlacesService) {
+        const place = await new Promise((resolve) => {
+          new g.places.PlacesService(document.createElement('div')).getDetails({
+            placeId,
+            fields: ['geometry'],
+            sessionToken: getPlacesSessionToken()
+          }, (res, status) => resolve(status === g.places.PlacesServiceStatus.OK ? res : null));
+        });
+        placesSession = null;
+        const loc = place?.geometry?.location;
+        if (loc) return { lat: loc.lat(), lng: loc.lng() };
+      }
+    } catch (e) {
+      console.warn('[geocodePlaceId] Google Place Details error:', e);
+    }
+    return null;
+  }
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/details?place_id=${encodeURIComponent(placeId)}&format=json`);
     const data = await res.json();

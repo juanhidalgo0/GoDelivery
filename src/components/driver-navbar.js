@@ -37,8 +37,8 @@ export function renderDriverBottomNav(activeTab, isLight) {
     <div id="driver-bottom-nav" style="
       position: fixed; left: 0; right: 0; bottom: 0;
       display: flex; align-items: stretch;
-      height: calc(${DRIVER_NAV_BAR_HEIGHT}px + env(safe-area-inset-bottom, 0px));
-      padding-bottom: env(safe-area-inset-bottom, 0px);
+      height: calc(${DRIVER_NAV_BAR_HEIGHT}px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+      padding-bottom: max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px));
       background: ${bg};
       border-top: 1px solid ${border};
       box-shadow: 0 -4px 20px ${shadow};
@@ -66,8 +66,15 @@ export function renderDriverBottomNav(activeTab, isLight) {
   `;
 }
 
+/** En el mapa no hay barra abajo (como Uber/DiDi): se entra al menú con el botón de arriba. */
+export function syncDriverBottomNavVisibility(activeTab) {
+  const c = document.getElementById('driver-bottom-nav-container');
+  if (c) c.style.display = driverNavTabForActiveTab(activeTab) === 'available' ? 'none' : '';
+}
+
 export function updateDriverBottomNavUI(activeTab) {
   const effective = driverNavTabForActiveTab(activeTab);
+  syncDriverBottomNavVisibility(activeTab);
   document.querySelectorAll('.driver-nav-tab-btn').forEach(btn => {
     const isActive = btn.dataset.navTab === effective;
     const isLight = document.getElementById('driver-bottom-nav')?.style.background === 'rgb(255, 255, 255)';

@@ -71,7 +71,7 @@ export async function renderMisChats(content) {
   const isNative = !!window.Capacitor;
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + env(safe-area-inset-top, 0px))' : 'env(safe-area-inset-top, 0px)');
+  const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
   const user = getState().user;
   if (!user) {
@@ -140,7 +140,7 @@ export async function renderMisChats(content) {
       </div>
 
       <!-- Scrollable list of chats -->
-      <div id="chats-list-container" style="flex: 1; overflow-y: auto; padding: 20px 20px calc(40px + env(safe-area-inset-bottom, 0px)) 20px; display: flex; flex-direction: column; gap: 12px; background: var(--color-bg); -webkit-overflow-scrolling:touch;">
+      <div id="chats-list-container" style="flex: 1; overflow-y: auto; padding: 20px 20px calc(40px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px; display: flex; flex-direction: column; gap: 12px; background: var(--color-bg); -webkit-overflow-scrolling:touch;">
         <div class="initial-loader" style="text-align: center; padding: 40px;">
           <div class="spinner-mini"></div>
         </div>
@@ -681,7 +681,7 @@ async function showChatOptionsModal(chat, user, container) {
   const { doc, updateDoc, arrayUnion } = await import('firebase/firestore');
   
   const modalEl = document.createElement('div');
-  modalEl.style.padding = '20px calc(20px + env(safe-area-inset-bottom, 0px)) 20px 20px';
+  modalEl.style.padding = '20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px 20px';
   modalEl.style.display = 'flex';
   modalEl.style.flexDirection = 'column';
   modalEl.style.gap = '14px';
@@ -739,7 +739,7 @@ async function showDeleteAllChatsModal(user, container) {
   const { doc, updateDoc, arrayUnion } = await import('firebase/firestore');
   
   const modalEl = document.createElement('div');
-  modalEl.style.padding = '20px calc(20px + env(safe-area-inset-bottom, 0px)) 20px 20px';
+  modalEl.style.padding = '20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px 20px';
   modalEl.style.display = 'flex';
   modalEl.style.flexDirection = 'column';
   modalEl.style.gap = '14px';

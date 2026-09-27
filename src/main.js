@@ -698,6 +698,7 @@ async function init() {
     '/admin/gomarket': (c) => import('./pages/admin/gomarket.js').then(m => m.renderAdminGoMarket(c)),
     '/admin/offers': (c) => import('./pages/admin/offers.js').then(m => m.renderAdminOffers(c)),
     '/admin/coupons': (c) => import('./pages/admin/coupons.js').then(m => m.renderAdminCoupons(c)),
+    '/admin/lugares': (c) => import('./pages/admin/mandado-places.js').then(m => m.renderAdminMandadoPlaces(c)),
     '/admin/metrics': (c) => import('./pages/admin/metrics.js').then(m => m.renderAdminMetrics(c)),
     '/admin/metrics/services': (c) => import('./pages/admin/services-metrics.js').then(m => m.renderServicesMetrics(c)),
     '/admin/metrics/breakdown': (c) => import('./pages/admin/metrics-breakdown.js').then(m => m.renderAdminMetricsBreakdown(c)),
@@ -1041,7 +1042,7 @@ async function init() {
         let tapTimer = null;
         const openReviewerModal = () => {
           const modalEl = document.createElement('div');
-          modalEl.style.cssText = 'padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 16px)) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
+          modalEl.style.cssText = 'padding: 24px 24px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 24px; display: flex; flex-direction: column; gap: 16px; background: var(--color-bg);';
           modalEl.innerHTML = `
             <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 900; margin: 0; color: var(--color-text-primary);">Acceso de Prueba</h3>
             <p style="font-size: 13px; color: var(--color-text-secondary); margin: 0;">Ingresá las credenciales para acceder.</p>
@@ -1511,7 +1512,7 @@ async function init() {
         banner.id = 'floating-geofence-banner';
         banner.style.cssText = `
           position: fixed;
-          bottom: calc(var(--navbar-height, 60px) + 16px + env(safe-area-inset-bottom, 0px));
+          bottom: calc(var(--navbar-height, 60px) + 16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
           left: 16px;
           right: 16px;
           background: rgba(255, 255, 255, 0.95);
@@ -1685,7 +1686,7 @@ function showUpdateFloatingBanner(storeUrl) {
   banner.id = 'pwa-update-banner';
   banner.style.cssText = `
     position: fixed;
-    bottom: calc(var(--navbar-height, 60px) + 16px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--navbar-height, 60px) + 16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
     left: 16px;
     right: 16px;
     background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);

@@ -46,7 +46,7 @@ export async function renderMarketplaceChat(chatId, content) {
     content.innerHTML = `
       <div class="marketplace-chat-container" style="display:flex; flex-direction:column; height:100dvh; background:var(--color-bg); position:relative; box-sizing:border-box; overflow:hidden;">
         <!-- Header (Red Premium style) -->
-        <div style="background:var(--color-primary); padding:calc(16px + env(safe-area-inset-top, 0px)) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
+        <div style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
           <a href="#/marketplace" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s;">
             ${icon('chevronLeft', 24)}
           </a>
@@ -234,7 +234,7 @@ export async function renderMarketplaceChat(chatId, content) {
         m.showModal({
           title: 'Enviar imagen',
           content: `
-            <div style="padding: 24px 20px calc(24px + env(safe-area-inset-bottom, 0px)) 20px; display: flex; flex-direction: column; gap: 16px;">
+            <div style="padding: 24px 20px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px; display: flex; flex-direction: column; gap: 16px;">
               <button id="btn-use-camera-${chatId}" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer;">
                 ${icon('camera', 20)} Tomar Foto (Cámara)
               </button>
