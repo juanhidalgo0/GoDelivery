@@ -1767,3 +1767,52 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 .app-guide-progress-segment.completed, .app-guide-progress-segment.active::after { background: var(--go-ink) !important; }
 .guide-btn-next { background: var(--go-ink) !important; color: #fff !important; box-shadow: none !important; border-radius: 16px !important; }
 .guide-btn-back { background: var(--color-surface) !important; border: 1px solid var(--go-line) !important; color: var(--go-text) !important; box-shadow: none !important; }
+
+/* ── Firma GO!: el servicio se abre como un círculo desde el botón tocado ──
+   El mismo anillo del splash: crece hasta cubrir la pantalla y, al cerrar,
+   se achica de vuelta hacia su botón, que lo "recibe" con un rebote. */
+.slide-overlay.slide-from-origin {
+  animation: goOriginIn 0.56s cubic-bezier(0.32, 0.72, 0, 1) both;
+  will-change: clip-path;
+  box-shadow: none !important;
+}
+.slide-overlay.slide-exit-origin {
+  animation: goOriginOut 0.38s cubic-bezier(0.5, 0, 0.75, 0.3) both !important;
+  will-change: clip-path;
+  box-shadow: none !important;
+}
+@keyframes goOriginIn {
+  from { clip-path: circle(var(--go-or, 32px) at var(--go-ox, 50%) var(--go-oy, 50%)); }
+  to { clip-path: circle(var(--go-oR, 150vmax) at var(--go-ox, 50%) var(--go-oy, 50%)); }
+}
+@keyframes goOriginOut {
+  from { clip-path: circle(var(--go-oR, 150vmax) at var(--go-ox, 50%) var(--go-oy, 50%)); }
+  to { clip-path: circle(var(--go-or, 32px) at var(--go-ox, 50%) var(--go-oy, 50%)); }
+}
+/* While the circle opens, the screen's content settles in just behind it. */
+.slide-overlay.slide-from-origin .go-service-page > :not(.go-service-header) {
+  animation: goOriginContent 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+.slide-overlay.slide-from-origin .go-service-titles {
+  animation: goOriginContent 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.06s both;
+}
+@keyframes goOriginContent {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.slide-overlay.slide-exit-origin .go-service-page { transition: opacity 0.2s ease-in 0.12s; opacity: 0.4; }
+
+.go-service-ring.is-landing { animation: goRingLand 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes goRingLand {
+  0% { transform: scale(0.86); border-color: var(--go-red); }
+  60% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-overlay.slide-from-origin,
+  .slide-overlay.slide-exit-origin,
+  .slide-overlay.slide-from-origin .go-service-page > *,
+  .slide-overlay.slide-from-origin .go-service-titles,
+  .go-service-ring.is-landing { animation: none !important; }
+}

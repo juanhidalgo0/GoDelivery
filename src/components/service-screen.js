@@ -95,6 +95,63 @@ export function serviceSkeleton(path) {
     </div>`;
 }
 
+// ── Signature motion: a service opens as a circle growing out of the button that was
+// tapped (the ring of the splash) and closes back into it. ──
+let pendingOrigin = null;
+const reduceMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const pathOf = (href) => (href || '').replace(/^#/, '').split('?')[0] || '/';
+
+function circleOf(el) {
+  const r = el?.getBoundingClientRect?.();
+  if (!r || !r.width || r.bottom < 0 || r.top > window.innerHeight) return null;
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: Math.max(r.width, r.height) / 2 };
+}
+
+/** The ring (or link) on the home that opens this service, if it is on screen. */
+export function serviceAnchor(path) {
+  const home = document.getElementById('page-home');
+  if (!home) return null;
+  const aliases = path === '/gofavores' || path === '/mandados' ? ['/mandados', '/gofavores'] : [path];
+  for (const p of aliases) {
+    const link = home.querySelector(`.go-service[href="#${p}"]`);
+    if (link) return link.querySelector('.go-service-ring') || link;
+  }
+  return null;
+}
+
+/** Where the tap that is opening `path` happened (once, and only if it was just now). */
+export function takeServiceOrigin(path) {
+  const o = pendingOrigin;
+  pendingOrigin = null;
+  if (!o || reduceMotion() || Date.now() - o.t > 1200) return null;
+  const same = o.path === path || (['/mandados', '/gofavores'].includes(o.path) && ['/mandados', '/gofavores'].includes(path));
+  return same ? o : null;
+}
+
+/** Where a closing service should shrink back to (its home button), if visible. */
+export function serviceReturnPoint(path) {
+  if (reduceMotion()) return null;
+  return circleOf(serviceAnchor(path));
+}
+
+export function setOriginVars(el, o) {
+  // Grow exactly to the farthest corner, so the whole duration is visible motion.
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const far = Math.hypot(Math.max(o.x, w - o.x), Math.max(o.y, h - o.y));
+  el.style.setProperty('--go-ox', `${Math.round(o.x)}px`);
+  el.style.setProperty('--go-oy', `${Math.round(o.y)}px`);
+  el.style.setProperty('--go-or', `${Math.round(o.r)}px`);
+  el.style.setProperty('--go-oR', `${Math.ceil(far) + 2}px`);
+}
+
+export function clearOriginVars(el) {
+  el.style.removeProperty('--go-ox');
+  el.style.removeProperty('--go-oy');
+  el.style.removeProperty('--go-or');
+  el.style.removeProperty('--go-oR');
+}
+
 export function closeServiceScreen() {
   window.location.hash = '#/';
 }
@@ -105,6 +162,16 @@ let gesturesReady = false;
 export function initServiceScreens() {
   if (gesturesReady || typeof document === 'undefined') return;
   gesturesReady = true;
+
+  // Remember where on the home a service was tapped, for the circle to grow from there.
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest?.('#page-home a[href^="#/"]');
+    if (!link) return;
+    const path = pathOf(link.getAttribute('href'));
+    if (!isServiceRoute(path)) return;
+    const c = circleOf(link.querySelector('.go-service-ring') || link);
+    pendingOrigin = c ? { ...c, path, t: Date.now() } : null;
+  }, true);
 
   document.addEventListener('click', (e) => {
     if (e.target.closest?.('[data-service-close]')) {

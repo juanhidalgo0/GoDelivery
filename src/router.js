@@ -1,7 +1,7 @@
 import { isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from './auth.js';
 import { getState, subscribe } from './state.js';
 import { clearActiveListeners } from './utils/cleanup.js';
-import { isServiceRoute, serviceSkeleton, initServiceScreens } from './components/service-screen.js';
+import { isServiceRoute, serviceSkeleton, initServiceScreens, takeServiceOrigin, serviceReturnPoint, serviceAnchor, setOriginVars, clearOriginVars } from './components/service-screen.js';
 
 let routes = {};
 let currentCleanup = null;
@@ -299,19 +299,33 @@ export async function handleRoute() {
     // Match is already parsed above
 
     if (mainRoutes[pattern]) {
-      const overlayClasses = ['active', 'is-service', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-from-bottom', 'slide-exit-left', 'slide-exit-right', 'slide-exit-bottom'];
+      const overlayClasses = ['active', 'is-service', 'panel-fullscreen', 'slide-from-left', 'slide-from-right', 'slide-from-bottom', 'slide-from-origin', 'slide-exit-left', 'slide-exit-right', 'slide-exit-bottom', 'slide-exit-origin'];
+      const exitClasses = ['slide-exit-bottom', 'slide-exit-left', 'slide-exit-right', 'slide-exit-origin'];
       const resetOverlay = (el) => {
         el.classList.remove(...overlayClasses);
         el.innerHTML = '';
         el.style.animation = '';
         el.style.transform = '';
         el.style.transition = '';
+        clearOriginVars(el);
         delete el.dataset.dismissed;
+        delete el.dataset.originPath;
       };
       if (overlay && overlay.classList.contains('active') && overlay.dataset.dismissed !== '1') {
-        // Leave the way it came in: service screens drop back down, sub-pages slide out sideways.
+        // Leave the way it came in: a service opened from its home button shrinks back
+        // into it; other services drop back down; sub-pages slide out sideways.
+        let exitMs = 260;
+        let landing = null;
         if (overlay.classList.contains('is-service')) {
-          overlay.classList.add('slide-exit-bottom');
+          const back = overlay.dataset.originPath ? serviceReturnPoint(overlay.dataset.originPath) : null;
+          if (back) {
+            setOriginVars(overlay, back);
+            overlay.classList.add('slide-exit-origin');
+            landing = serviceAnchor(overlay.dataset.originPath);
+            exitMs = 380;
+          } else {
+            overlay.classList.add('slide-exit-bottom');
+          }
         } else if (overlay.classList.contains('slide-from-left')) {
           overlay.classList.add('slide-exit-left');
         } else {
@@ -320,10 +334,17 @@ export async function handleRoute() {
         const currentTarget = overlay;
         setTimeout(() => {
           // A new overlay may have opened during the exit; don't wipe it.
-          if (currentTarget.classList.contains('slide-exit-bottom') || currentTarget.classList.contains('slide-exit-left') || currentTarget.classList.contains('slide-exit-right')) {
+          if (exitClasses.some(c => currentTarget.classList.contains(c))) {
             resetOverlay(currentTarget);
+            if (landing) {
+              // The button "catches" the screen that just closed into it.
+              landing.classList.remove('is-landing');
+              void landing.offsetWidth;
+              landing.classList.add('is-landing');
+              setTimeout(() => landing.classList.remove('is-landing'), 500);
+            }
           }
-        }, 260);
+        }, exitMs);
       } else if (overlay) {
         // Already dragged off-screen (or not open): no second animation.
         resetOverlay(overlay);
@@ -423,10 +444,11 @@ export async function handleRoute() {
 
         // Coming back to a service from one of its pages (Market → product → back) is a
         // step back, not a new opening: it returns from the left instead of rising again.
-        const wasOpen = overlay.classList.contains('active') && !overlay.classList.contains('slide-exit-bottom') && !overlay.classList.contains('slide-exit-left') && !overlay.classList.contains('slide-exit-right');
+        const wasOpen = overlay.classList.contains('active') && !['slide-exit-bottom', 'slide-exit-left', 'slide-exit-right', 'slide-exit-origin'].some(c => overlay.classList.contains(c));
+        if (!wasOpen) delete overlay.dataset.originPath;
 
         // Clear what a drag or a previous exit left behind before the next entrance.
-        overlay.classList.remove('slide-exit-left', 'slide-exit-right', 'slide-exit-bottom');
+        overlay.classList.remove('slide-exit-left', 'slide-exit-right', 'slide-exit-bottom', 'slide-exit-origin');
         overlay.style.animation = '';
         overlay.style.transform = '';
         overlay.style.transition = '';
@@ -436,10 +458,20 @@ export async function handleRoute() {
         // Services (Mandados, Viajes, Market, Ofertas) rise from the bottom over the home;
         // everything deeper (a store, a product, an order) comes in from the right.
         overlay.classList.toggle('is-service', isService);
-        overlay.classList.remove('slide-from-right', 'slide-from-left', 'slide-from-bottom');
+        overlay.classList.remove('slide-from-right', 'slide-from-left', 'slide-from-bottom', 'slide-from-origin');
         void overlay.offsetWidth; // restart the entrance even if the class is the same
         if (isService) {
-          overlay.classList.add(wasOpen ? 'slide-from-left' : 'slide-from-bottom');
+          const origin = wasOpen ? null : takeServiceOrigin(hash);
+          if (wasOpen) {
+            overlay.classList.add('slide-from-left');
+          } else if (origin) {
+            // Opened from its button on the home: grow out of it.
+            setOriginVars(overlay, origin);
+            overlay.dataset.originPath = hash;
+            overlay.classList.add('slide-from-origin');
+          } else {
+            overlay.classList.add('slide-from-bottom');
+          }
         } else {
           overlay.classList.add('slide-from-right');
         }

@@ -40,8 +40,10 @@ export function renderHeader() {
   const isSubPage = hash.startsWith('#/notifications') || hash.startsWith('#/gofavores') || hash.startsWith('#/mandados');
   const slider = document.getElementById('app-slider');
 
-  // When opening fullscreen overlays like Profile, do not alter home header/slider layout to prevent glitches underneath
-  if (hash.startsWith('#/profile')) {
+  // Fullscreen overlays (Profile and the services) cover the home: leave its header and
+  // slider exactly as they are, so nothing jumps underneath while they open or close.
+  const servicePaths = ['#/mandados', '#/gofavores', '#/viajes', '#/marketplace', '#/offers'];
+  if (hash.startsWith('#/profile') || servicePaths.includes(hash.split('?')[0])) {
     return;
   }
 
