@@ -11,6 +11,7 @@ import { getState } from '../state.js';
 import { openChat } from '../components/chat.js';
 import { GOOGLE_MAPS_STYLE, getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { createRiderMotion } from '../utils/rider-motion.js';
+import { renderClientPanel, setClientEta, trackingModel, CLIENT_PANEL_CSS } from './order-tracking/client-panel.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -67,6 +68,8 @@ let liveMap = null;
 let riderMarker = null;
 let riderMotion = null;      // movimiento fluido de la moto (utils/rider-motion.js)
 let lastUserMapMove = 0;     // si el cliente movió el mapa a mano, la cámara no lo pelea un rato
+let gtSheetCollapsed = false; // hoja del cliente achicada (para ver más mapa)
+let gtRouteEta = false;       // el tiempo del cliente sale de la ruta en vivo (repartidor → casa)
 // Distancia máxima para dibujar la moto sobre la línea de la ruta (antes 350 m: la ponía en
 // calles por las que no iba)
 const ROUTE_SNAP_METERS = 40;
@@ -77,30 +80,44 @@ let freshnessTimer = null;
 // timer too, because a stale driver is exactly when no new snapshot arrives.
 function refreshDriverLocationFreshness(order) {
   const livePill = document.querySelector('.v5-live-pill');
+  const liveDot = document.getElementById('gt-live-dot');
   const status = (order?.status || '').toString().toLowerCase();
-  if (!livePill || !order?.driverId || ['completed', 'cancelled'].includes(status)) return;
+  if ((!livePill && !liveDot) || !order?.driverId || ['completed', 'cancelled'].includes(status)) return;
 
   const updatedAt = order.driverLocation?.updatedAt;
   const updatedMs = updatedAt?.toMillis ? updatedAt.toMillis() : (updatedAt ? new Date(updatedAt).getTime() : 0);
   const ageMs = updatedMs ? Date.now() - updatedMs : Infinity;
   const isStale = ageMs > 60 * 1000;
+  const mins = Number.isFinite(ageMs) ? Math.max(1, Math.round(ageMs / 60000)) : null;
 
-  if (isStale) {
-    const mins = Number.isFinite(ageMs) ? Math.max(1, Math.round(ageMs / 60000)) : null;
-    livePill.innerHTML = mins ? `📶 Ubicación de hace ${mins} min` : '📶 Esperando ubicación';
-    livePill.style.color = '#b45309';
-    livePill.style.background = 'rgba(245, 158, 11, 0.14)';
-  } else if (!livePill.querySelector('.v5-pulse-dot')) {
-    livePill.innerHTML = `<span class="v5-pulse-dot"></span> EN VIVO`;
-    livePill.style.color = '';
-    livePill.style.background = '';
+  if (livePill) {
+    if (isStale) {
+      livePill.innerHTML = mins ? `📶 Ubicación de hace ${mins} min` : '📶 Esperando ubicación';
+      livePill.style.color = '#b45309';
+      livePill.style.background = 'rgba(245, 158, 11, 0.14)';
+    } else if (!livePill.querySelector('.v5-pulse-dot')) {
+      livePill.innerHTML = `<span class="v5-pulse-dot"></span> EN VIVO`;
+      livePill.style.color = '';
+      livePill.style.background = '';
+    }
+  }
+  // Hoja del cliente: el punto verde se apaga y se avisa desde cuándo no hay señal
+  if (liveDot) {
+    liveDot.classList.toggle('stale', isStale);
+    liveDot.title = isStale ? (mins ? `Ubicación de hace ${mins} min` : 'Esperando ubicación') : 'Ubicación en vivo';
+    const meta = liveDot.parentElement;
+    let note = meta && meta.querySelector('.gt-stale-note');
+    if (isStale && meta) {
+      if (!note) { note = document.createElement('span'); note.className = 'gt-stale-note'; note.style.cssText = 'color:var(--gt-amber);font-weight:600'; meta.appendChild(note); }
+      note.textContent = mins ? `sin señal hace ${mins} min` : 'esperando señal';
+    } else if (note) note.remove();
   }
   const markerEl = riderMarker?.getElement?.();
   if (markerEl) markerEl.style.opacity = isStale ? '0.55' : '1';
 
   if (!freshnessTimer) {
     freshnessTimer = setInterval(() => {
-      if (!document.querySelector('.v5-live-pill')) {
+      if (!document.querySelector('.v5-live-pill') && !document.getElementById('gt-live-dot')) {
         clearInterval(freshnessTimer);
         freshnessTimer = null;
         return;
@@ -184,6 +201,8 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   if (riderMotion) riderMotion.stop();
   riderMotion = null;
   lastUserMapMove = 0;
+  gtSheetCollapsed = false;
+  gtRouteEta = false;
   riderMarker = null;
   homeMarker = null;
   pickupMarker = null;
@@ -1036,7 +1055,10 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     try { if (liveMap) liveMap.zoomOut({ duration: 300 }); } catch(e) {}
   });
 
-  document.getElementById('recenter-map-btn').onclick = () => {
+  // Si la pantalla se volvió a dibujar mientras tanto (doble ruteo al abrir desde una notificación),
+  // el botón ya no existe: no tiene que romper el resto
+  const recenterBtn = document.getElementById('recenter-map-btn');
+  if (recenterBtn) recenterBtn.onclick = () => {
     if (!liveMap) return;
     
     const order = window.lastOrderData;
@@ -1055,7 +1077,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
         const maxLng = Math.max(riderPos.lng, destPos.lng);
         const minLat = Math.min(riderPos.lat, destPos.lat);
         const maxLat = Math.max(riderPos.lat, destPos.lat);
-        liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 260, left: 50, right: 50 } });
+        liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 90, bottom: bottomSheetPad(), left: 50, right: 50 }, maxZoom: 17 });
       } else if (destPos) {
         liveMap.easeTo({ center: [destPos.lng, destPos.lat], zoom: 17 });
       } else if (riderPos) {
@@ -1426,342 +1448,404 @@ function updateUI(order, isDriverViewOverride = false) {
     </div>
   ` : '';
 
+  if (!isDriverView) {
+    // Estilos de la hoja (una vez) y modo cliente en la pantalla
+    if (!document.getElementById('gt-client-panel-css')) {
+      const st = document.createElement('style');
+      st.id = 'gt-client-panel-css';
+      st.textContent = CLIENT_PANEL_CSS;
+      document.head.appendChild(st);
+    }
+    container.closest('.tracking-v5-viewport')?.classList.add('gt-client-view');
+    container.classList.add('gt-client');
+    const canCancel = normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
+    container.innerHTML = renderClientPanel(order, normalizedStatus, { canCancel, isDirectStore, collapsed: gtSheetCollapsed });
+
+    // Arriba: solo qué pedido es (el repartidor y el chat están en la hoja)
+    if (headerDriverCard) {
+      const label = order.isTrip ? 'Tu viaje' : (order.isFavor ? 'Tu mandado' : (order.comercioRealName || order.comercioName || 'Tu pedido'));
+      headerDriverCard.innerHTML = `
+        <div style="display:inline-flex; max-width:100%; align-items:center; gap:8px; background:var(--color-surface, #fff); border-radius:22px; padding:0 14px; height:44px; box-shadow:0 4px 16px rgba(15,23,42,.12); font-family:'Inter',system-ui,sans-serif;">
+          <span style="font-size:14.5px; font-weight:700; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${label.replace(/[<>&"]/g, '')}</span>
+          ${order.orderId ? `<span style="font-size:13px; color:var(--color-text-tertiary); font-weight:500; flex-shrink:0;">#${String(order.orderId).replace(/[<>&"]/g, '')}</span>` : ''}
+        </div>`;
+    }
+
+    // Chat: con el repartidor si ya hay uno; si no, con el comercio
+    const sheetChat = document.getElementById('header-chat-v5-btn');
+    if (sheetChat) {
+      sheetChat.onclick = (e) => {
+        e.stopPropagation();
+        const t = window.lastOrderData || order;
+        if (t.driverId) openChat({ orderId: t.id, type: 'client-delivery', otherName: t.driverName || 'Repartidor', orderNum: t.orderId });
+        else openChat({ orderId: t.id, type: 'client-commerce', otherName: t.comercioName || 'Comercio', orderNum: t.orderId });
+      };
+    }
+    document.getElementById('gt-help-btn')?.addEventListener('click', async () => {
+      try {
+        const { openSupportTicketModal } = await import('../components/support-bot.js');
+        await openSupportTicketModal(order.id, order.orderId || order.id);
+      } catch (err) {
+        console.error('Error opening support:', err);
+        showToast('No se pudo abrir la ayuda. Probá de nuevo.', 'error');
+      }
+    });
+    const handle = document.getElementById('gt-handle');
+    if (handle) {
+      handle.onclick = () => {
+        gtSheetCollapsed = !gtSheetCollapsed;
+        document.getElementById('gt-sheet')?.classList.toggle('collapsed', gtSheetCollapsed);
+        handle.setAttribute('aria-label', gtSheetCollapsed ? 'Ver más' : 'Ver menos');
+        // Que la moto no quede tapada por la hoja
+        const t = window.lastOrderData || order;
+        const rp = parseCoords(riderMotion?.current() || t.driverLocation);
+        const dp = parseCoords(t.isTrip && !['delivering', 'en camino'].includes(String(t.status || '').toLowerCase()) ? t.pickupCoords : t.deliveryCoords);
+        if (rp && dp) { lastUserMapMove = 0; setTimeout(() => followRiderCamera(rp, dp), 50); }
+      };
+    }
+    // El tiempo en vivo sale de la ruta del repartidor a tu casa cuando ya va hacia vos
+    const md = trackingModel(order, normalizedStatus);
+    gtRouteEta = md.eta && (normalizedStatus === 'delivering' || (order.isTrip && !!order.driverId));
+    if (md.eta && gtRouteEta && currentETA && currentETA !== '--') setClientEta(Number(currentETA));
+    refreshDriverLocationFreshness(order);
+  } else {
   container.innerHTML = `
-    ${getStatusBannerHTML(order, normalizedStatus, isDriverView)}
-    <div class="v5-status-header">
-      <div class="v5-status-content">
-        ${titleText ? `
-        <h2 class="v5-status-title">
-          ${titleText.includes('Buscando') ? `
-            <div class="radar-search-wrapper">
-              <div class="radar-search-wave"></div>
-              <div class="radar-search-wave"></div>
-              <div class="radar-search-dot"></div>
-            </div>
+      ${getStatusBannerHTML(order, normalizedStatus, isDriverView)}
+      <div class="v5-status-header">
+        <div class="v5-status-content">
+          ${titleText ? `
+          <h2 class="v5-status-title">
+            ${titleText.includes('Buscando') ? `
+              <div class="radar-search-wrapper">
+                <div class="radar-search-wave"></div>
+                <div class="radar-search-wave"></div>
+                <div class="radar-search-dot"></div>
+              </div>
+            ` : ''}
+            ${titleText}
+          </h2>
           ` : ''}
-          ${titleText}
-        </h2>
-        ` : ''}
-        ${subtitleHtml}
-        <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
-      </div>
-    </div>
-    
-    ${order.isTrip ? `
-      <div class="v5-stepper-container">
-        <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getTripStepperLinePercent(order)}%;"></div>
-        </div>
-        
-        <div class="v5-stepper-step ${getTripStepClass(order, 0)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Buscando</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 1)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Asignado</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 2)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">En camino</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 3)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">En viaje</span>
-        </div>
- 
-        <div class="v5-stepper-step ${getTripStepClass(order, 4)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Llegaste</span>
+          ${subtitleHtml}
+          <div id="v5-dynamic-eta-container" style="margin-top: 6px;"></div>
         </div>
       </div>
-    ` : (isTakeaway ? `
-      <!-- Stepper Retiro en el Local (Take Away) -->
-      <div class="v5-stepper-container">
-        <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getTakeawayStepperLinePercent(normalizedStatus)}%;"></div>
-        </div>
-        
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 0)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
+      
+      ${order.isTrip ? `
+        <div class="v5-stepper-container">
+          <div class="v5-stepper-line">
+            <div class="v5-stepper-line-fill" style="width: ${getTripStepperLinePercent(order)}%;"></div>
           </div>
-          <span class="v5-step-label">Recibido</span>
-        </div>
-
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 1)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Preparando</span>
-        </div>
-
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 2)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Listo para retirar</span>
-        </div>
-
-        <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 3)}">
-          <div class="v5-step-circle">
-            <span class="v5-step-icon">${icon('check', 13)}</span>
-            <span class="v5-step-pulse"></span>
-          </div>
-          <span class="v5-step-label">Entregado</span>
-        </div>
-      </div>
-    ` : `
-      <div class="v5-stepper-container">
-        <div class="v5-stepper-line">
-          <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus, order.isFavor, order)}%;"></div>
-        </div>
-        
-        ${order.isFavor ? `
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, true, order)}">
+          
+          <div class="v5-stepper-step ${getTripStepClass(order, 0)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, true, order), true)}
-              <span class="v5-step-pulse"></span>
-            </div>
-            <span class="v5-step-label">Solicitado</span>
-          </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, true, order)}">
-            <div class="v5-step-circle">
-              ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
             <span class="v5-step-label">Buscando</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, true, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 1)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Yendo al punto</span>
+            <span class="v5-step-label">Asignado</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, true, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 2)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, true, order), true)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
             <span class="v5-step-label">En camino</span>
           </div>
-        ` : `
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, false, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 3)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Pendiente</span>
+            <span class="v5-step-label">En viaje</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, false, order)}">
+   
+          <div class="v5-stepper-step ${getTripStepClass(order, 4)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Aprobado</span>
+            <span class="v5-step-label">Llegaste</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, false, order)}">
+        </div>
+      ` : (isTakeaway ? `
+        <!-- Stepper Retiro en el Local (Take Away) -->
+        <div class="v5-stepper-container">
+          <div class="v5-stepper-line">
+            <div class="v5-stepper-line-fill" style="width: ${getTakeawayStepperLinePercent(normalizedStatus)}%;"></div>
+          </div>
+          
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 0)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
+              <span class="v5-step-pulse"></span>
+            </div>
+            <span class="v5-step-label">Recibido</span>
+          </div>
+  
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 1)}">
+            <div class="v5-step-circle">
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
             <span class="v5-step-label">Preparando</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, false, order)}">
+  
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 2)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">Listo</span>
+            <span class="v5-step-label">Listo para retirar</span>
           </div>
-
-          <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4, false, order)}">
+  
+          <div class="v5-stepper-step ${getTakeawayStepClass(normalizedStatus, 3)}">
             <div class="v5-step-circle">
-              ${getStepCircleContent(order, 4, getActiveIndex(normalizedStatus, false, order), false)}
+              <span class="v5-step-icon">${icon('check', 13)}</span>
               <span class="v5-step-pulse"></span>
             </div>
-            <span class="v5-step-label">En camino</span>
-          </div>
-        `}
-      </div>
-    `)}
-
-    ${order.isTrip ? `
-      <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
-        <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:16px;">${order.tripType === 'moto' ? '🏍️' : '🚗'}</span>
-          <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
-          <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
-            <span style="color:#22c55e;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
-          </div>
-          <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
-            <span style="color:#ef4444;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino:</span> ${order.deliveryAddress}
+            <span class="v5-step-label">Entregado</span>
           </div>
         </div>
-      </div>
-    ` : ''}
-
-    ${isTakeaway ? `
-      <!-- Card Retiro en el Local -->
-      <div style="background:var(--color-surface); border:1.5px solid #10b981; border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(16,185,129,0.08); width:100%; box-sizing:border-box;">
-        <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-          <span style="font-size:10px; font-weight:800; color:#10b981; text-transform:uppercase; margin-bottom:2px;">🏬 Retiro por el Local</span>
-          <span style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${order.comercioRealName || order.comercioName || 'Comercio'}</span>
-          <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; margin-top:2px;">¡Sin costo de envío! ($0)</span>
+      ` : `
+        <div class="v5-stepper-container">
+          <div class="v5-stepper-line">
+            <div class="v5-stepper-line-fill" style="width: ${getStepperLinePercent(normalizedStatus, order.isFavor, order)}%;"></div>
+          </div>
+          
+          ${order.isFavor ? `
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Solicitado</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Buscando</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Yendo al punto</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, true, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, true, order), true)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">En camino</span>
+            </div>
+          ` : `
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 0, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 0, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Pendiente</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 1, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 1, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Aprobado</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 2, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 2, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Preparando</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 3, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 3, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">Listo</span>
+            </div>
+  
+            <div class="v5-stepper-step ${getStepClass(normalizedStatus, 4, false, order)}">
+              <div class="v5-step-circle">
+                ${getStepCircleContent(order, 4, getActiveIndex(normalizedStatus, false, order), false)}
+                <span class="v5-step-pulse"></span>
+              </div>
+              <span class="v5-step-label">En camino</span>
+            </div>
+          `}
         </div>
-      </div>
-    ` : ''}
-
-    ${(() => {
-      const isCommerceOrder = !order.isFavor && !order.isTrip;
-      const isEncomiendaOrder = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
-      const showCode = !isDriverView && !order.isTrip && !isTakeaway && !isEncomiendaOrder && !!order.verificationCode && (
-        isCommerceOrder ? order.status === 'delivering' : !['delivered', 'cancelled', 'completed'].includes(order.status)
-      );
-      return showCode ? `
-        <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
-      ` : '';
-    })()}
-
-    ${(!isDriverView && !isTakeaway && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
-      <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
-      <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
-        <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
-          <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias de Transferencia (${order.driverName || 'Repartidor'})</span>
-          <span style="font-size:14px; font-weight:800; color:${order.driverAlias ? 'var(--color-primary)' : 'var(--color-text-primary)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || (order.driverId ? 'Alias no registrado (consultar por chat)' : 'Esperando asignación...')}</span>
+      `)}
+  
+      ${order.isTrip ? `
+        <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
+          <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:16px;">${order.tripType === 'moto' ? '🏍️' : '🚗'}</span>
+            <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
+            <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+              <span style="color:#22c55e;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
+            </div>
+            <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
+              <span style="color:#ef4444;">●</span> <span style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Destino:</span> ${order.deliveryAddress}
+            </div>
+          </div>
         </div>
-        ${order.driverAlias ? `
-          <button id="v5-copy-alias-btn" style="background:var(--color-primary); color:white; border:none; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:900; cursor:pointer; flex-shrink:0; transition:all 0.2s; box-shadow:0 2px 8px rgba(225,29,72,0.3);">
-            Copiar
-          </button>
-        ` : ''}
-      </div>
-    ` : ''}
-
-    ${(isDriverView && !isCompleted && !isCancelled) ? `
-      <!-- Botones de Acción del Repartidor -->
-      <div class="driver-actions-container" style="display:flex; flex-direction:column; gap:10px; width:100%; margin-top:6px; margin-bottom:6px; box-sizing:border-box;">
-        ${!isDelivering ? `
-          <button id="v5-driver-pickup-btn" style="background:var(--color-primary); color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(225, 29, 72, 0.35); display:flex; align-items:center; justify-content:center; gap:8px;">
-            ${icon('bike', 18)} ${order.isTrip ? 'INICIAR VIAJE' : 'RETIRAR PEDIDO'}
-          </button>
-          ${(order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
-            <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
-              ${icon('creditCard', 14)} ${order.favorType === 'pagodeservicios' ? 'Ingresar Valor de Facturas' : 'Ingresar Valor de Compra'} (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+      ` : ''}
+  
+      ${isTakeaway ? `
+        <!-- Card Retiro en el Local -->
+        <div style="background:var(--color-surface); border:1.5px solid #10b981; border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(16,185,129,0.08); width:100%; box-sizing:border-box;">
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+            <span style="font-size:10px; font-weight:800; color:#10b981; text-transform:uppercase; margin-bottom:2px;">🏬 Retiro por el Local</span>
+            <span style="font-size:13.5px; font-weight:800; color:var(--color-text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${order.comercioRealName || order.comercioName || 'Comercio'}</span>
+            <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; margin-top:2px;">¡Sin costo de envío! ($0)</span>
+          </div>
+        </div>
+      ` : ''}
+  
+      ${(() => {
+        const isCommerceOrder = !order.isFavor && !order.isTrip;
+        const isEncomiendaOrder = order.favorType === 'encomienda' || order.serviceType === 'encomienda';
+        const showCode = !isDriverView && !order.isTrip && !isTakeaway && !isEncomiendaOrder && !!order.verificationCode && (
+          isCommerceOrder ? order.status === 'delivering' : !['delivered', 'cancelled', 'completed'].includes(order.status)
+        );
+        return showCode ? `
+          <div class="v5-cta-code"><span>CÓDIGO DE ENTREGA</span><span class="v5-code-val">${order.verificationCode}</span></div>
+        ` : '';
+      })()}
+  
+      ${(!isDriverView && !isTakeaway && (order.paymentMethod === 'mercadopago' || order.paymentMethod === 'transferencia' || order.paymentMethod === 'transfer' || (order.paymentMethod && order.paymentMethod.toString().toLowerCase().includes('transf')))) ? `
+        <!-- Card de Transferencia Minimalista con Alias del Repartidor -->
+        <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:16px; padding:12px 14px; margin-top:2px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,0.02); width:100%; box-sizing:border-box;">
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:12px;">
+            <span style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:2px;">Alias de Transferencia (${order.driverName || 'Repartidor'})</span>
+            <span style="font-size:14px; font-weight:800; color:${order.driverAlias ? 'var(--color-primary)' : 'var(--color-text-primary)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" id="v5-driver-alias-val">${order.driverAlias || (order.driverId ? 'Alias no registrado (consultar por chat)' : 'Esperando asignación...')}</span>
+          </div>
+          ${order.driverAlias ? `
+            <button id="v5-copy-alias-btn" style="background:var(--color-primary); color:white; border:none; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:900; cursor:pointer; flex-shrink:0; transition:all 0.2s; box-shadow:0 2px 8px rgba(225,29,72,0.3);">
+              Copiar
             </button>
           ` : ''}
-        ` : `
-          <div style="display:flex; gap:10px; width:100%;">
-            ${!order.isAtDoor ? `
-              <button id="v5-driver-notify-door-btn" style="background:#f59e0b; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:14.5px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap;">
-                ${icon('bell', 16)} AVISAR AFUERA
+        </div>
+      ` : ''}
+  
+      ${(isDriverView && !isCompleted && !isCancelled) ? `
+        <!-- Botones de Acción del Repartidor -->
+        <div class="driver-actions-container" style="display:flex; flex-direction:column; gap:10px; width:100%; margin-top:6px; margin-bottom:6px; box-sizing:border-box;">
+          ${!isDelivering ? `
+            <button id="v5-driver-pickup-btn" style="background:var(--color-primary); color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(225, 29, 72, 0.35); display:flex; align-items:center; justify-content:center; gap:8px;">
+              ${icon('bike', 18)} ${order.isTrip ? 'INICIAR VIAJE' : 'RETIRAR PEDIDO'}
+            </button>
+            ${(order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
+              <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                ${icon('creditCard', 14)} ${order.favorType === 'pagodeservicios' ? 'Ingresar Valor de Facturas' : 'Ingresar Valor de Compra'} (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
               </button>
-            ` : `
-              <button id="v5-driver-deliver-btn" style="background:#10b981; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); display:flex; align-items:center; justify-content:center; gap:6px;">
-                ${icon('checkCircle', 16)} ${order.isTrip ? 'FINALIZAR VIAJE' : 'ENTREGAR'}
-              </button>
-            `}
-          </div>
-        `}
-        ${isDelivering && (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
-          <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px;">
-            ${icon('creditCard', 14)} Modificar precio (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+            ` : ''}
+          ` : `
+            <div style="display:flex; gap:10px; width:100%;">
+              ${!order.isAtDoor ? `
+                <button id="v5-driver-notify-door-btn" style="background:#f59e0b; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:14.5px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap;">
+                  ${icon('bell', 16)} AVISAR AFUERA
+                </button>
+              ` : `
+                <button id="v5-driver-deliver-btn" style="background:#10b981; color:white; border:none; width:100%; padding:14px; border-radius:16px; font-size:15px; font-weight:900; cursor:pointer; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); display:flex; align-items:center; justify-content:center; gap:6px;">
+                  ${icon('checkCircle', 16)} ${order.isTrip ? 'FINALIZAR VIAJE' : 'ENTREGAR'}
+                </button>
+              `}
+            </div>
+          `}
+          ${isDelivering && (order.isFavor && (order.favorType === 'compra' || order.favorType === 'pagodeservicios')) ? `
+            <button id="v5-driver-edit-price-btn" style="background:var(--color-bg-secondary); color:var(--color-text-primary); border:1px solid var(--color-border); width:100%; padding:10px; border-radius:12px; font-size:12.5px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px;">
+              ${icon('creditCard', 14)} Modificar precio (${order.subtotal ? `$${order.subtotal}` : 'No cargado'})
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
+  
+      <!-- Total Price Pill & Details Toggle -->
+      <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:12px 16px; background:linear-gradient(to right, rgba(255,255,255,0.7), rgba(255,255,255,0.55)); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-radius:20px; border:1px solid rgba(255,255,255,0.6); margin-top:6px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:11.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Total:</span>
+          <strong id="v5-footer-total-val" style="font-size:20px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;">
+            $${Math.round(totalAmount).toLocaleString('es-AR')}
+          </strong>
+          <button id="v5-price-breakdown-info-btn" style="background:var(--color-primary); color:#ffffff; border:none; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900; cursor:pointer; margin-left:2px; transition:all 0.2s;" title="Ver desglose del importe">
+            i
           </button>
-        ` : ''}
-      </div>
-    ` : ''}
-
-    <!-- Total Price Pill & Details Toggle -->
-    <div style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:12px 16px; background:linear-gradient(to right, rgba(255,255,255,0.7), rgba(255,255,255,0.55)); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-radius:20px; border:1px solid rgba(255,255,255,0.6); margin-top:6px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); box-sizing:border-box;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:11.5px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Total:</span>
-        <strong id="v5-footer-total-val" style="font-size:20px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.5px;">
-          $${Math.round(totalAmount).toLocaleString('es-AR')}
-        </strong>
-        <button id="v5-price-breakdown-info-btn" style="background:var(--color-primary); color:#ffffff; border:none; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900; cursor:pointer; margin-left:2px; transition:all 0.2s;" title="Ver desglose del importe">
-          i
+        </div>
+        <button id="v5-toggle-details-btn" class="v5-toggle-btn" style="margin:0; padding:8px 16px; font-size:12px; font-weight:800; width:auto; border-radius:12px; background:var(--color-primary); color:#ffffff; border:none; display:flex; align-items:center; gap:6px; transition:all 0.2s;">
+          <span>Ver Detalles</span>
+          ${icon('clipboard', 12)}
         </button>
       </div>
-      <button id="v5-toggle-details-btn" class="v5-toggle-btn" style="margin:0; padding:8px 16px; font-size:12px; font-weight:800; width:auto; border-radius:12px; background:var(--color-primary); color:#ffffff; border:none; display:flex; align-items:center; gap:6px; transition:all 0.2s;">
-        <span>Ver Detalles</span>
-        ${icon('clipboard', 12)}
-      </button>
-    </div>
-
-    <!-- Contenedor expandible -->
-    <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
-      ${order.isFavor ? `
-        <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left;">
-          <div style="font-size:9px; font-weight:900; color:${getFavorTypeMeta(order.favorType).textColor}; text-transform:uppercase; margin-bottom:8px;">${getFavorTypeMeta(order.favorType).headerText}</div>
-          <div style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${formatFavorDetailsHTML(order.details)}</div>
-          ${order.pickupAddress ? `
-            <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
-              ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
-      ${(!order.isFavor && !order.isTrip && order.items && order.items.length > 0) ? `
-        <div style="background:var(--color-surface); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left; display:flex; flex-direction:column; gap:8px;">
-          <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Detalle del Pedido</div>
-          ${order.items.map(item => `
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.04);">
-              <div style="flex:1;">
-                <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${item.qty}x</span> ${item.name}</div>
-                ${item.notes ? `<div style="font-size:10px; color:var(--color-text-secondary); margin-top:2px; font-style:italic;">"${item.notes}"</div>` : ''}
+  
+      <!-- Contenedor expandible -->
+      <div id="v5-expandable-details" class="v5-details-container ${isDetailsExpanded ? 'expanded' : ''}">
+        ${order.isFavor ? `
+          <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left;">
+            <div style="font-size:9px; font-weight:900; color:${getFavorTypeMeta(order.favorType).textColor}; text-transform:uppercase; margin-bottom:8px;">${getFavorTypeMeta(order.favorType).headerText}</div>
+            <div style="font-size:12px; font-weight:600; color:var(--color-text-primary); margin-bottom:10px; line-height:1.4;">${formatFavorDetailsHTML(order.details)}</div>
+            ${order.pickupAddress ? `
+              <div style="font-size:11px; font-weight:700; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; border-top:1px solid var(--color-border-light); padding-top:8px;">
+                ${icon('mapPin', 14)} <span style="font-size:9px; opacity:0.6; text-transform:uppercase;">Origen:</span> ${order.pickupAddress}
               </div>
-              <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
-            </div>
-          `).join('')}
-        </div>
-      ` : ''}
-      ${(normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus))) ? `
-        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; align-items: flex-end; width: 100%;">
-          <button id="v5-cancel-order-btn" class="v5-cancel-btn" style="margin: 0; padding: 6px 14px; font-size: 11.5px; font-weight: 800; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
-            ${icon('trash', 13)} ${order.isTrip ? 'Cancelar Viaje' : 'Cancelar Pedido'}
-          </button>
-          ${order.pointsRedeemed > 0 ? `
-            <div style="display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; margin-top: 4px;">
-              ${icon('goPointsLogo', 11)} Go Points canjeados serán reintegrados
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
-    </div>
-
-    ${viralBannerHTML}
-  `;
+            ` : ''}
+          </div>
+        ` : ''}
+        ${(!order.isFavor && !order.isTrip && order.items && order.items.length > 0) ? `
+          <div style="background:var(--color-surface); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-bottom:12px; width: 100%; box-sizing: border-box; text-align: left; display:flex; flex-direction:column; gap:8px;">
+            <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Detalle del Pedido</div>
+            ${order.items.map(item => `
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.04);">
+                <div style="flex:1;">
+                  <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${item.qty}x</span> ${item.name}</div>
+                  ${item.notes ? `<div style="font-size:10px; color:var(--color-text-secondary); margin-top:2px; font-style:italic;">"${item.notes}"</div>` : ''}
+                </div>
+                <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+        ${(normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus))) ? `
+          <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-light); display: flex; flex-direction: column; align-items: flex-end; width: 100%;">
+            <button id="v5-cancel-order-btn" class="v5-cancel-btn" style="margin: 0; padding: 6px 14px; font-size: 11.5px; font-weight: 800; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
+              ${icon('trash', 13)} ${order.isTrip ? 'Cancelar Viaje' : 'Cancelar Pedido'}
+            </button>
+            ${order.pointsRedeemed > 0 ? `
+              <div style="display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; color: var(--color-text-secondary); opacity: 0.85; margin-top: 4px;">
+                ${icon('goPointsLogo', 11)} Go Points canjeados serán reintegrados
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+      </div>
+  
+      ${viralBannerHTML}
+    `;
+  }
 
   const directBackBtn = document.getElementById('v5-direct-back-btn');
   if (directBackBtn) {
@@ -1885,6 +1969,11 @@ function updateUI(order, isDriverViewOverride = false) {
   // Trigger Asynchronous Predictive and Weather-Adaptive ETA calculation
   setTimeout(() => {
     calculatePredictiveETA(order).then(eta => {
+      if (!isDriverView) {
+        // Si ya hay tiempo de la ruta en vivo, manda ese (es más preciso)
+        if (!(gtRouteEta && currentETA && currentETA !== '--')) setClientEta(eta.min, eta.label.includes('Llega') ? null : eta.max);
+        return;
+      }
       const etaContainer = document.getElementById('v5-dynamic-eta-container');
       if (etaContainer) {
         if (isDriverView || order.status === 'completed' || order.status === 'cancelled' || isWaitingConfirmation || isSearchingRider) {
@@ -2057,6 +2146,7 @@ async function updateMap(order) {
       antialias: true
     });
 
+    if (import.meta.env.DEV) window.__trackingMap = liveMap; // solo para depurar en desarrollo
     liveMap.on('error', () => {
       try {
         if (liveMap && liveMap.getStyle() !== activeMapStyle) {
@@ -2159,13 +2249,21 @@ async function updateMap(order) {
       const maxLng = Math.max(riderPos.lng, targetPos.lng);
       const minLat = Math.min(riderPos.lat, targetPos.lat);
       const maxLat = Math.max(riderPos.lat, targetPos.lat);
-      liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 260, left: 50, right: 50 } });
+      liveMap.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 90, bottom: bottomSheetPad(), left: 50, right: 50 }, maxZoom: 17 });
       isFirstFit = false;
     } else if (destPos) {
       liveMap.easeTo({ center: [destPos.lng, destPos.lat], zoom: 16.5 });
       isFirstFit = false;
     }
   }
+}
+
+// Lo que tapa la hoja de abajo (mide la real: cambia según el estado y si está achicada)
+function bottomSheetPad() {
+  const el = document.getElementById('gt-sheet') || document.getElementById('tracking-info-panel');
+  const h = el ? el.getBoundingClientRect().height : 260;
+  const box = liveMap ? liveMap.getContainer().getBoundingClientRect().height : 800;
+  return Math.round(Math.min(Math.max(h + 24, 120), box * 0.7));
 }
 
 // Como Uber: si la moto se va del área visible, la cámara se acomoda para ver moto y destino.
@@ -2175,13 +2273,13 @@ function followRiderCamera(riderPos, targetPos) {
   try {
     const box = liveMap.getContainer().getBoundingClientRect();
     const pt = liveMap.project([riderPos.lng, riderPos.lat]);
-    const margin = { top: 80, bottom: 290, side: 40 }; // abajo está la tarjeta del pedido
+    const margin = { top: 80, bottom: bottomSheetPad(), side: 40 }; // abajo está la hoja del pedido
     const inside = pt.x > margin.side && pt.x < box.width - margin.side && pt.y > margin.top && pt.y < box.height - margin.bottom;
     if (inside) return;
     liveMap.fitBounds([
       [Math.min(riderPos.lng, targetPos.lng), Math.min(riderPos.lat, targetPos.lat)],
       [Math.max(riderPos.lng, targetPos.lng), Math.max(riderPos.lat, targetPos.lat)],
-    ], { padding: { top: 90, bottom: 300, left: 60, right: 60 }, maxZoom: 17, duration: 900 });
+    ], { padding: { top: 90, bottom: bottomSheetPad(), left: 60, right: 60 }, maxZoom: 17, duration: 900 });
   } catch (e) { /* mapa todavía cargando */ }
 }
 
@@ -2358,6 +2456,7 @@ async function updateRoute(start, end) {
       const durationSec = data.routes[0].duration;
       const minutes = Math.ceil(durationSec / 60) + 1;
       currentETA = minutes;
+      if (gtRouteEta) setClientEta(minutes);
       const etaValEl = document.querySelector('#v5-dynamic-eta-container b');
       if (etaValEl) {
         etaValEl.textContent = `${minutes} min`;
