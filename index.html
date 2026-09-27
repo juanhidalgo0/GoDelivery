@@ -381,7 +381,7 @@
       text-transform: uppercase;
       color: rgba(247, 245, 241, 0.62);
       opacity: 0;
-      animation: gsTag 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.8s forwards;
+      animation: gsTag 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.7s forwards;
     }
 
     @keyframes gsDraw { to { stroke-dashoffset: 0; } }
@@ -658,7 +658,8 @@
         <script>
           window.setSplashProgress = function() {};
           // The splash is the way into the app: every open plays the whole GO! intro
-          // (~1.5 s) and holds it a beat before the ink rolls up into the header.
+          // (~1.4 s) and holds it so "Servicio puerta a puerta" can be read, then the ink rolls
+          // up into the header.
           // Timed from when the splash is painted, not from page start, so a slow
           // WebView boot never eats the animation. Reduced motion gets a short hold.
           window.__gsStart = performance.now();
@@ -667,7 +668,7 @@
             if (!s || s.dataset.dismissed) return;
             s.dataset.dismissed = 'true';
             var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            var minShow = reduce ? 500 : 1900;
+            var minShow = reduce ? 900 : 2700; // the tagline stays readable for over a second
             var elapsed = performance.now() - (window.__gsStart || 0);
             var wait = (opts && opts.immediate) ? 0 : Math.max(0, minShow - elapsed);
             setTimeout(function() {
@@ -681,7 +682,7 @@
           // (the pre-rendered shell is already behind it).
           setTimeout(function() {
             if (window.dismissSplashScreen) window.dismissSplashScreen();
-          }, 2000);
+          }, 2800);
         </script>
       </div>
     </div>
