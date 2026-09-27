@@ -6,12 +6,17 @@
 #
 # Qué hace: toma firestore.rules y functions/index.js tal como estaban en la etiqueta
 # "antes-de-mandados", los publica y deja tus archivos como estaban.
-# La app de prueba (canal "mandados" de Hosting) no hace falta volverla atrás: es una dirección
-# aparte que vence sola. Para borrarla antes: npx firebase hosting:channel:delete mandados --site godelivery-magdalena
-# La app que usan los clientes nunca se tocó.
-param([switch]$SoloFuncion)
+param([switch]$SoloFuncion, [switch]$SoloApp)
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
+
+if (-not $SoloFuncion) {
+  Write-Host 'Volviendo la app a la version anterior...' -ForegroundColor Yellow
+  npx firebase hosting:clone godelivery-magdalena:respaldo-antes-mandados godelivery-magdalena:live --project godelivery-magdalena
+  if ($LASTEXITCODE -ne 0) { throw "No se pudo volver la app (codigo $LASTEXITCODE)" }
+  Write-Host 'App: lista.' -ForegroundColor Green
+  if ($SoloApp) { return }
+}
 
 $tag = 'antes-de-mandados'
 git rev-parse --verify $tag | Out-Null
