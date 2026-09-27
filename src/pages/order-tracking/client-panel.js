@@ -190,10 +190,10 @@ export function renderClientPanel(o, status, flags = {}) {
   const foot = `
     <div class="gt-foot">
       <div class="gt-pay">
-        <div class="gt-pay-top"><span id="v5-footer-total-val">${money(total)}</span><button class="gt-i" id="v5-price-breakdown-info-btn" aria-label="Ver el desglose">${icon('receipt', 14)}</button></div>
+        <div class="gt-pay-top"><span id="v5-footer-total-val">${money(total)}</span></div>
         <div class="gt-pay-sub">${payText}</div>
       </div>
-      <button class="gt-btn" id="v5-toggle-details-btn">Ver pedido</button>
+      <button class="gt-btn" id="v5-toggle-details-btn">${icon('receipt', 16)}Detalle y precios</button>
       <button class="gt-round gt-round-sm" id="gt-help-btn" aria-label="Ayuda">${icon('helpCircle', 18)}</button>
     </div>
     ${flags.canCancel ? `<button class="gt-cancel" id="v5-cancel-order-btn">${o.isTrip ? 'Cancelar viaje' : 'Cancelar pedido'}${o.pointsRedeemed > 0 ? ' · te devolvemos los Go Points' : ''}</button>` : ''}`;
@@ -294,7 +294,8 @@ export const CLIENT_PANEL_CSS = `
   .gt-pay-sub { font-size: 12.5px; color: var(--gt-tx2); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gt-pay-sub b { color: var(--gt-tx); font-weight: 700; }
   .gt-copy { border: 0; background: none; color: var(--gt-brand); font-weight: 700; font-size: 12.5px; cursor: pointer; padding: 0 0 0 4px; font-family: inherit; }
-  .gt-btn { height: 44px; padding: 0 16px; border-radius: 22px; border: 0; background: var(--gt-card); color: var(--gt-tx); font-weight: 700; font-size: 14px; cursor: pointer; flex-shrink: 0; font-family: inherit; }
+  .gt-btn { height: 44px; padding: 0 14px; border-radius: 22px; border: 1.5px solid var(--gt-line); background: var(--gt-bg); color: var(--gt-tx); font-weight: 700; font-size: 13.5px; cursor: pointer; flex-shrink: 0; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+  .gt-btn svg { color: var(--gt-brand); }
   .gt-round-sm { width: 44px; height: 44px; background: var(--gt-card); box-shadow: none; flex-shrink: 0; }
   .gt-cancel { align-self: center; border: 0; background: none; color: var(--gt-red); font-weight: 600; font-size: 13.5px; cursor: pointer; padding: 4px 8px; font-family: inherit; }
   .gt-list { display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; background: var(--gt-card); }

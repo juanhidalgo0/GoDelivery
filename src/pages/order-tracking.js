@@ -12,6 +12,7 @@ import { openChat } from '../components/chat.js';
 import { GOOGLE_MAPS_STYLE, getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
 import { createRiderMotion } from '../utils/rider-motion.js';
 import { renderClientPanel, setClientEta, trackingModel, CLIENT_PANEL_CSS } from './order-tracking/client-panel.js';
+import { openClientOrderSheet } from './order-tracking/order-sheet.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -1884,7 +1885,11 @@ function updateUI(order, isDriverViewOverride = false) {
   });
 
   document.getElementById('v5-toggle-details-btn')?.addEventListener('click', () => {
-    window.openOrderDetailsModal(order);
+    // Cliente: una sola hoja con productos, precio línea por línea y entrega
+    if (!isDriverView) {
+      const canCancel = normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
+      openClientOrderSheet(window.lastOrderData || order, { canCancel });
+    } else window.openOrderDetailsModal(order);
   });
 
   document.getElementById('chat-v5-btn')?.addEventListener('click', () => {
