@@ -10,6 +10,7 @@ import { showToast } from '../components/toast.js';
 import { getState } from '../state.js';
 import { openChat } from '../components/chat.js';
 import { GOOGLE_MAPS_STYLE, getAppMapStyle, MAPTILER_DARK, OSM_MAP_STYLE } from '../utils/map-styles.js';
+import { createRiderMotion } from '../utils/rider-motion.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -64,6 +65,11 @@ function formatFavorDetailsHTML(detailsStr) {
 
 let liveMap = null;
 let riderMarker = null;
+let riderMotion = null;      // movimiento fluido de la moto (utils/rider-motion.js)
+let lastUserMapMove = 0;     // si el cliente movió el mapa a mano, la cámara no lo pelea un rato
+// Distancia máxima para dibujar la moto sobre la línea de la ruta (antes 350 m: la ponía en
+// calles por las que no iba)
+const ROUTE_SNAP_METERS = 40;
 let freshnessTimer = null;
 
 // The driver's position only means "live" if it's recent. With no signal, or the OS killing
@@ -175,6 +181,9 @@ const parseCoords = (c) => {
 export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false, isDirectMode = false) {
   // Reset all module-level map references to prevent DOM pollution when modal is opened/closed
   liveMap = null;
+  if (riderMotion) riderMotion.stop();
+  riderMotion = null;
+  lastUserMapMove = 0;
   riderMarker = null;
   homeMarker = null;
   pickupMarker = null;
@@ -185,6 +194,8 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   isFirstFit = true;
   isDetailsExpanded = false;
   lastRouteFetchTime = 0;
+  clearTimeout(routeTrailingTimer); // la ruta agendada del pedido anterior no se dibuja acá
+  currentRouteCoordinates = null;
   lastRouteStartCoords = null;
   lastRouteEndCoords = null;
 
@@ -2054,6 +2065,8 @@ async function updateMap(order) {
       } catch(e) {}
     });
 
+    ['dragstart', 'zoomstart', 'rotatestart'].forEach(ev => liveMap.on(ev, (e) => { if (e && e.originalEvent) lastUserMapMove = Date.now(); }));
+
     liveMap.on('load', () => {
       try { liveMap.resize(); } catch(e) {}
       ensureTrackingRouteLayers();
@@ -2103,19 +2116,8 @@ async function updateMap(order) {
     }
   }
 
-  // Snap Rider Marker directly onto the route lineString if available
-  let effectiveRiderPos = riderPos;
-  let snappedBearing = null;
-  if (riderPos && currentRouteCoordinates && currentRouteCoordinates.length >= 2) {
-    const snap = snapPointToLineString(riderPos, currentRouteCoordinates, 350);
-    if (snap.isSnapped) {
-      effectiveRiderPos = snap.snappedPoint;
-      snappedBearing = snap.bearing;
-    }
-  }
-
-  // Rider Marker
-  if (effectiveRiderPos) {
+  // La moto: la mueve el motor de movimiento (sin tirones, por las calles, girando suave)
+  if (riderPos) {
     if (!riderMarker) {
       const el = document.createElement('div');
       el.className = 'v5-marker-shadow';
@@ -2125,50 +2127,30 @@ async function updateMap(order) {
           <div class="sonar-pulse-ring-1"></div>
           <div class="sonar-pulse-ring-2"></div>
           <div class="moto-base-glow" style="position:absolute; width:24px; height:6px; background:rgba(225, 29, 72, 0.5); border-radius:50%; bottom:2px; left:50%; transform:translateX(-50%); filter:blur(2px); z-index:1;"></div>
-          <div class="rider-marker-avatar" style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; transition: transform 0.4s ease;">
+          <div class="rider-marker-avatar" style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; will-change:transform;">
             <img src="/go-delivery-moto.png?v=2" style="width:44px; height:44px; object-fit:contain;" />
           </div>
         </div>`;
       riderMarker = new maplibregl.Marker({ element: el })
-        .setLngLat([effectiveRiderPos.lng, effectiveRiderPos.lat])
+        .setLngLat([riderPos.lng, riderPos.lat])
         .addTo(liveMap);
-      riderMarker.lastPos = effectiveRiderPos;
-      riderMarker.angle = snappedBearing !== null ? snappedBearing : 0;
-      if (snappedBearing !== null) {
-        const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
-        if (avatar) avatar.style.transform = `rotate(${snappedBearing}deg)`;
-      }
-    } else {
-      let bearing = snappedBearing;
-      if (bearing === null && riderMarker.lastPos && (riderMarker.lastPos.lat !== effectiveRiderPos.lat || riderMarker.lastPos.lng !== effectiveRiderPos.lng)) {
-        const lat1 = riderMarker.lastPos.lat * Math.PI / 180;
-        const lat2 = effectiveRiderPos.lat * Math.PI / 180;
-        const dLon = (effectiveRiderPos.lng - riderMarker.lastPos.lng) * Math.PI / 180;
-        const y = Math.sin(dLon) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-        bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-      }
-
-      if (bearing !== null) {
-        let delta = bearing - (riderMarker.angle % 360);
-        if (delta > 180) delta -= 360;
-        if (delta < -180) delta += 360;
-        riderMarker.angle += delta;
-
-        const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
-        if (avatar) {
-          avatar.style.transform = `rotate(${riderMarker.angle}deg)`;
-        }
-      }
-      riderMarker.lastPos = effectiveRiderPos;
-      animateRiderMarkerTo(effectiveRiderPos);
+      const avatar = el.querySelector('.rider-marker-avatar');
+      if (riderMotion) riderMotion.stop();
+      riderMotion = createRiderMotion({
+        setPosition: (p) => { if (riderMarker) riderMarker.setLngLat([p.lng, p.lat]); },
+        setHeading: (deg) => { if (avatar) avatar.style.transform = `rotate(${deg}deg)`; },
+        setRemainingRoute: (coords) => setTrackingRouteLine(coords),
+      });
+      if (currentRouteCoordinates) riderMotion.setRoute(currentRouteCoordinates);
     }
+    riderMotion.push(riderPos);
   }
 
   // Update Route Polyline & ETA
   const targetPos = destPos || pickupPos;
   if (riderPos && targetPos) {
     updateRoute(riderPos, targetPos);
+    followRiderCamera(riderPos, targetPos);
   }
 
   if (isFirstFit) {
@@ -2184,6 +2166,23 @@ async function updateMap(order) {
       isFirstFit = false;
     }
   }
+}
+
+// Como Uber: si la moto se va del área visible, la cámara se acomoda para ver moto y destino.
+// Si el cliente movió el mapa hace poco, no se toca.
+function followRiderCamera(riderPos, targetPos) {
+  if (!liveMap || isFirstFit || Date.now() - lastUserMapMove < 12000) return;
+  try {
+    const box = liveMap.getContainer().getBoundingClientRect();
+    const pt = liveMap.project([riderPos.lng, riderPos.lat]);
+    const margin = { top: 80, bottom: 290, side: 40 }; // abajo está la tarjeta del pedido
+    const inside = pt.x > margin.side && pt.x < box.width - margin.side && pt.y > margin.top && pt.y < box.height - margin.bottom;
+    if (inside) return;
+    liveMap.fitBounds([
+      [Math.min(riderPos.lng, targetPos.lng), Math.min(riderPos.lat, targetPos.lat)],
+      [Math.max(riderPos.lng, targetPos.lng), Math.max(riderPos.lat, targetPos.lat)],
+    ], { padding: { top: 90, bottom: 300, left: 60, right: 60 }, maxZoom: 17, duration: 900 });
+  } catch (e) { /* mapa todavía cargando */ }
 }
 
 function getTripStepClass(order, index) {
@@ -2288,74 +2287,73 @@ function snapPointToLineString(point, coordinates, maxThresholdMeters = 350) {
   return { snappedPoint: point, bearing: 0, distance: minDistance, isSnapped: false };
 }
 
+// La ruta se recalcula como mucho cada 8 s (servicio gratuito de rutas), pero siempre termina
+// usando la última posición: antes, si la posición llegaba antes de los 8 s, se descartaba y la
+// línea quedaba saliendo de un punto viejo, lejos de la moto (y así hasta el próximo movimiento).
+// Si el repartidor se salió de la ruta, se recalcula enseguida (sin esperar los 8 s).
+const ROUTE_MIN_INTERVAL_MS = 8000;
+const ROUTE_OFF_TRACK_MIN_MS = 2500;
+let routeTrailingTimer = null;
+let routeRequestSeq = 0;
+
+function setTrackingRouteLine(coords) {
+  if (!liveMap) return;
+  ensureTrackingRouteLayers();
+  const src = liveMap.getSource('tracking-route-source');
+  if (src) src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } });
+}
+
 async function updateRoute(start, end) {
   const now = Date.now();
   const timeElapsed = now - lastRouteFetchTime;
-  
+
   let shouldFetch = false;
+  let offTrack = false;
   if (!lastRouteStartCoords || !lastRouteEndCoords) {
     shouldFetch = true;
   } else {
     const startMoved = getHaversineDistance(start.lat, start.lng, lastRouteStartCoords.lat, lastRouteStartCoords.lng);
     const endMoved = getHaversineDistance(end.lat, end.lng, lastRouteEndCoords.lat, lastRouteEndCoords.lng);
-    
-    if (timeElapsed >= 8000 && (startMoved >= 10 || endMoved >= 8)) {
+    const moved = startMoved >= 10 || endMoved >= 8;
+    // ¿Sigue sobre la ruta dibujada? Si no, la línea ya no sale de la moto
+    offTrack = endMoved >= 8 || !(currentRouteCoordinates && currentRouteCoordinates.length >= 2 &&
+      snapPointToLineString(start, currentRouteCoordinates, ROUTE_SNAP_METERS).isSnapped);
+
+    if (moved && (timeElapsed >= ROUTE_MIN_INTERVAL_MS || (offTrack && timeElapsed >= ROUTE_OFF_TRACK_MIN_MS))) {
       shouldFetch = true;
+    } else if (moved) {
+      // Muy pronto: se deja agendado con la última posición (nunca se pierde la última)
+      clearTimeout(routeTrailingTimer);
+      const wait = (offTrack ? ROUTE_OFF_TRACK_MIN_MS : ROUTE_MIN_INTERVAL_MS) - timeElapsed;
+      routeTrailingTimer = setTimeout(() => updateRoute(start, end), Math.max(250, wait));
     }
   }
 
-  // Draw optimistic line immediately
-  if (liveMap) {
-    ensureTrackingRouteLayers();
-    const src = liveMap.getSource('tracking-route-source');
-    if (src && (!lastRouteStartCoords || shouldFetch)) {
-      src.setData({
-        type: 'Feature',
-        geometry: {
-          type: 'LineString',
-          coordinates: [[start.lng, start.lat], [end.lng, end.lat]]
-        }
-      });
-    }
+  // Mientras llega la ruta por calles, una línea recta desde donde está la moto
+  if (!lastRouteStartCoords || (shouldFetch && offTrack) || (offTrack && !shouldFetch)) {
+    if (offTrack && riderMotion) riderMotion.setRoute(null);
+    const from = (riderMotion && riderMotion.current()) || start;
+    setTrackingRouteLine([[from.lng, from.lat], [end.lng, end.lat]]);
+    if (offTrack) currentRouteCoordinates = null;
   }
 
   if (!shouldFetch) return;
 
+  clearTimeout(routeTrailingTimer);
   lastRouteFetchTime = now;
   lastRouteStartCoords = { lat: start.lat, lng: start.lng };
   lastRouteEndCoords = { lat: end.lat, lng: end.lng };
+  const seq = ++routeRequestSeq;
 
   try {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`);
     const data = await res.json();
+    if (seq !== routeRequestSeq) return; // llegó tarde: ya se pidió una ruta más nueva
     if (data.routes?.[0] && liveMap) {
       let coords = data.routes[0].geometry.coordinates;
       currentRouteCoordinates = coords;
-      
-      ensureTrackingRouteLayers();
-      const src = liveMap.getSource('tracking-route-source');
-      if (src) {
-        src.setData({
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: coords
-          }
-        });
-      }
-
-      // Snap rider marker immediately onto newly received route geometry
-      if (riderMarker && start) {
-        const snap = snapPointToLineString(start, coords, 350);
-        if (snap.isSnapped) {
-          riderMarker.setLngLat([snap.snappedPoint.lng, snap.snappedPoint.lat]);
-          riderMarker.lastPos = snap.snappedPoint;
-          const avatar = riderMarker.getElement().querySelector('.rider-marker-avatar');
-          if (avatar && snap.bearing !== null) {
-            avatar.style.transform = `rotate(${snap.bearing}deg)`;
-          }
-        }
-      }
+      if (riderMotion) riderMotion.setRoute(coords);
+      else setTrackingRouteLine(coords);
 
       const durationSec = data.routes[0].duration;
       const minutes = Math.ceil(durationSec / 60) + 1;

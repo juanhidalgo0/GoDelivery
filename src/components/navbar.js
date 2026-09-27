@@ -112,7 +112,9 @@ export function updateGlobalDriverReturnBadge() {
                         document.documentElement.classList.contains('is-direct-store-mode');
 
   // Badge must be visible whenever the user is a driver AND is NOT currently on the delivery or direct store screen
-  if (isDriverUser && !isDeliveryRoute && !isDirectStore) {
+  // En el seguimiento de un pedido tapaba la tarjeta de abajo (total, detalles); ahí se vuelve con la flecha
+  const isOrderTracking = cleanHash.startsWith('#/pedido/');
+  if (isDriverUser && !isDeliveryRoute && !isDirectStore && !isOrderTracking) {
     if (!floatingDriverBtn) {
       floatingDriverBtn = document.createElement('a');
       floatingDriverBtn.id = 'floating-driver-mode-pill';
