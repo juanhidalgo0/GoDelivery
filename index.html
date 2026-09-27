@@ -217,7 +217,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
   <meta name="description"
     content="GoDelivery — Pedí lo que necesites, lo llevamos a tu puerta. Delivery de comercios locales." />
-  <meta name="theme-color" content="#E11D48" />
+  <meta name="theme-color" content="#0B0B0C" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -272,275 +272,156 @@
       background: var(--color-bg);
     }
 
-    /* Premium Cinematic Blend Background - Starts Red */
+    /* ============================================================
+       Splash GO!
+       Tinta de fondo (el mismo negro del encabezado). El círculo del logo se
+       dibuja como un recorrido y un punto rojo lo va marcando "puerta a
+       puerta"; GO! entra hacia adelante, aparece la barrita roja y el lema.
+       Al salir, el negro sube como un telón y queda convertido en el header.
+       ============================================================ */
     #splash-screen {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      inset: 0;
       z-index: 9999999;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #E11D48;
+      background: #0b0b0c;
       overflow: hidden;
-      transition: background 0.3s ease;
+      clip-path: inset(0 0 0 0);
     }
 
-    #app.ready #splash-screen {
-      background: transparent !important;
-    }
-
-    /* Expanding Morphing White Sphere from Logo Center */
-    .splash-circle-grow {
-      position: absolute;
-      width: 10px;
-      height: 10px;
-      background: #FFFFFF;
-      border-radius: 50%;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) scale(0);
-      transform-origin: center;
-      z-index: 1;
-      pointer-events: none;
-      transition: opacity 0.3s ease;
-    }
-
-    #app.ready .splash-circle-grow {
-      animation: expandWhiteCircle 1.6s cubic-bezier(0.85, 0, 0.15, 1) forwards;
-    }
-
-    @keyframes expandWhiteCircle {
-      0% {
-        transform: translate(-50%, -50%) scale(0);
-      }
-      100% {
-        transform: translate(-50%, -50%) scale(350);
-      }
-    }
-
-    /* Collapsing Red Sphere from Outside In */
-    .splash-circle-red-collapse {
-      position: absolute;
-      width: 10px;
-      height: 10px;
-      background: #E11D48;
-      border-radius: 50%;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) scale(0);
-      transform-origin: center;
-      z-index: 2;
-      pointer-events: none;
-    }
-
-    #app.ready .splash-circle-red-collapse {
-      animation: collapseRedCircle 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-    }
-
-    @keyframes collapseRedCircle {
-      0% {
-        transform: translate(-50%, -50%) scale(350);
-      }
-      100% {
-        transform: translate(-50%, -50%) scale(0);
-      }
-    }
-
-    #splash-screen.fade-out,
-    #app.ready #splash-screen {
-      opacity: 0 !important;
-      visibility: hidden !important;
-      pointer-events: none !important;
-      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    #app.ready #splash-progress-container {
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-
-    /* Expanding Ripple Shockwaves */
-    .splash-ripple {
-      position: absolute;
-      width: 180px;
-      height: 180px;
-      border-radius: 50%;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) scale(1);
-      transform-origin: center;
-      pointer-events: none;
-      z-index: 3;
-      opacity: 0;
-      animation: rippleOut 1.8s cubic-bezier(0.85, 0, 0.15, 1) forwards;
-    }
-
-    .splash-ripple.ripple-white {
-      border: 2px solid rgba(255, 255, 255, 0.75);
-    }
-
-    .splash-ripple.ripple-red {
-      border: 2px solid rgba(225, 29, 72, 0.45);
-    }
-
-    @keyframes rippleOut {
-      0% {
-        transform: translate(-50%, -50%) scale(1);
-        opacity: 0.8;
-      }
-      100% {
-        transform: translate(-50%, -50%) scale(4.5);
-        opacity: 0;
-      }
-    }
-
-    .splash-content {
+    .gs-stage {
       position: relative;
-      z-index: 10;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      transition: transform 1.0s cubic-bezier(0.25, 1, 0.5, 1), opacity 1.0s ease;
-      will-change: transform, opacity;
+      width: 184px;
+      height: 184px;
     }
 
-    #app.ready .splash-logo-container {
-      animation: logoExit 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-    }
-
-    #app.ready .splash-loader-container {
-      opacity: 0;
-      transform: translateY(12px);
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      pointer-events: none;
-    }
-
-    @keyframes logoExit {
-      0% {
-        transform: scale(1);
-        opacity: 1;
-        filter: blur(0px);
-      }
-      100% {
-        transform: scale(1.15);
-        opacity: 0;
-        filter: blur(8px);
-      }
-    }
-
-    /* Logo Container - Minimalist & Breathing with red/pink shadow */
-    .splash-logo-container {
-      position: relative;
-      width: 195px;
-      height: 195px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      filter: drop-shadow(0 15px 35px rgba(225, 29, 72, 0.25));
-      animation: logoEntrance 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards, logoFloat 3s ease-in-out infinite 0.8s;
-    }
-
-    .splash-logo-container::before {
-      content: '';
+    .gs-ring {
       position: absolute;
-      width: 185px;
-      height: 185px;
-      border-radius: 50%;
-      padding: 3px;
-      background: linear-gradient(135deg, #E11D48, #FF6B81, #FF4757, #E11D48);
-      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      animation: rotateBorder 3s linear infinite;
-      z-index: 1;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+      overflow: visible;
     }
 
-    .splash-logo-img {
-      width: 175px;
-      height: 175px;
-      border-radius: 50%;
-      object-fit: cover;
-      z-index: 2;
-      animation: logoWobble 6s ease-in-out infinite 0.8s;
-    }
-
-    @keyframes logoEntrance {
-      0% {
-        transform: scale(0) rotate(-15deg);
-        opacity: 0;
-      }
-      100% {
-        transform: scale(1) rotate(0deg);
-        opacity: 1;
-      }
-    }
-
-    @keyframes rotateBorder {
-      100% { transform: rotate(360deg); }
-    }
-
-    @keyframes logoFloat {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-10px); }
-    }
-
-    @keyframes logoWobble {
-      0%, 100% { border-radius: 50% 50% 50% 50% / 50% 50% 50% 50%; }
-      33% { border-radius: 54% 46% 52% 48% / 48% 52% 46% 54%; }
-      66% { border-radius: 46% 54% 48% 52% / 52% 48% 54% 46%; }
-    }
-
-    /* Spinner & Progress - Brand Red Spinner on White */
-    .splash-loader-container {
-      margin-top: 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 18px;
-      animation: fadeIn 0.8s ease 0.3s both;
-    }
-
-    .splash-spinner {
-      width: 40px;
-      height: 40px;
-      animation: rotateSpinner 2s linear infinite;
-    }
-
-    .splash-spinner .path-bg {
-      stroke: #FFE4E6;
-    }
-
-    .splash-spinner .path {
-      stroke: #E11D48;
+    .gs-ring circle {
+      fill: none;
+      stroke: #f7f5f1;
+      stroke-width: 2.5;
       stroke-linecap: round;
-      animation: dashSpinner 1.5s ease-in-out infinite;
+      stroke-dasharray: 578.1;
+      stroke-dashoffset: 578.1;
+      animation: gsDraw 0.8s cubic-bezier(0.65, 0, 0.35, 1) 0.1s forwards;
     }
 
-    @keyframes rotateSpinner {
-      100% {
-        transform: rotate(360deg);
-      }
+    /* The "rider": a red dot riding the head of the stroke */
+    .gs-rider {
+      position: absolute;
+      inset: 0;
+      animation: gsOrbit 0.8s cubic-bezier(0.65, 0, 0.35, 1) 0.1s both;
     }
 
-    @keyframes dashSpinner {
-      0% {
-        stroke-dasharray: 1, 150;
-        stroke-dashoffset: 0;
-      }
-      50% {
-        stroke-dasharray: 90, 150;
-        stroke-dashoffset: -35;
-      }
-      100% {
-        stroke-dasharray: 90, 150;
-        stroke-dashoffset: -124;
-      }
+    .gs-rider span {
+      position: absolute;
+      top: 2.4px;
+      left: 50%;
+      width: 10px;
+      height: 10px;
+      margin-left: -5px;
+      border-radius: 50%;
+      background: #e11d48;
+      box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.22);
+      animation: gsArrive 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.9s forwards;
+    }
+
+    /* GO! enters moving forward. The image is drawn a bit larger than its window
+       so the anti-aliased edge of the source circle never shows. */
+    .gs-logo {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      width: calc(100% - 24px);
+      height: calc(100% - 24px);
+      border-radius: 50%;
+      overflow: hidden;
+      background: #0b0b0c;
+      clip-path: inset(0 100% 0 0);
+      transform: translateX(-10px);
+      animation: gsGo 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.38s forwards;
+    }
+
+    .gs-logo img {
+      position: absolute;
+      top: -1.5%;
+      left: -1.5%;
+      width: 103%;
+      height: 103%;
+      object-fit: cover;
+      mix-blend-mode: lighten;
+    }
+
+    .gs-bar {
+      width: 36px;
+      height: 4px;
+      margin-top: 28px;
+      border-radius: 2px;
+      background: #e11d48;
+      transform: scaleX(0);
+      transform-origin: left center;
+      animation: gsBar 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.72s forwards;
+    }
+
+    .gs-tag {
+      margin-top: 14px;
+      font: 700 11px/1 'Inter', system-ui, -apple-system, sans-serif;
+      letter-spacing: 0.5em;
+      text-transform: uppercase;
+      color: rgba(247, 245, 241, 0.62);
+      opacity: 0;
+      animation: gsTag 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.8s forwards;
+    }
+
+    @keyframes gsDraw { to { stroke-dashoffset: 0; } }
+    @keyframes gsOrbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes gsArrive {
+      0%   { transform: scale(1); box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.22); }
+      45%  { transform: scale(1.35); box-shadow: 0 0 0 10px rgba(225, 29, 72, 0); }
+      100% { transform: scale(1); box-shadow: 0 0 0 4px rgba(225, 29, 72, 0); }
+    }
+    @keyframes gsGo { to { clip-path: inset(0 0 0 0); transform: translateX(0); } }
+    @keyframes gsBar { to { transform: scaleX(1); } }
+    @keyframes gsTag { to { opacity: 1; letter-spacing: 0.24em; } }
+
+    /* Exit: content lifts away, then the ink rolls up into the header */
+    #splash-screen .gs-stage,
+    #splash-screen .gs-bar,
+    #splash-screen .gs-tag {
+      transition: transform 0.24s cubic-bezier(0.4, 0, 1, 1), opacity 0.2s ease-in;
+    }
+
+    #splash-screen.fade-out {
+      clip-path: inset(0 0 100% 0);
+      transition: clip-path 0.38s cubic-bezier(0.7, 0, 0.2, 1) 0.02s;
+      pointer-events: none !important;
+    }
+
+    #splash-screen.fade-out .gs-stage,
+    #splash-screen.fade-out .gs-bar,
+    #splash-screen.fade-out .gs-tag {
+      transform: translateY(-28px) scale(0.96);
+      opacity: 0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .gs-ring circle { animation: none; stroke-dashoffset: 0; }
+      .gs-rider, .gs-rider span { animation: none; }
+      .gs-logo { animation: none; clip-path: none; transform: none; }
+      .gs-bar { animation: none; transform: none; }
+      .gs-tag { animation: none; opacity: 1; letter-spacing: 0.24em; }
+      #splash-screen.fade-out { clip-path: none; opacity: 0; transition: opacity 0.2s ease; }
     }
 
     /* Dynamic Loading Text - Premium brand red contrast */
@@ -765,31 +646,38 @@
 
 
     <!-- Splash / Loading -->
-    <div class="splash-screen" id="splash-screen">
-      <div class="splash-content">
-        <div class="splash-logo-container">
-          <!-- Expanding ripple shockwaves & expanding circle inside logo container for perfect centering -->
-          <div class="splash-ripple ripple-white" style="animation-delay: 0.1s;"></div>
-          <div class="splash-ripple ripple-red" style="animation-delay: 0.7s;"></div>
-          <div class="splash-circle-grow"></div>
-          <div class="splash-circle-red-collapse"></div>
-          <img src="/logo-brand.jpg?v=2" alt="GoDelivery" class="splash-logo-img" />
-        </div>
+    <div class="splash-screen" id="splash-screen" role="img" aria-label="GO! Delivery · Servicio puerta a puerta">
+      <div class="gs-stage">
+        <svg class="gs-ring" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="92"></circle></svg>
+        <div class="gs-rider" aria-hidden="true"><span></span></div>
+        <div class="gs-logo"><img src="/logo-brand.jpg?v=2" alt="" /></div>
+      </div>
+      <span class="gs-bar" aria-hidden="true"></span>
+      <span class="gs-tag">Servicio puerta a puerta</span>
+      <div>
         <script>
           window.setSplashProgress = function() {};
-          window.dismissSplashScreen = function() {
+          // Every path that hides the splash goes through here. The first open of the
+          // session lets the GO! intro finish (~0.95 s from page start); later opens,
+          // and reduced-motion users, get it out of the way immediately.
+          window.dismissSplashScreen = function(opts) {
             var s = document.getElementById('splash-screen');
-            if (s && !s.dataset.dismissed) {
-              s.dataset.dismissed = 'true';
+            if (!s || s.dataset.dismissed) return;
+            s.dataset.dismissed = 'true';
+            var seen = false;
+            try { seen = sessionStorage.getItem('gd_splash_intro_seen') === '1'; sessionStorage.setItem('gd_splash_intro_seen', '1'); } catch (e) {}
+            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            var wait = (opts && opts.immediate) || seen || reduce ? 0 : Math.max(0, 950 - performance.now());
+            setTimeout(function() {
               s.classList.add('fade-out');
               var appEl = document.getElementById('app');
               if (appEl) appEl.classList.add('ready');
-              setTimeout(function() { if (s && s.parentNode) s.parentNode.removeChild(s); }, 400);
-            }
+              setTimeout(function() { if (s && s.parentNode) s.parentNode.removeChild(s); }, 450);
+            }, wait);
           };
-          // Safety Fallback: Guarantee splash dismissal after 1.5s maximum on iOS/Capacitor/Web
+          // Safety fallback: the splash never stays longer than 1.5 s
           setTimeout(function() {
-            if (window.dismissSplashScreen) window.dismissSplashScreen();
+            if (window.dismissSplashScreen) window.dismissSplashScreen({ immediate: true });
           }, 1500);
         </script>
       </div>

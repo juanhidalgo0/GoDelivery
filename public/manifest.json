@@ -8,8 +8,8 @@
     "window-controls-overlay",
     "standalone"
   ],
-  "background_color": "#E11D48",
-  "theme_color": "#E11D48",
+  "background_color": "#0B0B0C",
+  "theme_color": "#0B0B0C",
   "orientation": "portrait",
   "categories": [
     "shopping",

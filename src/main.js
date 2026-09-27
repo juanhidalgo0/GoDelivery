@@ -910,24 +910,11 @@ async function init() {
   // Init router
   initRouter();
 
-  // Unified Splash Screen dismissal
-  window.dismissSplashScreen = function() {
-    const splash = document.getElementById('splash-screen');
-    if (splash && !splash.dataset.dismissed) {
-      splash.dataset.dismissed = 'true';
-      splash.classList.add('fade-out');
-      document.getElementById('app')?.classList.add('ready');
-      setTimeout(() => {
-        if (splash && splash.parentNode) splash.remove();
-      }, 400);
-    }
-  };
-
+  // Splash dismissal lives in index.html (window.dismissSplashScreen): it lets the GO!
+  // intro finish on the first open of the session and is instant afterwards.
   const initialSplash = document.getElementById('splash-screen');
   if (initialSplash) {
-    setTimeout(() => {
-      window.dismissSplashScreen();
-    }, 300);
+    setTimeout(() => window.dismissSplashScreen?.(), 300);
   }
 
   // Init auth
@@ -1111,9 +1098,7 @@ async function init() {
               const loginWall = document.getElementById('login-wall');
               if (loginWall) loginWall.remove();
 
-              const splash = document.getElementById('splash-screen');
-              if (splash) splash.classList.add('fade-out');
-              document.getElementById('app')?.classList.add('ready');
+              window.dismissSplashScreen?.();
 
               const header = document.getElementById('app-header');
               const navbar = document.getElementById('app-navbar');
@@ -1225,7 +1210,7 @@ async function init() {
         if (isDeliveryTarget) {
           splash.remove(); // Instant removal for fast push notification response
         } else {
-          splash.classList.add('fade-out');
+          window.dismissSplashScreen?.();
         }
       }
       document.getElementById('app')?.classList.add('ready');
@@ -1249,14 +1234,14 @@ async function init() {
         } else if (pendingUrl.includes('admin/orders')) {
           import('./pages/admin/orders.js').then(m => {
             m.renderAdminOrders();
-            if (splash) splash.classList.add('fade-out');
+            window.dismissSplashScreen?.();
             document.getElementById('app')?.classList.add('ready');
           });
         } else if (pendingUrl.includes('pedido')) {
           const pedId = pendingUrl.split('/').pop();
           import('./pages/order-tracking.js').then(m => {
             m.renderOrderTracking(pedId);
-            if (splash) splash.classList.add('fade-out');
+            window.dismissSplashScreen?.();
             document.getElementById('app')?.classList.add('ready');
           });
         }
@@ -1627,10 +1612,7 @@ async function init() {
       const splash = document.getElementById('splash-screen');
       if (splash) {
         // PedidosYa instant shell visibility: force immediate fadeout in 50ms
-        setTimeout(() => {
-          splash.classList.add('fade-out');
-          document.getElementById('app')?.classList.add('ready');
-        }, 50);
+        setTimeout(() => window.dismissSplashScreen?.(), 50);
       }
     }
   });
