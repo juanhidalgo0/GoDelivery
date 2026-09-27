@@ -756,3 +756,15 @@ body {
   color: var(--go-text-3) !important;
   cursor: not-allowed;
 }
+
+/* Encabezados de página del lado cliente (Ofertas, Chats, Perfil) */
+.go-page-header {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.go-page-header button[style*="rgba(255,255,255,0.1"],
+.go-page-header button[style*="rgba(255, 255, 255, 0.1"] {
+  background: var(--go-ink-2) !important;
+  border: 1px solid var(--go-ink-line) !important;
+}

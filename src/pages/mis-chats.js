@@ -78,15 +78,10 @@ export async function renderMisChats(content) {
     content.innerHTML = `
       <div class="chats-panel-page page-enter" style="display: flex; flex-direction: column; height: 100%; width: 100%; background: var(--color-bg); overflow: hidden; position: relative;">
         <!-- Header -->
-        <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: relative; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0;">
-          <!-- Decorative Circles -->
-          <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
-            <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-            <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-          </div>
+        <div class="go-page-header" style="background: var(--go-ink); padding: ${topPadding} 0 0 0; position: relative; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0;">
 
           <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 16px; position: relative; z-index: 2;">
-            <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Mis Chats</span>
+            <span class="go-title" style="font-size: 22px; color: white;">Mis Chats</span>
           </div>
         </div>
         <div style="text-align: center; padding: 60px 20px; color: var(--color-text-tertiary); flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
@@ -125,15 +120,10 @@ export async function renderMisChats(content) {
     </style>
     <div class="chats-panel-page page-enter" style="display: flex; flex-direction: column; height: 100%; width: 100%; background: var(--color-bg); overflow: hidden; position: relative;">
       <!-- Header -->
-      <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: relative; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0;">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
-          <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-          <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-        </div>
+      <div class="go-page-header" style="background: var(--go-ink); padding: ${topPadding} 0 0 0; position: relative; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0;">
 
         <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 2; width: 100%; box-sizing: border-box;">
-          <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Mis Chats</span>
+          <span class="go-title" style="font-size: 22px; color: white;">Mis Chats</span>
           
           <div style="display: flex; align-items: center; gap: 8px;">
             <button id="btn-delete-all-chats" style="background: rgba(255,255,255,0.15); border: none; color: white; border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; cursor: pointer; font-size: 11px; font-weight: 800; gap: 6px;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">

@@ -35,15 +35,10 @@ export async function renderOffersPage(container) {
   container.innerHTML = `
     <div class="offers-page" style="display:flex; flex-direction:column; min-height:100vh; background:var(--color-bg); padding-bottom: 90px;">
       <!-- Header estilo Mis Chats (Sticky) -->
-      <div style="background: var(--color-primary); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 200; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); flex-shrink: 0;">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; inset: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; pointer-events: none; z-index: 1;">
-          <div style="position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-          <div style="position: absolute; bottom: -10px; left: 100px; width: 50px; height: 50px; background: rgba(255,255,255,0.04); border-radius: 50%;"></div>
-        </div>
+      <div class="go-page-header" style="background: var(--go-ink); padding: ${topPadding} 0 0 0; position: sticky; top: 0; z-index: 200; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); flex-shrink: 0;">
 
         <div style="height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 16px; position: relative; z-index: 2;">
-          <span style="font-weight: 800; font-size: 20px; color: white; font-family: var(--font-display); letter-spacing: -0.02em;">Ofertas y Descuentos</span>
+          <span class="go-title" style="font-size: 22px; color: white;">Ofertas y Descuentos</span>
         </div>
       </div>
 
@@ -224,11 +219,11 @@ function renderCategoriesPills() {
   if (!container) return;
 
   container.innerHTML = `
-    <button class="offers-tab-pill ${activeCategory === 'all' ? 'active' : ''}" data-cat="all" style="height:36px; padding:0 16px; border-radius:18px; border:none; background:${activeCategory === 'all' ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${activeCategory === 'all' ? 'white' : 'var(--color-text-secondary)'}; font-weight:800; font-size:12.5px; cursor:pointer; flex-shrink:0; transition:all 0.2s;">Todos</button>
+    <button class="offers-tab-pill ${activeCategory === 'all' ? 'active' : ''}" data-cat="all" style="height:36px; padding:0 16px; border-radius:18px; border:none; background:${activeCategory === 'all' ? 'var(--go-ink)' : 'var(--color-surface)'}; color:${activeCategory === 'all' ? 'white' : 'var(--color-text-secondary)'}; font-weight:800; font-size:12.5px; cursor:pointer; flex-shrink:0; transition:all 0.2s;">Todos</button>
     ${allCategories.map(c => {
       const isActive = activeCategory === c.name;
       return `
-        <button class="offers-tab-pill ${isActive ? 'active' : ''}" data-cat="${c.name}" style="height:36px; padding:0 16px; border-radius:18px; border:none; background:${isActive ? 'var(--color-primary)' : 'var(--color-surface)'}; color:${isActive ? 'white' : 'var(--color-text-secondary)'}; font-weight:800; font-size:12.5px; cursor:pointer; flex-shrink:0; transition:all 0.2s; display:flex; align-items:center; gap:6px;">
+        <button class="offers-tab-pill ${isActive ? 'active' : ''}" data-cat="${c.name}" style="height:36px; padding:0 16px; border-radius:18px; border:none; background:${isActive ? 'var(--go-ink)' : 'var(--color-surface)'}; color:${isActive ? 'white' : 'var(--color-text-secondary)'}; font-weight:800; font-size:12.5px; cursor:pointer; flex-shrink:0; transition:all 0.2s; display:flex; align-items:center; gap:6px;">
           <span>${c.icon || '🏷️'}</span>
           <span>${c.name}</span>
         </button>

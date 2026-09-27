@@ -1,5 +1,7 @@
 import { db } from '../firebase.js';
 import { collection, getDocs, query, where } from 'firebase/firestore';
+import { escapeHtml } from '../utils/escape.js';
+import { goStoreCard } from '../components/go-ui.js';
 import { icon, categoryIcon } from '../utils/icons.js';
 import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
@@ -49,9 +51,12 @@ export async function renderCategoryPage(categoryName, content) {
     <div class="category-page" style="display:flex; flex-direction:column; min-height: 100%; background: var(--color-bg); opacity: 1;">
 
       <!-- Red Brand Title Bar (respects the phone's status bar / notch) -->
-      <div style="display:flex; align-items:center; gap:10px; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; background: var(--color-primary); z-index: 10; position: sticky; top: 0;">
-        <button id="category-back-btn" aria-label="Volver" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; flex-shrink:0; border:none; background:rgba(255,255,255,0.18); border-radius:12px; color:white; cursor:pointer;">${icon('chevronLeft', 22)}</button>
-        <h2 style="margin:0; font-family:var(--font-display); font-size:19px; font-weight:900; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${categoryName}</h2>
+      <div style="display:flex; align-items:center; gap:12px; padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 14px 16px; background: var(--go-ink); z-index: 10; position: sticky; top: 0;">
+        <button id="category-back-btn" aria-label="Volver" class="go-icon-btn">${icon('chevronLeft', 20)}</button>
+        <div style="min-width:0;">
+          <span class="go-eyebrow" style="color: var(--go-on-ink-2); font-size: 10px;">Categoría</span>
+          <h2 class="go-title" style="font-size:22px; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top: 2px;">${escapeHtml(categoryName)}</h2>
+        </div>
       </div>
 
       <!-- Search Bar & Filters (Now in Content) -->
@@ -255,76 +260,12 @@ export async function renderCategoryPage(categoryName, content) {
           const bannerSrc = c.banner || '';
 
           return `
-            <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} ${isInactive ? 'is-inactive' : ''} page-enter stagger-${Math.min(i+1, 6)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom: 18px; position:relative; ${isInactive ? 'opacity: 0.75; filter: grayscale(0.85);' : ''}">
-              <!-- Floating Favorite Heart Button (Moved out of banner to prevent clipping) -->
-              <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10; ${isInactive ? 'display:none;' : ''}" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
-                ${icon('heart', 18)}
-              </div>
-
-              <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
-                ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" decoding="async" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
-                
-                <div class="comercio-card-logo-container">
-                  ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" decoding="async" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
-                </div>
-
-                <!-- Status Badge on top-left (fixed right:auto !important to prevent stretching) -->
-                <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isInactive ? '#64748b' : (isOpen && !isPaused ? '#00B174' : '#3F372B')}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15); text-transform:none; letter-spacing:normal;">
-                  ${statusText === 'Abierto' ? 'Abierto ahora' : statusText.toUpperCase()}
-                </div>
-                
-                <!-- Rating Box on top-right -->
-                <div style="position:absolute; top:12px; right:12px; background:white; padding:6px 12px; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.08); z-index:2; border:1px solid rgba(0,0,0,0.03);">
-                  <div style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:3.5px; line-height:1.2;">
-                    <span style="color:#f59e0b; font-size:13px;">★</span>
-                    <span>${c.ratingAverage !== undefined && c.ratingAverage > 0 ? c.ratingAverage.toFixed(1) : 'Nuevo'}</span>
-                  </div>
-                  ${c.ratingCount ? `<span style="font-size:9.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:1px;">(${c.ratingCount})</span>` : ''}
-                </div>
-              </div>
-              
-              <div class="comercio-card-body" style="padding: 16px; padding-top: 18px; display:flex; flex-direction:column; gap:2px; text-align:left; position:relative;">
-                <!-- Title -->
-                <div class="comercio-card-name" style="font-family:var(--font-display); font-size:18px; font-weight:800; color:var(--color-text-primary); margin:0; line-height:1.2;">${c.name}</div>
-                
-                <!-- Category & Distance -->
-                <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; display:flex; align-items:center; gap:5px; margin-top:2px;">
-                  <span>${c.category || 'Comercio'}</span>
-                  ${distanceKm !== null ? `<span>•</span> <span>${distanceKm.toFixed(1)} km</span>` : ''}
-                </div>
-                
-                <!-- Bottom Row: Separate Bordered Pills & Arrow Button in a Single Row -->
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; width:100%;">
-                  <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;">
-                    <!-- Pill 1: Shipping dynamic cost -->
-                    <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
-                      ${icon('bike', 15, '', 'var(--color-primary)')}
-                      <span>${deliveryFee !== null ? (deliveryFee === 0 ? 'Envío gratis' : `Envío $${deliveryFee}`) : 'Envío a calcular'}</span>
-                    </span>
-                    
-                    <!-- Pill 2: Duration -->
-                    <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-text-secondary); white-space:nowrap; flex-shrink:0;">
-                      ${icon('clock', 14)}
-                      <span>
-                        ${(() => {
-                          const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
-                          if (scheds.length === 0) return 'Sin horario';
-                          if (isOpen && !isPaused) {
-                            return formatDeliveryTime(distanceKm, c.averagePrepTime);
-                          }
-                          return scheds.map(s => `${s.open}-${s.close}`).join(', ');
-                        })()}
-                      </span>
-                    </span>
-                  </div>
-                  
-              <!-- Ver Comercio Button with Arrow -->
-              <span style="background:var(--color-primary); color:white; width:36px; height:36px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:none; flex-shrink:0; transition:all 0.2s; box-shadow:0 4px 12px rgba(225, 29, 72, 0.15);">
-                ${icon('chevronRight', 16, '', 'white')}
-              </span>
-            </div>
-              </div>
-            </a>
+            ${goStoreCard({ c, href, isOpen, isPaused, isInactive, deliveryFee, timeLabel: (() => {
+              const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
+              if (scheds.length === 0) return 'Sin horario';
+              if (isOpen && !isPaused) return formatDeliveryTime(distanceKm, c.averagePrepTime);
+              return `Abre ${escapeHtml(scheds[0].open || '')}`;
+            })(), style: 'margin-bottom: 16px;' })}
           `;
         }).join('') + `<div style="grid-column: 1/-1;">${getFooterHTML()}</div>`;
       } else {
@@ -352,76 +293,12 @@ export async function renderCategoryPage(categoryName, content) {
             const bannerSrc = c.banner || '';
 
             return `
-              <a href="${href}" class="comercio-card card-interactive ${isPaused ? 'is-paused' : ''} page-enter stagger-${Math.min(i+1, 6)}" style="text-decoration:none; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; border:1px solid var(--color-border-light); background:var(--color-surface); box-shadow:var(--shadow-sm); margin-bottom: 18px; position:relative;">
-                <!-- Floating Favorite Heart Button (Moved out of banner to prevent clipping) -->
-                <div class="card-favorite-btn-floating" style="position:absolute; top:120px; right:24px; width:40px; height:40px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-border-light); box-shadow:0 4px 12px rgba(0,0,0,0.08); color:var(--color-text-secondary); cursor:pointer; z-index:10;" onclick="event.preventDefault(); event.stopPropagation(); this.querySelector('svg').style.fill = this.querySelector('svg').style.fill ? '' : 'var(--color-primary)'; this.querySelector('svg').style.stroke = this.querySelector('svg').style.fill ? 'var(--color-primary)' : 'currentColor';">
-                  ${icon('heart', 18)}
-                </div>
-
-                <div class="comercio-card-banner" style="position:relative; height:140px; overflow:hidden;">
-                  ${bannerSrc ? `<img src="${bannerSrc}" alt="${c.name}" loading="lazy" decoding="async" style="width:100%; height:100%; object-fit:cover;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 40)}</div>`}
-                  
-                  <div class="comercio-card-logo-container">
-                    ${c.logo ? `<img src="${c.logo}" alt="" class="comercio-card-logo" loading="lazy" decoding="async" />` : `<div class="comercio-card-logo" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface);">${categoryIcon(c.category, 20)}</div>`}
-                  </div>
-
-                  <!-- Status Badge on top-left -->
-                  <div class="comercio-card-badge ${statusClass}" style="position:absolute; top:12px; left:12px; right:auto !important; padding:6px 12px; border-radius:100px; font-size:11px; font-weight:800; color:white; background:${isOpen && !isPaused ? '#00B174' : '#3F372B'}; z-index:2; box-shadow:0 4px 12px rgba(0,0,0,0.15); text-transform:none; letter-spacing:normal;">
-                    ${statusText === 'Abierto' ? 'Abierto ahora' : statusText}
-                  </div>
-                  
-                  <!-- Rating Box on top-right -->
-                  <div style="position:absolute; top:12px; right:12px; background:white; padding:6px 12px; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.08); z-index:2; border:1px solid rgba(0,0,0,0.03);">
-                    <div style="font-size:12.5px; font-weight:800; color:var(--color-text-primary); display:flex; align-items:center; gap:3.5px; line-height:1.2;">
-                      <span style="color:#f59e0b; font-size:13px;">★</span>
-                      <span>${c.ratingAverage !== undefined && c.ratingAverage > 0 ? c.ratingAverage.toFixed(1) : 'Nuevo'}</span>
-                    </div>
-                    ${c.ratingCount ? `<span style="font-size:9.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:1px;">(${c.ratingCount})</span>` : ''}
-                  </div>
-                </div>
-                
-                <div class="comercio-card-body" style="padding: 16px; padding-top: 18px; display:flex; flex-direction:column; gap:2px; text-align:left; position:relative;">
-                  <!-- Title -->
-                  <div class="comercio-card-name" style="font-family:var(--font-display); font-size:18px; font-weight:800; color:var(--color-text-primary); margin:0; line-height:1.2;">${c.name}</div>
-                  
-                  <!-- Category & Distance -->
-                  <div style="font-size:13px; color:var(--color-text-secondary); font-weight:600; display:flex; align-items:center; gap:5px; margin-top:2px;">
-                    <span>${c.category || 'Comercio'}</span>
-                    ${distanceKm !== null ? `<span>•</span> <span>${distanceKm.toFixed(1)} km</span>` : ''}
-                  </div>
-                  
-                  <!-- Bottom Row: Separate Bordered Pills & Arrow Button in a Single Row -->
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; width:100%;">
-                    <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;">
-                      <!-- Pill 1: Shipping dynamic cost -->
-                      <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-primary); white-space:nowrap; flex-shrink:0;">
-                        ${icon('bike', 15, '', 'var(--color-primary)')}
-                        <span>${deliveryFee !== null ? (deliveryFee === 0 ? 'Envío gratis' : `Envío $${deliveryFee}`) : 'Envío a calcular'}</span>
-                      </span>
-                      
-                      <!-- Pill 2: Duration -->
-                      <span style="display:inline-flex; align-items:center; gap:5.5px; background:white; border:1px solid var(--color-border-light); border-radius:100px; padding:6px 12px; font-size:12.5px; font-weight:700; color:var(--color-text-secondary); white-space:nowrap; flex-shrink:0;">
-                        ${icon('clock', 14)}
-                        <span>
-                          ${(() => {
-                            const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
-                            if (scheds.length === 0) return 'Sin horario';
-                            if (isOpen && !isPaused) {
-                              return formatDeliveryTime(distanceKm, c.averagePrepTime);
-                            }
-                            return scheds.map(s => `${s.open}-${s.close}`).join(', ');
-                          })()}
-                        </span>
-                      </span>
-                    </div>
-                    
-                    <!-- Ver Comercio Button with Arrow -->
-                    <span style="background:var(--color-primary); color:white; width:36px; height:36px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:none; flex-shrink:0; transition:all 0.2s; box-shadow:0 4px 12px rgba(225, 29, 72, 0.15);">
-                      ${icon('chevronRight', 16, '', 'white')}
-                    </span>
-                  </div>
-                </div>
-              </a>
+              ${goStoreCard({ c, href, isOpen, isPaused, deliveryFee, timeLabel: (() => {
+              const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
+              if (scheds.length === 0) return 'Sin horario';
+              if (isOpen && !isPaused) return formatDeliveryTime(distanceKm, c.averagePrepTime);
+              return `Abre ${escapeHtml(scheds[0].open || '')}`;
+            })(), style: 'margin-bottom: 16px;' })}
             `;
           }).join('');
         }

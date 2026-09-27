@@ -410,16 +410,13 @@ export function renderHeader() {
       ${desktopHeaderHTML}
       <div class="mobile-header-only" style="width:100%; padding-top: ${topPadding};">
         <div class="header-nav-sub" style="display: flex; align-items: center; padding: 12px 16px 20px 16px; position: relative; overflow: hidden; margin: 0; border: none;">
-          <!-- Decorative Circles -->
-          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-          
           <div style="background: none; border: none; color: white; display: flex; align-items: center; gap: 12px; padding: 0; position: relative; z-index: 2;">
             ${(hash === '#/profile' || hash.startsWith('#/profile/orders') || hash.startsWith('#/cart') || hash.startsWith('#/admin/support-chats')) ? '' : `
               <button onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex;">
                 ${icon('chevronLeft', 28)}
               </button>
             `}
-            <span style="font-weight: 800; font-size: 20px; letter-spacing: -0.02em;">${title}</span>
+            <span class="go-title" style="font-size: 22px; color: #fff;">${escapeHtml(title)}</span>
           </div>
         </div>
       </div>

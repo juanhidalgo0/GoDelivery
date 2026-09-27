@@ -5,7 +5,7 @@ import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js'
 import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
 import { escapeHtml } from '../utils/escape.js';
-import { goSectionHead } from '../components/go-ui.js';
+import { goSectionHead, goStoreCard } from '../components/go-ui.js';
 import { icon, categoryIcon, CATEGORY_ICON_MAP, CATEGORY_PHOSPHOR_MAP } from '../utils/icons.js';
 import { getState, subscribe } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
@@ -1583,46 +1583,14 @@ async function renderComercios(comercios, category, search, filters) {
       
       const isInactive = c.isActive === false;
       const isPaused = c.isPaused === true;
-      const statusClass = isInactive ? 'inactive' : (isPaused ? 'paused' : (isOpen ? 'open' : 'closed'));
-      const statusText = isInactive ? 'Próximamente' : (isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado'));
       const href = (isPaused || isInactive) ? 'javascript:void(0)' : `#/comercio/${c.id}`;
 
-      const bannerSrc = c.banner || '';
-      const name = escapeHtml(c.name || 'Comercio');
-      const rating = c.ratingAverage !== undefined && c.ratingAverage > 0 ? Number(c.ratingAverage).toFixed(1) : null;
       const scheds = c.schedules || (c.schedule ? [c.schedule] : []);
       const timeLabel = scheds.length === 0
         ? 'Sin horario'
         : (isOpen && !isPaused ? formatDeliveryTime(distanceKm, c.averagePrepTime) : `Abre ${escapeHtml(scheds[0].open || '')}`);
-      const feeLabel = deliveryFee === null
-        ? 'Envío a calcular'
-        : (deliveryFee === 0 ? '<span class="go-free">Envío gratis</span>' : `Envío $${deliveryFee}`);
-      const statusMod = isInactive ? '' : (isPaused ? 'is-paused' : (isOpen ? 'is-open' : ''));
 
-      return `
-        <a href="${href}" class="go-store-card comercio-card ${isPaused ? 'is-paused' : ''} ${isInactive ? 'is-inactive' : ''} ${(isInactive || isPaused || !isOpen) ? 'is-muted' : ''}" aria-label="${name}">
-          <div class="go-store-cover">
-            ${bannerSrc ? `<img src="${escapeHtml(bannerSrc)}" alt="" loading="lazy" decoding="async" />` : `<div class="go-store-cover-empty">${icon('store', 36)}</div>`}
-            <span class="go-status ${statusMod}">${statusText}</span>
-            <span class="go-store-logo">
-              ${c.logo ? `<img src="${escapeHtml(c.logo)}" alt="" loading="lazy" decoding="async" />` : categoryIcon(c.category, 22)}
-            </span>
-          </div>
-          <div class="go-store-body">
-            <div class="go-store-name">
-              <span>${name}</span>
-              <span class="go-rating">${icon('star', 14, '', '#f59e0b')} ${rating || 'Nuevo'}</span>
-            </div>
-            <div class="go-store-meta">
-              <span>${escapeHtml(c.category || 'Comercio')}</span>
-              <span class="go-dot"></span>
-              <span>${timeLabel}</span>
-              <span class="go-dot"></span>
-              <span>${feeLabel}</span>
-            </div>
-          </div>
-        </a>
-      `;
+      return goStoreCard({ c, href, isOpen, isPaused, isInactive, deliveryFee, timeLabel });
     }).join('');
 
     // Comercios slider navigation arrows logic

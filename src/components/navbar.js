@@ -90,6 +90,7 @@ export function renderNavbar() {
         </span>
         <span style="font-size: 11px; font-weight: 800; margin-top: 2px;">Mis Chats</span>
       </a>
+    </div>
   `;
 
   updateGlobalDriverReturnBadge();
