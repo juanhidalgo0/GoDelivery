@@ -1775,7 +1775,7 @@ export async function renderDeliveryPanel(containerArg) {
       ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
       ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
       <div class="go-drawer-brand" aria-hidden="true">
-        <span class="go-drawer-brand-ring"><img src="/logo-brand.jpg?v=2" alt="" /><i></i></span>
+        <span class="go-drawer-brand-ring"><img src="/logo-brand.jpg?v=2" alt="" /></span>
         <span class="go-drawer-brand-name">GO! Delivery</span>
         <span class="go-drawer-brand-tag">Servicio puerta a puerta</span>
       </div>

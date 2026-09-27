@@ -8,6 +8,7 @@ import { escapeHtml } from '../utils/escape.js';
  * @param {object} o
  * @param {string} [o.id]        Only one sheet per id at a time.
  * @param {string} [o.iconName]  Icon inside the ring.
+ * @param {string} [o.art]       Trusted markup (e.g. the GO! logo) instead of the icon.
  * @param {string} [o.eyebrow]
  * @param {string} o.title
  * @param {string} [o.bodyHtml]  Trusted markup built by the caller.
@@ -16,7 +17,7 @@ import { escapeHtml } from '../utils/escape.js';
  * @param {boolean} [o.dismissible=true]  Backdrop, ✕, drag down and back close it.
  * @param {Function} [o.onClose]  Called once with the reason: 'primary' | 'secondary' | 'dismiss'.
  */
-export function showGoSheet({ id = '', iconName = 'sparkles', eyebrow = '', title = '', bodyHtml = '', primary = null, secondary = null, dismissible = true, onClose = null } = {}) {
+export function showGoSheet({ id = '', iconName = 'sparkles', art = '', eyebrow = '', title = '', bodyHtml = '', primary = null, secondary = null, dismissible = true, onClose = null } = {}) {
   if (id && document.getElementById(id)) return null;
 
   const sheet = document.createElement('div');
@@ -31,7 +32,7 @@ export function showGoSheet({ id = '', iconName = 'sparkles', eyebrow = '', titl
       <div class="go-bsheet-hero">
         <span class="go-bsheet-handle" aria-hidden="true"></span>
         ${dismissible ? `<button type="button" class="go-bsheet-x" data-sheet-close aria-label="Cerrar">${icon('close', 16)}</button>` : ''}
-        <span class="go-bsheet-ring" aria-hidden="true">${icon(iconName, 30)}<i></i></span>
+        <span class="go-bsheet-ring${art ? ' has-art' : ''}" aria-hidden="true">${art || icon(iconName, 30)}<i></i></span>
         ${eyebrow ? `<span class="go-eyebrow">${escapeHtml(eyebrow)}</span>` : ''}
         <h2 class="go-title">${escapeHtml(title)}</h2>
         <span class="go-bar"></span>

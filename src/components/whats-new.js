@@ -7,8 +7,8 @@ import { isAdmin, isComercio, isDelivery } from '../auth.js';
 import { icon } from '../utils/icons.js';
 import { showGoSheet, isAnySheetOpen } from './go-sheet.js';
 
-const FLAG = 'seenRedesign2026';
-const LOCAL_KEY = 'gd_seen_redesign_2026';
+const FLAG = 'seenRedesign2026b'; // v2: shown again to everyone once
+const LOCAL_KEY = 'gd_seen_redesign_2026b';
 const LAUNCH = new Date('2026-09-28T00:00:00-03:00').getTime();
 
 const row = (iconName, title, text) =>
@@ -54,8 +54,8 @@ const MESSAGES = {
     body: `
       <p>La app tiene la nueva identidad GO! en todas las pantallas: clientes, comercios, repartidores y administración.</p>
       <ul class="go-bsheet-list">
-        ${row('grid', 'Misma lógica', 'Pedidos, pagos y reglas no cambian.')}
-        ${row('eye', 'Revisá lo nuevo', 'Si ves algo raro, avisá y lo ajustamos.')}
+        ${row('shieldCheck', 'Misma lógica', 'Pedidos, pagos y reglas no cambian.')}
+        ${row('headset', 'Revisá lo nuevo', 'Si ves algo raro, avisá y lo ajustamos.')}
       </ul>`,
   },
 };
@@ -106,7 +106,7 @@ function tryShow(attempt = 0) {
   const msg = MESSAGES[roleOf()];
   showGoSheet({
     id: 'go-whats-new-sheet',
-    iconName: 'sparkles',
+    art: '<img src="/logo-brand.jpg?v=2" alt="" />',
     eyebrow: msg.eyebrow,
     title: msg.title,
     bodyHtml: msg.body,

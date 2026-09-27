@@ -1262,6 +1262,7 @@ async function init() {
         import('./components/active-order-banner.js').then(m => m.initActiveOrderBanner());
         import('./components/delivery-monitor.js').then(m => m.initDeliveryMonitor());
         import('./components/whats-new.js').then(m => m.initWhatsNew()).catch(() => {});
+        import('./components/challenge-progress.js').then(m => m.initChallengeProgress()).catch(() => {});
         import('./components/commerce-monitor.js').then(m => m.initCommerceMonitor());
         import('./components/chat-notifier.js').then(m => m.initChatNotifier());
         

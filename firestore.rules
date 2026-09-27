@@ -162,6 +162,12 @@ service cloud.firestore {
 
       match /challenges/{challengeId} {
         allow read, write: if isAdmin() || (isSignedIn() && userId == uid());
+        // Quien entrega el pedido avanza los desafíos semanales del cliente: sólo de a un
+        // paso y sólo los campos de progreso (antes fallaba y nunca se acreditaban).
+        allow read: if isDriver();
+        allow update: if isDriver()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['progress', 'completed', 'completedAt', 'modalShown'])
+          && request.resource.data.get('progress', 0) == resource.data.get('progress', 0) + 1;
       }
     }
 

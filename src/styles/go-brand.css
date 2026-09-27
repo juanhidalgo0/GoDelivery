@@ -2098,7 +2098,6 @@ body.is-delivery-mode:not(.driver-light-mode) .go-driver-subpage [style*="#1e293
   border: 2px solid var(--driver-text-primary, #f7f5f1); padding: 4px; box-sizing: border-box; margin-bottom: 6px;
 }
 .go-drawer-brand-ring img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
-.go-drawer-brand-ring i { position: absolute; top: -5px; left: 50%; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; background: var(--go-red); }
 .go-drawer-brand-name { font: 900 15px/1 var(--go-font); letter-spacing: -0.01em; text-transform: uppercase; color: var(--driver-text-primary, #f7f5f1); }
 .go-drawer-brand-tag { font: 700 10px/1 var(--font-body); letter-spacing: 0.22em; text-transform: uppercase; color: var(--driver-text-secondary, #a8a29e); }
 #apply-trip-btn { background: #f7f5f1 !important; color: #0b0b0c !important; box-shadow: none !important; }
@@ -2134,3 +2133,24 @@ body.driver-light-mode .go-offline-connect { background: var(--go-ink); color: #
   display: inline-flex; align-items: center; gap: 8px;
 }
 @media (prefers-reduced-motion: reduce) { .go-offline-ring i { animation: none; } }
+/* Ring with the GO! logo instead of an icon */
+.go-bsheet-ring.has-art { padding: 5px; box-sizing: border-box; }
+.go-bsheet-ring.has-art img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+/* List icons: ink disc with a white icon, readable on light and dark themes */
+.go-bsheet-list li > span:first-child { background: var(--go-ink) !important; border: 0 !important; color: #fff !important; border-radius: 50% !important; }
+.go-bsheet-list li > span:first-child svg { stroke: #fff; }
+
+/* Progreso de desafíos al completar un pedido */
+.go-challenge-list { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 8px; }
+.go-challenge { padding: 14px; border-radius: 16px; background: var(--color-surface); border: 1px solid var(--go-line); }
+.go-challenge.is-moved { border-color: var(--go-ink); }
+.go-challenge-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.go-challenge-top strong { font-size: 14.5px; color: var(--go-text); }
+.go-challenge-top span { font: 800 13px/1 var(--font-body); color: var(--go-text); white-space: nowrap; }
+.go-challenge.is-done .go-challenge-top span { color: var(--go-red); }
+.go-challenge-track { height: 6px; margin-top: 10px; border-radius: 3px; background: var(--go-paper-2); overflow: hidden; }
+.go-challenge-track span { display: block; height: 100%; width: var(--to); border-radius: 3px; background: var(--go-ink); }
+.go-challenge.is-moved .go-challenge-track span { background: var(--go-red); animation: goChallengeFill 1s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both; }
+@keyframes goChallengeFill { from { width: 0; } to { width: var(--to); } }
+.go-challenge small { display: block; margin-top: 8px; font-size: 12px; color: var(--go-text-2); }
+@media (prefers-reduced-motion: reduce) { .go-challenge.is-moved .go-challenge-track span { animation: none; } }
