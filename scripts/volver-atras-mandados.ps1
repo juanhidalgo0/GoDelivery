@@ -1,11 +1,14 @@
 # Vuelve atrás lo que se publicó con "lugares de mandados" (rama feature/rediseno-repartidor).
 #
 # Uso (desde la carpeta GoDelivery, en PowerShell):
-#   .\scripts\volver-atras-mandados.ps1              -> vuelve la función que crea mandados y las reglas
+#   .\scripts\volver-atras-mandados.ps1 -SoloApp     -> vuelve solo la app (clientes y repartidores). Lo más rápido.
+#   .\scripts\volver-atras-mandados.ps1              -> vuelve la app, la función que crea mandados y las reglas
 #   .\scripts\volver-atras-mandados.ps1 -SoloFuncion -> vuelve solo la función (las reglas nuevas no molestan)
 #
-# Qué hace: toma firestore.rules y functions/index.js tal como estaban en la etiqueta
-# "antes-de-mandados", los publica y deja tus archivos como estaban.
+# La app anterior quedó copiada en el canal "respaldo-antes-mandados" (vence el 27/10/2026); volver es
+# copiarla otra vez a la dirección real. También se puede desde la consola de Firebase: Hosting >
+# historial de versiones > Revertir.
+# La función y las reglas vuelven a como estaban en la etiqueta "antes-de-mandados"; tus archivos quedan igual.
 param([switch]$SoloFuncion, [switch]$SoloApp)
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
