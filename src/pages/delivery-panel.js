@@ -1612,37 +1612,13 @@ export async function renderDeliveryPanel(containerArg) {
     ${!isOnline ? `
       <div id="driver-offline-hero" style="position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(36px, calc(24px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 24px)))) 24px calc(${DRIVER_NAV_BAR_HEIGHT}px + max(36px, calc(28px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 24px))))) 24px; box-sizing:border-box; z-index:900; pointer-events:auto; background:${isLight ? '#f8fafc' : '#04070d'};">
         <div style="width:100%; max-width:340px; display:flex; flex-direction:column; align-items:center; text-align:center;">
-          <div style="font-size:44px; margin-bottom:8px;">💤</div>
-          <h3 style="font-family:var(--font-display, sans-serif); font-size:21px; font-weight:900; color:var(--driver-text-primary); margin:0 0 8px 0; letter-spacing:0.2px;">Estás desconectado</h3>
-          <p style="color:var(--driver-text-secondary); font-size:13.5px; margin:0 0 24px 0; line-height:1.5; font-weight:500;">Debés conectarte para empezar a recibir y tomar pedidos disponibles.</p>
-          <button id="main-connect-hero-btn" class="btn" style="
-            width: 100%;
-            max-width: 280px;
-            height: 54px;
-            border-radius: 20px;
-            border: none;
-            background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
-            color: white;
-            font-size: 15px;
-            font-weight: 900;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            box-shadow: 0 10px 25px rgba(225, 29, 72, 0.45);
-            cursor: pointer;
-            text-transform: uppercase;
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
-          ">
-            ${icon('power', 20)} CONECTAR AHORA
-          </button>
-          <button type="button" id="main-client-mode-hero-btn" data-go-client-mode style="
-            margin-top: 14px; height: 48px; padding: 0 20px; border-radius: 24px;
-            background: transparent; border: 1px solid var(--driver-border-strong);
-            color: var(--driver-text-primary); font-family: inherit; font-size: 14px; font-weight: 700;
-            display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
-          ">${icon('shoppingBag', 18)} Ir a modo cliente</button>
+          <span class="go-offline-ring" aria-hidden="true">${icon('power', 30)}<i></i></span>
+          <span class="go-eyebrow go-offline-eyebrow">Repartidor ${user.deliveryId || ''} · Magdalena</span>
+          <h3 class="go-title go-offline-title">Estás desconectado</h3>
+          <span class="go-bar" style="margin: 14px auto 0;"></span>
+          <p class="go-offline-text">Conectate para empezar a recibir pedidos en tu zona. La cuota del día se cobra una sola vez.</p>
+          <button id="main-connect-hero-btn" class="go-offline-connect">${icon('power', 20)} Conectarme</button>
+          <button type="button" id="main-client-mode-hero-btn" data-go-client-mode class="go-offline-client">${icon('shoppingBag', 18)} Ir a modo cliente</button>
         </div>
       </div>
     ` : ''}
@@ -1763,7 +1739,7 @@ export async function renderDeliveryPanel(containerArg) {
   ensureSheetStyles();
   const drawerIsLight = getDriverMapTheme() === 'light';
   const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  deliveryDrawerEl.style.cssText = `position: fixed; top: 0; left: 0; bottom: 0; width: min(320px, 86vw); background: ${drawerIsLight ? '#ffffff' : '#111722'}; color: var(--driver-text-primary); border-right: 1px solid var(--driver-border); box-shadow: 12px 0 40px rgba(0,0,0,${drawerIsLight ? '0.12' : '0.5'}); z-index: 10001; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1); display: flex; flex-direction: column; border-top-right-radius: 24px; border-bottom-right-radius: 24px; font-family: var(--font-body, sans-serif);`;
+  deliveryDrawerEl.style.cssText = `position: fixed; top: 0; left: 0; bottom: 0; width: min(320px, 86vw); background: ${drawerIsLight ? '#ffffff' : '#111113'}; color: var(--driver-text-primary); border-right: 1px solid var(--driver-border); box-shadow: 12px 0 40px rgba(0,0,0,${drawerIsLight ? '0.12' : '0.5'}); z-index: 10001; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1); display: flex; flex-direction: column; border-top-right-radius: 24px; border-bottom-right-radius: 24px; font-family: var(--font-body, sans-serif);`;
   const drawerTile = (iconName, bg, fg) => `<div class="dsheet-tile" style="background:${bg}; color:${fg};">${icon(iconName, 20)}</div>`;
   const drawerTone = (dark, light) => drawerIsLight ? light : dark;
   const drawerItem = ({ id, href, iconName, bg, fg, title, subtitle }) => {
@@ -1792,12 +1768,17 @@ export async function renderDeliveryPanel(containerArg) {
         <span class="dsheet-chev" style="color:inherit; opacity:0.7;">${icon('chevronRight', 18)}</span>
       </button>
       <div class="dsheet-label">Mi cuenta</div>
-      ${drawerItem({ id: 'delivery-drawer-history', href: '#/delivery/history', iconName: 'history', bg: drawerTone('rgba(255,255,255,0.08)', '#f1f5f9'), fg: drawerTone('#cbd5e1', '#475569'), title: 'Historial de pedidos', subtitle: 'Tus entregas anteriores' })}
-      ${drawerItem({ id: 'delivery-drawer-finances', href: '#/delivery/finances', iconName: 'bank', bg: drawerTone('rgba(34,197,94,0.14)', '#dcfce7'), fg: drawerTone('#4ade80', '#16a34a'), title: 'Finanzas y cuentas', subtitle: 'Saldo, cobros y alias' })}
-      ${drawerItem({ id: 'delivery-drawer-config', href: '#/delivery/config', iconName: 'settings', bg: drawerTone('rgba(129,140,248,0.14)', '#e0e7ff'), fg: drawerTone('#a5b4fc', '#4f46e5'), title: 'Configuración de perfil', subtitle: 'Datos, vehículo y preferencias' })}
+      ${drawerItem({ id: 'delivery-drawer-history', href: '#/delivery/history', iconName: 'history', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Historial de pedidos', subtitle: 'Tus entregas anteriores' })}
+      ${drawerItem({ id: 'delivery-drawer-finances', href: '#/delivery/finances', iconName: 'bank', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Finanzas y cuentas', subtitle: 'Saldo, cobros y alias' })}
+      ${drawerItem({ id: 'delivery-drawer-config', href: '#/delivery/config', iconName: 'settings', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Configuración de perfil', subtitle: 'Datos, vehículo y preferencias' })}
       <div class="dsheet-label">Ayuda</div>
-      ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(56,189,248,0.14)', '#e0f2fe'), fg: drawerTone('#38bdf8', '#0284c7'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
-      ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(245,158,11,0.14)', '#fef3c7'), fg: drawerTone('#fbbf24', '#d97706'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
+      ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
+      ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
+      <div class="go-drawer-brand" aria-hidden="true">
+        <span class="go-drawer-brand-ring"><img src="/logo-brand.jpg?v=2" alt="" /><i></i></span>
+        <span class="go-drawer-brand-name">GO! Delivery</span>
+        <span class="go-drawer-brand-tag">Servicio puerta a puerta</span>
+      </div>
     </div>
   `;
   document.body.appendChild(deliveryDrawerEl);
@@ -1877,36 +1858,6 @@ export async function renderDeliveryPanel(containerArg) {
       openDeliveryDrawer();
     });
 
-    // Wire info button inside drawer
-    document.getElementById('delivery-drawer-info-btn')?.addEventListener('click', () => {
-      closeDeliveryDrawer();
-
-      openDriverSheet({
-        id: 'info-bottom-sheet',
-        iconName: 'helpCircle',
-        tone: 'amber',
-        title: 'Cómo funciona el sistema',
-        subtitle: 'Reglas de asignación y pausas',
-        body: `
-        <details class="dsheet-faq">
-          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('refresh', 18)}</span><span style="flex:1;">Asignación en cola</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
-          <div class="dsheet-faq-body">Los pedidos listos se ofrecen a un repartidor a la vez, en exclusiva, durante 30 segundos. Se prioriza a quien no lo rechazó y se desempata por quien tenga menos pedidos completados hoy.</div>
-        </details>
-        <details class="dsheet-faq">
-          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('pause', 18)}</span><span style="flex:1;">Pausa automática por inactividad</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
-          <div class="dsheet-faq-body">Si dejás expirar o rechazás <strong>2 pedidos seguidos</strong>, el sistema te pasa a desconectado para que no queden pedidos trabados.</div>
-        </details>
-        <details class="dsheet-faq">
-          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('package', 18)}</span><span style="flex:1;">Pedidos simultáneos</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
-          <div class="dsheet-faq-body">Podés llevar hasta 2 pedidos de comercios distintos, o hasta 3 si son del mismo comercio.</div>
-        </details>
-        <details class="dsheet-faq">
-          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('close', 18)}</span><span style="flex:1;">Cancelación por falta de cobertura</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
-          <div class="dsheet-faq-body">Si todos los repartidores de la zona rechazan o ignoran el pedido, se cancela automáticamente y se reembolsa al cliente al instante.</div>
-        </details>
-        `,
-      });
-    });
   }
 
   const barContainer = document.getElementById('session-status-bar-container');
@@ -1914,6 +1865,38 @@ export async function renderDeliveryPanel(containerArg) {
     barContainer.innerHTML = renderStatusBar(user);
     attachStatusBarListeners(user);
   }
+
+  // The info sheet is wired regardless of the old header slot (it no longer exists).
+  // Wire info button inside drawer
+  document.getElementById('delivery-drawer-info-btn')?.addEventListener('click', () => {
+    closeDeliveryDrawer();
+
+    openDriverSheet({
+      id: 'info-bottom-sheet',
+      iconName: 'helpCircle',
+      tone: 'amber',
+      title: 'Cómo funciona el sistema',
+      subtitle: 'Reglas de asignación y pausas',
+      body: `
+      <details class="dsheet-faq">
+        <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('refresh', 18)}</span><span style="flex:1;">Asignación en cola</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+        <div class="dsheet-faq-body">Los pedidos listos se ofrecen a un repartidor a la vez, en exclusiva, durante 30 segundos. Se prioriza a quien no lo rechazó y se desempata por quien tenga menos pedidos completados hoy.</div>
+      </details>
+      <details class="dsheet-faq">
+        <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('pause', 18)}</span><span style="flex:1;">Pausa automática por inactividad</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+        <div class="dsheet-faq-body">Si dejás expirar o rechazás <strong>2 pedidos seguidos</strong>, el sistema te pasa a desconectado para que no queden pedidos trabados.</div>
+      </details>
+      <details class="dsheet-faq">
+        <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('package', 18)}</span><span style="flex:1;">Pedidos simultáneos</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+        <div class="dsheet-faq-body">Podés llevar hasta 2 pedidos de comercios distintos, o hasta 3 si son del mismo comercio.</div>
+      </details>
+      <details class="dsheet-faq">
+        <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('close', 18)}</span><span style="flex:1;">Cancelación por falta de cobertura</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+        <div class="dsheet-faq-body">Si todos los repartidores de la zona rechazan o ignoran el pedido, se cancela automáticamente y se reembolsa al cliente al instante.</div>
+      </details>
+      `,
+    });
+  });
 
   renderDailyEarningsWidget(user);
 
@@ -5262,8 +5245,8 @@ function loadTabContent(tab, container, user) {
                   <button id="reapply-trip-btn" class="btn btn-outline btn-block" style="height:38px; border-radius:10px; font-weight:800; font-size:12px;">Volver a postularse...</button>
                 </div>
               ` : `
-                <button id="apply-trip-btn" class="btn btn-primary btn-block" style="height:48px; border-radius:14px; font-weight:900; font-size:13.0px; background:#3b82f6; border:none; color:white; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 12px rgba(59,130,246,0.2);">
-                  ${icon('car', 16)} Postularse para Realizar Viajes
+                <button id="apply-trip-btn" class="btn btn-block" style="height:48px; border-radius:14px; font-weight:800; font-size:13.5px; background:var(--driver-text-primary); border:none; color:var(--driver-bg-panel); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
+                  ${icon('car', 16)} Postularme para hacer viajes
                 </button>
               `}
             </div>
@@ -5310,9 +5293,11 @@ function loadTabContent(tab, container, user) {
 
       configHtml += `
           <!-- Save button -->
-          <button id="config-save-btn" class="btn btn-primary btn-block" style="height:56px; border-radius:20px; font-weight:900; font-size:15px; background:#E11D48; border:none; color:white; box-shadow:0 8px 20px rgba(225, 29, 72, 0.2); cursor:pointer;">
-            Guardar Configuración
+          <div class="go-driver-savebar">
+          <button id="config-save-btn" class="btn btn-block" style="height:56px; border-radius:16px; font-weight:800; font-size:15.5px; cursor:pointer; width:100%;">
+            Guardar configuración
           </button>
+          </div>
         </div>
       `;
 
@@ -5395,7 +5380,7 @@ function loadTabContent(tab, container, user) {
           showToast('Error al guardar la configuración: ' + err.message, 'error');
         } finally {
           saveBtn.disabled = false;
-          saveBtn.innerHTML = 'Guardar Configuración';
+          saveBtn.innerHTML = 'Guardar configuración';
         }
       };
 
@@ -9694,15 +9679,15 @@ function getHaversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 export async function renderDeliveryHistory() {
-  await renderSubPage('history', 'Historial de Pedidos');
+  await renderSubPage('history', 'Historial de pedidos');
 }
 
 export async function renderDeliveryFinances() {
-  await renderSubPage('finances', 'Finanzas y Cuentas');
+  await renderSubPage('finances', 'Finanzas y cuentas');
 }
 
 export async function renderDeliveryConfig() {
-  await renderSubPage('config', 'Configuración de Perfil');
+  await renderSubPage('config', 'Configuración de perfil');
 }
 
 async function renderSubPage(tab, title) {
@@ -9727,23 +9712,21 @@ async function renderSubPage(tab, title) {
   }
 
   content.innerHTML = `
-    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; overflow:hidden; background:var(--color-bg-secondary);">
+    <div class="panel-page go-driver-subpage" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; overflow:hidden; background:var(--color-bg);">
       <!-- Header -->
-      <div  class="go-page-header" style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:14px; padding: calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px 20px; background: var(--go-ink); flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
-        
-        <a href="#/delivery" style="display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); color:white; flex-shrink:0; text-decoration:none; transition:all 0.2s; position:relative; z-index:2;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-          ${icon('chevronLeft', 24)}
-        </a>
-        <div style="flex:1; min-width:0; position:relative; z-index:2;">
-          <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; line-height:1.2; letter-spacing:-0.02em;">
-            ${title}
-          </h1>
-          <p style="font-size:11px; color:rgba(255,255,255,0.7); font-weight:800; margin:2px 0 0; text-transform:uppercase; letter-spacing:0.05em;">Repartidor ${user.deliveryId || ''}</p>
+      <header class="go-service-header go-page-header" style="padding-top: calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)));">
+        <div class="go-service-row">
+          <a href="#/delivery" class="go-icon-btn" aria-label="Volver al panel">${icon('chevronLeft', 20)}</a>
+          <div class="go-service-titles">
+            <span class="go-eyebrow go-service-eyebrow">Repartidor ${user.deliveryId || ''}</span>
+            <h1 class="go-title go-service-title">${title}</h1>
+            <span class="go-bar go-service-bar"></span>
+          </div>
         </div>
-      </div>
+      </header>
 
       <!-- Scrollable Content -->
-      <div id="sub-page-content" style="flex:1; min-height:0; overflow-x:hidden; -webkit-overflow-scrolling:touch; touch-action:pan-y; ${tab === 'finances' ? 'overflow-y:hidden; padding:0;' : 'overflow-y:auto; padding:16px 16px 40px;'}">
+      <div id="sub-page-content" style="flex:1; min-height:0; overflow-x:hidden; -webkit-overflow-scrolling:touch; touch-action:pan-y; ${tab === 'finances' ? 'overflow-y:hidden; padding:0;' : 'overflow-y:auto; padding:16px 16px calc(32px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));'}">
         <div class="loader-dots" style="margin: 4rem auto;"><span></span><span></span><span></span></div>
       </div>
     </div>
