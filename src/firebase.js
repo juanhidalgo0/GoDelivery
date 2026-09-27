@@ -36,7 +36,12 @@ const testingConfig = {
   measurementId: "G-DWNQDRZG27"
 };
 
-const firebaseConfig = isTesting ? testingConfig : prodConfig;
+// Local end-to-end testing against the Firebase emulators (never set in a real build):
+//   VITE_USE_EMULATORS=true npx vite --mode testing
+const useEmulators = import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true';
+const emulatorConfig = { ...testingConfig, projectId: 'demo-godelivery', authDomain: 'demo-godelivery.firebaseapp.com', storageBucket: 'demo-godelivery.appspot.com' };
+
+const firebaseConfig = useEmulators ? emulatorConfig : (isTesting ? testingConfig : prodConfig);
 
 if (isTesting) {
   console.log("🧪 Running in TESTING environment (godelivery-testing)");
@@ -44,6 +49,7 @@ if (isTesting) {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+if (useEmulators) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 
 // Enforce browserLocalPersistence to guarantee session survival across iOS Safari / PWA reloads & redirects
 setPersistence(auth, browserLocalPersistence).catch((err) => {
@@ -74,6 +80,10 @@ try {
   }
 }
 export const db = dbInstance;
+if (useEmulators) {
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  console.log('🎮 Connected to the local Firebase emulators (demo-godelivery)');
+}
 
 // Clear IndexedDB offline cache if flagged by hard reset
 if (localStorage.getItem('gd_clear_persistence') === 'true') {
@@ -87,6 +97,7 @@ if (localStorage.getItem('gd_clear_persistence') === 'true') {
 
 
 export const storage = getStorage(app);
+if (useEmulators) connectStorageEmulator(storage, '127.0.0.1', 9199);
 
 const isLocalhost = typeof window !== 'undefined' && (
   window.location.hostname === 'localhost' ||
@@ -94,14 +105,8 @@ const isLocalhost = typeof window !== 'undefined' && (
   window.location.hostname.startsWith('192.168.')
 );
 
-if (isLocalhost) {
-  try {
-    // Connect Firestore to local emulator
-    // connectFirestoreEmulator(db, 'localhost', 8080);
-    console.log("🎮 Firestore Emulator bypassed (Connected to Real Database)!");
-  } catch (err) {
-    console.warn("Firestore Emulator connection warning (likely already connected):", err);
-  }
+if (isLocalhost && !useEmulators) {
+  console.log(`🔌 Localhost using the real ${isTesting ? 'testing' : 'production'} database (set VITE_USE_EMULATORS=true for the local emulators)`);
 }
 
 // Messaging (may not be supported in all browsers)

@@ -10,8 +10,8 @@ const SLIDES = [
     id: 'welcome',
     emoji: '<img src="/logo-pwa.png" style="width:72px;height:72px;object-fit:contain;border-radius:18px;" />',
     iconBg: 'linear-gradient(135deg, rgba(225,29,72,0.2), rgba(225,29,72,0.05))',
-    title: '¡Bienvenido a GoDelivery!',
-    subtitle: 'Tu app todo-en-uno para pedir comida, productos, viajes y mucho más. Vamos a enseñarte cómo sacarle el máximo provecho.',
+    title: '¡Bienvenido a GO!',
+    subtitle: 'Comida, súper, mandados y viajes en una sola app. Te mostramos cómo sacarle el jugo.',
     type: 'features',
     features: [
       { icon: '🛒', bg: 'rgba(16,185,129,0.15)', label: 'Pedidos a comercios', desc: 'Comida, productos y más directo a tu puerta.' },

@@ -68,45 +68,20 @@ export async function showInstallUI() {
   if (installModalOpen) return;
   installModalOpen = true;
 
-  const { showModal } = await import('./modal.js');
-
-  const modalContent = document.createElement('div');
-  modalContent.style.padding = 'var(--space-2, 8px)';
-  modalContent.style.textAlign = 'center';
-
-  modalContent.innerHTML = `
-    <div style="text-align: center; margin-bottom: 24px;">
-      <div style="width: 72px; height: 72px; background: linear-gradient(135deg, #e11d48, #be123c); border-radius: 20px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 10px 30px rgba(225, 29, 72, 0.35);">
-        <img src="/logo-pwa.png" style="width: 100%; height: 100%; border-radius: inherit; object-fit: cover;" alt="GoDelivery" />
-      </div>
-      <h2 style="font-family: var(--font-display); font-size: 1.5rem; font-weight: 900; margin-bottom: 6px; color: var(--color-text-primary);">Descargá GoDelivery</h2>
-      <p style="font-size: 13.5px; color: var(--color-text-secondary); line-height: 1.5; max-width: 290px; margin: 0 auto;">Descargá nuestra aplicación oficial desde tu tienda de aplicaciones favorita:</p>
-    </div>
-
-    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
-      <a href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; justify-content: center; gap: 12px; background: #000000; color: #ffffff; border: 1.5px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 14px 20px; text-decoration: none; font-weight: 800; font-size: 14px;">
-        Descargar en Google Play
-      </a>
-      <a href="${APP_STORE_URL}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; justify-content: center; gap: 12px; background: #000000; color: #ffffff; border: 1.5px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 14px 20px; text-decoration: none; font-weight: 800; font-size: 14px;">
-        Descargar en App Store
-      </a>
-    </div>
-
-    <button id="store-guide-close-btn" class="btn btn-ghost btn-block" style="color: var(--color-text-tertiary); font-weight: 700; font-size: 13px;">
-      Continuar en el navegador
-    </button>
-  `;
-
-  const modal = showModal({
-    title: '',
-    content: modalContent,
-    hideHeader: true,
-    onClose: () => {
-      installModalOpen = false;
-    }
-  });
-
-  document.getElementById('store-guide-close-btn')?.addEventListener('click', () => {
-    modal.close();
+  const { showGoSheet } = await import('./go-sheet.js');
+  const storeLink = (href, label) => `<a class="go-store-row" href="${href}" target="_blank" rel="noopener noreferrer"><span>${label}</span><span aria-hidden="true">›</span></a>`;
+  showGoSheet({
+    id: 'store-install-sheet',
+    iconName: 'smartphone',
+    eyebrow: 'App oficial',
+    title: 'Descargá GO!',
+    bodyHtml: `
+      <p>Pedí más rápido, seguí tu pedido en el mapa y recibí avisos al instante.</p>
+      <div class="go-store-rows">
+        ${storeLink(PLAY_STORE_URL, 'Google Play')}
+        ${storeLink(APP_STORE_URL, 'App Store')}
+      </div>`,
+    secondary: { label: 'Seguir en el navegador' },
+    onClose: () => { installModalOpen = false; },
   });
 }

@@ -1,4 +1,5 @@
 import { checkIfInstalled, isIOS } from './install-prompt.js';
+import { icon } from '../utils/icons.js';
 
 export const APP_STORE_URL = 'https://apps.apple.com/app/go-delivery/id6790820954';
 export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.godelivery.magdalena';
@@ -36,7 +37,7 @@ function showLockScreen() {
     width: 100vw;
     min-height: 100dvh;
     z-index: 200000;
-    background: #080b11;
+    background: #0b0b0c;
     color: #ffffff;
     display: flex;
     flex-direction: column;
@@ -46,7 +47,6 @@ function showLockScreen() {
     box-sizing: border-box;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    animation: fadeIn 0.3s ease-out;
     font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   `;
 
@@ -71,176 +71,59 @@ function showLockScreen() {
   `;
 
   lockScreen.innerHTML = `
-    <style>
-      .store-primary-cta {
-        position: relative;
-        overflow: hidden;
-        transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease;
-      }
-      .store-primary-cta:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 16px 36px rgba(225, 29, 72, 0.45);
-      }
-      .store-primary-cta:active {
-        transform: scale(0.98);
-      }
-      .store-primary-cta::after {
-        content: '';
-        position: absolute;
-        top: 0; left: -100%; width: 60%; height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-        transform: skewX(-20deg);
-        animation: shineSweep 4s infinite;
-      }
-      @keyframes shineSweep {
-        0%, 75% { left: -100%; }
-        100% { left: 200%; }
-      }
-      .skip-web-link:hover {
-        color: #e2e8f0 !important;
-      }
-    </style>
-
-    <!-- Top Ambient Glow -->
-    <div style="position: absolute; top: -80px; left: 50%; transform: translateX(-50%); width: 380px; height: 380px; background: radial-gradient(circle, rgba(225, 29, 72, 0.22) 0%, transparent 65%); pointer-events: none; filter: blur(50px);"></div>
-
-    <!-- Top Badge -->
-    <div style="z-index: 1; margin-bottom: auto; padding-top: 8px;">
-      <div style="display: inline-flex; align-items: center; gap: 6px; background: rgba(225, 29, 72, 0.12); border: 1px solid rgba(225, 29, 72, 0.28); padding: 5px 14px; border-radius: 100px; font-size: 11px; font-weight: 850; color: #fb7185; letter-spacing: 0.5px;">
-        <span>★ 4.9</span>
-        <span style="opacity:0.4;">•</span>
-        <span>APP OFICIAL</span>
-      </div>
+    <div class="gl-top">
+      <span class="gl-ring"><img src="/logo-brand.jpg?v=2" alt="GO! Delivery" /><i></i></span>
     </div>
 
-    <!-- Center Hero Section -->
-    <div style="z-index: 1; max-width: 380px; width: 100%; display: flex; flex-direction: column; align-items: center; text-align: center; margin: auto 0; padding: 24px 0;">
-      
-      <!-- Brand App Icon -->
-      <div style="position: relative; margin-bottom: 20px;">
-        <div style="position: absolute; inset: -8px; background: radial-gradient(circle, rgba(225,29,72,0.4) 0%, transparent 70%); filter: blur(14px); border-radius: 28px;"></div>
-        <div style="position: relative; width: 88px; height: 88px; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); border-radius: 24px; display: flex; align-items: center; justify-content: center; box-shadow: 0 16px 36px rgba(0,0,0,0.6), 0 0 0 1.5px rgba(255, 255, 255, 0.2); overflow: hidden;">
-          <img src="/logo-pwa.png" style="width: 100%; height: 100%; object-fit: cover;" alt="GoDelivery" />
-        </div>
-      </div>
-
-      <!-- Title & Tagline -->
-      <h1 style="font-family: var(--font-display, sans-serif); font-size: 2.1rem; font-weight: 950; color: #ffffff; margin: 0 0 8px 0; letter-spacing: -0.03em; line-height: 1.15;">
-        GoDelivery
-      </h1>
-      
-      <p style="color: #94a3b8; font-size: 14px; line-height: 1.5; margin: 0 0 28px 0; max-width: 320px; font-weight: 500;">
-        Tu comida, farmacia y mandados favoritos en la puerta de tu casa.
-      </p>
-
-      <!-- Minimal Benefit Rows -->
-      <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; text-align: left;">
-        <div style="display: flex; align-items: center; gap: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); padding: 11px 14px; border-radius: 16px;">
-          <div style="width: 30px; height: 30px; border-radius: 10px; background: rgba(225, 29, 72, 0.16); color: #fb7185; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;">⚡</div>
-          <div style="font-size: 13px; font-weight: 600; color: #e2e8f0; line-height: 1.35;">
-            Descuentos y cupones exclusivos en la app
-          </div>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); padding: 11px 14px; border-radius: 16px;">
-          <div style="width: 30px; height: 30px; border-radius: 10px; background: rgba(59, 130, 246, 0.16); color: #60a5fa; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;">🛵</div>
-          <div style="font-size: 13px; font-weight: 600; color: #e2e8f0; line-height: 1.35;">
-            Seguimiento de tu pedido en vivo por GPS
-          </div>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); padding: 11px 14px; border-radius: 16px;">
-          <div style="width: 30px; height: 30px; border-radius: 10px; background: rgba(16, 185, 129, 0.16); color: #34d399; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;">🔔</div>
-          <div style="font-size: 13px; font-weight: 600; color: #e2e8f0; line-height: 1.35;">
-            Avisos instantáneos de cada estado de entrega
-          </div>
-        </div>
-      </div>
-
+    <div class="gl-hero">
+      <span class="go-eyebrow">App oficial · Magdalena</span>
+      <h1 class="go-title">Pedí mejor<br>desde la app</h1>
+      <span class="go-bar"></span>
+      <p>Comida, súper, mandados y viajes, puerta a puerta.</p>
+      <ul class="gl-benefits">
+        <li><span>${icon('ticket', 18)}</span>Cupones y descuentos que solo están en la app</li>
+        <li><span>${icon('mapPin', 18)}</span>Seguí tu pedido en vivo en el mapa</li>
+        <li><span>${icon('bell', 18)}</span>Avisos al instante en cada paso de tu pedido</li>
+      </ul>
     </div>
 
-    <!-- Bottom Actions Area -->
-    <div style="z-index: 1; max-width: 380px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto;">
-      
-      <!-- Primary Store CTA -->
-      <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-        ${isIos ? `
-          <a href="${APP_STORE_URL}" target="_blank" rel="noopener noreferrer" id="btn-open-appstore" class="store-primary-cta" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); color: white; padding: 15px 18px; border-radius: 18px; text-decoration: none; box-shadow: 0 10px 28px rgba(225, 29, 72, 0.38); border: 1px solid rgba(255, 255, 255, 0.22); cursor: pointer;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 38px; height: 38px; background: rgba(0,0,0,0.22); border-radius: 11px; display: flex; align-items: center; justify-content: center; color: white;">
-                ${appleLogoSvg}
-              </div>
-              <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.2;">
-                <span style="font-size: 10.5px; font-weight: 700; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.5px;">Disponible en el</span>
-                <span style="font-size: 17px; font-weight: 950; letter-spacing: -0.3px;">App Store</span>
-              </div>
-            </div>
-            <div style="background: #ffffff; color: #be123c; font-weight: 950; font-size: 12px; padding: 8px 15px; border-radius: 100px; box-shadow: 0 4px 12px rgba(0,0,0,0.18); display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-              <span>OBTENER</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="9 18 15 12 9 6"/></svg>
-            </div>
+    <div class="gl-actions">
+      ${isIos ? `
+          <a href="${APP_STORE_URL}" target="_blank" rel="noopener noreferrer" id="btn-open-appstore" class="gl-store">
+            <span class="gl-store-logo">${appleLogoSvg}</span>
+            <span class="gl-store-text"><small>Descargala en</small><strong>App Store</strong></span>
+            <span class="gl-store-go">${icon('chevronRight', 18)}</span>
           </a>
-        ` : isAndroid ? `
-          <a href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer" id="btn-open-playstore" class="store-primary-cta" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); color: white; padding: 15px 18px; border-radius: 18px; text-decoration: none; box-shadow: 0 10px 28px rgba(225, 29, 72, 0.38); border: 1px solid rgba(255, 255, 255, 0.22); cursor: pointer;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 38px; height: 38px; background: rgba(0,0,0,0.22); border-radius: 11px; display: flex; align-items: center; justify-content: center;">
-                ${googlePlaySvg}
-              </div>
-              <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.2;">
-                <span style="font-size: 10.5px; font-weight: 700; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.5px;">Disponible en</span>
-                <span style="font-size: 17px; font-weight: 950; letter-spacing: -0.3px;">Google Play</span>
-              </div>
-            </div>
-            <div style="background: #ffffff; color: #be123c; font-weight: 950; font-size: 12px; padding: 8px 15px; border-radius: 100px; box-shadow: 0 4px 12px rgba(0,0,0,0.18); display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-              <span>INSTALAR</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="9 18 15 12 9 6"/></svg>
-            </div>
+      ` : isAndroid ? `
+          <a href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer" id="btn-open-playstore" class="gl-store">
+            <span class="gl-store-logo">${googlePlaySvg}</span>
+            <span class="gl-store-text"><small>Descargala en</small><strong>Google Play</strong></span>
+            <span class="gl-store-go">${icon('chevronRight', 18)}</span>
           </a>
-        ` : `
-          <a href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer" class="store-primary-cta" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); color: white; padding: 14px 18px; border-radius: 18px; text-decoration: none; box-shadow: 0 10px 25px rgba(225, 29, 72, 0.4); border: 1px solid rgba(255, 255, 255, 0.25);">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 36px; height: 36px; background: rgba(0,0,0,0.25); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
-                ${googlePlaySvg}
-              </div>
-              <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.2;">
-                <span style="font-size: 10px; font-weight: 700; opacity: 0.85; text-transform: uppercase;">Descargar en</span>
-                <span style="font-size: 16px; font-weight: 950;">Google Play</span>
-              </div>
-            </div>
-            <div style="background: #ffffff; color: #be123c; font-weight: 950; font-size: 11.5px; padding: 6px 14px; border-radius: 100px;">INSTALAR</div>
+      ` : `
+          <a href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer" class="gl-store">
+            <span class="gl-store-logo">${googlePlaySvg}</span>
+            <span class="gl-store-text"><small>Descargala en</small><strong>Google Play</strong></span>
+            <span class="gl-store-go">${icon('chevronRight', 18)}</span>
           </a>
-          <a href="${APP_STORE_URL}" target="_blank" rel="noopener noreferrer" class="store-primary-cta" style="display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.08); color: white; padding: 14px 18px; border-radius: 18px; text-decoration: none; border: 1.5px solid rgba(255, 255, 255, 0.2);">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 36px; height: 36px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white;">
-                ${appleLogoSvg}
-              </div>
-              <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.2;">
-                <span style="font-size: 10px; font-weight: 700; opacity: 0.85; text-transform: uppercase;">Descargar en</span>
-                <span style="font-size: 16px; font-weight: 950;">App Store</span>
-              </div>
-            </div>
-            <div style="background: rgba(255,255,255,0.2); color: #ffffff; font-weight: 950; font-size: 11.5px; padding: 6px 14px; border-radius: 100px;">OBTENER</div>
+          <a href="${APP_STORE_URL}" target="_blank" rel="noopener noreferrer" class="gl-store">
+            <span class="gl-store-logo">${appleLogoSvg}</span>
+            <span class="gl-store-text"><small>Descargala en</small><strong>App Store</strong></span>
+            <span class="gl-store-go">${icon('chevronRight', 18)}</span>
           </a>
-        `}
-      </div>
-
-      <!-- Minimalist Skip Web Link -->
-      <button id="lock-skip-btn" class="skip-web-link" style="background: transparent; border: none; color: #64748b; font-weight: 600; font-size: 13px; padding: 8px 16px; cursor: pointer; transition: color 0.2s ease; text-decoration: underline; text-underline-offset: 4px;">
-        Continuar en el navegador web
-      </button>
-
+      `}
+      <button id="lock-skip-btn" class="gl-skip">Seguir en el navegador</button>
     </div>
   `;
 
   // Listeners
   document.getElementById('lock-skip-btn')?.addEventListener('click', () => {
     sessionStorage.setItem('pwa_skipped', 'true');
-    lockScreen.style.opacity = '0';
-    lockScreen.style.transition = 'opacity 0.25s ease';
+    lockScreen.classList.add('is-leaving');
     setTimeout(() => {
       lockScreen.remove();
       window.dispatchEvent(new CustomEvent('pwa-lock-dismissed'));
-    }, 250);
+    }, 320);
   });
 }
 

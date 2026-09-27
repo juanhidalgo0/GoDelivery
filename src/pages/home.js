@@ -6,6 +6,7 @@ import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
 import { escapeHtml } from '../utils/escape.js';
 import { goSectionHead, goStoreCard } from '../components/go-ui.js';
+import { showGoSheet } from '../components/go-sheet.js';
 import { icon, categoryIcon, CATEGORY_ICON_MAP, CATEGORY_PHOSPHOR_MAP } from '../utils/icons.js';
 import { getState, subscribe } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
@@ -514,85 +515,18 @@ function checkAndShowWelcomeModal() {
   const welcomed = localStorage.getItem('welcome_beta_v1');
   if (welcomed === 'true') return;
 
-  const modalEl = document.createElement('div');
-  modalEl.id = 'welcome-beta-modal-overlay';
-  modalEl.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(15, 23, 42, 0.4);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 99999;
-    padding: 24px;
-    box-sizing: border-box;
-    animation: fadeInWelcome 0.3s ease-out forwards;
-  `;
-
-  modalEl.innerHTML = `
-    <div style="background: var(--color-surface, #ffffff); max-width: 420px; width: 100%; height: 500px; max-height: 85vh; border-radius: 28px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
-      <!-- Cabecera fija -->
-      <div style="text-align: center; padding: 20px 24px 10px 24px; flex-shrink: 0;">
-        <div style="font-size: 36px; margin-bottom: 8px; display: inline-block; animation: waveEmoji 2s infinite ease-in-out;">👋</div>
-        <h2 style="font-family: var(--font-display, inherit); font-size: 20px; font-weight: 950; color: var(--color-text-primary, #0f172a); margin: 0;">¡Hola, Vecino! Te damos la bienvenida a GO!</h2>
-      </div>
-      
-      <!-- Cuerpo con scroll -->
-      <div style="overflow-y: auto; padding: 0 24px 12px 24px; flex-grow: 1; -webkit-overflow-scrolling: touch;">
-        <p style="font-size: 13.5px; line-height: 1.6; color: var(--color-text-secondary, #475569); margin: 0; font-weight: 600; text-align: left;">
-          Estamos muy felices de traerte una aplicación creada por y para nuestro pueblo, pensada para hacernos el día a día más fácil a todos.<br><br>
-          Queremos contarte que actualmente nos encontramos en <strong>Fase Beta (en desarrollo y prueba)</strong>. Esto significa que, aunque le ponemos todo el corazón, de vez en cuando podría surgir algún pequeño error en el sistema.<br><br>
-          Si te encontrás con alguno, te agradeceríamos enormemente tu paciencia y que nos lo comentes directamente desde el botón de soporte. Tu feedback es nuestro motor para corregir los detalles, seguir mejorando y <strong>seguir creciendo juntos</strong>.<br><br>
-          ¡Gracias por ser parte de la comunidad de GO!
-        </p>
-      </div>
-      
-      <!-- Pie de página fijo con el botón -->
-      <div style="padding: 12px 24px 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff); border-top: 1.5px solid var(--color-border-light, #f1f5f9);">
-        <button id="welcome-beta-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: var(--go-ink); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
-          ¡Entendido, vamos a GO!
-        </button>
-      </div>
-    </div>
-    
-    <style>
-      @keyframes fadeInWelcome {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      @keyframes scaleUpWelcome {
-        from { transform: scale(0.9); opacity: 0; }
-        to { transform: scale(1); opacity: 1; }
-      }
-      @keyframes waveEmoji {
-        0%, 100% { transform: rotate(0deg); }
-        25% { transform: rotate(-10deg); }
-        75% { transform: rotate(10deg); }
-      }
-      #welcome-beta-accept-btn:active {
-        transform: scale(0.96);
-        opacity: 0.95;
-      }
-    </style>
-  `;
-
-  document.body.appendChild(modalEl);
-
-  const acceptBtn = modalEl.querySelector('#welcome-beta-accept-btn');
-  if (acceptBtn) {
-    acceptBtn.onclick = () => {
-      localStorage.setItem('welcome_beta_v1', 'true');
-      modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
-      setTimeout(() => {
-        modalEl.remove();
-      }, 200);
-    };
-  }
+  showGoSheet({
+    id: 'welcome-beta-modal-overlay',
+    iconName: 'smile',
+    eyebrow: 'Bienvenido a GO!',
+    title: '¡Hola, vecino!',
+    bodyHtml: `
+      <p>Esta app la hicimos en Magdalena y para Magdalena: comida, súper, mandados y viajes, puerta a puerta.</p>
+      <p>Estamos en <strong>etapa beta</strong> y la seguimos puliendo todos los días. Si algo no anda como esperás, contanos desde <strong>Soporte</strong> y lo arreglamos.</p>`,
+    primary: { label: 'Empezar' },
+    // However it is closed, it has been seen.
+    onClose: () => localStorage.setItem('welcome_beta_v1', 'true'),
+  });
 }
 
 async function checkAndShowWelcomeCouponModal() {
@@ -682,87 +616,21 @@ async function checkAndShowWelcomeCouponModal() {
         console.warn('Auto-applying welcome coupon failed:', e);
       }
 
-      const modalEl = document.createElement('div');
-      modalEl.id = 'welcome-coupon-modal-overlay';
-      modalEl.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(15, 23, 42, 0.5);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 100001;
-        padding: 20px;
-        box-sizing: border-box;
-        animation: fadeInWelcome 0.25s ease-out forwards;
-      `;
-
-      modalEl.innerHTML = `
-        <div style="background: var(--color-surface, #ffffff); max-width: 400px; width: 92%; max-height: calc(100vh - 40px); border-radius: 28px; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.25); border: 1.5px solid var(--color-border-light, #f1f5f9); overflow-y: auto; display: flex; flex-direction: column; box-sizing: border-box; transform: scale(0.9); animation: scaleUpWelcome 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; position: relative;">
-          
-          <!-- Close X button -->
-          <button id="welcome-coupon-close-x" style="position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%; background: rgba(0,0,0,0.2); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; transition: transform 0.2s;" title="Cerrar">
-            ${icon('x', 18, '', '#FFF')}
-          </button>
-
-          <!-- Gift Header visual box -->
-          <div style="background: linear-gradient(135deg, #FF2E55 0%, #E10036 100%); padding: 36px 24px 24px; text-align: center; color: white; position: relative; flex-shrink: 0;">
-            <div style="font-size: 56px; line-height: 1; margin-bottom: 12px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15)); display: inline-block;">🎁</div>
-            <h2 style="font-family: var(--font-display, inherit); font-size: 24px; font-weight: 950; color: white; margin: 0; letter-spacing: -0.03em;">¡Tu Regalo de Bienvenida!</h2>
-            <div style="font-size: 13px; font-weight: 800; color: rgba(255,255,255,0.9); margin-top: 6px;">Te regalamos $${couponValue} para tu primer pedido</div>
+      showGoSheet({
+        id: 'welcome-coupon-modal-overlay',
+        iconName: 'gift',
+        eyebrow: 'Regalo de bienvenida',
+        title: `${formatPrice(couponValue)} para tu primer pedido`,
+        bodyHtml: `
+          <div class="go-bsheet-ticket">
+            <span>Cupón BIENVENIDA</span>
+            <strong>${formatPrice(couponValue)} OFF</strong>
           </div>
-          
-          <!-- Body details -->
-          <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;">
-            <p style="font-size: 14.5px; line-height: 1.55; color: var(--color-text-secondary, #475569); margin: 0; font-weight: 650;">
-              Queremos darte una cálida bienvenida a la app. Por eso, tenés disponible un cupón de descuento por <strong>$${couponValue}</strong>.
-            </p>
-
-            <!-- Coupon Banner without buttons -->
-            <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px dashed rgba(168, 85, 247, 0.35); border-radius: 16px; padding: 14px 18px; text-align: center; margin: 4px 0;">
-              <div style="font-size: 11px; font-weight: 900; color: #a855f7; letter-spacing: 0.8px; text-transform: uppercase;">CUPÓN DE BIENVENIDA APLICADO</div>
-              <div style="font-size: 24px; font-weight: 950; color: var(--color-text-primary); margin-top: 2px; letter-spacing: 1px;">$${couponValue} OFF</div>
-            </div>
-
-            <div style="font-size: 12.5px; color: var(--color-text-secondary, #475569); font-weight: 750; background: var(--color-bg-secondary, #f8fafc); border-radius: 12px; padding: 12px 14px; line-height: 1.45; border: 1px solid var(--color-border-light, #f1f5f9); text-align: left; display: flex; flex-direction: column; gap: 8px;">
-              <span>✨ <strong>¡Uso Automático!</strong> El descuento se aplicará solo al hacer tu primer pedido a un comercio (no tenés que copiar nada).</span>
-              <span style="font-size: 11px; color: var(--color-text-tertiary);">* No válido para el servicio de mandados ni viajes.</span>
-            </div>
-          </div>
-          
-          <!-- Footer Button -->
-          <div style="padding: 0 24px 24px; flex-shrink: 0; background: var(--color-surface, #ffffff);">
-            <button id="welcome-coupon-accept-btn" style="width: 100%; height: 50px; border-radius: 14px; background: var(--go-ink); color: white; border: none; font-size: 14.5px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 16px rgba(225, 0, 54, 0.25); transition: all 0.2s; outline: none;">
-              ¡Buenísimo, comprar!
-            </button>
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(modalEl);
-
-      const closeWelcomeModal = () => {
-        localStorage.setItem('welcome_coupon_modal_shown_v1', 'true');
-        modalEl.style.animation = 'fadeInWelcome 0.2s ease-out reverse forwards';
-        setTimeout(() => {
-          modalEl.remove();
-        }, 200);
-      };
-
-      const acceptBtn = modalEl.querySelector('#welcome-coupon-accept-btn');
-      if (acceptBtn) acceptBtn.onclick = closeWelcomeModal;
-
-      const closeX = modalEl.querySelector('#welcome-coupon-close-x');
-      if (closeX) closeX.onclick = closeWelcomeModal;
-
-      modalEl.onclick = (e) => {
-        if (e.target === modalEl) closeWelcomeModal();
-      };
+          <p>Ya quedó aplicado: se descuenta solo en tu primer pedido a un comercio. No tenés que copiar nada.</p>
+          <p class="go-bsheet-note">No aplica a Mandados ni Viajes.</p>`,
+        primary: { label: 'Buenísimo, a pedir' },
+        onClose: () => localStorage.setItem('welcome_coupon_modal_shown_v1', 'true'),
+      });
     }
   }, 150);
 }

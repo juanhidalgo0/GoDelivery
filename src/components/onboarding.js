@@ -15,7 +15,11 @@ export async function showOnboarding(onComplete) {
     }
     const notifStatus = 'Notification' in window ? Notification.permission : 'granted';
     
-    if (locationStatus === 'denied' || notifStatus === 'denied') {
+    // A permission was turned off later: remind at most once a week, not on every open.
+    const lastReminder = Number(localStorage.getItem('gd-onboarding-reminded-at') || 0);
+    const remindAgain = Date.now() - lastReminder > 7 * 24 * 60 * 60 * 1000;
+    if ((locationStatus === 'denied' || notifStatus === 'denied') && remindAgain) {
+      localStorage.setItem('gd-onboarding-reminded-at', String(Date.now()));
       localStorage.removeItem('gd-onboarding-done');
     } else {
       if (onComplete) onComplete();
@@ -39,8 +43,8 @@ export async function showOnboarding(onComplete) {
     screens.push({
       id: 'location',
       image: '/onboarding_location_illustration.png',
-      title: 'Ubicación Obligatoria',
-      text: 'Para usar GoDelivery, es necesario acceder a tu ubicación. Así podremos mostrarte los locales cercanos a tu puerta.',
+      title: 'Activá tu ubicación',
+      text: 'Así te mostramos lo que llega a tu puerta y calculamos bien el envío. Si preferís, después la podés escribir a mano.',
       btnText: 'Continuar',
       action: async () => {
         const { showToast } = await import('./toast.js');
@@ -70,8 +74,8 @@ export async function showOnboarding(onComplete) {
     screens.push({
       id: 'notifications',
       image: '/onboarding_delivery_illustration.png',
-      title: 'Notificaciones en Tiempo Real',
-      text: 'Recibí avisos en tiempo real del estado de tus pedidos, repartidores en camino y mensajes de chat.',
+      title: 'Avisos en tiempo real',
+      text: 'Te avisamos cuando tu pedido se confirma, sale y llega, y si alguien te escribe.',
       btnText: 'Activar ahora',
       action: async () => {
         try {
@@ -116,7 +120,9 @@ export async function showOnboarding(onComplete) {
           <img src="${step.image}" alt="" />
         </div>
         <div class="onboarding-content">
+          <span class="go-eyebrow">Paso ${currentStep + 1} de ${screens.length}</span>
           <h1 class="onboarding-title">${step.title}</h1>
+          <span class="go-bar" style="margin: 12px auto 0;"></span>
           <p class="onboarding-text">${step.text}</p>
           <div id="permission-helper-container"></div>
         </div>
