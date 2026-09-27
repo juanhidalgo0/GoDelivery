@@ -6730,6 +6730,7 @@ function dockQuickRow(user, isLight, compact, withSos = true) {
         <span style="position:absolute;top:3px;left:${on ? 19 : 3}px;width:16px;height:16px;border-radius:8px;background:#fff;transition:left .2s ease"></span>
       </span>
     </button>
+    <button type="button" aria-label="Menú: modo cliente, admin y más" title="Menú" onclick="event.stopPropagation(); window.__openDeliveryDrawer && window.__openDeliveryDrawer();" style="width:${compact ? 40 : 44}px;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;padding:0"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg></button>
     ${iconBtn('driver-quick-support-btn', 'headset', 'Chat con soporte')}
     ${iconBtn('driver-quick-help-btn', 'help', 'Ayuda y preguntas frecuentes')}
     ${withSos ? iconBtn('driver-quick-sos-btn', 'shield', 'Centro de seguridad SOS', t.brandTx) : ''}
