@@ -4,6 +4,7 @@ import { icon } from '../utils/icons.js';
 import { formatPrice, isScheduleActive } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
+import { ensureSheetStyles, openDriverSheet } from './delivery-panel/driver-sheet.js';
 import { db, storage } from '../firebase.js';
 import { App } from '@capacitor/app';
 import { AudioManager } from '../utils/audio-manager.js';
@@ -1576,90 +1577,19 @@ export async function renderDeliveryPanel(containerArg) {
         e.preventDefault();
         e.stopPropagation();
         
-        // Remove existing sheet if any
-        const existing = document.getElementById('info-bottom-sheet');
-        if (existing) existing.remove();
-
-        const overlay = document.createElement('div');
-        overlay.id = 'info-bottom-sheet';
-        overlay.style.cssText = `
-          position: fixed;
-          inset: 0;
-          z-index: 999999;
-          background: rgba(0,0,0,0.4);
-          display: flex;
-          flex-direction: column;
-          justify-content: flex-end;
-          opacity: 0;
-          transition: opacity 0.3s ease;
-        `;
-
-        overlay.innerHTML = `
-          <div id="info-bottom-sheet-card" style="
-            background: var(--color-bg);
-            border-top-left-radius: 24px;
-            border-top-right-radius: 24px;
-            padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5);
-            box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
-            transform: translateY(100%);
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-4);
-          ">
-            <!-- Drag indicator handle -->
-            <div style="width: 36px; height: 5px; background: var(--color-border-light, #e5e7eb); border-radius: 3px; align-self: center; margin-bottom: 8px;"></div>
-            
-            <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6);">
-              Modo Auto-Aceptar
-            </h3>
-            
-            <div style="font-size: 14.5px; line-height: 1.6; color: var(--color-text-secondary); font-weight: 550; display:flex; flex-direction:column; gap:12px;">
-              <p style="margin:0;"><strong>¿Cómo funciona?</strong></p>
-              <p style="margin:0;">Al activar esta opción, cualquier pedido exclusivo que se te asigne en cola será <strong>aceptado automáticamente</strong> por el sistema sin necesidad de que presiones el botón de aceptar.</p>
-              <p style="margin:0;">⚠️ <strong>Importante:</strong> Evita que tus pedidos expiren por inactividad y mantiene tu flujo de trabajo constante.</p>
+        openDriverSheet({
+          id: 'info-bottom-sheet',
+          iconName: 'zap',
+          tone: 'green',
+          title: 'Modo Auto-aceptar',
+          subtitle: '¿Cómo funciona?',
+          body: `
+            <div style="font-size:13.5px; line-height:1.55; color:var(--driver-text-secondary); display:flex; flex-direction:column; gap:10px; padding:0 2px 6px;">
+              <p style="margin:0;">Con esta opción activa, los pedidos exclusivos que se te asignen en cola se <strong style="color:var(--driver-text-primary);">aceptan automáticamente</strong>, sin tocar el botón de aceptar.</p>
+              <p style="margin:0;">Evita que tus pedidos expiren por inactividad y mantiene tu flujo de trabajo constante.</p>
             </div>
-            
-            <button id="info-bottom-sheet-close-btn" style="
-              width: 100%;
-              height: 54px;
-              border: none;
-              background: var(--color-primary);
-              color: white;
-              border-radius: 16px;
-              font-weight: 900;
-              font-size: 15.5px;
-              cursor: pointer;
-              margin-top: 8px;
-              box-shadow: 0 8px 24px rgba(225,29,72,0.25);
-            ">
-              Entendido
-            </button>
-          </div>
-        `;
-
-        document.body.appendChild(overlay);
-
-        // Animate in
-        setTimeout(() => {
-          overlay.style.opacity = '1';
-          const card = document.getElementById('info-bottom-sheet-card');
-          if (card) card.style.transform = 'translateY(0)';
-        }, 10);
-
-        const closeSheet = () => {
-          const card = document.getElementById('info-bottom-sheet-card');
-          if (card) card.style.transform = 'translateY(100%)';
-          overlay.style.opacity = '0';
-          setTimeout(() => overlay.remove(), 300);
-        };
-
-        overlay.onclick = (e) => {
-          if (e.target === overlay) closeSheet();
-        };
-
-        const closeBtn = document.getElementById('info-bottom-sheet-close-btn');
-        if (closeBtn) closeBtn.onclick = closeSheet;
+          `,
+        });
       };
     }
 
@@ -1681,39 +1611,39 @@ export async function renderDeliveryPanel(containerArg) {
 
   const deliveryDrawerEl = document.createElement('div');
   deliveryDrawerEl.id = 'delivery-drawer';
-  deliveryDrawerEl.style.cssText = "position: fixed; top: 0; right: 0; bottom: 0; width: 300px; background: var(--color-surface); box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 10001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; border-top-left-radius: 20px; border-bottom-left-radius: 20px;";
+  ensureSheetStyles();
+  const drawerIsLight = getDriverMapTheme() === 'light';
+  const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  deliveryDrawerEl.style.cssText = `position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 86vw); background: ${drawerIsLight ? '#ffffff' : '#111722'}; color: var(--driver-text-primary); border-left: 1px solid var(--driver-border); box-shadow: -12px 0 40px rgba(0,0,0,${drawerIsLight ? '0.12' : '0.5'}); z-index: 10001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; border-top-left-radius: 24px; border-bottom-left-radius: 24px; font-family: var(--font-body, sans-serif);`;
+  const drawerTile = (iconName, bg, fg) => `<div class="dsheet-tile" style="background:${bg}; color:${fg};">${icon(iconName, 20)}</div>`;
+  const drawerTone = (dark, light) => drawerIsLight ? light : dark;
+  const drawerItem = ({ id, href, iconName, bg, fg, title, subtitle }) => {
+    const inner = `${drawerTile(iconName, bg, fg)}
+        <div style="flex:1; min-width:0;"><div class="dsheet-row-title">${title}</div><div class="dsheet-row-sub">${subtitle}</div></div>
+        <span class="dsheet-chev">${icon('chevronRight', 18)}</span>`;
+    return href
+      ? `<a href="${href}" id="${id}" class="dsheet-row">${inner}</a>`
+      : `<button type="button" id="${id}" class="dsheet-row">${inner}</button>`;
+  };
   deliveryDrawerEl.innerHTML = `
-    <div style="padding: 20px 20px 14px; display:flex; align-items:center; justify-content:space-between; border-bottom: 1px solid var(--color-border-light);">
-      <h2 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Opciones</h2>
-      <button id="delivery-drawer-close-btn" style="width:36px; height:36px; border-radius:10px; border:none; background:var(--color-bg-secondary); color:var(--color-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center;">${icon('close', 16)}</button>
+    <div style="padding: calc(18px + env(safe-area-inset-top, 0px)) 16px 14px; display:flex; align-items:center; gap:12px; border-bottom: 1px solid var(--driver-border);">
+      <div class="dsheet-tile" style="width:44px; height:44px; border-radius:14px; background:${drawerTone('rgba(225,29,72,0.14)', '#ffe4e6')}; color:${drawerTone('#fb7185', '#e11d48')}; font-family:var(--font-display, sans-serif); font-weight:800; font-size:17px;">
+        ${escapeHtml((user.displayName || user.name || 'R').trim().charAt(0).toUpperCase())}
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-family:var(--font-display, sans-serif); font-size:17px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(user.displayName || user.name || 'Repartidor')}</div>
+        <div style="font-size:12.5px; color:var(--driver-text-secondary);">Repartidor ${escapeHtml(String(user.deliveryId || 'Oficial'))}</div>
+      </div>
+      <button id="delivery-drawer-close-btn" aria-label="Cerrar menú" style="width:40px; height:40px; border-radius:12px; flex-shrink:0; background:var(--driver-fill-subtle); border:1px solid var(--driver-border); color:var(--driver-text-secondary); cursor:pointer; display:flex; align-items:center; justify-content:center;">${icon('close', 16)}</button>
     </div>
-    <div style="flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:4px;">
-      <a href="#/delivery/history" id="delivery-drawer-history" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; text-decoration:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer;">
-        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(100,116,139,0.09); color:#64748b;">${icon('history', 18)}</div>
-        <span style="flex:1; font-size:14.5px; font-weight:700;">Historial de Pedidos</span>
-        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-      </a>
-      <a href="#/delivery/finances" id="delivery-drawer-finances" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; text-decoration:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer;">
-        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(34,197,94,0.09); color:#16a34a;">${icon('bank', 18)}</div>
-        <span style="flex:1; font-size:14.5px; font-weight:700;">Finanzas y Cuentas</span>
-        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-      </a>
-      <a href="#/delivery/config" id="delivery-drawer-config" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; text-decoration:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer;">
-        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(99,102,241,0.09); color:#6366f1;">${icon('settings', 18)}</div>
-        <span style="flex:1; font-size:14.5px; font-weight:700;">Configuración de Perfil</span>
-        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-      </a>
-      <div style="height:1px; background:var(--color-border-light); margin:8px 0;"></div>
-      <button id="delivery-drawer-support-btn" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; border:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer; width:100%; text-align:left;">
-        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background: rgba(14,165,233,0.08); color:#0284c7;">${icon('headset', 18)}</div>
-        <span style="flex:1; font-size:14.5px; font-weight:700;">Soporte Técnico</span>
-        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-      </button>
-      <button id="delivery-drawer-info-btn" style="display:flex; align-items:center; gap:14px; padding:14px 12px; border-radius:14px; background:transparent; border:none; color:var(--color-text-primary); transition:background 0.15s; cursor:pointer; width:100%; text-align:left;">
-        <div style="width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:rgba(245,158,11,0.1); color:#f59e0b;">${icon('helpCircle', 18)}</div>
-        <span style="flex:1; font-size:14.5px; font-weight:700;">Funcionamiento del Sistema</span>
-        <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-      </button>
+    <div style="flex:1; overflow-y:auto; padding:14px 16px calc(16px + env(safe-area-inset-bottom, 0px)); display:flex; flex-direction:column; gap:8px;">
+      <div class="dsheet-label" style="margin-top:0;">Mi cuenta</div>
+      ${drawerItem({ id: 'delivery-drawer-history', href: '#/delivery/history', iconName: 'history', bg: drawerTone('rgba(255,255,255,0.08)', '#f1f5f9'), fg: drawerTone('#cbd5e1', '#475569'), title: 'Historial de pedidos', subtitle: 'Tus entregas anteriores' })}
+      ${drawerItem({ id: 'delivery-drawer-finances', href: '#/delivery/finances', iconName: 'bank', bg: drawerTone('rgba(34,197,94,0.14)', '#dcfce7'), fg: drawerTone('#4ade80', '#16a34a'), title: 'Finanzas y cuentas', subtitle: 'Saldo, cobros y alias' })}
+      ${drawerItem({ id: 'delivery-drawer-config', href: '#/delivery/config', iconName: 'settings', bg: drawerTone('rgba(129,140,248,0.14)', '#e0e7ff'), fg: drawerTone('#a5b4fc', '#4f46e5'), title: 'Configuración de perfil', subtitle: 'Datos, vehículo y preferencias' })}
+      <div class="dsheet-label">Ayuda</div>
+      ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(56,189,248,0.14)', '#e0f2fe'), fg: drawerTone('#38bdf8', '#0284c7'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
+      ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(245,158,11,0.14)', '#fef3c7'), fg: drawerTone('#fbbf24', '#d97706'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
     </div>
   `;
   document.body.appendChild(deliveryDrawerEl);
@@ -1776,51 +1706,31 @@ export async function renderDeliveryPanel(containerArg) {
     document.getElementById('delivery-drawer-info-btn')?.addEventListener('click', () => {
       closeDeliveryDrawer();
 
-      const existing = document.getElementById('info-bottom-sheet');
-      if (existing) existing.remove();
-
-      const overlay = document.createElement('div');
-      overlay.id = 'info-bottom-sheet';
-      overlay.style.cssText = `position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.4); display: flex; flex-direction: column; justify-content: flex-end; opacity: 0; transition: opacity 0.3s ease;`;
-      overlay.innerHTML = `
-        <div id="info-bottom-sheet-card" style="background: var(--color-bg); border-top-left-radius: 24px; border-top-right-radius: 24px; padding: var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px)) var(--space-5); box-shadow: 0 -8px 32px rgba(0,0,0,0.15); transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; gap: var(--space-4); max-height: 85vh;">
-          <div style="width: 36px; height: 5px; background: var(--color-border-light, #e5e7eb); border-radius: 3px; align-self: center; margin-bottom: 8px;"></div>
-          <h3 style="font-family: var(--font-display); font-size: 20px; font-weight: 900; color: var(--color-text-primary); margin: 0; padding-right: var(--space-6); text-align: left;">Funcionamiento del Sistema</h3>
-          <div style="font-size: 14px; line-height: 1.6; color: var(--color-text-secondary); font-weight: 550; display:flex; flex-direction:column; gap:16px; max-height:55vh; overflow-y:auto; padding-right:6px; text-align: left;">
-            <div>
-              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🔄 Asignación en Cola (Round-Robin)</p>
-              <p style="margin: 0;">Los pedidos listos se ofrecen a un repartidor a la vez de forma exclusiva durante 30 segundos. La cola prioriza a quienes no hayan rechazado el pedido y desempata seleccionando a quien tenga menos pedidos completados hoy.</p>
-            </div>
-            <div>
-              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">🛑 Desconexión Automática por Inactividad</p>
-              <p style="margin: 0;">Si dejas expirar o rechazas 2 pedidos de forma consecutiva, el sistema pausará tu sesión automáticamente cambiándote a desconectado. Esto evita que dejes pedidos trabados si no estás atento al celular.</p>
-            </div>
-            <div>
-              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">📦 Co-retiros Simultáneos</p>
-              <p style="margin: 0;">Puedes llevar hasta 2 pedidos activos en curso de comercios diferentes. Si los pedidos pertenecen al mismo comercio, puedes llevar hasta 3 pedidos simultáneos (lote optimizado del local).</p>
-            </div>
-            <div>
-              <p style="margin: 0 0 4px 0; color: var(--color-text-primary); font-weight: 800; font-size: 15px;">❌ Cancelación Automática por Falta de Cobertura</p>
-              <p style="margin: 0;">Si todos los repartidores activos de la zona rechazan o ignoran el pedido, la orden se cancela de forma automática, notificando al cliente y reembolsándole su saldo y puntos al instante.</p>
-            </div>
-          </div>
-          <button id="info-bottom-sheet-close-btn" style="width: 100%; height: 54px; border: none; background: var(--color-primary); color: white; border-radius: 16px; font-weight: 900; font-size: 15.5px; cursor: pointer; margin-top: 8px; box-shadow: 0 8px 24px rgba(225,29,72,0.25);">Entendido</button>
-        </div>
-      `;
-      document.body.appendChild(overlay);
-      setTimeout(() => {
-        overlay.style.opacity = '1';
-        const card = document.getElementById('info-bottom-sheet-card');
-        if (card) card.style.transform = 'translateY(0)';
-      }, 10);
-      const closeSheet = () => {
-        const card = document.getElementById('info-bottom-sheet-card');
-        if (card) card.style.transform = 'translateY(100%)';
-        overlay.style.opacity = '0';
-        setTimeout(() => overlay.remove(), 300);
-      };
-      overlay.onclick = (e) => { if (e.target === overlay) closeSheet(); };
-      document.getElementById('info-bottom-sheet-close-btn')?.addEventListener('click', closeSheet);
+      openDriverSheet({
+        id: 'info-bottom-sheet',
+        iconName: 'helpCircle',
+        tone: 'amber',
+        title: 'Cómo funciona el sistema',
+        subtitle: 'Reglas de asignación y pausas',
+        body: `
+        <details class="dsheet-faq">
+          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('refresh', 18)}</span><span style="flex:1;">Asignación en cola</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+          <div class="dsheet-faq-body">Los pedidos listos se ofrecen a un repartidor a la vez, en exclusiva, durante 30 segundos. Se prioriza a quien no lo rechazó y se desempata por quien tenga menos pedidos completados hoy.</div>
+        </details>
+        <details class="dsheet-faq">
+          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('pause', 18)}</span><span style="flex:1;">Pausa automática por inactividad</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+          <div class="dsheet-faq-body">Si dejás expirar o rechazás <strong>2 pedidos seguidos</strong>, el sistema te pasa a desconectado para que no queden pedidos trabados.</div>
+        </details>
+        <details class="dsheet-faq">
+          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('package', 18)}</span><span style="flex:1;">Pedidos simultáneos</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+          <div class="dsheet-faq-body">Podés llevar hasta 2 pedidos de comercios distintos, o hasta 3 si son del mismo comercio.</div>
+        </details>
+        <details class="dsheet-faq">
+          <summary><span style="display:flex; color:var(--driver-text-secondary);">${icon('close', 18)}</span><span style="flex:1;">Cancelación por falta de cobertura</span><span class="dsheet-chev">${icon('chevronRight', 16)}</span></summary>
+          <div class="dsheet-faq-body">Si todos los repartidores de la zona rechazan o ignoran el pedido, se cancela automáticamente y se reembolsa al cliente al instante.</div>
+        </details>
+        `,
+      });
     });
   }
 
@@ -7441,215 +7351,108 @@ export function attachBottomDockListeners(user, activeOrders = []) {
   if (quickAutoAcceptBtn) {
     quickAutoAcceptBtn.onclick = async () => {
       const isCurrentlyEnabled = window.autoAcceptEnabled === true;
-      const isLight = getDriverMapTheme() === 'light';
       const isChofer = isDriverChoferApproved(latestUser);
       const currentFilters = { ...getDriverAutoAcceptFilters(latestUser) };
-      const { showModal, closeModal } = await import('../components/modal.js');
+      const { openDriverSheet, sheetTone } = await import('./delivery-panel/driver-sheet.js');
 
-      const modalEl = document.createElement('div');
-      modalEl.style.cssText = `padding: 28px 20px calc(24px + env(safe-area-inset-bottom, 20px)) 20px; font-family: var(--font-body, sans-serif); color: var(--driver-text-primary);`;
+      const categories = [
+        { key: 'comercios', iconName: 'restaurant', title: 'Pedidos de comercios', sub: 'Restaurantes, kioscos y locales' },
+        { key: 'mandados', iconName: 'package', title: 'Mandados y envíos', sub: 'GoFavores, compras y paquetería' },
+        ...(isChofer ? [{ key: 'viajes', iconName: 'car', title: 'Viajes de pasajeros', sub: 'GoViajes y traslados urbanos' }] : []),
+      ];
 
-      const renderFilterCards = () => `
-        <div style="display: flex; flex-direction: column; gap: 10px; margin: 16px 0 20px 0;">
-          <!-- 1. COMERCIOS -->
-          <div id="filter-card-comercios" style="
-            display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 14px;
-            background: ${currentFilters.comercios ? (isLight ? '#f0fdf4' : 'rgba(34, 197, 94, 0.12)') : (isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)')};
-            border: 1.5px solid ${currentFilters.comercios ? (isLight ? '#86efac' : 'rgba(34, 197, 94, 0.35)') : (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)')};
-            cursor: pointer; transition: all 0.2s ease;
-          ">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <div style="display:flex; align-items:center; justify-content:center; width:22px; height:22px; color:${currentFilters.comercios ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#0f172a' : '#ffffff')};">${icon('restaurant', 22)}</div>
-              <div>
-                <div style="font-size:13.5px; font-weight:900; color:${currentFilters.comercios ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#0f172a' : '#ffffff')};">Pedidos de Comercios</div>
-                <div style="font-size:11px; color:var(--driver-text-secondary); font-weight:500;">Restaurantes, kioscos y locales</div>
-              </div>
-            </div>
-            <div style="
-              width: 22px; height: 22px; border-radius: 7px;
-              background: ${currentFilters.comercios ? '#22c55e' : 'transparent'};
-              border: 1.5px solid ${currentFilters.comercios ? '#22c55e' : (isLight ? '#cbd5e1' : 'rgba(255,255,255,0.25)')};
-              display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 900;
-            ">
-              ${currentFilters.comercios ? '✓' : ''}
-            </div>
-          </div>
+      const renderSwitch = (on) => `
+        <span style="width:44px; height:26px; border-radius:13px; flex-shrink:0; position:relative; transition:background 0.2s ease; background:${on ? '#22c55e' : 'var(--driver-border-strong)'};">
+          <span style="position:absolute; top:3px; left:${on ? '21px' : '3px'}; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.3); transition:left 0.2s cubic-bezier(0.16,1,0.3,1);"></span>
+        </span>`;
 
-          <!-- 2. MANDADOS -->
-          <div id="filter-card-mandados" style="
-            display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 14px;
-            background: ${currentFilters.mandados ? (isLight ? '#f0fdf4' : 'rgba(34, 197, 94, 0.12)') : (isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)')};
-            border: 1.5px solid ${currentFilters.mandados ? (isLight ? '#86efac' : 'rgba(34, 197, 94, 0.35)') : (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)')};
-            cursor: pointer; transition: all 0.2s ease;
-          ">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <div style="display:flex; align-items:center; justify-content:center; width:22px; height:22px; color:${currentFilters.mandados ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#0f172a' : '#ffffff')};">${icon('package', 22)}</div>
-              <div>
-                <div style="font-size:13.5px; font-weight:900; color:${currentFilters.mandados ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#0f172a' : '#ffffff')};">Mandados y Envíos</div>
-                <div style="font-size:11px; color:var(--driver-text-secondary); font-weight:500;">GoFavores, compras y paquetería</div>
-              </div>
+      const renderRows = () => categories.map(c => {
+        const on = !!currentFilters[c.key];
+        const t = sheetTone(on ? 'green' : 'slate');
+        return `
+          <button type="button" class="dsheet-row" data-filter-key="${c.key}" role="switch" aria-checked="${on}">
+            <div class="dsheet-tile" style="background:${t.bg}; color:${t.fg};">${icon(c.iconName, 20)}</div>
+            <div style="flex:1; min-width:0;">
+              <div class="dsheet-row-title">${c.title}</div>
+              <div class="dsheet-row-sub">${c.sub}</div>
             </div>
-            <div style="
-              width: 22px; height: 22px; border-radius: 7px;
-              background: ${currentFilters.mandados ? '#22c55e' : 'transparent'};
-              border: 1.5px solid ${currentFilters.mandados ? '#22c55e' : (isLight ? '#cbd5e1' : 'rgba(255,255,255,0.25)')};
-              display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 900;
-            ">
-              ${currentFilters.mandados ? '✓' : ''}
-            </div>
-          </div>
+            ${renderSwitch(on)}
+          </button>`;
+      }).join('');
 
-          <!-- 3. VIAJES (SOLO VISIBLE SI ES CHOFER HABILITADO) -->
-          ${isChofer ? `
-            <div id="filter-card-viajes" style="
-              display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 14px;
-              background: ${currentFilters.viajes ? (isLight ? '#f0fdf4' : 'rgba(34, 197, 94, 0.12)') : (isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)')};
-              border: 1.5px solid ${currentFilters.viajes ? (isLight ? '#86efac' : 'rgba(34, 197, 94, 0.35)') : (isLight ? '#e2e8f0' : 'rgba(255,255,255,0.1)')};
-              cursor: pointer; transition: all 0.2s ease;
-            ">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <div style="display:flex; align-items:center; justify-content:center; width:22px; height:22px; color:${currentFilters.viajes ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#0f172a' : '#ffffff')};">${icon('car', 22)}</div>
-                <div>
-                  <div style="font-size:13.5px; font-weight:900; color:${currentFilters.viajes ? (isLight ? '#166534' : '#4ade80') : (isLight ? '#0f172a' : '#ffffff')};">Viajes de Pasajeros</div>
-                  <div style="font-size:11px; color:var(--driver-text-secondary); font-weight:500;">GoViajes y traslados urbanos</div>
-                </div>
-              </div>
-              <div style="
-                width: 22px; height: 22px; border-radius: 7px;
-                background: ${currentFilters.viajes ? '#22c55e' : 'transparent'};
-                border: 1.5px solid ${currentFilters.viajes ? '#22c55e' : (isLight ? '#cbd5e1' : 'rgba(255,255,255,0.25)')};
-                display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 900;
-              ">
-                ${currentFilters.viajes ? '✓' : ''}
-              </div>
-            </div>
-          ` : ''}
-        </div>
-      `;
-
-      modalEl.innerHTML = `
-        <div style="text-align:center; padding-top: 8px;">
-          <div style="width: 52px; height: 52px; border-radius: 16px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; background: ${isCurrentlyEnabled ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)'}; color: white; box-shadow: 0 8px 20px rgba(0,0,0,0.2);">
-            ${icon('zap', 26)}
-          </div>
-          <h3 style="margin: 0 0 6px 0; font-size: 18px; font-weight: 900; font-family: var(--font-display, sans-serif);">
-            ${isCurrentlyEnabled ? 'Filtros de Auto-Aceptar' : 'Activar Auto-Aceptar'}
-          </h3>
-          <p style="margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--driver-text-secondary); font-weight: 500;">
-            Seleccioná qué tipos de pedidos querés aceptar de forma automática en tu ruta:
+      const { sheet, close } = openDriverSheet({
+        id: 'driver-auto-accept-sheet',
+        iconName: 'zap',
+        tone: 'green',
+        title: isCurrentlyEnabled ? 'Auto-aceptar activo' : 'Auto-aceptar',
+        subtitle: 'Elegí qué pedidos se aceptan solos',
+        body: `
+          <div id="auto-accept-filter-rows" style="display:flex; flex-direction:column; gap:8px;">${renderRows()}</div>
+          <p style="margin:4px 2px 6px; font-size:12px; line-height:1.45; color:var(--driver-text-secondary);">
+            Los pedidos exclusivos que coincidan se aceptan automáticamente, así no expiran si no llegás a tocar el celular.
           </p>
-        </div>
-
-        <div id="auto-accept-filter-cards-container">
-          ${renderFilterCards()}
-        </div>
-
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-          ${isCurrentlyEnabled ? `
-            <button id="btn-disable-auto-accept" style="flex: 1; height: 46px; border-radius: 14px; border: 1.5px solid ${isLight ? '#fecaca' : 'rgba(239,68,68,0.3)'}; background: ${isLight ? '#fee2e2' : 'rgba(239,68,68,0.15)'}; color: ${isLight ? '#dc2626' : '#f87171'}; font-weight: 850; font-size: 13px; cursor: pointer;">
-              Desactivar
-            </button>
-            <button id="btn-save-auto-accept" style="flex: 1; height: 46px; border-radius: 14px; border: none; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; font-weight: 900; font-size: 13px; cursor: pointer; box-shadow: 0 6px 16px rgba(16,185,129,0.35);">
-              Guardar Filtros
-            </button>
-          ` : `
-            <button id="btn-cancel-auto-accept" style="flex: 1; height: 46px; border-radius: 14px; border: 1.5px solid var(--driver-border-strong); background: transparent; color: var(--driver-text-label); font-weight: 800; font-size: 13px; cursor: pointer;">
-              Cancelar
-            </button>
-            <button id="btn-confirm-auto-accept" style="flex: 1; height: 46px; border-radius: 14px; border: none; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; font-weight: 900; font-size: 13px; cursor: pointer; box-shadow: 0 6px 16px rgba(16,185,129,0.35); display:flex; align-items:center; justify-content:center; gap:6px;">
-              <span style="display:inline-flex;">${icon('zap', 15)}</span> Activar Auto-Aceptar
-            </button>
-          `}
-        </div>
-      `;
-
-      showModal({
-        content: modalEl,
-        height: 'auto',
-        hideHeader: true,
-        headerBackground: isLight ? '#ffffff' : '#090d16',
-        onOpen: () => {
-          const container = modalEl.querySelector('#auto-accept-filter-cards-container');
-          const bindFilterEvents = () => {
-            const cardComercios = modalEl.querySelector('#filter-card-comercios');
-            const cardMandados = modalEl.querySelector('#filter-card-mandados');
-            const cardViajes = modalEl.querySelector('#filter-card-viajes');
-
-            if (cardComercios) {
-              cardComercios.onclick = () => {
-                currentFilters.comercios = !currentFilters.comercios;
-                container.innerHTML = renderFilterCards();
-                bindFilterEvents();
-              };
-            }
-            if (cardMandados) {
-              cardMandados.onclick = () => {
-                currentFilters.mandados = !currentFilters.mandados;
-                container.innerHTML = renderFilterCards();
-                bindFilterEvents();
-              };
-            }
-            if (cardViajes) {
-              cardViajes.onclick = () => {
-                currentFilters.viajes = !currentFilters.viajes;
-                container.innerHTML = renderFilterCards();
-                bindFilterEvents();
-              };
-            }
-          };
-          bindFilterEvents();
-
-          const cancelBtn = modalEl.querySelector('#btn-cancel-auto-accept');
-          if (cancelBtn) cancelBtn.onclick = () => closeModal();
-
-          const disableBtn = modalEl.querySelector('#btn-disable-auto-accept');
-          if (disableBtn) {
-            disableBtn.onclick = async () => {
-              closeModal();
-              window.autoAcceptEnabled = false;
-              localStorage.setItem('driver_auto_accept', 'false');
-              if (window.toggleAutoAccept && latestUser?.uid) {
-                try { window.toggleAutoAccept(false, latestUser.uid, currentFilters); } catch(e) {}
-              }
-              showToast('Auto-Aceptar Desactivado ⏸️', 'info');
-              const bottomDock = document.getElementById('driver-footer-dock-container');
-              if (bottomDock) {
-                refreshBottomDock(bottomDock, latestUser, activeOrdersList);
-              }
-            };
-          }
-
-          const confirmBtn = modalEl.querySelector('#btn-confirm-auto-accept') || modalEl.querySelector('#btn-save-auto-accept');
-          if (confirmBtn) {
-            confirmBtn.onclick = async () => {
-              const selectedCount = (currentFilters.comercios ? 1 : 0) + (currentFilters.mandados ? 1 : 0) + (isChofer && currentFilters.viajes ? 1 : 0);
-              if (selectedCount === 0) {
-                showToast('⚠️ Seleccioná al menos un tipo de pedido', 'warning');
-                return;
-              }
-
-              closeModal();
-              saveDriverAutoAcceptFilters(currentFilters);
-              window.autoAcceptEnabled = true;
-              localStorage.setItem('driver_auto_accept', 'true');
-              if (window.toggleAutoAccept && latestUser?.uid) {
-                try { window.toggleAutoAccept(true, latestUser.uid, currentFilters); } catch(e) {}
-              }
-
-              const names = [];
-              if (currentFilters.comercios) names.push('Comercios');
-              if (currentFilters.mandados) names.push('Mandados');
-              if (isChofer && currentFilters.viajes) names.push('Viajes');
-
-              showToast(`⚡ Auto-Aceptar activo para: ${names.join(', ')}`, 'success');
-              const bottomDock = document.getElementById('driver-footer-dock-container');
-              if (bottomDock) {
-                refreshBottomDock(bottomDock, latestUser, activeOrdersList);
-              }
-            };
-          }
-        }
+          <div style="display:flex; gap:8px;">
+            ${isCurrentlyEnabled
+              ? `<button type="button" id="btn-disable-auto-accept" class="dsheet-btn dsheet-btn-ghost" style="flex:1; color:${sheetTone('red').fg};">Desactivar</button>
+                 <button type="button" id="btn-save-auto-accept" class="dsheet-btn" style="flex:1.4; background:#22c55e; color:#fff;">Guardar</button>`
+              : `<button type="button" id="btn-cancel-auto-accept" class="dsheet-btn dsheet-btn-ghost" style="flex:1;">Cancelar</button>
+                 <button type="button" id="btn-confirm-auto-accept" class="dsheet-btn" style="flex:1.4; background:#22c55e; color:#fff;">${icon('zap', 16)} Activar</button>`}
+          </div>
+        `,
       });
+
+      const rowsEl = sheet.querySelector('#auto-accept-filter-rows');
+      rowsEl.onclick = (e) => {
+        const row = e.target.closest('[data-filter-key]');
+        if (!row) return;
+        const key = row.dataset.filterKey;
+        currentFilters[key] = !currentFilters[key];
+        rowsEl.innerHTML = renderRows();
+      };
+
+      const refreshDock = () => {
+        const bottomDock = document.getElementById('driver-footer-dock-container');
+        if (bottomDock) refreshBottomDock(bottomDock, latestUser, activeOrdersList);
+      };
+
+      const cancelBtn = sheet.querySelector('#btn-cancel-auto-accept');
+      if (cancelBtn) cancelBtn.onclick = close;
+
+      const disableBtn = sheet.querySelector('#btn-disable-auto-accept');
+      if (disableBtn) {
+        disableBtn.onclick = () => {
+          close();
+          window.autoAcceptEnabled = false;
+          localStorage.setItem('driver_auto_accept', 'false');
+          if (window.toggleAutoAccept && latestUser?.uid) {
+            try { window.toggleAutoAccept(false, latestUser.uid, currentFilters); } catch(e) {}
+          }
+          showToast('Auto-Aceptar Desactivado ⏸️', 'info');
+          refreshDock();
+        };
+      }
+
+      const confirmBtn = sheet.querySelector('#btn-confirm-auto-accept') || sheet.querySelector('#btn-save-auto-accept');
+      confirmBtn.onclick = () => {
+        const selectedCount = (currentFilters.comercios ? 1 : 0) + (currentFilters.mandados ? 1 : 0) + (isChofer && currentFilters.viajes ? 1 : 0);
+        if (selectedCount === 0) {
+          showToast('⚠️ Seleccioná al menos un tipo de pedido', 'warning');
+          return;
+        }
+        close();
+        saveDriverAutoAcceptFilters(currentFilters);
+        window.autoAcceptEnabled = true;
+        localStorage.setItem('driver_auto_accept', 'true');
+        if (window.toggleAutoAccept && latestUser?.uid) {
+          try { window.toggleAutoAccept(true, latestUser.uid, currentFilters); } catch(e) {}
+        }
+        const names = [];
+        if (currentFilters.comercios) names.push('Comercios');
+        if (currentFilters.mandados) names.push('Mandados');
+        if (isChofer && currentFilters.viajes) names.push('Viajes');
+        showToast(`⚡ Auto-Aceptar activo para: ${names.join(', ')}`, 'success');
+        refreshDock();
+      };
     };
   }
 

@@ -37,7 +37,7 @@ export async function openDriverDirectSupportChat(user) {
   overlay.id = 'driver-support-chat-modal';
   overlay.style.cssText = `
     position: fixed; inset: 0; z-index: 100010;
-    background: rgba(0,0,0,0.65); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    background: rgba(2,6,15,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
     display: flex; align-items: flex-end; justify-content: center;
     opacity: 0; transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   `;
@@ -45,9 +45,9 @@ export async function openDriverDirectSupportChat(user) {
   overlay.innerHTML = `
     <div id="driver-support-chat-card" style="
       width: 100%; max-width: 520px; height: 90vh; height: 90dvh;
-      background: ${isLight ? '#ffffff' : '#0f172a'};
-      border-top-left-radius: 28px; border-top-right-radius: 28px;
-      border: 1px solid ${isLight ? '#e2e8f0' : 'rgba(255,255,255,0.12)'};
+      background: ${isLight ? '#ffffff' : '#111722'};
+      border-top-left-radius: 24px; border-top-right-radius: 24px;
+      border: 1px solid var(--driver-border); border-bottom: none;
       display: flex; flex-direction: column; overflow: hidden;
       box-shadow: 0 -10px 40px rgba(0,0,0,0.4);
       transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -55,37 +55,31 @@ export async function openDriverDirectSupportChat(user) {
       position: relative;
     ">
       <!-- HEADER -->
-      <div style="
-        padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px;
-        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
-        color: white; display: flex; align-items: center; justify-content: space-between;
-        box-shadow: 0 2px 10px rgba(2,132,199,0.25); z-index: 10;
-      ">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <button id="close-driver-support-chat" aria-label="Volver" style="
-            width: 44px; height: 44px;
-            background: none; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%;
-          ">
-            ${icon('chevronLeft', 24)}
-          </button>
+      <div style="padding: 10px 16px 12px; background: ${isLight ? '#ffffff' : '#111722'}; border-bottom: 1px solid var(--driver-border); z-index: 10; flex-shrink: 0;">
+        <div style="width: 40px; height: 4px; border-radius: 2px; background: var(--driver-border-strong); margin: 0 auto 12px;"></div>
+        <div style="display:flex; align-items:center; gap:12px;">
           <div style="
-            width: 40px; height: 40px; border-radius: 12px;
-            background: rgba(255,255,255,0.2); border: 1.5px solid rgba(255,255,255,0.3);
+            width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0; position: relative;
+            background: ${isLight ? '#e0f2fe' : 'rgba(56,189,248,0.14)'}; color: ${isLight ? '#0284c7' : '#38bdf8'};
             display: flex; align-items: center; justify-content: center;
-            color: white; position: relative; flex-shrink: 0;
           ">
-            ${icon('headset', 20)}
-            <span style="position:absolute; bottom:-2px; right:-2px; width:11px; height:11px; border-radius:50%; background:#22c55e; border:2px solid #0369a1;"></span>
+            ${icon('headset', 22)}
+            <span style="position:absolute; bottom:-2px; right:-2px; width:12px; height:12px; border-radius:50%; background:#22c55e; border:2px solid ${isLight ? '#ffffff' : '#111722'};"></span>
           </div>
-          <div style="min-width:0;">
-            <div style="font-size:14.5px; font-weight:900; color:white; display:flex; align-items:center; gap:6px;">
-              <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Soporte GoDelivery</span>
-              <span style="font-size:9.5px; background:rgba(255,255,255,0.25); color:white; padding:1px 6px; border-radius:6px; font-weight:900;">EN LÍNEA</span>
-            </div>
-            <div style="font-size:11px; color:rgba(255,255,255,0.9); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-              Mesa de Ayuda para Repartidores · Magdalena
+          <div style="flex:1; min-width:0;">
+            <div style="font-family: var(--font-display, sans-serif); font-size:18px; font-weight:800; color:var(--driver-text-primary); line-height:1.2;">Soporte GoDelivery</div>
+            <div style="font-size:12.5px; color:var(--driver-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              <span style="color:#22c55e; font-weight:700;">En línea</span> · Mesa de ayuda Magdalena
             </div>
           </div>
+          <button id="close-driver-support-chat" aria-label="Cerrar" style="
+            width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+            background: var(--driver-fill-subtle); border: 1px solid var(--driver-border);
+            color: var(--driver-text-secondary); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+          ">
+            ${icon('close', 16)}
+          </button>
         </div>
       </div>
 
