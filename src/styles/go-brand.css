@@ -767,3 +767,127 @@ html:not(.is-delivery-mode) .btn-primary[disabled] {
   background: var(--go-ink-2) !important;
   border: 1px solid var(--go-ink-line) !important;
 }
+
+/* ---------- Mandados: tarjetas de servicio con el mismo lenguaje GO! ---------- */
+
+html .gofavores-card.gofavores-card {
+  background: var(--go-card) !important;
+  border: 1px solid var(--go-line) !important;
+  box-shadow: none !important;
+  border-radius: 20px !important;
+  padding: 14px !important;
+}
+
+html .gofavores-card.gofavores-card > div[style*="radial-gradient"] { display: none !important; }
+
+html .gofavores-card .gofavores-icon-box {
+  background: var(--go-ink) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  width: 48px !important;
+  height: 48px !important;
+}
+
+html .gofavores-card h3 {
+  color: var(--go-text) !important;
+  text-shadow: none !important;
+  font-family: var(--go-font) !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  letter-spacing: -0.01em !important;
+}
+
+html .gofavores-card p {
+  color: var(--go-text-2) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
+}
+
+html .gofavores-card span[style*="text-transform: uppercase"] {
+  background: var(--go-paper-2) !important;
+  color: var(--go-text) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  margin-top: 6px !important;
+}
+
+html .gofavores-card .info-btn-favores,
+html .gofavores-card .chevron-icon-container {
+  background: var(--go-paper-2) !important;
+  color: var(--go-text) !important;
+  border: none !important;
+  width: 32px !important;
+  height: 32px !important;
+}
+
+html .gofavores-page .home-blob { display: none !important; }
+html .gofavores-page { background: var(--color-bg) !important; }
+
+.gofavores-info-section { border-style: solid !important; border-color: var(--go-line) !important; background: var(--go-card) !important; }
+
+/* Títulos de los encabezados GO! en todas las páginas */
+.go-page-header h1,
+.go-page-header h2 {
+  font-family: var(--go-font) !important;
+  font-weight: 900 !important;
+  text-transform: uppercase;
+  letter-spacing: -0.01em !important;
+}
+
+.go-page-header a[style*="rgba(255,255,255,0.1"],
+.go-page-header a[style*="rgba(255, 255, 255, 0.1"],
+.go-page-header a[style*="rgba(255,255,255,0.2"],
+.go-page-header button[style*="rgba(255,255,255,0.2"],
+.go-page-header button[style*="rgba(255, 255, 255, 0.2"] {
+  background: var(--go-ink-2) !important;
+  border: 1px solid var(--go-ink-line) !important;
+}
+
+/* ---------- Admin: tarjetas del panel con el mismo lenguaje GO! ---------- */
+
+html .admin-nav-card.admin-nav-card {
+  background: var(--go-card) !important;
+  border: 1px solid var(--go-line) !important;
+  box-shadow: none !important;
+  border-radius: 20px !important;
+  padding: 14px 16px !important;
+  gap: 14px !important;
+}
+
+html .admin-nav-card > div:first-child {
+  background: var(--go-ink) !important;
+  color: #fff !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  width: 44px !important;
+  height: 44px !important;
+}
+
+html .admin-nav-card > div:nth-child(2) > div:first-child {
+  color: var(--go-text) !important;
+  font-family: var(--go-font) !important;
+  font-weight: 800 !important;
+  font-size: 15.5px !important;
+}
+
+html .admin-nav-card > div:nth-child(2) > div:nth-child(2) {
+  color: var(--go-text-2) !important;
+  font-weight: 500 !important;
+}
+
+html .admin-nav-card > div:last-child { color: var(--go-text-3) !important; }
+
+/* Gradientes rojos de acción del diseño anterior -> acción negra GO! (no en el modo repartidor) */
+html:not(.is-delivery-mode) [style*="linear-gradient(135deg, var(--color-primary)"],
+html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #e11d48"],
+html:not(.is-delivery-mode) [style*="linear-gradient(135deg,#e11d48"],
+html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #E11D48 0%, #BE123C"],
+html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #BE123C"],
+html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
+  background: var(--go-ink) !important;
+  box-shadow: none !important;
+}

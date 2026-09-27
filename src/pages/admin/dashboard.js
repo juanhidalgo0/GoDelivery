@@ -14,9 +14,7 @@ export async function renderAdminDashboard() {
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; background:var(--color-bg); overflow:hidden;">
       
       <!-- Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      <div  class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         
         <a href="#/profile" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s; position:relative; z-index:2;">
           ${icon('chevronLeft', 24)}
@@ -62,7 +60,6 @@ export async function renderAdminDashboard() {
             </a>
 
             <a href="#/admin/metrics" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(126, 34, 206, 0.08)); border:1px solid rgba(168, 85, 247, 0.3); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.05); position: relative; overflow: hidden;">
-              <div style="position: absolute; right: 0; bottom: 0; width: 60px; height: 60px; background: radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, transparent 70%); pointer-events: none;"></div>
               <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#c084fc,#a855f7); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px; box-shadow: 0 4px 10px rgba(168, 85, 247, 0.3); animation: pulse-purple 2s infinite;">${icon('trendingUp', 24)}</div>
               <div style="flex:1;">
                 <div style="font-weight:900; font-size:16px; color:var(--color-primary);">Métricas y Analíticas</div>

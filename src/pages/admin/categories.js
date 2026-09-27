@@ -23,9 +23,7 @@ export async function renderAdminCategories() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg);">
       <!-- Fixed Header -->
-      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--color-primary);flex-shrink:0;position:relative;overflow:hidden;box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background: var(--go-ink);flex-shrink:0;position:relative;overflow:hidden;box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
         
         <a href="#/admin" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;position:relative;z-index:2;">${icon('chevronLeft', 24)}</a>
         <div style="flex:1;min-width:0;position:relative;z-index:2;">

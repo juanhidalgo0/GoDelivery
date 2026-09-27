@@ -11,9 +11,7 @@ export async function renderAdminCommissions() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg);">
       <!-- Red Premium Header (Integrated) -->
-      <div style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      <div  class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
         
         <a href="#/admin" style="display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.15);color:white;flex-shrink:0;text-decoration:none;transition:all 0.2s;position:relative;z-index:2;">
           ${icon('arrowLeft', 26)}
@@ -439,9 +437,7 @@ async function showSettlementsHistory() {
   const overlay = document.getElementById('settlements-container');
   overlay.innerHTML = `
     <div class="orders-detail-content page-enter" style="background:var(--color-bg); padding:0;">
-      <div class="detail-header" style="padding:16px 20px; background:var(--color-primary); position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:16px; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      <div class="go-page-header detail-header"  style="padding:16px 20px; background: var(--go-ink); position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:16px; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2);">
         
         <button class="close-settlements-btn" style="width:44px; height:44px; border-radius:14px; background:rgba(255,255,255,0.15); border:none; color:white; display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; z-index:2;">
           ${icon('arrowLeft', 26)}

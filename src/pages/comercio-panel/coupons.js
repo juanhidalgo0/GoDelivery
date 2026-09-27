@@ -28,7 +28,7 @@ export async function renderComercioCoupons(container) {
   container.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
       <!-- Premium Fixed Header -->
-      <div style="width:100%; padding-top: ${topPadding}; background: var(--color-primary); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
+      <div  class="go-page-header" style="width:100%; padding-top: ${topPadding}; background: var(--go-ink); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 12px 16px 20px 16px; position:relative; overflow:hidden; color:white;">
           <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
           

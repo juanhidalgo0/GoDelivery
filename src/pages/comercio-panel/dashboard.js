@@ -36,10 +36,8 @@ export async function renderComercioDashboard() {
   content.innerHTML = `
     <div class="panel-page" style="position:fixed; inset:0; width:100%; height:100dvh; display:flex; flex-direction:column; overflow:hidden; background:var(--color-bg); z-index:1000;">
       <!-- Premium Fixed Header -->
-      <div style="width:100%; padding-top: ${topPadding}; background: var(--color-primary); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
+      <div  class="go-page-header" style="width:100%; padding-top: ${topPadding}; background: var(--go-ink); position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); flex-shrink: 0;">
         <div style="display:flex;align-items:center;gap:12px;padding: 12px 16px 16px 16px; position:relative;overflow:hidden;color:white;">
-          <!-- Decorative Circles -->
-          <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
           
           <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.2);width:38px;height:38px;border-radius:12px;cursor:pointer;text-decoration:none;position:relative;z-index:2;flex-shrink:0;">${icon('chevronLeft', 24)}</a>
           <div style="flex:1;min-width:0;">

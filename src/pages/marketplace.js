@@ -23,7 +23,7 @@ export async function renderMarketplace(content) {
     </style>
     <div class="marketplace-container" style="display:flex; flex-direction:column; height:100%; background:var(--color-bg); position:relative;">
       <!-- Header (Green Premium style) -->
-      <div style="background:linear-gradient(135deg, #10B981 0%, #059669 100%); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(16, 185, 129, 0.2); z-index:100;">
+      <div class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(16, 185, 129, 0.2); z-index:100;">
         <a href="#/" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s;">
           ${icon('chevronLeft', 24)}
         </a>
@@ -53,7 +53,7 @@ export async function renderMarketplace(content) {
           </div>
         </div>
         <div style="display:flex; gap:8px; overflow-x:auto; padding:4px 0; scrollbar-width:none;">
-          <button class="filter-chip active" data-condition="all" style="background:#10B981; color:white; border:none; border-radius:20px; padding:6px 14px; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer;">Todos</button>          <button class="filter-chip" data-condition="new" style="background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1px solid var(--color-border); border-radius:20px; padding:6px 14px; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer;">Nuevos</button>
+          <button class="filter-chip active" data-condition="all" style="background:var(--go-ink); color:white; border:none; border-radius:20px; padding:6px 14px; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer;">Todos</button>          <button class="filter-chip" data-condition="new" style="background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1px solid var(--color-border); border-radius:20px; padding:6px 14px; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer;">Nuevos</button>
           <button class="filter-chip" data-condition="used" style="background:var(--color-bg-secondary); color:var(--color-text-secondary); border:1px solid var(--color-border); border-radius:20px; padding:6px 14px; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer;">Usados</button>
         </div>
       </div>
@@ -61,7 +61,7 @@ export async function renderMarketplace(content) {
       <!-- Products Grid -->
       <div id="market-products-list" style="flex:1; overflow-y:auto; padding:16px; display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; align-content:start;">
         <div style="grid-column:1/-1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; color:var(--color-text-secondary); gap:14px;">
-          <div style="width:32px; height:32px; border:3px solid rgba(16,185,129,0.15); border-top-color:#10B981; border-radius:50%; animation:marketSpin 0.75s linear infinite;"></div>
+          <div style="width:32px; height:32px; border:3px solid rgba(16,185,129,0.15); border-top-color:var(--go-ink); border-radius:50%; animation:marketSpin 0.75s linear infinite;"></div>
           <span style="font-size:13px; font-weight:600; color:var(--color-text-secondary);">Cargando publicaciones...</span>
         </div>
       </div>
@@ -111,7 +111,7 @@ export async function renderMarketplace(content) {
           </div>
         </div>
         <div style="padding:10px; display:flex; flex-direction:column; gap:4px; flex:1;">
-          <span style="font-size:16px; font-weight:900; color:#10B981;">$${p.price}</span>
+          <span style="font-family:var(--go-font); font-size:16px; font-weight:900; color:var(--go-text);">$${p.price}</span>
           <h3 style="font-size:13px; font-weight:700; margin:0; line-height:1.3; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; color:var(--color-text);">${p.title}</h3>
           <span style="font-size:11px; color:var(--color-text-secondary); margin-top:auto;">Por: ${p.sellerName}</span>
         </div>
@@ -154,7 +154,7 @@ export async function renderMarketplace(content) {
         c.style.borderColor = 'var(--color-border)';
       });
       chip.classList.add('active');
-      chip.style.background = '#10B981';
+      chip.style.background = 'var(--go-ink)';
       chip.style.color = 'white';
       chip.style.borderColor = 'transparent';
 

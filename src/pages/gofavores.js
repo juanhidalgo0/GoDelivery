@@ -129,12 +129,17 @@ export async function renderGoFavores(content) {
       <div class="home-blob home-blob-1" style="position: absolute; top: -10%; left: -20%; width: 300px; height: 300px; background: rgba(225, 29, 72, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
       <div class="home-blob home-blob-2" style="position: absolute; bottom: 10%; right: -20%; width: 250px; height: 250px; background: rgba(99, 102, 241, 0.05); border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 1;"></div>
 
-      <!-- Floating Info Helper Button -->
-      <button id="gofavores-help-header-btn" style="position: absolute; top: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) + 12px); right: 16px; width: 36px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.25); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); transition: all 0.2s;" onactive="transform: scale(0.95);">
-        ${icon('info', 18)}
-      </button>
+      <!-- Encabezado GO! -->
+      <div class="go-page-header" style="background: var(--go-ink); padding: calc(12px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 14px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 5; flex-shrink: 0;">
+        <button type="button" class="go-icon-btn" aria-label="Volver" onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')">${icon('chevronLeft', 20)}</button>
+        <div style="flex: 1; min-width: 0;">
+          <span class="go-eyebrow" style="color: var(--go-on-ink-2); font-size: 10px;">Te lo buscamos y te lo llevamos</span>
+          <h1 style="margin: 2px 0 0; font-size: 22px; color: #fff;">Mandados</h1>
+        </div>
+        <button type="button" id="gofavores-help-header-btn" class="go-icon-btn" aria-label="¿Cómo funcionan los Mandados?">${icon('info', 18)}</button>
+      </div>
 
-      <div style="padding: calc(var(--header-height, 60px) + 8px) 14px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
+      <div style="padding: 16px 14px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); display: flex; flex-direction: column; gap: 14px; flex: 1; width: 100%; box-sizing: border-box; max-width: 600px; margin: 0 auto; position: relative; z-index: 2; height: 100%;">
         
         <!-- Cards Grouped Together -->
         <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; box-sizing: border-box; flex-shrink: 0;">
@@ -215,7 +220,7 @@ export async function renderGoFavores(content) {
             <!-- Ambient light reflection -->
             <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%); pointer-events: none;"></div>
             <div class="gofavores-icon-box" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.06); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 2;">
-              ${icon('fileText', 22)}
+              ${icon('receipt', 22)}
             </div>
             <div style="flex: 1; min-width: 0; text-align: left; z-index: 2;">
               <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 900; margin: 0 0 1px; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Pago de Servicios</h3>

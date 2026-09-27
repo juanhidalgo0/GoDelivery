@@ -60,7 +60,7 @@ export async function renderAdminSupportChats() {
         
         <!-- Left Side: Chat Sessions List -->
         <div id="chats-list-sidebar" style="width:100%; max-width:360px; border-right:1px solid var(--color-border); display:flex; flex-direction:column; background:var(--color-surface); flex-shrink:0;">
-          <div style="padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 16px 16px; background:var(--color-primary); color:white; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
+          <div  class="go-page-header" style="padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 16px 16px; background: var(--go-ink); color:white; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
             <div style="display:flex; align-items:center; gap:8px;">
               <a href="#/admin/orders" style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:10px; background:rgba(255,255,255,0.15); border:1.5px solid rgba(255,255,255,0.3); color:white; text-decoration:none;" title="Volver a Registro de Ventas">
                 ${icon('chevronLeft', 20)}
@@ -91,7 +91,7 @@ export async function renderAdminSupportChats() {
         <!-- Right Side: Chat Conversation Details -->
         <div id="chat-conversation-area" style="flex:1; display:none; flex-direction:column; background:var(--color-bg);">
           <!-- Active User Header -->
-          <div style="background:var(--color-primary); color:white; padding:calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 14px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
+          <div  class="go-page-header" style="background: var(--go-ink); color:white; padding:calc(14px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 14px; display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
             <!-- Mobile Back Button to list -->
             <button id="chat-back-to-list-btn" style="background:none; border:none; color:white; cursor:pointer; padding:0; display:none; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,0.15); margin-right:4px;">
               ${icon('chevronLeft', 24)}

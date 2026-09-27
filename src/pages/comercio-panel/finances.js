@@ -33,7 +33,7 @@ export async function renderComercioFinances() {
 
     content.innerHTML = `
       <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;">
-        <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--color-primary);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
+        <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background: var(--go-ink);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
           <a href="#/mi-comercio/${comercioId}" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);flex-shrink:0;">${icon('back', 18)}</a>
           <div style="flex:1;min-width:0;">
             <h1 style="font-family:var(--font-display);font-weight:800;font-size:18px;color:white;margin:0;line-height:1.2;">${isAdmin() ? 'Adm: Finanzas' : 'Comisiones y Finanzas'}</h1>

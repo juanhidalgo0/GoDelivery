@@ -33,9 +33,7 @@ export async function renderComercioProducts() {
   content.innerHTML = `
     <div class="panel-page" style="position:fixed; inset:0; width:100%; height:100dvh; display:flex; flex-direction:column; overflow:hidden; background:var(--color-bg); z-index:1000;">
       <!-- Primary Top Bar -->
-      <div style="position:sticky;top:0;z-index:100;display:flex;align-items:center;height:64px;padding:0 16px;background:var(--color-primary);box-shadow:0 4px 12px rgba(0,0,0,0.1);flex-shrink:0;overflow:hidden;">
-        <!-- Decorative Circles -->
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;height:64px;padding:0 16px;background: var(--go-ink);box-shadow:0 4px 12px rgba(0,0,0,0.1);flex-shrink:0;overflow:hidden;">
         
         <div style="display:flex;align-items:center;gap:12px;position:relative;z-index:2;flex:1;min-width:0;">
           <a href="#/mi-comercio/${comercioId}" style="display:flex;align-items:center;justify-content:center;background:none;border:none;color:white;cursor:pointer;padding:0;text-decoration:none;">

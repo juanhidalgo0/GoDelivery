@@ -99,10 +99,8 @@ export async function renderComercioOrders(manualId = null) {
 
       const renderHeaderContent = () => {
         headerContainer.innerHTML = `
-          <div class="orders-sticky-header-container" style="background: var(--color-primary); box-shadow: 0 4px 12px rgba(var(--color-primary-rgb),0.2); padding-top: ${topPadding};">
+          <div class="go-page-header orders-sticky-header-container"  style="background: var(--go-ink); box-shadow: 0 4px 12px rgba(var(--color-primary-rgb),0.2); padding-top: ${topPadding};">
             <div class="orders-sticky-header" style="position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 14px 20px;">
-              <!-- Decorative Circles -->
-              <div style="position: absolute; top: -15px; right: -15px; width: 60px; height: 60px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
 
               <div class="orders-header-left" style="position: relative; z-index: 2; display: flex; align-items: center; min-width: 0; flex: 1; gap: 10px;">
                 ${window.innerWidth >= 1024 ? `

@@ -21,7 +21,7 @@ export async function renderComercioMetrics() {
   content.innerHTML = `
     <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
       <!-- Premium Fixed Header -->
-      <div style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:16px; padding:16px 20px; background:var(--color-primary); box-shadow:0 4px 12px rgba(0,0,0,0.1); flex-shrink:0; color:white;">
+      <div  class="go-page-header" style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:16px; padding:16px 20px; background: var(--go-ink); box-shadow:0 4px 12px rgba(0,0,0,0.1); flex-shrink:0; color:white;">
         <a href="#/mi-comercio/${comercioId}" style="display:flex; align-items:center; justify-content:center; background:none; border:none; color:white; cursor:pointer; padding:0; text-decoration:none;" title="Volver al Menú">${icon('chevronLeft', 28)}</a>
         <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;">
           <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; line-height:1.1; letter-spacing:-0.03em;">${isAdmin() ? 'Adm: Dashboard' : 'Dashboard'}</h1>

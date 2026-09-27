@@ -48,8 +48,7 @@ export async function renderViajes(content) {
     <div class="viajes-page" style="display:flex; flex-direction:column; height: 100dvh; background: var(--color-bg); overflow: hidden; position:relative;">
       
       <!-- Premium Unified Blue Header with smooth gradient -->
-      <div style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); padding:calc(18px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(37, 99, 235, 0.2); z-index:100;">
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
+      <div class="go-page-header" style="background: var(--go-ink); padding:calc(18px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 18px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 6px 20px rgba(37, 99, 235, 0.2); z-index:100;">
         <button onclick="window.safeGoBack ? window.safeGoBack('#/') : (window.location.hash = '#/')" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; position:relative; z-index:2; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
           ${icon('chevronLeft', 24)}
         </button>
@@ -110,7 +109,7 @@ export async function renderViajes(content) {
               </div>
               <span style="font-size:15px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.01em;">Viaje en Moto</span>
               <span style="font-size:10.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">Rápido y económico</span>
-              <div id="moto-price-preview" style="font-size:18px; font-weight:950; color:var(--color-primary); margin-top:14px; font-family:var(--font-display);">$ 0</div>
+              <div id="moto-price-preview" style="font-size:18px; font-weight:900; color:var(--go-text); margin-top:14px; font-family:var(--go-font);">$ 0</div>
             </div>
 
             <!-- Auto Option -->
@@ -120,7 +119,7 @@ export async function renderViajes(content) {
               </div>
               <span style="font-size:15px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.01em;">Viaje en Auto</span>
               <span style="font-size:10.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">Cómodo y seguro</span>
-              <div id="auto-price-preview" style="font-size:18px; font-weight:950; color:#3b82f6; margin-top:14px; font-family:var(--font-display);">$ 0</div>
+              <div id="auto-price-preview" style="font-size:18px; font-weight:900; color:var(--go-text); margin-top:14px; font-family:var(--go-font);">$ 0</div>
             </div>
           </div>
         </div>
@@ -179,23 +178,23 @@ export async function renderViajes(content) {
       
       /* Moto active state */
       .vehicle-card-pro.active.type-moto {
-        border-color: var(--color-primary) !important;
-        box-shadow: 0 8px 25px rgba(225, 29, 72, 0.12), 0 0 0 1px var(--color-primary) !important;
+        border-color: var(--go-ink) !important;
+        box-shadow: 0 0 0 1px var(--go-ink) !important;
       }
       .vehicle-card-pro.active.type-moto .vehicle-icon-box {
-        background: var(--color-primary-light) !important;
-        color: var(--color-primary) !important;
+        background: var(--go-ink) !important;
+        color: #fff !important;
         transform: scale(1.05);
       }
 
       /* Auto active state */
       .vehicle-card-pro.active.type-auto {
-        border-color: #3b82f6 !important;
-        box-shadow: 0 8px 25px rgba(59, 130, 246, 0.12), 0 0 0 1px #3b82f6 !important;
+        border-color: var(--go-ink) !important;
+        box-shadow: 0 0 0 1px var(--go-ink) !important;
       }
       .vehicle-card-pro.active.type-auto .vehicle-icon-box {
-        background: rgba(59, 130, 246, 0.12) !important;
-        color: #3b82f6 !important;
+        background: var(--go-ink) !important;
+        color: #fff !important;
         transform: scale(1.05);
       }
 
@@ -309,7 +308,7 @@ export async function renderViajes(content) {
   motoCard.onclick = () => {
     selectedVehicle = 'moto';
     motoCard.classList.add('active');
-    motoCard.style.borderColor = 'var(--color-primary)';
+    motoCard.style.borderColor = 'var(--go-ink)';
     motoCard.style.borderWidth = '2.5px';
 
     autoCard.classList.remove('active');
@@ -322,7 +321,7 @@ export async function renderViajes(content) {
   autoCard.onclick = () => {
     selectedVehicle = 'auto';
     autoCard.classList.add('active');
-    autoCard.style.borderColor = '#3b82f6';
+    autoCard.style.borderColor = 'var(--go-ink)';
     autoCard.style.borderWidth = '2.5px';
 
     motoCard.classList.remove('active');
