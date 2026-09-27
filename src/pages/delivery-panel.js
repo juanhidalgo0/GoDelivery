@@ -1767,6 +1767,11 @@ export async function renderDeliveryPanel(containerArg) {
         <div style="flex:1; min-width:0;"><div class="dsheet-row-title">Ir a modo cliente</div><div class="dsheet-row-sub" style="color:inherit; opacity:0.75;">${user?.isOnline ? 'Pedí sin desconectarte' : 'Pedí como cualquier vecino'}</div></div>
         <span class="dsheet-chev" style="color:inherit; opacity:0.7;">${icon('chevronRight', 18)}</span>
       </button>
+      ${(user?.role === 'admin' || user?.isAdmin === true) ? `<button type="button" id="delivery-drawer-admin-btn" data-go-admin-mode class="dsheet-row">
+        <div class="dsheet-tile" style="background:${drawerTone('rgba(255,255,255,0.08)', '#ebe7e0')}; color:${drawerTone('#f7f5f1', '#0b0b0c')};">${icon('shieldCheck', 20)}</div>
+        <div style="flex:1; min-width:0;"><div class="dsheet-row-title">Panel de administración</div><div class="dsheet-row-sub">Pedidos, ajustes y usuarios${user?.isOnline ? ' · seguís en línea' : ''}</div></div>
+        <span class="dsheet-chev">${icon('chevronRight', 18)}</span>
+      </button>` : ''}
       <div class="dsheet-label">Mi cuenta</div>
       ${drawerItem({ id: 'delivery-drawer-history', href: '#/delivery/history', iconName: 'history', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Historial de pedidos', subtitle: 'Tus entregas anteriores' })}
       ${drawerItem({ id: 'delivery-drawer-finances', href: '#/delivery/finances', iconName: 'bank', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Finanzas y cuentas', subtitle: 'Saldo, cobros y alias' })}
@@ -8248,6 +8253,15 @@ function attachPerfilTabListeners(user, container) {
 if (typeof document !== 'undefined' && !window.__goClientModeDelegation) {
   window.__goClientModeDelegation = true;
   document.addEventListener('click', (e) => {
+    const adminTrigger = e.target.closest?.('[data-go-admin-mode]');
+    if (adminTrigger) {
+      e.preventDefault();
+      e.stopPropagation();
+      try { window.__closeDeliveryDrawer?.(); } catch (err) {}
+      // Same as client mode: the driver stays online and offers still show up.
+      switchToClientMode('#/admin');
+      return;
+    }
     const trigger = e.target.closest?.('[data-go-client-mode]');
     if (!trigger) return;
     e.preventDefault();
@@ -8272,7 +8286,7 @@ export function requestClientMode(user) {
   }
 }
 
-export async function switchToClientMode() {
+export async function switchToClientMode(target = '#/') {
   sessionStorage.setItem('gd_temp_client_mode', 'true');
   // The options drawer lives on <body>; drop it so it does not linger over the client home.
   try { window.__closeDeliveryDrawer?.(); } catch (e) {}
@@ -8303,13 +8317,13 @@ export async function switchToClientMode() {
   const appHead = document.getElementById('app-header');
   if (appHead) appHead.style.removeProperty('display');
 
-  window.location.hash = '#/';
+  window.location.hash = target;
   
   const { renderHome } = await import('./home.js');
   const { renderNavbar } = await import('../components/navbar.js');
   const { handleRoute } = await import('../router.js');
 
-  await renderHome();
+  if (target === '#/') await renderHome();
   renderNavbar();
   await handleRoute();
 }
