@@ -6038,7 +6038,6 @@ async function startSession(user) {
   if (!latestUser) return;
 
   try {
-    showBlockingLoading('Iniciando sesión...');
     const { setDoc, collection, doc, updateDoc, serverTimestamp, deleteField } = await import('firebase/firestore');
 
     // Firestore writes only resolve once the SERVER acknowledges them. With weak signal
@@ -6082,39 +6081,19 @@ async function startSession(user) {
       disconnectedReason: deleteField()
     });
 
-    const confirmedInTime = await Promise.race([
-      onlineWrite.then(() => true, (err) => { console.warn('Firestore user update error:', err); return false; }),
-      new Promise(resolve => setTimeout(() => resolve(null), 4000))
-    ]);
-
-    hideBlockingLoading();
-
-    if (confirmedInTime === false) {
-      // Rejected by the server (not just slow): the driver is NOT online, don't pretend.
+    // Online right away; the server confirms in the background. Only a real rejection undoes it.
+    onlineWrite.catch((err) => {
+      console.warn('Firestore user update error:', err);
       setState('user', { ...getState().user, isOnline: false, currentSessionId: null });
       showToast('⚠️ No se pudo iniciar la sesión. Intentá nuevamente.', 'danger');
-      await renderDeliveryPanel();
-      return;
-    }
-
-    if (confirmedInTime === null) {
-      showToast('📶 Señal débil: te conectamos, se confirmará apenas vuelva la conexión.', 'warning', 6000);
-      onlineWrite.then(
-        () => showToast('✅ Conexión confirmada. Buscando pedidos en la zona...', 'success'),
-        () => {
-          setState('user', { ...getState().user, isOnline: false, currentSessionId: null });
-          showToast('⚠️ No se pudo iniciar la sesión. Intentá nuevamente.', 'danger');
-          renderDeliveryPanel();
-        }
-      );
-    } else {
-      showToast('⚡ ¡En línea! Buscando pedidos en la zona...', 'success');
-    }
+      renderDeliveryPanel();
+    });
 
     // Re-render driver panel immediately
     await renderDeliveryPanel();
+    hideGoConnecting(true);
   } catch(err) {
-    hideBlockingLoading();
+    hideGoConnecting(false);
     console.error('Error starting session:', err);
     showToast('⚠️ No se pudo iniciar la sesión. Intentá nuevamente.', 'danger');
   }
@@ -7684,8 +7663,7 @@ export async function ensureDriverPermissions() {
   if ('Notification' in window) {
     if (Notification.permission === 'default') {
       try {
-        const { requestWebPushPermission } = await import('../utils/notifications.js');
-        await requestWebPushPermission();
+        import('../utils/notifications.js').then(m => m.requestWebPushPermission()).catch(() => {});
       } catch (e) {
         console.warn('Error requesting notifications:', e);
       }
@@ -7693,10 +7671,15 @@ export async function ensureDriverPermissions() {
   }
 
   let locationGranted = false;
+  // Already allowed: no need to wait for a GPS fix (that was the slow part of connecting).
+  try {
+    const st = await navigator.permissions?.query({ name: 'geolocation' });
+    if (st?.state === 'granted') return { locationGranted: true };
+  } catch (e) {}
   if ('geolocation' in navigator) {
     try {
       await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, maximumAge: 60000, enableHighAccuracy: false });
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000, maximumAge: Infinity, enableHighAccuracy: false });
       });
       locationGranted = true;
     } catch (err) {
@@ -7706,6 +7689,28 @@ export async function ensureDriverPermissions() {
   }
 
   return { locationGranted };
+}
+
+function showGoConnecting() {
+  document.getElementById('go-connecting')?.remove();
+  const el = document.createElement('div');
+  el.id = 'go-connecting';
+  el.innerHTML = `<div class="go-connecting-ring"><span></span><span></span><i>${icon('power', 30)}</i></div><strong>Conectando</strong><small>Buscando pedidos en tu zona</small>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('is-in'));
+}
+
+function hideGoConnecting(ok) {
+  const el = document.getElementById('go-connecting');
+  if (!el) return;
+  if (ok) {
+    el.classList.add('is-ok');
+    el.querySelector('strong').textContent = 'En línea';
+    setTimeout(() => { el.classList.remove('is-in'); setTimeout(() => el.remove(), 260); }, 650);
+  } else {
+    el.classList.remove('is-in');
+    setTimeout(() => el.remove(), 260);
+  }
 }
 
 function showBlockingLoading(message = 'Cargando...') {
@@ -8400,12 +8405,12 @@ export async function promptStartSession(user) {
     message: modalMessage,
     confirmText: 'Sí, conectar ahora',
     onConfirm: async () => {
-      showBlockingLoading('Verificando permisos y conectando...');
+      showGoConnecting();
 
       try {
         const { locationGranted } = await ensureDriverPermissions();
         if (!locationGranted) {
-          hideBlockingLoading();
+          hideGoConnecting(false);
           showModal({
             title: '📍 Ubicación Requerida',
             content: `
@@ -8430,9 +8435,8 @@ export async function promptStartSession(user) {
         await startSession(currentUser);
       } catch (err) {
         console.error('Error starting session:', err);
+        hideGoConnecting(false);
         showToast('Error al conectar sesión', 'error');
-      } finally {
-        hideBlockingLoading();
       }
     }
   });

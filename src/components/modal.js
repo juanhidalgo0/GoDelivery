@@ -365,7 +365,7 @@ export function showConfirm({ title, message, confirmText = 'Confirmar', cancelT
     content: `<p class="go-dialog-msg">${message}</p>`,
     footer: `
       <div style="display:flex;flex-wrap:wrap;gap:12px;width:100%;padding:0 4px 12px 4px;">
-        <button class="btn btn-ghost" id="${cancelId}" style="flex:1;min-width:120px;height:52px;border-radius:16px;font-weight:800;font-size:14.5px;color:var(--go-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px;background:var(--color-surface);border:1px solid var(--go-line);">${cancelText}</button>
+        <button class="btn btn-ghost go-confirm-cancel" id="${cancelId}" style="flex:1;min-width:120px;height:52px;border-radius:16px;font-weight:800;font-size:14.5px;color:var(--go-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px;background:var(--color-surface);border:1px solid var(--go-line);">${cancelText}</button>
         <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="${confirmId}" style="flex:1.5;min-width:160px;height:52px;border-radius:16px;font-weight:800;font-size:14.5px;padding:0 16px;${danger ? 'background:#DC2626;color:white;box-shadow:none;border:none;' : 'box-shadow:none;'}">${confirmText}</button>
       </div>
     `,
