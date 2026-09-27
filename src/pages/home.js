@@ -1206,7 +1206,7 @@ const CATEGORY_IMAGE_MAP = {
   'Heladeria': '/images/categories/go-heladeria.webp',
   'Fiambrería': '/images/categories/go-fiambreria.webp',
   'Fiambreria': '/images/categories/go-fiambreria.webp',
-  'Postres': '/images/categories/postres.png',
+  'Postres': '/images/categories/go-kiosco.webp',
   'Comida': '/images/categories/go-comida.webp',
   'Bazar': '/images/categories/bazar.png',
   'Tecnología': '/images/categories/go-tecnologia.webp',
