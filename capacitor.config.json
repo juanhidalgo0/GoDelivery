@@ -4,7 +4,8 @@
   "webDir": "dist",
   "server": {
     "url": "https://godelivery-magdalena.web.app",
-    "cleartext": true
+    "cleartext": true,
+    "errorPath": "offline.html"
   },
   "plugins": {
     "SplashScreen": {
@@ -17,7 +18,22 @@
       "androidSplashResourceName": "splash"
     },
     "FirebaseMessaging": {
-      "presentationOptions": ["badge", "sound", "alert"]
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
+    }
+  },
+  "experimental": {
+    "ios": {
+      "spm": {
+        "packageOptions": {
+          "@capacitor-firebase/messaging": {
+            "symlink": true
+          }
+        }
+      }
     }
   }
 }
