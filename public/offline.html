@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GO! · Sin conexión</title>
+  <!-- Shown by the native app (capacitor.config.json server.errorPath) when it can't reach
+       Hosting. It ships inside the app binary, so it must work with no network at all. -->
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: #0B0B0C; color: #F8FAFC;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; text-align: center;
+      padding: calc(env(safe-area-inset-top) + 24px) 28px calc(env(safe-area-inset-bottom) + 24px);
+    }
+    main { max-width: 320px; width: 100%; }
+    img { width: 84px; height: 84px; border-radius: 22px; margin-bottom: 28px; }
+    h1 { font-size: 22px; font-weight: 800; margin: 0 0 10px; }
+    p { font-size: 15px; line-height: 1.5; color: #94A3B8; margin: 0 0 32px; }
+    button {
+      width: 100%; height: 54px; border: 0; border-radius: 16px;
+      background: #E11D48; color: #fff; font-size: 16px; font-weight: 800; cursor: pointer;
+    }
+    button:active { transform: scale(.98); }
+    .hint { margin-top: 16px; font-size: 13px; color: #64748B; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/logo-pwa.png" alt="GO!">
+    <h1>Sin conexión</h1>
+    <p>No pudimos conectarnos. Revisá tus datos móviles o el Wi‑Fi y volvé a intentar.</p>
+    <button id="retry" type="button">Reintentar</button>
+    <div class="hint" id="hint"></div>
+  </main>
+  <script>
+    var APP_URL = 'https://godelivery-magdalena.web.app/';
+    var hint = document.getElementById('hint');
+    function retry() {
+      hint.textContent = 'Conectando…';
+      // Ask first so a failed retry stays here instead of showing the browser's error page.
+      fetch(APP_URL + 'version.json?t=' + Date.now(), { cache: 'no-store', mode: 'no-cors' }) // opaque is fine: we only need to know the network answers
+        .then(function () { window.location.replace(APP_URL); })
+        .catch(function () { hint.textContent = 'Todavía sin conexión.'; });
+    }
+    document.getElementById('retry').addEventListener('click', retry);
+    // Come back on its own as soon as the phone is online again.
+    window.addEventListener('online', retry);
+  </script>
+</body>
+</html>

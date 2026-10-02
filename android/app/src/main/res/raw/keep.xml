@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The notification channels reach raw/alert only through a URI string (src/utils/notifications.js),
+     so resource shrinking would think it's unused. Keep it. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/alert" />
