@@ -148,7 +148,7 @@ export function renderFinancesCharts(orders) {
 }
 
 export async function loadProfessionalStats(driverId, callback = null) {
-  const { getDocs, getDoc, doc, collection, query, where } = await import('firebase/firestore');
+  const { getDocs, collection, query, where } = await import('firebase/firestore');
   const q = query(collection(db, 'orders'), where('driverId', '==', driverId), where('status', '==', 'completed'));
   
   try {
@@ -184,10 +184,11 @@ export async function loadProfessionalStats(driverId, callback = null) {
     if (document.getElementById('stats-week')) document.getElementById('stats-week').textContent = formatPrice(earningsWeek);
     if (document.getElementById('stats-month')) document.getElementById('stats-month').textContent = formatPrice(earningsMonth);
 
-    // Compute cash vs digital split for Billetera
+    // Last 30 days' earnings by how the customer paid. The balance with GO! lives in "Mi cuenta":
+    // mixing it in here compared a month of earnings with a debt of any age.
     let cashEarnings = 0;
     let digitalEarnings = 0;
-    orders.forEach(o => {
+    orders.filter(o => o.deliveredAt >= monthAgo).forEach(o => {
       const method = (o.paymentMethod || 'efectivo').toLowerCase();
       if (method === 'efectivo' || method === 'cash') {
         cashEarnings += (o.deliveryCost || 0);
@@ -196,23 +197,9 @@ export async function loadProfessionalStats(driverId, callback = null) {
       }
     });
 
-    const combinedTotal = cashEarnings + digitalEarnings;
-
-    // Fetch user debt
-    const userDocSnap = await getDoc(doc(db, 'users', driverId));
-    const debt = userDocSnap.exists() ? (userDocSnap.data().deliveryDebt || 0) : 0;
-    const netBalance = digitalEarnings + cashEarnings - debt;
-
     if (document.getElementById('wallet-digital-earnings')) document.getElementById('wallet-digital-earnings').textContent = formatPrice(digitalEarnings);
     if (document.getElementById('wallet-cash-earnings')) document.getElementById('wallet-cash-earnings').textContent = formatPrice(cashEarnings);
-    if (document.getElementById('wallet-total-combined')) document.getElementById('wallet-total-combined').textContent = formatPrice(combinedTotal);
-    if (document.getElementById('wallet-app-fee')) document.getElementById('wallet-app-fee').textContent = `-${formatPrice(debt)}`;
-    
-    const netBalanceEl = document.getElementById('wallet-net-balance');
-    if (netBalanceEl) {
-      netBalanceEl.textContent = formatPrice(netBalance);
-      netBalanceEl.style.color = netBalance >= 0 ? '#10b981' : '#ef4444';
-    }
+    if (document.getElementById('wallet-total-combined')) document.getElementById('wallet-total-combined').textContent = formatPrice(cashEarnings + digitalEarnings);
 
     // Render the CSS/SVG charts dynamically
     renderFinancesCharts(orders);
@@ -221,272 +208,190 @@ export async function loadProfessionalStats(driverId, callback = null) {
   } catch (e) { console.error(e); }
 }
 
-export async function showBalanceManagementModal(user, debt) {
+// "Mi cuenta": the driver's balance with GO!, their latest movements and how to pay.
+// Same data and look as the admin's statement (src/components/driver-statement.js).
+export async function showBalanceManagementModal(user) {
   const { showModal, closeModal } = await import('../../components/modal.js');
-  const { showToast } = await import('../../components/toast.js');
-  const { collection, query, where, getDocs } = await import('firebase/firestore');
-  const { db } = await import('../../firebase.js');
-
-  const pendingProofs = getState().pendingProofs || [];
-  const totalPending = pendingProofs.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const currentTheme = getDriverMapTheme();
-  const isLight = currentTheme === 'light';
-
-  // Fetch pending completed orders with coupons
-  let pendingCouponOrders = [];
-  try {
-    const qOrders = query(
-      collection(db, 'orders'),
-      where('driverId', '==', user.uid),
-      where('status', '==', 'completed')
-    );
-    const ordersSnap = await getDocs(qOrders);
-    pendingCouponOrders = ordersSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(o => o.isSettledDriver !== true && (o.couponDiscount || 0) > 0);
-  } catch (err) {
-    console.warn('[BalanceModal] Error fetching coupon orders:', err);
-  }
-
-  const totalCouponsCredit = pendingCouponOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
-  // deliveryDebt already has coupon credits subtracted (the server does it when each order
-  // completes), so it is the net amount; the gross figure adds them back for display.
-  const netDebt = Math.max(0, debt || 0);
-  const grossDebt = netDebt + totalCouponsCredit;
+  const { doc, getDoc } = await import('firebase/firestore');
+  const { ensureStatementStyles, renderBalanceHero, renderStatementList, fetchStatementPage, balanceInfo } = await import('../../components/driver-statement.js');
+  ensureStatementStyles();
+  const isLight = getDriverMapTheme() === 'light';
+  const uid = user?.uid || getState().user?.uid;
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = `padding: 20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 20px; background:var(--driver-bg-panel); height:100%; display:flex; flex-direction:column; overflow:hidden; justify-content:space-between;`;
-  
-  modalEl.innerHTML = `
-    <div style="flex:1; display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:2px;">
-      <!-- Main Debt / Net Card -->
-      <div class="debt-card-v3" style="
-        background: ${netDebt > 0 ? (isLight ? 'rgba(225, 29, 72, 0.05)' : 'rgba(225, 29, 72, 0.08)') : (isLight ? 'rgba(16, 185, 129, 0.06)' : 'rgba(16, 185, 129, 0.1)')};
-        border: 1.5px solid ${netDebt > 0 ? (isLight ? 'rgba(225, 29, 72, 0.2)' : 'rgba(225, 29, 72, 0.28)') : (isLight ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.35)')};
-        border-radius: 24px; padding: 20px;
-        box-shadow: 0 10px 30px ${isLight ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.35)'};
-        text-align: center;
-        flex-shrink: 0;
-        margin-top: 4px;
-      ">
-        <span style="font-size:11px; font-weight:900; color:${netDebt > 0 ? '#e11d48' : '#10b981'}; text-transform:uppercase; letter-spacing:0.08em; display:block; margin-bottom:4px;">
-          ${totalCouponsCredit > 0 ? 'Balance Neto a Liquidar' : 'Balance Pendiente'}
-        </span>
-        <div style="font-size:36px; font-weight:950; color:${netDebt > 0 ? '#e11d48' : '#10b981'}; letter-spacing:-1.5px; line-height:1.1;">
-          ${formatPrice(netDebt)}
-        </div>
-        <p style="font-size:12px; color:var(--driver-text-label); margin:8px 0 0; font-weight:600; line-height:1.45;">
-          ${totalCouponsCredit > 0 ? `Total calculado descontando ${formatPrice(totalCouponsCredit)} a tu favor por cupones.` : (grossDebt > 0 ? 'Total a liquidar con la plataforma.' : '¡Tu cuenta está al día sin deudas pendientes!')}
-        </p>
-      </div>
-
-      <!-- Transparent Breakdown Card when coupons exist -->
-      ${totalCouponsCredit > 0 ? `
-        <div style="background:var(--driver-fill-faint); border:1.5px solid var(--driver-border); border-radius:20px; padding:14px 16px; display:flex; flex-direction:column; gap:8px; box-shadow:${isLight ? '0 4px 12px rgba(0,0,0,0.03)' : 'none'};">
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; color:var(--driver-text-secondary);">
-            <span>Deuda en Sistema (Tarifas / Cánones):</span>
-            <strong style="color:#ef4444; font-weight:900; font-size:13.5px;">${formatPrice(grossDebt)}</strong>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; color:var(--driver-text-secondary);">
-            <span style="display:flex; align-items:center; gap:6px;">
-              <span style="background:rgba(168,85,247,0.15); color:#a855f7; font-size:9.5px; font-weight:950; padding:2px 6px; border-radius:6px; text-transform:uppercase;">${pendingCouponOrders.length} ${pendingCouponOrders.length === 1 ? 'pedido' : 'pedidos'}</span>
-              Crédito por Cupones Entregados:
-            </span>
-            <strong style="color:#a855f7; font-weight:950; font-size:13.5px;">-${formatPrice(totalCouponsCredit)}</strong>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1.5px dashed var(--driver-border-strong); padding-top:8px; font-weight:950; margin-top:2px;">
-            <span style="color:var(--driver-text-primary); font-size:13px;">Neto Real a Transferir:</span>
-            <strong style="color:${netDebt > 0 ? '#10b981' : '#10b981'}; font-size:15px;">${formatPrice(netDebt)}</strong>
-          </div>
-        </div>
-
-        <!-- Orders with coupons list -->
-        <div style="background:rgba(168,85,247,0.05); border:1px solid rgba(168,85,247,0.18); border-radius:18px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
-          <div style="font-size:10.5px; font-weight:900; color:#a855f7; text-transform:uppercase; letter-spacing:0.05em; display:flex; align-items:center; gap:6px;">
-            <span style="display:inline-flex;">${icon('ticket', 12)}</span> Detalle de Cupones Aplicados
-          </div>
-          <div style="display:flex; flex-direction:column; gap:4px; max-height:100px; overflow-y:auto;">
-            ${pendingCouponOrders.map(o => `
-              <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:var(--driver-text-label);">
-                <span>Pedido #${o.orderId || o.id.slice(0,6)} ${o.commerceName ? `(${o.commerceName})` : ''}</span>
-                <strong style="color:#a855f7; font-weight:850;">-${formatPrice(o.couponDiscount)}</strong>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      ` : ''}
-
-      ${totalPending > 0 ? `
-        <div style="background:${isLight ? '#fef3c7' : 'linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(217,119,6,0.04) 100%)'}; border:1px solid ${isLight ? '#fde68a' : 'rgba(245,158,11,0.25)'}; border-radius:18px; padding:12px 16px; display:flex; gap:8px; align-items:center; margin-top:2px; box-shadow:0 8px 24px rgba(0,0,0,0.06); flex-shrink:0;">
-          <span style="display:inline-flex;">${icon('hourglass', 16)}</span>
-          <div style="font-size:11.5px; color:#d97706; font-weight:700; line-height:1.4; text-align:left;">
-            Tenés una transferencia de <strong style="font-weight:900;">${formatPrice(totalPending)}</strong> pendiente de validación por administración.
-          </div>
-        </div>
-      ` : ''}
-
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; flex-shrink:0;">
-        <button id="modal-view-history-btn" style="height:50px; border-radius:16px; background:var(--driver-fill-subtle-b); border:1.5px solid var(--driver-border-soft); color:var(--driver-text-primary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; text-transform:uppercase; transition:all 0.2s;">
-          ${icon('history', 16)} Historial
-        </button>
-        <button id="modal-regularize-btn" style="height:50px; border-radius:16px; background:#e11d48; border:none; color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; text-transform:uppercase; box-shadow:0 6px 16px rgba(225, 29, 72, 0.35); transition:all 0.2s;">
-          ${icon('wallet', 16)} Regularizar
-        </button>
-      </div>
-    </div>
-
-    <button id="modal-send-proof-btn" style="width:100%; height:54px; border-radius:18px; background:#25D366; border:none; color:white; font-weight:950; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; text-transform:uppercase; box-shadow:0 8px 20px rgba(37, 211, 102, 0.25); flex-shrink:0; margin-top:12px;">
-      ${icon('whatsappLogo', 20)} Enviar comprobante
-    </button>
-  `;
-
-  showModal({ 
-    title: 'Gestión de Balance', 
-    content: modalEl, 
-    height: '75dvh',
+  modalEl.className = 'gd-stmt gd-stmt--driver';
+  modalEl.style.cssText = 'padding:18px 18px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background:var(--driver-bg-panel); min-height:100%; box-sizing:border-box;';
+  modalEl.innerHTML = '<div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>';
+  showModal({
+    title: 'Mi cuenta con GO!',
+    content: modalEl,
+    height: '85dvh',
     headerBackground: isLight ? '#ffffff' : '#090d16',
     headerTextColor: isLight ? '#0f172a' : 'white'
   });
 
-  modalEl.querySelector('#modal-view-history-btn').onclick = () => {
-    showBalanceHistoryModal(user.uid);
-  };
-  modalEl.querySelector('#modal-regularize-btn').onclick = () => {
-    const pendingProofs = getState().pendingProofs || [];
-    if (pendingProofs.length > 0) {
-      showToast('⚠️ Ya tenés una liquidación pendiente de verificación.', 'warning');
-      return;
-    }
-    showRegularizeModal(netDebt, grossDebt, totalCouponsCredit);
-  };
-  modalEl.querySelector('#modal-send-proof-btn').onclick = () => {
-    const pendingProofs = getState().pendingProofs || [];
-    if (pendingProofs.length > 0) {
-      showToast('⚠️ Ya tenés una liquidación pendiente de verificación.', 'warning');
-      return;
-    }
+  // Fresh balance: the one in memory may be a few seconds old.
+  let balance = Number(user?.deliveryDebt) || 0;
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (snap.exists()) balance = Number(snap.data().deliveryDebt) || 0;
+  } catch (err) {
+    console.warn('[Mi cuenta] using cached balance:', err);
+  }
+  const info = balanceInfo(balance, 'driver');
+  const pendingProofs = getState().pendingProofs || [];
+  const inReview = pendingProofs.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const limitOn = getState().debtLimitEnabled === true;
+  const limit = Number(getState().maxDebtLimit) || 0;
+  const caption = info.tone === 'debt'
+    ? 'Pagás cuando quieras y el monto que quieras.'
+    : info.tone === 'credit'
+      ? 'Es plata que GO! te debe (cupones e incentivos). Coordiná el cobro con administración.'
+      : 'No tenés saldo pendiente.';
+  const usedPct = limitOn && limit > 0 ? Math.min(100, Math.round((Math.max(0, balance) / limit) * 100)) : 0;
+
+  modalEl.innerHTML = `
+    ${renderBalanceHero(balance, { perspective: 'driver', caption })}
+    ${inReview > 0 ? `<div class="gd-stmt-note">${icon('hourglass', 14)} Tenés ${formatPrice(inReview)} en revisión: administración está validando tu comprobante.</div>` : ''}
+    ${limitOn && limit > 0 && info.tone === 'debt' ? `
+      <div style="background:var(--driver-bg-elevated); border:1px solid var(--driver-border); border-radius:16px; padding:12px 14px;">
+        <div style="display:flex; justify-content:space-between; font-size:11.5px; font-weight:800; color:var(--driver-text-secondary);">
+          <span>Tope de deuda</span><span>${formatPrice(Math.max(0, balance))} de ${formatPrice(limit)}</span>
+        </div>
+        <div style="height:6px; border-radius:6px; background:var(--driver-border); margin-top:8px; overflow:hidden;">
+          <div style="height:100%; width:${usedPct}%; background:${usedPct >= 80 ? '#f43f5e' : '#10b981'}; border-radius:6px;"></div>
+        </div>
+        ${usedPct >= 80 ? `<div style="font-size:11.5px; font-weight:700; color:#f43f5e; margin-top:8px;">Si pasás el tope no vas a poder conectarte hasta pagar.</div>` : ''}
+      </div>` : ''}
+
+    <div style="display:grid; grid-template-columns:${info.tone === 'debt' ? '1fr 1fr' : '1fr'}; gap:10px;">
+      ${info.tone === 'debt' ? `<button id="acct-pay-btn" class="gd-stmt-btn" style="background:#e11d48; color:white;">${icon('bank', 17)} Pagar</button>` : ''}
+      <button id="acct-wsp-btn" class="gd-stmt-btn gd-stmt-btn--ghost">${icon('whatsappLogo', 17)} ${info.tone === 'credit' ? 'Coordinar cobro' : 'Administración'}</button>
+    </div>
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px;">
+      <div style="font-size:13px; font-weight:900;">Últimos movimientos</div>
+      <button id="acct-all-btn" style="background:none; border:none; color:#f43f5e; font-size:12px; font-weight:800; cursor:pointer; padding:4px 0;">Ver estado de cuenta</button>
+    </div>
+    <div id="acct-latest" style="display:flex; flex-direction:column; gap:14px;"><div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div></div>
+  `;
+
+  const latest = modalEl.querySelector('#acct-latest');
+  fetchStatementPage(db, uid, null, 6)
+    .then(({ entries }) => { latest.innerHTML = renderStatementList(entries, { perspective: 'driver', emptyText: 'Todavía no hay movimientos en tu cuenta.' }); })
+    .catch(() => { latest.innerHTML = '<div class="gd-stmt-empty"><p>No se pudieron cargar los movimientos.</p></div>'; });
+
+  modalEl.querySelector('#acct-all-btn').onclick = () => showBalanceHistoryModal(uid);
+  modalEl.querySelector('#acct-pay-btn')?.addEventListener('click', () => showRegularizeModal(Math.max(0, balance - inReview) || Math.max(0, balance)));
+  modalEl.querySelector('#acct-wsp-btn').onclick = () => {
+    const u = getState().user || user || {};
     const wsp = getState().whatsappPayments || '5491123456789';
-    const detailMsg = totalCouponsCredit > 0
-      ? `\nMONTO NETO A TRANSFERIR: ${formatPrice(netDebt)}\n(Deuda bruta: ${formatPrice(grossDebt)} - Cupones: ${formatPrice(totalCouponsCredit)})\nDETALLE: Saldar balance neto pendiente.`
-      : `\nMONTO: ${formatPrice(grossDebt)}\nDETALLE: Saldar balance pendiente.`;
-    const msg = encodeURIComponent(`Hola, adjunto comprobante de pago de GoDelivery.\n---\nREPARTIDOR: ${user.displayName || user.name}\nID: ${user.deliveryId || '---'}${detailMsg}`);
-    window.open(`https://wa.me/${wsp}?text=${msg}`, '_blank');
+    const text = info.tone === 'credit'
+      ? `Hola! Soy ${u.displayName || u.name || 'repartidor'} (ID ${u.deliveryId || '---'}). En la app figura que GO! me debe ${formatPrice(info.amount)}. ¿Cómo coordinamos el cobro?`
+      : `Hola! Soy ${u.displayName || u.name || 'repartidor'} (ID ${u.deliveryId || '---'}). Te escribo por mi cuenta: ${info.tone === 'debt' ? `figura un saldo de ${formatPrice(info.amount)}` : 'estoy al día'}.`;
+    window.open(`https://wa.me/${wsp}?text=${encodeURIComponent(text)}`, '_blank');
   };
 }
 
-export async function showRegularizeModal(netDebt, grossDebt = netDebt, totalCouponsCredit = 0) {
+// Pay by bank transfer: the driver chooses how much, transfers and uploads the receipt.
+// The admin approves it for what actually arrived (Repartidores → Validaciones).
+export async function showRegularizeModal(suggestedAmount = 0) {
   const { showModal, closeModal } = await import('../../components/modal.js');
   const { showToast } = await import('../../components/toast.js');
-  const currentTheme = getDriverMapTheme();
-  const isLight = currentTheme === 'light';
-
-  const modalEl = document.createElement('div');
-  modalEl.style.cssText = `padding: 20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))) 20px; background:var(--driver-bg-panel); color:var(--driver-text-primary); height:100%; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden;`;
-  
+  const { ensureStatementStyles } = await import('../../components/driver-statement.js');
+  ensureStatementStyles();
+  const isLight = getDriverMapTheme() === 'light';
   const bankAlias = getState().bankAlias || 'godelivery.oficial';
   const bankOwner = getState().bankOwner || 'GoDelivery S.R.L.';
 
+  const modalEl = document.createElement('div');
+  modalEl.className = 'gd-stmt gd-stmt--driver';
+  modalEl.style.cssText = 'padding:18px 18px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background:var(--driver-bg-panel); min-height:100%; box-sizing:border-box;';
+  const step = (n, text) => `<div style="display:flex; gap:10px; align-items:flex-start; font-size:12.5px; font-weight:700; color:var(--driver-text-secondary); line-height:1.45;"><span style="width:22px; height:22px; border-radius:50%; background:var(--driver-text-primary); color:var(--driver-bg-panel); font-size:11px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${n}</span><span>${text}</span></div>`;
   modalEl.innerHTML = `
-    <div style="flex:1; display:flex; flex-direction:column; gap:16px; overflow-y:auto; margin-bottom:12px;">
-      <div style="text-align:center; padding:4px 0;">
-        <p style="font-size:13px; color:var(--driver-text-label); margin:0 0 6px 0; font-weight:600; line-height:1.45;">
-          ${totalCouponsCredit > 0 ? `Deuda en sistema: <strong style="color:#ef4444;">${formatPrice(grossDebt)}</strong> | Descuento cupones: <strong style="color:#a855f7;">-${formatPrice(totalCouponsCredit)}</strong>` : 'Total adeudado a la plataforma:'}
-        </p>
-        <div style="font-size:32px; font-weight:950; color:#10b981; letter-spacing:-1px;">
-          ${formatPrice(netDebt)}
-        </div>
-        <span style="font-size:11px; font-weight:800; color:var(--driver-text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Monto Neto a Transferir</span>
-      </div>
+    <div>
+      <label style="font-size:10.5px; font-weight:900; color:var(--driver-text-secondary); text-transform:uppercase; letter-spacing:0.06em; display:block; margin-bottom:6px;">¿Cuánto vas a pagar?</label>
+      <input id="pay-amount-input" type="number" inputmode="decimal" min="0" value="${suggestedAmount > 0 ? Math.round(suggestedAmount * 100) / 100 : ''}" style="width:100%; box-sizing:border-box; height:56px; border-radius:16px; border:1.5px solid var(--driver-border); background:var(--driver-bg-elevated); color:var(--driver-text-primary); font-size:24px; font-weight:950; padding:0 16px;" />
+      <div style="font-size:11.5px; font-weight:600; color:var(--driver-text-secondary); margin-top:6px;">Podés pagar todo o una parte. Si pagás de más, te queda a favor.</div>
+    </div>
 
-      <div style="background:${isLight ? '#f8fafc' : 'rgba(255,255,255,0.05)'}; border:1.5px solid var(--driver-border-b); border-radius:22px; padding:20px; box-shadow:${isLight ? '0 4px 12px rgba(0,0,0,0.04)' : 'none'};">
-        <div style="margin-bottom:14px; border-bottom:1px dashed var(--driver-border-strong); padding-bottom:12px;">
-          <label style="font-size:10px; font-weight:900; color:var(--driver-text-secondary); text-transform:uppercase; margin-bottom:4px; display:block; letter-spacing:0.06em;">ALIAS / CVU</label>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="font-size:18px; color:var(--driver-text-primary); letter-spacing:0.02em; font-family:monospace;">${bankAlias}</strong>
-            <button class="btn-copy" aria-label="Copiar alias o CVU" onclick="navigator.clipboard.writeText('${bankAlias}'); showToast('Copiado', 'success')" style="background:${isLight ? 'rgba(225,29,72,0.1)' : 'rgba(225,29,72,0.2)'}; border:none; color:#e11d48; cursor:pointer; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">
-              ${icon('copy', 16)}
-            </button>
-          </div>
+    <div style="background:var(--driver-bg-elevated); border:1px solid var(--driver-border); border-radius:18px; padding:16px; display:flex; flex-direction:column; gap:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-size:10px; font-weight:900; color:var(--driver-text-secondary); text-transform:uppercase; letter-spacing:0.06em;">Alias / CVU</div>
+          <div style="font-size:17px; font-weight:900; font-family:monospace; overflow-wrap:anywhere;">${bankAlias}</div>
         </div>
-        
-        <div>
-          <label style="font-size:10px; font-weight:900; color:var(--driver-text-secondary); text-transform:uppercase; margin-bottom:4px; display:block; letter-spacing:0.06em;">TITULAR</label>
-          <strong style="font-size:14.5px; color:var(--driver-text-primary); font-weight:800;">${bankOwner}</strong>
-        </div>
+        <button id="pay-copy-btn" aria-label="Copiar alias" style="width:44px; height:44px; border-radius:12px; border:none; background:rgba(225,29,72,0.15); color:#f43f5e; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('copy', 16)}</button>
       </div>
-
-      <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); border-radius:18px; padding:14px; display:flex; gap:10px; align-items:flex-start;">
-        <div style="color:#d97706; margin-top:2px; display:flex; flex-shrink:0;">${icon('info', 18)}</div>
-        <p style="font-size:12px; color:${isLight ? '#92400e' : '#fbbf24'}; margin:0; line-height:1.45; font-weight:600;">
-          Una vez realizada la transferencia, subí el comprobante para que administración verifique y reactive tu saldo neto de forma inmediata.
-        </p>
+      <div style="border-top:1px dashed var(--driver-border); padding-top:10px;">
+        <div style="font-size:10px; font-weight:900; color:var(--driver-text-secondary); text-transform:uppercase; letter-spacing:0.06em;">Titular</div>
+        <div style="font-size:14px; font-weight:800;">${bankOwner}</div>
       </div>
     </div>
 
-    <input type="file" id="receipt-file-input" accept="image/*" style="display:none;" />
-    
-    <button id="modal-upload-receipt-btn"
-            style="width:100%; height:54px; border-radius:18px; background:#e11d48; color:white; border:none; font-weight:950; font-size:14px; cursor:pointer; box-shadow:0 8px 20px rgba(225,29,72,0.35); display:flex; align-items:center; justify-content:center; gap:10px; text-transform:uppercase; flex-shrink:0; transition:all 0.2s;">
-      ${icon('camera', 20)} SUBIR COMPROBANTE
-    </button>
-  `;
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      ${step(1, 'Transferí el monto al alias de arriba.')}
+      ${step(2, 'Subí la captura del comprobante.')}
+      ${step(3, 'Administración lo valida y se descuenta de tu cuenta.')}
+    </div>
 
-  showModal({ 
-    title: 'Regularizar Balance', 
-    content: modalEl, 
-    height: '70dvh',
-    headerBackground: '#E11D48',
-    headerTextColor: 'white'
+    <input type="file" id="receipt-file-input" accept="image/*" style="display:none;" />
+    <button id="modal-upload-receipt-btn" class="gd-stmt-btn" style="background:#e11d48; color:white; height:54px;">${icon('camera', 19)} Subir comprobante</button>
+  `;
+  showModal({
+    title: 'Pagar por transferencia',
+    content: modalEl,
+    height: 'auto',
+    headerBackground: isLight ? '#ffffff' : '#090d16',
+    headerTextColor: isLight ? '#0f172a' : 'white'
   });
 
+  modalEl.querySelector('#pay-copy-btn').onclick = () => {
+    navigator.clipboard?.writeText(bankAlias).then(() => showToast('Alias copiado', 'success')).catch(() => showToast(bankAlias, 'info'));
+  };
   const fileInput = modalEl.querySelector('#receipt-file-input');
   const uploadBtn = modalEl.querySelector('#modal-upload-receipt-btn');
-
+  const amountOf = () => Math.round((parseFloat(modalEl.querySelector('#pay-amount-input').value) || 0) * 100) / 100;
   uploadBtn.onclick = () => {
+    if (amountOf() <= 0) {
+      showToast('Escribí cuánto transferiste', 'warning');
+      return;
+    }
     fileInput.click();
   };
-
   fileInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
+    const amount = amountOf();
     uploadBtn.disabled = true;
     uploadBtn.innerHTML = 'Subiendo comprobante...';
     uploadBtn.style.opacity = '0.7';
-
     try {
       const user = getState().user;
       const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
       const { compressImage } = await import('../../utils/format.js');
-      const { addDoc, collection } = await import('firebase/firestore');
-      const { db, storage } = await import('../../firebase.js');
+      const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+      const { storage } = await import('../../firebase.js');
       const optimizedFile = await compressImage(file, 1280, 0.82);
-      
-      const storageRef = ref(storage, `delivery_receipts/${user.uid}_${Date.now()}.jpg`);
-      const snapshot = await uploadBytes(storageRef, optimizedFile);
+      const snapshot = await uploadBytes(ref(storage, `delivery_receipts/${user.uid}_${Date.now()}.jpg`), optimizedFile);
       const downloadUrl = await getDownloadURL(snapshot.ref);
-
-      // Create transaction request in Firestore collection delivery_settlement_proofs
       await addDoc(collection(db, 'delivery_settlement_proofs'), {
         driverId: user.uid,
         driverName: user.displayName || user.name || 'Repartidor',
         driverDeliveryId: user.deliveryId || '---',
-        amount: netDebt,
-        grossDebt: grossDebt,
-        couponsCredit: totalCouponsCredit,
+        amount,
+        balanceAtUpload: Number(user.deliveryDebt) || 0,
         imageUrl: downloadUrl,
         status: 'pending',
-        createdAt: new Date()
+        createdAt: serverTimestamp()
       });
-
-      showToast('✅ Comprobante subido con éxito. El administrador lo revisará en breve.', 'success');
-      closeModal(); // close Regularize Modal
-      closeModal(); // close Balance Management Modal
+      showToast('✅ Comprobante enviado. Administración lo va a revisar en breve.', 'success');
+      closeModal();
     } catch (err) {
       console.error(err);
-      showToast('❌ Error al subir comprobante. Reintenta.', 'error');
+      showToast('❌ No se pudo subir el comprobante. Probá de nuevo.', 'error');
       uploadBtn.disabled = false;
-      uploadBtn.innerHTML = `${icon('camera', 20)} SUBIR COMPROBANTE`;
+      uploadBtn.innerHTML = `${icon('camera', 19)} Subir comprobante`;
       uploadBtn.style.opacity = '1';
     }
   };
@@ -886,378 +791,36 @@ export async function showCompletedOrderDetailsModal(orderId) {
   openCompletedOrderDetailsModal(o, getState().user);
 }
 
+// Full statement: every movement of the driver's account, with the balance each one left.
 export async function showBalanceHistoryModal(driverId) {
-  const { showModal, closeModal } = await import('../../components/modal.js');
-  const { getDocs, getDoc, doc, collection, query, where } = await import('firebase/firestore');
-  const currentTheme = getDriverMapTheme();
-  const isLight = currentTheme === 'light';
-  
+  const { showModal } = await import('../../components/modal.js');
+  const { doc, getDoc } = await import('firebase/firestore');
+  const { ensureStatementStyles, renderBalanceHero, mountStatement } = await import('../../components/driver-statement.js');
+  ensureStatementStyles();
+  const isLight = getDriverMapTheme() === 'light';
+
   const content = document.createElement('div');
-  content.style.cssText = `padding:16px 20px; background:var(--driver-bg-panel); min-height:60dvh; display:flex; flex-direction:column; color:var(--driver-text-primary);`;
-  content.innerHTML = `<div class="loader-dots" style="margin:40px auto;"><span></span><span></span><span></span></div>`;
-  
-  showModal({ 
-    title: 'Historial de Balance', 
-    content, 
-    height: '80dvh',
+  content.className = 'gd-stmt gd-stmt--driver';
+  content.style.cssText = 'padding:16px 18px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background:var(--driver-bg-panel); min-height:100%; box-sizing:border-box;';
+  content.innerHTML = `<div data-hero></div><div data-body style="display:flex; flex-direction:column; gap:14px;"></div>`;
+  showModal({
+    title: 'Estado de cuenta',
+    content,
+    height: '88dvh',
     headerBackground: isLight ? '#ffffff' : '#090d16',
     headerTextColor: isLight ? '#0f172a' : 'white'
   });
-  
-  try {
-    // 1. Fetch user deliveryDebt from Firestore reference correctly
-    const userDocSnap = await getDoc(doc(db, 'users', driverId));
-    const userData = userDocSnap.exists() ? userDocSnap.data() : {};
-    const actualDebt = userData.deliveryDebt || 0;
-    const lastLiquidationAt = userData.lastLiquidationAt;
 
-    // 2. Fetch transactions and canon payments
-    const [transSnap, canonSnap] = await Promise.all([
-      getDocs(query(collection(db, 'delivery_transactions'), where('driverId', '==', driverId))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'delivery_canon_payments'), where('driverId', '==', driverId))).catch(() => ({ docs: [] }))
-    ]);
+  getDoc(doc(db, 'users', driverId)).then((snap) => {
+    const hero = content.querySelector('[data-hero]');
+    if (hero && snap.exists()) hero.innerHTML = renderBalanceHero(Number(snap.data().deliveryDebt) || 0, { perspective: 'driver' });
+  }).catch(() => {});
 
-    const transList = transSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const canonList = canonSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    // 3. Fetch completed orders pending liquidation
-    const qOrders = query(
-      collection(db, 'orders'),
-      where('driverId', '==', driverId),
-      where('status', '==', 'completed')
-    );
-    const ordersSnap = await getDocs(qOrders).catch(() => ({ docs: [] }));
-    const pendingOrdersList = ordersSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(o => {
-        let isSettled = o.isSettledDriver === true;
-        if (!isSettled && lastLiquidationAt) {
-          const lqTime = lastLiquidationAt.toMillis ? lastLiquidationAt.toMillis() : new Date(lastLiquidationAt).getTime();
-          const orderTime = o.deliveredAt ? (o.deliveredAt.toMillis ? o.deliveredAt.toMillis() : new Date(o.deliveredAt).getTime()) : (o.createdAt ? (o.createdAt.toMillis ? o.createdAt.toMillis() : new Date(o.createdAt).getTime()) : 0);
-          if (orderTime > 0 && orderTime <= lqTime) {
-            isSettled = true;
-          }
-        }
-        return !isSettled && (o.appUsageFee || 0) > 0;
-      })
-      .map(o => ({
-        id: o.id,
-        type: 'app_usage_fee',
-        amount: o.appUsageFee,
-        description: `Tarifa de Uso App (Pedido #${o.orderId})`,
-        createdAt: o.deliveredAt || o.createdAt,
-        orderId: o.id
-      }));
-
-    // 3b. Fetch pending coupon credits from delivered orders
-    const pendingCouponOrdersList = ordersSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(o => o.isSettledDriver !== true && (o.couponDiscount || 0) > 0)
-      .map(o => ({
-        id: `coupon_${o.id}`,
-        type: 'coupon_credit',
-        amount: -(o.couponDiscount || 0),
-        rawDiscount: o.couponDiscount,
-        description: `Crédito por Cupón (Pedido #${o.orderId || o.id.slice(0,6)})`,
-        createdAt: o.deliveredAt || o.createdAt,
-        orderId: o.id
-      }));
-
-    const totalCouponsCredit = pendingCouponOrdersList.reduce((sum, c) => sum + (c.rawDiscount || 0), 0);
-    // actualDebt is already net of coupons (subtracted server-side on completion).
-    const netDebt = Math.max(0, actualDebt);
-
-    // Build unique Canon charges list from both collections (deduplicated by date)
-    const canonChargesMap = new Map();
-    transList.filter(t => t.type === 'canon_charge').forEach(t => {
-      const dStr = t.description?.match(/\d{4}-\d{2}-\d{2}/)?.[0] || (t.createdAt?.toDate ? t.createdAt.toDate().toISOString().slice(0,10) : t.id);
-      canonChargesMap.set(dStr, {
-        id: t.id,
-        type: 'canon_charge',
-        amount: t.amount,
-        description: t.description || `Canon Diario Jornada (${dStr})`,
-        createdAt: t.createdAt,
-        dateKey: dStr
-      });
-    });
-
-    canonList.forEach(c => {
-      const dStr = c.dateStr || (c.id?.split('_')[1]) || (c.createdAt?.toDate ? c.createdAt.toDate().toISOString().slice(0,10) : c.id);
-      if (!c.settled && c.amount > 0 && !canonChargesMap.has(dStr)) {
-        canonChargesMap.set(dStr, {
-          id: c.id,
-          type: 'canon_charge',
-          amount: c.amount,
-          description: `Canon Diario Jornada (${c.dateStr || dStr || 'Hoy'})`,
-          createdAt: c.createdAt,
-          dateKey: dStr
-        });
-      }
-    });
-
-    const allCharges = [
-      ...pendingOrdersList,
-      ...Array.from(canonChargesMap.values())
-    ].sort((a, b) => {
-      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-      return (timeB || 0) - (timeA || 0);
-    });
-
-    const pendingCharges = [];
-    let accumulated = 0;
-    for (const charge of allCharges) {
-      if (accumulated >= actualDebt) break;
-      const amt = charge.amount || 0;
-      if (accumulated + amt <= actualDebt) {
-        pendingCharges.push(charge);
-        accumulated += amt;
-      } else {
-        const partialAmt = actualDebt - accumulated;
-        pendingCharges.push({
-          ...charge,
-          amount: partialAmt,
-          isPartial: true
-        });
-        accumulated += partialAmt;
-      }
-    }
-
-    const discrepancy = actualDebt - accumulated;
-    if (Math.abs(discrepancy) > 1) {
-      pendingCharges.push({
-        id: 'virtual_adjustment',
-        type: 'adjustment_charge',
-        amount: discrepancy,
-        description: 'Saldo Pendiente Anterior',
-        createdAt: null
-      });
-    }
-
-    // 5. Liquidations tab list
-    const liquidationsList = transList
-      .filter(t => t.type === 'liquidation' || t.type === 'coupon_reimbursement')
-      .sort((a, b) => {
-        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-        return (timeB || 0) - (timeA || 0);
-      });
-
-    let currentMainTab = 'pending';
-    let currentFilterType = 'all'; // 'all' | 'app_fee' | 'canon' | 'coupon'
-
-    // 6. Draw Tabs & Filter Header
-    content.innerHTML = `
-      <!-- Main Tabs -->
-      <div style="display:flex; background:rgba(255,255,255,0.06); border-radius:16px; padding:4px; margin-bottom:12px; border:1px solid rgba(255,255,255,0.08); flex-shrink:0;">
-        <button id="tab-btn-pending" style="flex:1; height:40px; border-radius:12px; border:none; background:rgba(225,29,72,0.2); color:#f43f5e; font-size:12px; font-weight:900; cursor:pointer; transition:all 0.2s;">
-          A Liquidar ($${Math.round(netDebt).toLocaleString('es-AR')})
-        </button>
-        <button id="tab-btn-history" style="flex:1; height:40px; border-radius:12px; border:none; background:transparent; color:#94a3b8; font-size:12px; font-weight:700; cursor:pointer; transition:all 0.2s;">
-          Liquidaciones
-        </button>
-      </div>
-
-      <!-- Sub-Filter Switch (for Pending Charges) -->
-      <div id="balance-sub-filter-row" style="display:flex; gap:6px; margin-bottom:14px; flex-shrink:0; overflow-x:auto;">
-        <button class="balance-filter-pill active" data-filter="all" style="flex:1; min-width:60px; height:34px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.12); color:white; font-size:11px; font-weight:800; cursor:pointer; transition:all 0.15s;">
-          Todas
-        </button>
-        <button class="balance-filter-pill" data-filter="app_fee" style="flex:1; min-width:90px; height:34px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.04); color:#94a3b8; font-size:11px; font-weight:700; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:4px;">
-          <span style="display:inline-flex;">${icon('cart', 12)}</span> Tarifa App
-        </button>
-        <button class="balance-filter-pill" data-filter="canon" style="flex:1; min-width:90px; height:34px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.04); color:#94a3b8; font-size:11px; font-weight:700; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:4px;">
-          <span style="display:inline-flex;">${icon('motorcycle', 12)}</span> Canon Diario
-        </button>
-        ${totalCouponsCredit > 0 ? `
-          <button class="balance-filter-pill" data-filter="coupon" style="flex:1; min-width:110px; height:34px; border-radius:10px; border:1px solid rgba(168,85,247,0.3); background:rgba(168,85,247,0.12); color:#c084fc; font-size:11px; font-weight:800; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:4px;">
-            <span style="display:inline-flex;">${icon('ticket', 12)}</span> Cupones (-$${Math.round(totalCouponsCredit).toLocaleString('es-AR')})
-          </button>
-        ` : ''}
-      </div>
-
-      <!-- Tab Content Area -->
-      <div id="balance-tab-content-area" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px; touch-action:pan-y; -webkit-overflow-scrolling:touch;">
-      </div>
-    `;
-
-    const pendingBtn = content.querySelector('#tab-btn-pending');
-    const historyBtn = content.querySelector('#tab-btn-history');
-    const subFilterRow = content.querySelector('#balance-sub-filter-row');
-    const contentArea = content.querySelector('#balance-tab-content-area');
-
-    function updateFilterPillsUI() {
-      subFilterRow.querySelectorAll('.balance-filter-pill').forEach(btn => {
-        const isSelected = btn.dataset.filter === currentFilterType;
-        btn.classList.toggle('active', isSelected);
-        if (btn.dataset.filter === 'coupon') {
-          btn.style.background = isSelected ? 'rgba(168,85,247,0.25)' : 'rgba(168,85,247,0.1)';
-          btn.style.borderColor = isSelected ? 'rgba(168,85,247,0.5)' : 'rgba(168,85,247,0.25)';
-          btn.style.color = isSelected ? '#ffffff' : '#c084fc';
-        } else {
-          btn.style.background = isSelected ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)';
-          btn.style.borderColor = isSelected ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.06)';
-          btn.style.color = isSelected ? 'white' : '#94a3b8';
-        }
-        btn.style.fontWeight = isSelected ? '800' : '600';
-      });
-    }
-
-    subFilterRow.querySelectorAll('.balance-filter-pill').forEach(btn => {
-      btn.onclick = () => {
-        currentFilterType = btn.dataset.filter;
-        updateFilterPillsUI();
-        renderTabContent();
-      };
-    });
-
-    function renderTabContent() {
-      if (currentMainTab === 'pending') {
-        pendingBtn.style.background = 'rgba(225,29,72,0.2)';
-        pendingBtn.style.color = '#f43f5e';
-        pendingBtn.style.fontWeight = '900';
-        
-        historyBtn.style.background = 'transparent';
-        historyBtn.style.color = '#94a3b8';
-        historyBtn.style.fontWeight = '700';
-
-        subFilterRow.style.display = 'flex';
-
-        let filtered = [...pendingCharges, ...pendingCouponOrdersList];
-        if (currentFilterType === 'app_fee') {
-          filtered = pendingCharges.filter(t => t.type === 'app_usage_fee');
-        } else if (currentFilterType === 'canon') {
-          filtered = pendingCharges.filter(t => t.type === 'canon_charge');
-        } else if (currentFilterType === 'coupon') {
-          filtered = pendingCouponOrdersList;
-        }
-
-        if (filtered.length === 0) {
-          contentArea.innerHTML = `
-            <div style="text-align:center; padding:60px 20px; color:#94a3b8; opacity:0.8;">
-              <div style="display:flex; justify-content:center; margin-bottom:10px; color:#94a3b8;">${icon('sparkles', 36)}</div>
-              <p style="margin:0; font-weight:700; font-size:14px; color:white;">No hay registros pendientes</p>
-              <p style="margin:4px 0 0; font-size:12px; color:#64748b;">${currentFilterType === 'canon' ? 'No tenés canones diarios sin liquidar.' : currentFilterType === 'app_fee' ? 'No tenés tarifas de pedidos sin liquidar.' : currentFilterType === 'coupon' ? 'No tenés cupones pendientes.' : 'Tu cuenta está al día.'}</p>
-            </div>
-          `;
-          return;
-        }
-
-        contentArea.innerHTML = filtered.map(t => {
-          const isCanon = t.type === 'canon_charge';
-          const isAppFee = t.type === 'app_usage_fee';
-          const isCoupon = t.type === 'coupon_credit';
-          const rawDate = t.createdAt ? (t.createdAt.toMillis ? t.createdAt.toMillis() : new Date(t.createdAt).getTime()) : null;
-          const formattedDate = rawDate ? `<span style="display:inline-flex; vertical-align:middle;">${icon('calendar', 11)}</span> ${new Date(rawDate).toLocaleDateString('es-AR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'})} hs` : 'Saldo Pendiente';
-          
-          let iconColor = isCanon ? '#f43f5e' : isAppFee ? '#f59e0b' : '#a855f7';
-          let iconBg = isCanon ? 'rgba(225,29,72,0.12)' : isAppFee ? 'rgba(245,158,11,0.12)' : 'rgba(168,85,247,0.15)';
-          let iconName = isCanon ? 'bike' : isAppFee ? 'cart' : 'tag';
-          if (t.type === 'adjustment_charge') {
-            iconColor = '#94a3b8';
-            iconBg = 'rgba(148,163,184,0.1)';
-            iconName = 'receipt';
-          }
-
-          const amountFormatted = isCoupon 
-            ? `-$${Math.round(t.rawDiscount || 0).toLocaleString('es-AR')}`
-            : `+$${Math.round(t.amount || 0).toLocaleString('es-AR')}`;
-          const amountColor = isCoupon ? '#c084fc' : iconColor;
-
-          return `
-            <div class="balance-item-card" data-order-id="${t.orderId || ''}" style="background:rgba(255,255,255,0.04); border:1px solid ${isCoupon ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.08)'}; border-radius:18px; padding:13px 15px; display:flex; justify-content:space-between; align-items:center; cursor:${t.orderId ? 'pointer' : 'default'}; transition:all 0.2s;">
-              <div style="min-width:0; flex:1; display:flex; align-items:center; gap:12px;">
-                <div style="width:36px; height:36px; border-radius:12px; background:${iconBg}; color:${iconColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                  ${icon(iconName, 18)}
-                </div>
-                <div style="min-width:0; display:flex; flex-direction:column; gap:2px;">
-                  <div style="font-weight:800; font-size:13.5px; color:#f8fafc; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${t.description}</div>
-                  <div style="font-size:11px; color:#94a3b8; font-weight:600;">${formattedDate}</div>
-                </div>
-              </div>
-              <div style="text-align:right; margin-left:12px; flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end;">
-                <span style="font-weight:900; font-size:15px; color:${amountColor}; letter-spacing:-0.5px;">${amountFormatted}</span>
-                <span style="font-size:9px; font-weight:850; color:${isCoupon ? '#a855f7' : '#64748b'}; text-transform:uppercase; letter-spacing:0.04em; margin-top:2px;">${isCanon ? 'CANON DIARIO' : isAppFee ? 'TARIFA APP' : isCoupon ? 'CRÉDITO A FAVOR' : 'SALDO'}</span>
-              </div>
-            </div>
-          `;
-        }).join('');
-
-        contentArea.querySelectorAll('.balance-item-card').forEach(card => {
-          if (card.dataset.orderId) {
-            card.addEventListener('click', () => {
-              showCompletedOrderDetailsModal(card.dataset.orderId);
-            });
-            card.onmouseover = () => { card.style.borderColor = 'rgba(225,29,72,0.4)'; card.style.background = 'rgba(255,255,255,0.07)'; };
-            card.onmouseout = () => { card.style.borderColor = 'rgba(255,255,255,0.08)'; card.style.background = 'rgba(255,255,255,0.04)'; };
-          }
-        });
-
-      } else {
-        historyBtn.style.background = 'rgba(255,255,255,0.12)';
-        historyBtn.style.color = 'white';
-        historyBtn.style.fontWeight = '800';
-        
-        pendingBtn.style.background = 'transparent';
-        pendingBtn.style.color = '#94a3b8';
-        pendingBtn.style.fontWeight = '700';
-
-        subFilterRow.style.display = 'none';
-
-        if (liquidationsList.length === 0) {
-          contentArea.innerHTML = `
-            <div style="text-align:center; padding:60px 20px; color:#94a3b8; opacity:0.8;">
-              <div style="display:flex; justify-content:center; margin-bottom:10px; color:#94a3b8;">${icon('clipboard', 36)}</div>
-              <p style="margin:0; font-weight:700; font-size:14px; color:white;">No hay liquidaciones registradas</p>
-              <p style="margin:4px 0 0; font-size:12px; color:#64748b;">Tus liquidaciones aprobadas aparecerán aquí.</p>
-            </div>
-          `;
-          return;
-        }
-
-        contentArea.innerHTML = liquidationsList.map(t => {
-          const isCoupon = t.type === 'coupon_reimbursement';
-          const formattedDate = t.createdAt ? new Date(t.createdAt.toMillis ? t.createdAt.toMillis() : new Date(t.createdAt).getTime()).toLocaleDateString('es-AR', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Reciente';
-          
-          const iconColor = isCoupon ? '#a855f7' : '#22c55e';
-          const iconBg = isCoupon ? 'rgba(168,85,247,0.12)' : 'rgba(34,197,94,0.12)';
-          const iconName = isCoupon ? 'tag' : 'checkCircle';
-
-          return `
-            <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:18px; padding:13px 15px; display:flex; justify-content:space-between; align-items:center;">
-              <div style="min-width:0; flex:1; display:flex; align-items:center; gap:12px;">
-                <div style="width:36px; height:36px; border-radius:12px; background:${iconBg}; color:${iconColor}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                  ${icon(iconName, 18)}
-                </div>
-                <div style="min-width:0; display:flex; flex-direction:column; gap:2px;">
-                  <div style="font-weight:800; font-size:13.5px; color:#f8fafc; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${t.description || 'Liquidación de Balance'}</div>
-                  <div style="font-size:11px; color:#94a3b8; font-weight:600;">${formattedDate}</div>
-                </div>
-              </div>
-              <div style="text-align:right; margin-left:12px; flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end;">
-                <span style="font-weight:900; font-size:15px; color:${iconColor}; letter-spacing:-0.5px;">-$${Math.round(Math.abs(t.amount || 0)).toLocaleString('es-AR')}</span>
-                <span style="font-size:9px; font-weight:850; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; margin-top:2px;">${isCoupon ? 'REINTEGRO' : 'LIQUIDADO'}</span>
-              </div>
-            </div>
-          `;
-        }).join('');
-      }
-    }
-
-    pendingBtn.onclick = () => {
-      currentMainTab = 'pending';
-      renderTabContent();
-    };
-
-    historyBtn.onclick = () => {
-      currentMainTab = 'history';
-      renderTabContent();
-    };
-
-    renderTabContent();
-  } catch (e) {
-    console.error("Error drawing balance history modal:", e);
-    content.innerHTML = `<p style="color:var(--color-danger); text-align:center; padding:40px;">Error al cargar el historial de balance.</p>`;
-  }
+  mountStatement(content.querySelector('[data-body]'), {
+    db,
+    driverId,
+    perspective: 'driver',
+    onOrder: (orderId) => showCompletedOrderDetailsModal(orderId),
+    emptyText: 'Todavía no hay movimientos en tu cuenta. Van a aparecer acá tus pedidos, cuotas y pagos.'
+  });
 }
-

@@ -194,7 +194,7 @@ async function loadAndGroupOrders() {
 
     let globalDriverDebts = 0;
     Object.values(groupedDrivers).forEach(d => {
-      globalDriverDebts += Number(d.debt || 0);
+      globalDriverDebts += Math.max(0, Number(d.debt || 0));
     });
 
     const totalPendingBalance = globalAppFees + globalCommissions + globalDriverDebts;
@@ -724,8 +724,8 @@ function renderDriversList(filter = '') {
           
           <div style="display:flex; align-items:center; gap:12px; flex-shrink:0;">
             <div style="text-align:right;">
-              <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Deuda Total</div>
-              <div style="font-size:17px; font-weight:900; color:${d.debt > 0 ? 'var(--color-success)' : 'var(--color-text-tertiary)'}; letter-spacing:-0.5px;">${formatPrice(d.debt)}</div>
+              <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">${d.debt > 0 ? 'Debe' : d.debt < 0 ? 'A favor' : 'Al día'}</div>
+              <div style="font-size:17px; font-weight:900; color:${d.debt > 0 ? 'var(--color-success)' : d.debt < 0 ? '#3b82f6' : 'var(--color-text-tertiary)'}; letter-spacing:-0.5px;">${formatPrice(Math.abs(d.debt))}</div>
             </div>
             <div style="width:36px; height:36px; border-radius:12px; background:var(--color-bg-secondary); display:flex; align-items:center; justify-content:center; color:var(--color-text-tertiary);">
               ${icon('chevronRight', 18)}
@@ -768,8 +768,8 @@ function showDriverDetail(driverId) {
             </div>
             
             <div style="text-align: center;">
-              <div style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 2.5px; margin-bottom: 8px; opacity:0.6;">Deuda Total a Liquidar</div>
-              <div style="font-size: 48px; font-weight: 950; color: white; letter-spacing: -2px; text-shadow: 0 4px 12px rgba(0,0,0,0.3);">${formatPrice(driver.debt)}</div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 2.5px; margin-bottom: 8px; opacity:0.6;">${driver.debt < 0 ? 'A favor del repartidor' : 'Deuda Total a Liquidar'}</div>
+              <div style="font-size: 48px; font-weight: 950; color: ${driver.debt < 0 ? '#93c5fd' : 'white'}; letter-spacing: -2px; text-shadow: 0 4px 12px rgba(0,0,0,0.3);">${formatPrice(Math.abs(driver.debt))}</div>
             </div>
         </div>
 

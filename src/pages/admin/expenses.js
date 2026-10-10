@@ -11,6 +11,7 @@ let currentTransactions = [];
 let currentSettlements = [];
 let currentUsers = [];
 let currentProofs = [];
+let currentLedger = []; // driver_ledger entries of the loaded period (drivers' accounts)
 let goMarketCatalogProducts = [];
 // Track last loaded month to avoid re-fetching same data
 let _lastLoadedMonth = null;
@@ -321,13 +322,22 @@ async function fetchFilteredData() {
       proofsQ = query(collection(db, 'delivery_settlement_proofs'), where('createdAt', '>=', start));
     }
 
+    // Drivers' accounts, by Argentina day (dayStr) — same period as the rest.
+    const dayOf = (ts) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(ts.toDate());
+    const ledgerParts = [collection(db, 'driver_ledger'),
+      where('type', 'in', ['order', 'daily_fee', 'payment', 'payout', 'reversal']),
+      where('dayStr', '>=', dayOf(start))];
+    if (end) ledgerParts.push(where('dayStr', '<', dayOf(end)));
+
     // Fetch all in parallel — single batch of reads
-    const [ordersSnap, transSnap, settSnap, usersSnap, proofsSnap] = await Promise.all([
+    const [ordersSnap, transSnap, settSnap, usersSnap, proofsSnap, ledgerSnap] = await Promise.all([
       getDocs(ordersQ),
       getDocs(transQ),
       getDocs(settlementsQ),
       getDocs(query(collection(db, 'users'), where('role', 'in', ['delivery', 'admin', 'comercio']))),
       getDocs(proofsQ),
+      // A failure here (e.g. index still building) must not take the whole report down.
+      getDocs(query(...ledgerParts)).catch((err) => { console.warn('driver_ledger load failed:', err); return { docs: [] }; }),
     ]);
 
     currentOrders       = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -335,6 +345,7 @@ async function fetchFilteredData() {
     currentSettlements  = settSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     currentUsers        = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     currentProofs       = proofsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    currentLedger       = ledgerSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     _lastLoadedMonth = cacheKey;
     updateDashboardView();
@@ -382,6 +393,84 @@ function getSelectedMonthPeriod() {
   };
 }
 
+// Money from drivers. Like the rest of this page it counts what was actually collected: what
+// drivers paid into their accounts minus what GO! paid them (driver_ledger). What their accounts
+// generated (fees + daily fees − coupons and incentives) is shown apart, for reference.
+// Before the accounts existed there are no entries: for that money the old estimate stays (fees and
+// daily fees of drivers who settled in the period), skipping whatever the ledger already covers.
+function driverFigures(period, checkPeriodDate) {
+  const ym = period.isAll ? '' : `${period.year}-${String(period.month + 1).padStart(2, '0')}`;
+  const ledger = currentLedger.filter(e => period.isAll || (e.dayStr || '').startsWith(ym));
+  const nameOf = (id, fallback) => {
+    const u = currentUsers.find(x => x.id === id);
+    return u ? (u.displayName || u.name) : (fallback || 'Repartidor');
+  };
+
+  const collectedItems = [];
+  let collected = 0;
+  ledger.forEach(e => {
+    const kind = e.type === 'reversal' ? e.reversesType : e.type;
+    if (kind !== 'payment' && kind !== 'payout') return;
+    const cash = -(Number(e.amount) || 0); // payment −X → +X in; payout +X → −X out
+    collected += cash;
+    const label = e.type === 'reversal'
+      ? (kind === 'payment' ? 'Cobro anulado' : 'Pago al cadete anulado')
+      : (kind === 'payment' ? 'Cobro' : 'Pago al cadete');
+    collectedItems.push({ date: e.createdAt, driverId: e.driverId, concept: `${label}: ${nameOf(e.driverId, e.driverName)}${e.method ? ` (${e.method})` : ''}`, amount: cash });
+  });
+
+  const generatedItems = [];
+  let fees = 0, canon = 0, credits = 0;
+  ledger.forEach(e => {
+    if (e.reversedById) return;
+    if (e.type === 'order') {
+      fees += Number(e.appFee) || 0;
+      const credit = (Number(e.couponCredit) || 0) + (Number(e.pointsCredit) || 0) + (Number(e.incentiveCredit) || 0);
+      credits += credit;
+      generatedItems.push({ date: e.createdAt, driverId: e.driverId, concept: `Tarifa ${e.concept || 'pedido'} (${nameOf(e.driverId, e.driverName)})`, amount: Number(e.appFee) || 0 });
+      if (credit > 0) generatedItems.push({ date: e.createdAt, driverId: e.driverId, concept: `Cupón / GoPoints / incentivo ${e.concept || ''} (${nameOf(e.driverId, e.driverName)})`, amount: -credit });
+    } else if (e.type === 'daily_fee') {
+      canon += Number(e.amount) || 0;
+      generatedItems.push({ date: e.createdAt, driverId: e.driverId, concept: `${e.concept || 'Cuota diaria'} (${nameOf(e.driverId, e.driverName)})`, amount: Number(e.amount) || 0 });
+    }
+  });
+
+  // Old estimate, only for what predates the accounts (docs without ledgerEntryId).
+  const liquidatedDriverIds = new Set();
+  currentSettlements.forEach(s => {
+    if ((s.type === 'driver_debt' || s.driverId) && checkPeriodDate(s.createdAt)) liquidatedDriverIds.add(s.driverId);
+  });
+  currentTransactions.forEach(t => {
+    const isLiquidation = t.type === 'liquidation' || t.type === 'settlement' || t.type === 'pago' || t.type === 'canon_paid';
+    if (isLiquidation && !t.ledgerEntryId && t.driverId && checkPeriodDate(t.createdAt)) liquidatedDriverIds.add(t.driverId);
+  });
+  let legacy = 0;
+  currentTransactions.forEach(t => {
+    if (t.type === 'canon_charge' && !t.ledgerEntryId && t.driverId && liquidatedDriverIds.has(t.driverId) && checkPeriodDate(t.createdAt)) {
+      const amount = Math.abs(Number(t.amount || 0));
+      legacy += amount;
+      collectedItems.push({ date: t.createdAt, driverId: t.driverId, concept: `Cuota diaria (sistema anterior): ${nameOf(t.driverId)}`, amount });
+    }
+  });
+  currentOrders.forEach(o => {
+    const delivered = o.status === 'delivered' || o.status === 'completed';
+    if (delivered && !o.ledgerEntryId && o.driverId && liquidatedDriverIds.has(o.driverId) && checkPeriodDate(o.createdAt)) {
+      const fee = Number(o.appUsageFee || o.appFee || 0);
+      if (fee > 0) {
+        legacy += fee;
+        collectedItems.push({ date: o.createdAt, driverId: o.driverId, concept: `Tarifa pedido #${o.goId || o.orderId || o.id.slice(0, 6)} (sistema anterior): ${nameOf(o.driverId, o.driverName)}`, amount: fee });
+      }
+    }
+  });
+
+  return {
+    driversIncome: collected + legacy,
+    collectedItems,
+    generated: { fees, canon, credits, net: fees + canon - credits },
+    generatedItems
+  };
+}
+
 function calculateFinancials(period) {
   const checkPeriodDate = (dt) => {
     const d = parseFirestoreDate(dt);
@@ -414,7 +503,6 @@ function calculateFinancials(period) {
   });
 
   let comercioCommissionsTotal = 0;
-  let appUsageFeesTotal = 0;
   let goMarketIncomeTotal = 0;
   let goMarketProfitTotal = 0;
   const goMarketProductsMap = {};
@@ -428,27 +516,8 @@ function calculateFinancials(period) {
     }
   });
 
-  // 2. DRIVER LIQUIDATIONS MAP FOR CANON CALCULATION & APP FEES CALCULATION
-  const liquidatedDriverIds = new Set();
-  filteredSettlements.forEach(s => {
-    if (s.type === 'driver_debt' || s.driverId) {
-      liquidatedDriverIds.add(s.driverId);
-    }
-  });
-  currentTransactions.forEach(t => {
-    const isLiquidation = t.type === 'liquidation' || t.type === 'settlement' || t.type === 'pago' || t.type === 'canon_paid';
-    if (isLiquidation && t.driverId && checkPeriodDate(t.createdAt)) {
-      liquidatedDriverIds.add(t.driverId);
-    }
-  });
-
-  // Sum canon_charge transactions in period for liquidated drivers
-  let driverCanonTotal = 0;
-  currentTransactions.forEach(t => {
-    if (t.type === 'canon_charge' && t.driverId && liquidatedDriverIds.has(t.driverId) && checkPeriodDate(t.createdAt)) {
-      driverCanonTotal += Number(t.amount || 1800);
-    }
-  });
+  // 2. DRIVERS: collected from their accounts (plus the old estimate for what predates them)
+  const drivers = driverFigures(period, checkPeriodDate);
 
   // Populate catalog products
   goMarketCatalogProducts.forEach(prod => {
@@ -482,12 +551,6 @@ function calculateFinancials(period) {
     if (isCommissionPaid && !hasCommerceSettlements) {
       const comm = order.isManual ? 0 : Number(order.commissionAmount || 0);
       comercioCommissionsTotal += comm;
-    }
-
-    // App Usage Fee (ONLY IF DELIVERED & DRIVER IS LIQUIDATED IN THIS PERIOD)
-    if (isOrderDelivered && order.driverId && liquidatedDriverIds.has(order.driverId)) {
-      const fee = Number(order.appUsageFee || order.appFee || 0);
-      appUsageFeesTotal += fee;
     }
 
     // GoMarket (ONLY IF LIQUIDATED)
@@ -542,7 +605,7 @@ function calculateFinancials(period) {
     }
   });
 
-  const totalIncome = comercioCommissionsTotal + appUsageFeesTotal + driverCanonTotal + goMarketProfitTotal + totalManualIncomes;
+  const totalIncome = comercioCommissionsTotal + drivers.driversIncome + goMarketProfitTotal + totalManualIncomes;
   const netResult = totalIncome - totalExpenses;
   const netMarginPct = totalIncome > 0 ? Math.round((netResult / totalIncome) * 100) : 0;
 
@@ -551,8 +614,8 @@ function calculateFinancials(period) {
     totalExpenses,
     totalManualIncomes,
     comercioCommissionsTotal,
-    appUsageFeesTotal,
-    driverCanonTotal,
+    driversIncome: drivers.driversIncome,
+    driversGenerated: drivers.generated,
     goMarketIncomeTotal,
     goMarketProfitTotal,
     goMarketProductsList: Object.values(goMarketProductsMap),
@@ -583,7 +646,7 @@ function updateDashboardView() {
 }
 
 function renderBalanceTab(container, financials, monthLabelText) {
-  const { totalIncome, totalExpenses, netResult, netMarginPct, comercioCommissionsTotal, appUsageFeesTotal, driverCanonTotal, goMarketProfitTotal, totalManualIncomes, filteredManuals } = financials;
+  const { totalIncome, totalExpenses, netResult, netMarginPct, comercioCommissionsTotal, driversIncome, driversGenerated, goMarketProfitTotal, totalManualIncomes, filteredManuals } = financials;
 
   const isPositive = netResult >= 0;
 
@@ -696,9 +759,9 @@ function renderBalanceTab(container, financials, monthLabelText) {
               </svg>
             </div>
             <div style="min-width:0; flex:1;">
-              <div style="font-size: 11px; font-weight: 850; color: #064e3b; text-transform:uppercase; letter-spacing:0.02em;">🛵 Canon Repartidores</div>
-              <div style="font-size: 19px; font-weight: 950; color: #065f46; margin-top: 2px;">+${formatPrice(driverCanonTotal)}</div>
-              <div style="font-size: 10.5px; color: #064e3b; margin-top: 1px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Cánones y saldos cobrados</div>
+              <div style="font-size: 11px; font-weight: 850; color: #064e3b; text-transform:uppercase; letter-spacing:0.02em;">🛵 Cobrado a Repartidores</div>
+              <div style="font-size: 19px; font-weight: 950; color: #065f46; margin-top: 2px;">${driversIncome < 0 ? '−' : '+'}${formatPrice(Math.abs(driversIncome))}</div>
+              <div style="font-size: 10.5px; color: #064e3b; margin-top: 1px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Lo que pagaron menos lo que GO! les pagó</div>
             </div>
           </div>
           <div style="color:#065f46; margin-left: 8px; display:flex; align-items:center;">
@@ -717,9 +780,9 @@ function renderBalanceTab(container, financials, monthLabelText) {
               </svg>
             </div>
             <div style="min-width:0; flex:1;">
-              <div style="font-size: 11px; font-weight: 850; color: #1e3a8a; text-transform:uppercase; letter-spacing:0.02em;">📲 Tarifas Servicio App</div>
-              <div style="font-size: 19px; font-weight: 950; color: #1d4ed8; margin-top: 2px;">+${formatPrice(appUsageFeesTotal)}</div>
-              <div style="font-size: 10.5px; color: #1e3a8a; margin-top: 1px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">De pedidos liquidados</div>
+              <div style="font-size: 11px; font-weight: 850; color: #1e3a8a; text-transform:uppercase; letter-spacing:0.02em;">📲 Generado en cuentas <span style="font-weight:700; text-transform:none; opacity:0.7;">(no suma)</span></div>
+              <div style="font-size: 19px; font-weight: 950; color: #1d4ed8; margin-top: 2px;">${formatPrice(driversGenerated.net)}</div>
+              <div style="font-size: 10.5px; color: #1e3a8a; margin-top: 1px; font-weight: 600; line-height: 1.35;">Tarifas ${formatPrice(driversGenerated.fees)} + cuotas ${formatPrice(driversGenerated.canon)} − cupones, GoPoints e incentivos ${formatPrice(driversGenerated.credits)}</div>
             </div>
           </div>
           <div style="color:#1d4ed8; margin-left: 8px; display:flex; align-items:center;">
@@ -1439,19 +1502,7 @@ window.showCategoryDetailsModal = (categoryKey, monthLabelText) => {
 
   const hasCommerceSettlements = currentSettlements.some(s => (s.type === 'commerce_settlement' || s.comercioId) && checkPeriodDate(s.createdAt));
 
-  // Build liquidated drivers map in selected period
-  const liquidatedDriverIds = new Set();
-  currentSettlements.forEach(s => {
-    if ((s.type === 'driver_debt' || s.driverId) && checkPeriodDate(s.createdAt)) {
-      liquidatedDriverIds.add(s.driverId);
-    }
-  });
-  currentTransactions.forEach(t => {
-    const isLiquidation = t.type === 'liquidation' || t.type === 'settlement' || t.type === 'pago' || t.type === 'canon_paid';
-    if (isLiquidation && t.driverId && checkPeriodDate(t.createdAt)) {
-      liquidatedDriverIds.add(t.driverId);
-    }
-  });
+  const drivers = driverFigures(period, checkPeriodDate);
 
   if (categoryKey === 'comercio_commissions') {
     titleText = '🏪 Comisiones Comercios';
@@ -1482,50 +1533,13 @@ window.showCategoryDetailsModal = (categoryKey, monthLabelText) => {
     }
 
   } else if (categoryKey === 'driver_liquidations') {
-    titleText = '🛵 Canon Repartidores';
-
-    // List daily canons (canon_charge) of liquidated drivers in period
-    currentTransactions.forEach(t => {
-      if (t.type === 'canon_charge' && t.driverId && liquidatedDriverIds.has(t.driverId) && checkPeriodDate(t.createdAt)) {
-        const driverUser = currentUsers.find(u => u.id === t.driverId);
-        const driverRealName = driverUser ? (driverUser.displayName || driverUser.name) : 'Repartidor';
-
-        // Find proof image if driver has approved receipt for their debt
-        const matchedProof = currentProofs.find(p => p.driverId === t.driverId && p.status === 'approved' && p.imageUrl);
-
-        items.push({
-          date: t.createdAt,
-          driverId: t.driverId,
-          concept: `Canon Diario: ${driverRealName}`,
-          amount: Math.abs(Number(t.amount || 1800)),
-          receiptUrl: matchedProof ? matchedProof.imageUrl : ''
-        });
-      }
-    });
+    titleText = '🛵 Cobrado a Repartidores';
+    items = drivers.collectedItems;
 
   } else if (categoryKey === 'app_fees') {
-    titleText = '📲 Tarifas Servicio App';
-
-    currentOrders.forEach(o => {
-      const isOrderDelivered = o.status === 'delivered' || o.status === 'completed';
-      if (isOrderDelivered && o.driverId && liquidatedDriverIds.has(o.driverId) && checkPeriodDate(o.createdAt)) {
-        const fee = Number(o.appUsageFee || o.appFee || 0);
-        if (fee > 0) {
-          const driverUser = currentUsers.find(u => u.id === o.driverId);
-          const driverRealName = driverUser ? (driverUser.displayName || driverUser.name) : (o.driverName || 'Repartidor');
-
-          const matchedProof = currentProofs.find(p => p.driverId === o.driverId && p.status === 'approved' && p.imageUrl);
-
-          items.push({
-            date: o.createdAt,
-            driverId: o.driverId,
-            concept: `Tarifa Pedido #${o.goId || o.id.slice(0,6)} (${driverRealName})`,
-            amount: fee,
-            receiptUrl: matchedProof ? matchedProof.imageUrl : ''
-          });
-        }
-      }
-    });
+    titleText = '📲 Generado en cuentas';
+    subTitleText = `Tarifas, cuotas y cupones de las cuentas (${monthLabelText}) · no suma al resultado`;
+    items = drivers.generatedItems;
 
   } else if (categoryKey === 'gomarket_profit') {
     titleText = '🛒 Margen GoMarket';
@@ -1652,8 +1666,8 @@ window.showCategoryDetailsModal = (categoryKey, monthLabelText) => {
                 </div>
                 <div style="font-size:10px; color:#71717a; font-weight:700; margin-top:2px;">${dateStr}</div>
               </div>
-              <div style="font-size:14px; font-weight:950; color:#10b981; white-space:nowrap; flex-shrink:0;">
-                +${formatPrice(it.amount)}
+              <div style="font-size:14px; font-weight:950; color:${it.amount < 0 ? '#e11d48' : '#10b981'}; white-space:nowrap; flex-shrink:0;">
+                ${it.amount < 0 ? '−' : '+'}${formatPrice(Math.abs(it.amount))}
               </div>
             </div>
           `;
