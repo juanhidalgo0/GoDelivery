@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0B0B0C">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Sorteo · GoDelivery Magdalena</title>
+  <meta name="description" content="Participá gratis del sorteo de GoDelivery Magdalena. Sumá chances con cada pedido e invitando a tus vecinos.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Sorteo · GoDelivery Magdalena">
+  <meta property="og:description" content="Participá gratis y ganá saldo para pedir lo que quieras. Sumá chances con cada pedido.">
+  <meta property="og:image" content="https://godelivery-magdalena.web.app/logo-pwa.png">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+    :root{
+      --ink:#0b0b0c;--ink2:#141416;--ink3:#1d1d20;--ink-line:#2a2a2e;
+      --paper:#f4f2ee;--paper2:#ebe7e0;--card:#fff;--line:#e6e1d8;
+      --text:#0b0b0c;--text2:#57534e;--text3:#8a847e;
+      --on-ink:#f7f5f1;--on-ink2:#a8a29e;--on-ink3:#6f6a66;
+      --red:#e11d48;--red-press:#be123c;--red-soft:rgba(225,29,72,.08);
+      --green:#0e9f6e;--green-soft:rgba(14,159,110,.1);
+      --gold:#f5b50b;--silver:#b8c2d0;--bronze:#d19a66;
+      --display:'Montserrat','Inter',system-ui,sans-serif;
+      --body:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      --r:16px;--r-lg:22px;
+      --shadow:0 1px 2px rgba(11,11,12,.04),0 10px 30px -10px rgba(11,11,12,.12);
+      --wrap:480px;
+    }
+    body{font-family:var(--body);background:var(--paper);color:var(--text);-webkit-font-smoothing:antialiased;overflow-x:hidden;line-height:1.45}
+    body.has-sticky{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+    body.overlay-open{overflow:hidden}
+    a{color:inherit}
+    button{font:inherit;color:inherit;cursor:pointer;border:none;background:none}
+    .wrap{max-width:var(--wrap);margin:0 auto;padding:0 20px}
+    .hidden{display:none!important}
+    .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+    /* ---------- Botones ---------- */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:50px;padding:0 22px;border-radius:14px;font-weight:700;font-size:15px;text-decoration:none;transition:transform .15s,background .2s,opacity .2s;-webkit-tap-highlight-color:transparent}
+    .btn:active{transform:scale(.97)}
+    .btn:disabled{opacity:.55;pointer-events:none}
+    .btn-red{background:var(--red);color:#fff}
+    .btn-red:hover{background:var(--red-press)}
+    .btn-ink{background:var(--ink);color:var(--on-ink)}
+    .btn-white{background:#fff;color:var(--text);border:1px solid var(--line)}
+    .btn-ghost-ink{background:rgba(255,255,255,.08);color:var(--on-ink);border:1px solid rgba(255,255,255,.12)}
+    .btn-block{width:100%}
+    .btn-sm{min-height:36px;padding:0 14px;border-radius:10px;font-size:13px}
+
+    /* ---------- Carga / sin sorteo ---------- */
+    .screen{position:fixed;inset:0;background:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px 24px;z-index:50}
+    .spinner{width:44px;height:44px;border:3px solid var(--ink-line);border-top-color:var(--red);border-radius:50%;animation:spin .8s linear infinite}
+    .screen p{color:var(--on-ink2);font-size:14px;margin-top:16px;max-width:300px}
+    .screen h1{font-family:var(--display);font-weight:900;font-size:26px;color:var(--on-ink);text-transform:uppercase;letter-spacing:-.01em;margin-top:28px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ---------- Logo ---------- */
+    .logo{font-family:var(--display);font-weight:900;font-size:20px;letter-spacing:.12em;color:var(--on-ink);display:inline-flex;align-items:flex-end;gap:2px;text-decoration:none}
+    .logo i{width:6px;height:6px;border-radius:50%;background:var(--red);margin-bottom:5px}
+
+    /* ---------- HERO ---------- */
+    .hero{position:relative;background:var(--ink);color:var(--on-ink);overflow:hidden;padding-bottom:36px}
+    .hero::before{content:'';position:absolute;inset:-20% -30% auto;height:520px;background:radial-gradient(closest-side,rgba(225,29,72,.28),transparent 70%);pointer-events:none}
+    .hero::after{content:'';position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(to bottom,#000,transparent 80%);-webkit-mask-image:linear-gradient(to bottom,#000,transparent 80%);pointer-events:none}
+    .hero .wrap{position:relative;z-index:2}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:8px}
+    .topbar a.app-link{font-size:12px;font-weight:700;color:var(--on-ink2);text-decoration:none;padding:8px 12px;border:1px solid var(--ink-line);border-radius:999px;background:rgba(255,255,255,.03)}
+    .confetti{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:1}
+    .cp{position:absolute;top:-14px;animation:cfall linear infinite;will-change:transform}
+    @keyframes cfall{0%{transform:translateY(-10px) rotate(0)}100%{transform:translateY(760px) rotate(540deg);opacity:0}}
+
+    .live-pill{display:inline-flex;align-items:center;gap:8px;margin-top:34px;padding:7px 12px;border-radius:999px;background:rgba(225,29,72,.12);border:1px solid rgba(225,29,72,.35);font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#ff8fa8}
+    .live-pill .dot{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 0 0 rgba(225,29,72,.7);animation:ping 1.6s infinite}
+    .live-pill.done{background:rgba(245,181,11,.12);border-color:rgba(245,181,11,.35);color:#ffd166}
+    .live-pill.done .dot{background:var(--gold);animation:none}
+    @keyframes ping{0%{box-shadow:0 0 0 0 rgba(225,29,72,.6)}80%,100%{box-shadow:0 0 0 8px rgba(225,29,72,0)}}
+    .hero h1{font-family:var(--display);font-weight:900;font-size:clamp(40px,12.5vw,60px);line-height:.95;letter-spacing:-.035em;text-transform:uppercase;margin-top:16px;color:#fff;overflow-wrap:anywhere}
+    .hero h1 em{font-style:normal;color:var(--red)}
+    .hero .sub{font-size:15px;color:var(--on-ink2);margin-top:14px;max-width:360px}
+
+    .jackpot{margin-top:26px;display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:var(--r-lg);background:linear-gradient(135deg,rgba(245,181,11,.14),rgba(245,181,11,.03));border:1px solid rgba(245,181,11,.28)}
+    .jackpot .trophy{width:46px;height:46px;border-radius:14px;background:rgba(245,181,11,.16);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .jackpot small{display:block;font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#ffd166}
+    .jackpot strong{display:block;font-family:var(--display);font-weight:900;font-size:28px;line-height:1.05;letter-spacing:-.02em;color:#fff}
+    .jackpot span{font-size:12px;color:var(--on-ink2)}
+
+    .cd{margin-top:14px;padding:18px 16px 16px;border-radius:var(--r-lg);background:var(--ink2);border:1px solid var(--ink-line)}
+    .cd-label{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--on-ink2);text-align:center}
+    .cd-boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+    .cd-box{background:var(--ink3);border:1px solid var(--ink-line);border-radius:12px;padding:10px 4px 8px;text-align:center}
+    .cd-num{font-family:var(--display);font-weight:800;font-size:28px;line-height:1;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+    .cd-lbl{display:block;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--on-ink3);margin-top:5px}
+    .cd-date{font-size:12px;color:var(--on-ink2);text-align:center;margin-top:12px}
+    .cd-date b{color:var(--on-ink);font-weight:700}
+    .cd-closed{text-align:center;padding:6px 0}
+    .cd-closed strong{display:block;font-family:var(--display);font-weight:900;font-size:20px;text-transform:uppercase;color:#fff}
+    .cd-closed span{font-size:13px;color:var(--on-ink2)}
+
+    .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+    .stat{padding:14px 16px;border-radius:var(--r);background:var(--ink2);border:1px solid var(--ink-line)}
+    .stat strong{display:block;font-family:var(--display);font-weight:800;font-size:22px;color:#fff;font-variant-numeric:tabular-nums}
+    .stat span{font-size:12px;color:var(--on-ink2)}
+    .hero-cta{margin-top:18px}
+
+    /* ---------- Secciones ---------- */
+    .section{padding:44px 0 8px}
+    .sec-head{margin-bottom:18px}
+    .eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--red)}
+    .sec-title{font-family:var(--display);font-weight:900;font-size:26px;line-height:1.05;letter-spacing:-.02em;text-transform:uppercase;margin-top:6px}
+    .sec-sub{font-size:14px;color:var(--text2);margin-top:6px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+
+    /* Premios */
+    .prizes{display:flex;flex-direction:column;gap:10px}
+    .prize{display:flex;align-items:center;gap:14px;padding:16px 18px}
+    .medal{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:var(--display);font-weight:900;font-size:16px;color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.12)}
+    .m1{background:linear-gradient(145deg,#ffd35c,#e9a100)}
+    .m2{background:linear-gradient(145deg,#d9e0ea,#9aa6b8)}
+    .m3{background:linear-gradient(145deg,#e8b387,#b8773f)}
+    .mx{background:var(--ink3)}
+    .prize-body{flex:1;min-width:0}
+    .prize-amt{font-family:var(--display);font-weight:900;font-size:22px;letter-spacing:-.02em;line-height:1.1}
+    .prize-desc{font-size:13px;color:var(--text2);margin-top:2px}
+    .prize-tag{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);white-space:nowrap}
+    .prize.first{border-color:rgba(245,181,11,.45);background:linear-gradient(135deg,#fffaf0,#fff)}
+
+    /* Participación */
+    .auth{padding:26px 22px;text-align:center}
+    .auth h3{font-family:var(--display);font-weight:900;font-size:20px;text-transform:uppercase;letter-spacing:-.01em}
+    .auth p{font-size:14px;color:var(--text2);margin:8px 0 20px}
+    .auth .btn{margin-bottom:10px}
+    .auth small{display:block;font-size:12px;color:var(--text3);margin-top:6px}
+    .notice{padding:18px 20px;border-radius:var(--r);font-size:14px;line-height:1.45;display:flex;gap:12px;align-items:flex-start}
+    .notice.warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}
+    .notice.err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+    .notice.info{background:var(--card);border:1px solid var(--line);color:var(--text2)}
+    .notice .btn{margin-top:10px}
+
+    .me-card{overflow:hidden}
+    .me-head{display:flex;align-items:center;gap:12px;padding:16px 18px;background:var(--ink);color:var(--on-ink)}
+    .av{width:42px;height:42px;border-radius:50%;background:var(--ink3);border:2px solid var(--ink-line);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:800;font-size:14px;color:var(--on-ink);flex-shrink:0;overflow:hidden}
+    .av img{width:100%;height:100%;object-fit:cover}
+    .me-name{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .me-status{font-size:12px;color:#6ee7b7;display:flex;align-items:center;gap:6px;margin-top:1px}
+    .me-status::before{content:'';width:7px;height:7px;border-radius:50%;background:#34d399}
+    .me-body{padding:22px 20px 18px;display:flex;align-items:center;gap:18px}
+    .me-big{font-family:var(--display);font-weight:900;font-size:64px;line-height:.9;letter-spacing:-.04em;color:var(--red);font-variant-numeric:tabular-nums}
+    .me-big-lbl{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--text3);margin-top:6px}
+    .me-prob{flex:1}
+    .me-prob b{display:block;font-size:14px}
+    .me-prob span{display:block;font-size:12px;color:var(--text3);margin-top:2px}
+    .bar{height:8px;border-radius:999px;background:var(--paper2);margin-top:10px;overflow:hidden}
+    .bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--red),#fb7185);width:0;transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
+    .bk{border-top:1px solid var(--line);padding:6px 20px 10px}
+    .bk summary{list-style:none;display:flex;justify-content:space-between;align-items:center;padding:12px 0;font-size:13px;font-weight:700;color:var(--text2);cursor:pointer}
+    .bk summary::-webkit-details-marker{display:none}
+    .bk summary::after{content:'';width:8px;height:8px;border-right:2px solid var(--text3);border-bottom:2px solid var(--text3);transform:rotate(45deg);transition:transform .2s;margin-right:4px}
+    .bk[open] summary::after{transform:rotate(-135deg)}
+    .bk-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #f0ece5;font-size:13px}
+    .bk-row .l{flex:1;min-width:0}
+    .bk-row .l small{display:block;color:var(--text3);font-size:12px}
+    .bk-row .v{font-family:var(--display);font-weight:800;color:var(--green)}
+
+    /* Sumar chances */
+    .earn{display:flex;flex-direction:column}
+    .earn-row{display:flex;align-items:center;gap:14px;padding:16px 18px;border-top:1px solid #f0ece5}
+    .earn-row:first-child{border-top:none}
+    .earn-ic{width:42px;height:42px;border-radius:12px;background:var(--red-soft);color:var(--red);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .earn-ic svg{width:20px;height:20px}
+    .earn-row.done .earn-ic{background:var(--green-soft);color:var(--green)}
+    .earn-t{flex:1;min-width:0}
+    .earn-t b{display:block;font-size:14px}
+    .earn-t span{display:block;font-size:12px;color:var(--text3);margin-top:1px}
+    .chip{font-family:var(--display);font-weight:800;font-size:12px;color:var(--red);background:var(--red-soft);padding:5px 9px;border-radius:999px;white-space:nowrap}
+    .earn-row.done .chip{color:var(--green);background:var(--green-soft)}
+
+    /* Invitar */
+    .share{padding:22px 20px}
+    .share h3{font-family:var(--display);font-weight:900;font-size:19px;text-transform:uppercase}
+    .share p{font-size:13px;color:var(--text2);margin:6px 0 16px}
+    .share-row{display:flex;gap:8px;margin-bottom:10px}
+    .share-input{flex:1;min-width:0;height:46px;padding:0 14px;background:var(--paper);border:1px solid var(--line);border-radius:12px;font:500 13px var(--body);color:var(--text);outline:none;text-overflow:ellipsis}
+    .btn-wa{background:#25d366;color:#fff}
+    .copy-ok{background:var(--green)!important}
+    .ref-stat{font-size:12px;color:var(--text3);text-align:center;margin-top:10px}
+
+    /* Ranking */
+    .rank-sec{background:var(--ink);color:var(--on-ink);margin-top:44px;padding:44px 0 36px}
+    .rank-sec .sec-sub{color:var(--on-ink2)}
+    .rank-list{display:flex;flex-direction:column;gap:6px}
+    .rk{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:var(--ink2);border:1px solid var(--ink-line)}
+    .rk.me{border-color:var(--red);background:linear-gradient(90deg,rgba(225,29,72,.14),var(--ink2))}
+    .rk-pos{width:26px;text-align:center;font-family:var(--display);font-weight:800;font-size:14px;color:var(--on-ink2);flex-shrink:0;font-variant-numeric:tabular-nums}
+    .rk:nth-child(1) .rk-pos{color:var(--gold)}
+    .rk:nth-child(2) .rk-pos{color:var(--silver)}
+    .rk:nth-child(3) .rk-pos{color:var(--bronze)}
+    .rk .av{width:34px;height:34px;font-size:11px;border-width:1px}
+    .rk-name{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rk-you{font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--red);margin-left:6px;vertical-align:middle}
+    .rk-ch{font-family:var(--display);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+    .rk-ch small{font-family:var(--body);font-weight:600;font-size:11px;color:var(--on-ink3);margin-left:3px}
+    .rk-gap{text-align:center;color:var(--on-ink3);font-size:18px;line-height:1;letter-spacing:.2em;padding:2px 0}
+    .empty-ink{text-align:center;color:var(--on-ink2);font-size:14px;padding:28px 16px;border:1px dashed var(--ink-line);border-radius:14px}
+
+    /* Ganadores (página) */
+    .winners{display:flex;flex-direction:column;gap:10px}
+    .win{display:flex;align-items:center;gap:14px;padding:14px 16px}
+    .win .av{width:46px;height:46px;border:none}
+    .win-name{font-weight:800;font-size:15px}
+    .win-prize{font-size:13px;color:var(--text2)}
+    .win.me{border:2px solid var(--gold);background:linear-gradient(135deg,#fffaf0,#fff)}
+    .win-me-tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;background:var(--gold);color:#3b2a00;border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:middle}
+
+    /* FAQ */
+    .faq details{border-top:1px solid var(--line)}
+    .faq details:first-child{border-top:none}
+    .faq summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px;font-weight:700;font-size:14px;cursor:pointer}
+    .faq summary::-webkit-details-marker{display:none}
+    .faq summary::after{content:'+';font-size:20px;font-weight:500;color:var(--text3);transition:transform .2s}
+    .faq details[open] summary::after{transform:rotate(45deg)}
+    .faq .a{padding:0 18px 16px;font-size:13px;color:var(--text2);line-height:1.55}
+
+    /* Footer */
+    .foot{background:var(--ink);color:var(--on-ink2);text-align:center;padding:30px 20px calc(30px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--ink-line);font-size:12px}
+    .foot .logo{font-size:16px;margin-bottom:8px}
+    .foot a{color:var(--on-ink);font-weight:600;text-decoration:none}
+    .foot .admin-sim{margin-top:14px;font-size:11px;color:var(--on-ink3);text-decoration:underline}
+
+    /* Barra fija */
+    .sticky{position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(244,242,238,.9);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));transform:translateY(110%);transition:transform .3s}
+    .sticky.show{transform:none}
+    .sticky .in{max-width:var(--wrap);margin:0 auto;display:flex;align-items:center;gap:12px}
+    .sticky-n{font-family:var(--display);font-weight:900;font-size:26px;color:var(--red);line-height:1;font-variant-numeric:tabular-nums}
+    .sticky-l{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);line-height:1.2}
+    .sticky .btn{flex:1;min-height:48px}
+
+    /* Toast */
+    .toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);opacity:0;background:var(--ink);color:var(--on-ink);padding:12px 18px;border-radius:12px;font-size:14px;font-weight:600;z-index:60;transition:all .25s;pointer-events:none;max-width:calc(100% - 32px);text-align:center}
+    .toast.show{opacity:1;transform:translate(-50%,0)}
+
+    /* ---------- SHOW DEL SORTEO ---------- */
+    .ov{position:fixed;inset:0;z-index:100;background:radial-gradient(ellipse at 50% 30%,#1b1b22,var(--ink) 70%);display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 24px calc(40px + env(safe-area-inset-bottom,0px));overflow:hidden;color:var(--on-ink)}
+    .ov.open{display:flex}
+    .ov .confetti{z-index:0}
+    .ov-close{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));right:14px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.08);color:var(--on-ink);display:flex;align-items:center;justify-content:center;z-index:3}
+    .ov-in{position:relative;z-index:2;width:100%;max-width:380px}
+    .ov-ring{width:96px;height:96px;margin:0 auto 26px;border:3px solid var(--ink-line);border-top-color:var(--red);border-radius:50%;animation:spin 1.3s linear infinite}
+    .ov-title{font-family:var(--display);font-weight:900;font-size:clamp(26px,8vw,36px);text-transform:uppercase;letter-spacing:-.02em;line-height:1.05}
+    .ov-sub{color:var(--on-ink2);font-size:14px;margin-top:10px}
+    .ov-num{font-family:var(--display);font-weight:900;font-size:clamp(110px,34vw,170px);line-height:1;color:#fff;animation:pop .6s cubic-bezier(.34,1.56,.64,1)}
+    @keyframes pop{0%{transform:scale(1.8);opacity:0}100%{transform:scale(1);opacity:1}}
+    .ov-kicker{font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);margin-bottom:14px}
+    .reveal{border-radius:24px;padding:30px 22px;background:linear-gradient(160deg,#1f1f27,#131318);border:1px solid rgba(245,181,11,.5);box-shadow:0 0 60px -10px rgba(245,181,11,.35);animation:flip .8s cubic-bezier(.34,1.56,.64,1) both}
+    @keyframes flip{0%{opacity:0;transform:perspective(800px) rotateY(80deg) scale(.7)}100%{opacity:1;transform:none}}
+    .reveal .av{width:78px;height:78px;margin:0 auto 14px;border:3px solid var(--gold);font-size:24px}
+    .reveal-name{font-family:var(--display);font-weight:900;font-size:26px;text-transform:uppercase;letter-spacing:-.01em;overflow-wrap:anywhere}
+    .reveal-prize{font-family:var(--display);font-weight:900;font-size:30px;color:var(--gold);margin-top:8px}
+    .reveal-desc{font-size:13px;color:var(--on-ink2);margin-top:2px}
+    .reveal.is-me{box-shadow:0 0 80px -6px rgba(225,29,72,.6);border-color:var(--red)}
+    .reveal-me{display:inline-block;margin-top:14px;padding:6px 12px;border-radius:999px;background:var(--red);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+    .sum-list{display:flex;flex-direction:column;gap:8px;margin:22px 0 22px;text-align:left}
+    .sum{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid var(--ink-line);opacity:0;animation:up .5s ease forwards}
+    .sum.me{border-color:var(--gold);background:rgba(245,181,11,.1)}
+    .sum-pos{font-family:var(--display);font-weight:900;color:var(--gold);width:28px;text-align:center}
+    .sum .av{width:38px;height:38px;font-size:12px}
+    .sum-t{flex:1;min-width:0}
+    .sum-t b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sum-t span{font-size:12px;color:var(--gold);font-weight:700}
+    @keyframes up{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+    .burst{position:absolute;top:50%;left:50%;pointer-events:none;animation:burst .9s ease-out forwards;z-index:1}
+    @keyframes burst{to{transform:translate(var(--x),var(--y)) rotate(600deg);opacity:0}}
+
+    @media (min-width:720px){
+      :root{--wrap:560px}
+      .hero h1{font-size:64px}
+    }
+    @media (prefers-reduced-motion:reduce){
+      *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+      .confetti{display:none}
+    }
+  </style>
+</head>
+<body>
+
+<div id="screen-loading" class="screen">
+  <div class="spinner"></div>
+  <p>Cargando sorteo…</p>
+</div>
+
+<div id="screen-empty" class="screen hidden">
+  <a class="logo" href="/#/">GO<i></i></a>
+  <h1>No hay sorteos activos</h1>
+  <p>Estate atento/a: cuando arranque uno nuevo te avisamos por la app.</p>
+  <a class="btn btn-red" style="margin-top:24px" href="/#/">Ir a GoDelivery</a>
+</div>
+
+<main id="app" class="hidden">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="confetti" id="hero-confetti"></div>
+    <div class="wrap">
+      <div class="topbar">
+        <a class="logo" href="/#/" aria-label="GoDelivery">GO<i></i></a>
+        <a class="app-link" href="/#/">Ir a la app →</a>
+      </div>
+
+      <div id="live-pill" class="live-pill"><span class="dot"></span><span id="live-text">Sorteo en vivo · Magdalena</span></div>
+      <h1 id="hero-title"></h1>
+      <p class="sub" id="hero-sub"></p>
+
+      <div class="jackpot" id="jackpot">
+        <div class="trophy"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffd166" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg></div>
+        <div>
+          <small>Premio mayor</small>
+          <strong id="jackpot-amt"></strong>
+          <span id="jackpot-more"></span>
+        </div>
+      </div>
+
+      <div class="cd" id="cd">
+        <div id="cd-open">
+          <div class="cd-label">La participación cierra en</div>
+          <div class="cd-boxes">
+            <div class="cd-box"><span class="cd-num" id="cd-d">00</span><span class="cd-lbl">Días</span></div>
+            <div class="cd-box"><span class="cd-num" id="cd-h">00</span><span class="cd-lbl">Horas</span></div>
+            <div class="cd-box"><span class="cd-num" id="cd-m">00</span><span class="cd-lbl">Min</span></div>
+            <div class="cd-box"><span class="cd-num" id="cd-s">00</span><span class="cd-lbl">Seg</span></div>
+          </div>
+          <div class="cd-date" id="cd-date"></div>
+        </div>
+        <div id="cd-closed" class="cd-closed hidden">
+          <strong id="cd-closed-title"></strong>
+          <span id="cd-closed-sub"></span>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><strong id="st-people">0</strong><span>vecinos participando</span></div>
+        <div class="stat"><strong id="st-chances">0</strong><span>chances en juego</span></div>
+      </div>
+
+      <div class="hero-cta">
+        <a class="btn btn-red btn-block" id="hero-cta" href="#participar">Participar gratis</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- GANADORES (cuando ya se sorteó) -->
+  <section class="section hidden" id="sec-winners">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Resultado oficial</div>
+        <h2 class="sec-title">Ganadores</h2>
+        <p class="sec-sub" id="winners-sub"></p>
+      </div>
+      <div class="winners" id="winners-list"></div>
+      <button class="btn btn-white btn-block" id="btn-replay" style="margin-top:12px">▶ Volver a ver el sorteo</button>
+    </div>
+  </section>
+
+  <!-- PARTICIPACIÓN -->
+  <section class="section" id="participar">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Tu participación</div>
+        <h2 class="sec-title" id="part-title">Participá gratis</h2>
+      </div>
+      <div id="part-body"></div>
+    </div>
+  </section>
+
+  <!-- SUMAR CHANCES -->
+  <section class="section" id="sec-earn">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Más chances, más probabilidades</div>
+        <h2 class="sec-title">Cómo sumar chances</h2>
+      </div>
+      <div class="card earn" id="earn-list"></div>
+    </div>
+  </section>
+
+  <!-- INVITAR -->
+  <section class="section hidden" id="sec-share">
+    <div class="wrap">
+      <div class="card share">
+        <h3>Invitá y sumá</h3>
+        <p>Por cada vecino que se anote con tu link sumás <b>+<span id="ref-val">2</span> chances</b>.</p>
+        <div class="share-row">
+          <input class="share-input" id="share-link" readonly aria-label="Tu link de invitación">
+          <button class="btn btn-ink btn-sm" id="btn-copy" style="min-height:46px">Copiar</button>
+        </div>
+        <button class="btn btn-wa btn-block" id="btn-wa">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.64.07-.3-.15-1.26-.46-2.39-1.47-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2.01-1.41.25-.69.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35M12.05 21.79h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.88 9.89-9.88 2.64 0 5.12 1.03 6.99 2.9a9.83 9.83 0 0 1 2.89 6.99c0 5.45-4.44 9.88-9.88 9.88m8.41-18.3A11.82 11.82 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.88 11.88 0 0 0 5.68 1.45h.01c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.16-3.48-8.41z"/></svg>
+          Compartir por WhatsApp
+        </button>
+        <div class="ref-stat hidden" id="ref-stat"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PREMIOS -->
+  <section class="section" id="sec-prizes">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Qué podés ganar</div>
+        <h2 class="sec-title">Premios</h2>
+      </div>
+      <div class="prizes" id="prizes"></div>
+    </div>
+  </section>
+
+  <!-- RANKING -->
+  <section class="rank-sec" id="sec-rank">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">En vivo</div>
+        <h2 class="sec-title">Quiénes tienen más chances</h2>
+        <p class="sec-sub">Se actualiza solo. Tener más chances no asegura ganar: el sorteo es al azar.</p>
+      </div>
+      <div class="rank-list" id="rank-list"></div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section" id="sec-faq" style="padding-bottom:44px">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Bases y condiciones</div>
+        <h2 class="sec-title">Cómo funciona</h2>
+      </div>
+      <div class="card faq" id="faq"></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <a class="logo" href="/#/">GO<i></i></a>
+    <div>GoDelivery Magdalena © <span id="year"></span></div>
+    <div style="margin-top:6px"><a href="/#/">Pedir ahora</a></div>
+    <button class="admin-sim hidden" id="btn-sim">Admin · simular el show del sorteo</button>
+  </footer>
+</main>
+
+<!-- Barra fija -->
+<div class="sticky" id="sticky">
+  <div class="in">
+    <div>
+      <div class="sticky-n" id="sticky-n">0</div>
+      <div class="sticky-l">tus<br>chances</div>
+    </div>
+    <a class="btn btn-ink" href="/#/" id="sticky-btn">Pedir y sumar chances</a>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Show del sorteo -->
+<div class="ov" id="ov" role="dialog" aria-modal="true" aria-label="Sorteo en vivo">
+  <div class="confetti" id="ov-confetti"></div>
+  <button class="ov-close" id="ov-close" aria-label="Cerrar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <div class="ov-in" id="ov-in"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore-compat.js"></script>
+<script>
+'use strict';
+
+// ============ Firebase ============
+const isTestingHost = location.hostname.includes('testing');
+const config = isTestingHost ? {
+  apiKey:"AIzaSyDqyQ6aRA_1q0E8GUb6nqXIJhghzD4L00A",authDomain:"godelivery-testing.firebaseapp.com",
+  projectId:"godelivery-testing",storageBucket:"godelivery-testing.firebasestorage.app",
+  messagingSenderId:"584541077992",appId:"1:584541077992:web:20c37a8b58595bf510e45d"
+} : {
+  apiKey:"AIzaSyAldeFtUWWlEpcuEg1LSTko90cVEvnsMLA",authDomain:"godelivery-magdalena.firebaseapp.com",
+  projectId:"godelivery-magdalena",storageBucket:"godelivery-magdalena.firebasestorage.app",
+  messagingSenderId:"848164656125",appId:"1:848164656125:web:eef2314205f5d8f887ff94"
+};
+firebase.initializeApp(config);
+const auth = firebase.auth();
+const db = firebase.firestore();
+db.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+
+const FN_BASE = `https://us-central1-${config.projectId}.cloudfunctions.net`;
+const PUBLIC_ORIGIN = /localhost|127\.0\.0\.1/.test(location.hostname)
+  ? `https://${config.projectId}.web.app` : location.origin;
+const ADMIN_EMAILS = ['kioscopaulos7@gmail.com'];
+// Si el sorteo salió hace más que esto, al entrar se muestran los ganadores sin el show.
+const SHOW_REPLAY_WINDOW_MS = 3 * 60 * 1000;
+
+// ============ Estado ============
+const S = {
+  gwId: null, gw: null, user: null, entry: null, top: [], myRank: null,
+  joinState: 'idle', joinError: null, isAdmin: false,
+  clockOffset: 0, loadedAt: Date.now(),
+  showPlayedFor: null, overlayMode: null, showToken: 0, waitingDismissed: false,
+  unsubEntry: null, rankTimer: null
+};
+const now = () => Date.now() + S.clockOffset;
+
+// ============ Utilidades ============
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const tsMs = (t) => !t ? 0 : (typeof t.toMillis === 'function' ? t.toMillis() : new Date(t).getTime() || 0);
+const fmtInt = (n) => Number(n || 0).toLocaleString('es-AR');
+const pad = (n) => String(n).padStart(2, '0');
+const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+
+function avatar(photoURL, name) {
+  const url = String(photoURL || '');
+  if (/^https:\/\//.test(url)) {
+    return `<img src="${esc(url)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.replaceWith(document.createTextNode('${esc(initials(name))}'))">`;
+  }
+  return esc(initials(name));
+}
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+const TZ = 'America/Argentina/Buenos_Aires';
+function fmtDrawDate(ms) {
+  const d = new Date(ms);
+  const day = new Intl.DateTimeFormat('es-AR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(d).replace(',', '');
+  const time = new Intl.DateTimeFormat('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ }).format(d);
+  return { day, time };
+}
+
+// El título lo escribe el admin: la última palabra va en rojo, los saltos de línea se respetan.
+function titleHtml(title) {
+  const lines = String(title || 'Sorteo GoDelivery').split('\n');
+  const last = lines.pop();
+  const words = last.trim().split(' ');
+  const tail = words.pop();
+  const head = words.join(' ');
+  return [...lines.map(esc), `${esc(head)}${head ? ' ' : ''}<em>${esc(tail)}</em>`].join('<br>');
+}
+
+function rules(g) {
+  const r = { registration: 1, appInstalled: 2, referral: 2, order: 5 };
+  const src = (g && g.chanceRules) || {};
+  for (const k of Object.keys(r)) if (Number.isFinite(Number(src[k]))) r[k] = Number(src[k]);
+  return r;
+}
+
+function prizesOf(g) {
+  return [...((g && g.prizes) || [])].sort((a, b) => (a.position || 0) - (b.position || 0));
+}
+
+// Etapa visible del sorteo. 'closed' cubre también el minuto entre que llega
+// la hora y el servidor lo marca como terminado.
+function phase(g = S.gw) {
+  if (!g) return 'none';
+  if (g.status === 'drawn') return 'drawn';
+  if (g.status === 'ended' || g.status === 'drawing') return 'closed';
+  const ends = tsMs(g.endsAt);
+  if (ends && ends <= now()) return 'closed';
+  return 'open';
+}
+
+// Hora del servidor (Hosting manda Date): un celular con la hora corrida no
+// debería ver otra cuenta regresiva que el resto.
+async function syncClock() {
+  try {
+    const t0 = Date.now();
+    const res = await fetch('/version.json?t=' + t0, { cache: 'no-store' });
+    const date = res.headers.get('date');
+    if (!date) return;
+    const server = new Date(date).getTime() + (Date.now() - t0) / 2;
+    const off = server - Date.now();
+    if (Math.abs(off) > 2000) S.clockOffset = off;
+  } catch (e) { /* sin conexión: se usa la hora local */ }
+}
+
+// ============ Confetti ============
+const CONF_COLORS = ['#e11d48', '#f5b50b', '#ffffff', '#0e9f6e', '#fda4af'];
+function confetti(el, count, { maxDelay = 6 } = {}) {
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('i');
+    p.className = 'cp';
+    const s = 4 + Math.random() * 7;
+    p.style.cssText = `left:${Math.random() * 100}%;width:${s}px;height:${s * (0.5 + Math.random())}px;background:${CONF_COLORS[i % CONF_COLORS.length]};border-radius:${Math.random() > .5 ? '50%' : '2px'};opacity:${.35 + Math.random() * .5};animation-duration:${5 + Math.random() * 6}s;animation-delay:${Math.random() * maxDelay}s`;
+    frag.appendChild(p);
+  }
+  el.appendChild(frag);
+}
+function burst(el, count = 44) {
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('i');
+    p.className = 'burst';
+    const a = (Math.PI * 2 * i) / count;
+    const d = 90 + Math.random() * 190;
+    const s = 5 + Math.random() * 7;
+    p.style.cssText = `--x:${Math.cos(a) * d}px;--y:${Math.sin(a) * d}px;width:${s}px;height:${s}px;background:${CONF_COLORS[i % CONF_COLORS.length]};border-radius:${i % 2 ? '50%' : '2px'};animation-delay:${Math.random() * .15}s`;
+    el.appendChild(p);
+    setTimeout(() => p.remove(), 1300);
+  }
+}
+
+// ============ Render ============
+function renderHero() {
+  const g = S.gw;
+  const ph = phase();
+  $('hero-title').innerHTML = titleHtml(g.title);
+  $('hero-sub').textContent = g.subtitle || 'Participá gratis y ganá saldo para pedir lo que quieras.';
+  document.title = `${(g.title || 'Sorteo').replace(/\n/g, ' ')} · GoDelivery`;
+
+  const prizes = prizesOf(g);
+  $('jackpot').classList.toggle('hidden', !prizes.length);
+  if (prizes.length) {
+    $('jackpot-amt').textContent = prizes[0].amount || '';
+    $('jackpot-more').textContent = prizes.length > 1
+      ? `y ${prizes.length - 1} premio${prizes.length > 2 ? 's' : ''} más · ${prizes[0].description || ''}`.replace(/ · $/, '')
+      : (prizes[0].description || '');
+  }
+
+  const pill = $('live-pill');
+  pill.classList.toggle('done', ph === 'drawn');
+  $('live-text').textContent = ph === 'drawn' ? 'Sorteo finalizado' : ph === 'closed' ? 'Sorteando en vivo' : 'Sorteo en vivo · Magdalena';
+
+  const ends = tsMs(g.endsAt);
+  $('cd-open').classList.toggle('hidden', ph !== 'open' || !ends);
+  $('cd-closed').classList.toggle('hidden', ph === 'open' && !!ends);
+  if (ends) {
+    const { day, time } = fmtDrawDate(ends);
+    $('cd-date').innerHTML = `Se sortea el <b>${esc(day)}</b> a las <b>${esc(time)} hs</b>`;
+  }
+  if (ph === 'drawn') {
+    $('cd-closed-title').textContent = '¡Ya hay ganadores!';
+    $('cd-closed-sub').textContent = 'Mirá quiénes se llevaron los premios.';
+  } else if (ph === 'closed') {
+    $('cd-closed-title').textContent = 'Participación cerrada';
+    $('cd-closed-sub').textContent = g.autoDraw === true ? 'Los ganadores salen en instantes. Quedate acá.' : 'El sorteo se hace en vivo en instantes. Quedate acá.';
+  } else if (!ends) {
+    $('cd-closed-title').textContent = 'Fecha a confirmar';
+    $('cd-closed-sub').textContent = 'Te avisamos por la app cuando se defina.';
+  }
+
+  // Los contadores del sorteo no pueden ser menores a lo que ya se ve en el ranking.
+  const topPeople = S.top.length;
+  const topChances = S.top.reduce((s, u) => s + (Number(u.chances) || 0), 0);
+  const people = ph === 'drawn' && g.participantsAtDraw != null ? g.participantsAtDraw : Math.max(g.totalParticipants || 0, topPeople);
+  $('st-people').textContent = fmtInt(people);
+  $('st-chances').textContent = fmtInt(Math.max(g.totalChances || 0, topChances));
+
+  const cta = $('hero-cta');
+  if (ph === 'drawn') { cta.textContent = 'Ver ganadores'; cta.setAttribute('href', '#sec-winners'); }
+  else if (S.entry) { cta.textContent = 'Ver mis chances'; cta.setAttribute('href', '#participar'); }
+  else if (ph === 'open') { cta.textContent = 'Participar gratis'; cta.setAttribute('href', '#participar'); }
+  else { cta.textContent = 'Ver el sorteo'; cta.setAttribute('href', '#sec-rank'); }
+}
+
+function tickCountdown() {
+  if (!S.gw) return;
+  const ends = tsMs(S.gw.endsAt);
+  const ph = phase();
+  if (ph !== S.lastPhase) {
+    const prev = S.lastPhase;
+    S.lastPhase = ph;
+    renderAll();
+    onPhaseChange(prev, ph);
+  }
+  if (ph !== 'open' || !ends) return;
+  let diff = Math.max(0, Math.floor((ends - now()) / 1000));
+  const d = Math.floor(diff / 86400); diff %= 86400;
+  const h = Math.floor(diff / 3600); diff %= 3600;
+  const m = Math.floor(diff / 60);
+  const s = diff % 60;
+  $('cd-d').textContent = pad(d);
+  $('cd-h').textContent = pad(h);
+  $('cd-m').textContent = pad(m);
+  $('cd-s').textContent = pad(s);
+}
+
+function renderPrizes() {
+  const labels = ['1°', '2°', '3°'];
+  $('prizes').innerHTML = prizesOf(S.gw).map((p, i) => `
+    <div class="card prize${i === 0 ? ' first' : ''}">
+      <div class="medal ${['m1', 'm2', 'm3'][i] || 'mx'}">${esc(p.position || i + 1)}°</div>
+      <div class="prize-body">
+        <div class="prize-amt">${esc(p.amount)}</div>
+        ${p.description ? `<div class="prize-desc">${esc(p.description)}</div>` : ''}
+      </div>
+      ${p.badge ? `<div class="prize-tag">${esc(p.badge)}</div>` : `<div class="prize-tag">${labels[i] || ''} premio</div>`}
+    </div>`).join('') || '<div class="notice info">Los premios se anuncian pronto.</div>';
+}
+
+const AUDIENCE_TEXT = { clients: 'clientes', drivers: 'repartidores', stores: 'comercios' };
+
+function renderParticipation() {
+  const g = S.gw;
+  const ph = phase();
+  const body = $('part-body');
+  const r = rules(g);
+
+  if (!S.user) {
+    $('part-title').textContent = ph === 'open' ? 'Participá gratis' : 'Tu participación';
+    if (ph !== 'open') {
+      body.innerHTML = `<div class="notice info">La participación ya cerró. ${ph === 'drawn' ? 'Mirá arriba quiénes ganaron.' : 'Quedate para ver los ganadores en vivo.'}</div>
+        <button class="btn btn-white btn-block" style="margin-top:10px" data-login>Ingresar para ver si participé</button>`;
+      bindLogin(body);
+      return;
+    }
+    const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    body.innerHTML = `
+      <div class="card auth">
+        <h3>Anotate en 1 toque</h3>
+        <p>Ingresá con tu cuenta de GoDelivery y sumás <b>+${r.registration} chance${r.registration === 1 ? '' : 's'}</b> al instante.</p>
+        ${isNative ? `
+          <a class="btn btn-red btn-block" href="/#/profile">Ingresar en la app</a>
+          <small>Después volvé a esta página y quedás anotado/a.</small>
+        ` : `
+          <button class="btn btn-white btn-block" data-login="google">
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.97 10.97 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+            Continuar con Google
+          </button>
+          <button class="btn btn-ink btn-block" data-login="apple">
+            <svg width="17" height="20" viewBox="0 0 18 22" fill="#fff" aria-hidden="true"><path d="M13.14 3.65c.86-1.05 1.44-2.5 1.28-3.96-1.24.05-2.74.83-3.62 1.87-.8.93-1.5 2.4-1.31 3.82 1.38.1 2.79-.69 3.65-1.73zM16.96 11.66c-.04-2.77 2.26-4.1 2.36-4.16-1.29-1.88-3.29-2.14-4-2.17-1.7-.17-3.32 1-4.18 1-.86 0-2.2-.98-3.61-.95-1.86.03-3.57 1.08-4.53 2.75-1.93 3.35-.49 8.32 1.39 11.04.92 1.33 2.02 2.83 3.46 2.77 1.39-.06 1.91-.9 3.59-.9s2.15.9 3.61.87c1.49-.03 2.45-1.36 3.36-2.69 1.06-1.54 1.5-3.04 1.52-3.12-.03-.01-2.93-1.12-2.97-4.44z"/></svg>
+            Continuar con Apple
+          </button>
+          <small>Usá la misma cuenta con la que pedís en GoDelivery.</small>
+        `}
+      </div>`;
+    bindLogin(body);
+    return;
+  }
+
+  $('part-title').textContent = 'Tus chances';
+
+  if (!S.entry) {
+    if (S.joinState === 'joining' || S.joinState === 'idle') {
+      body.innerHTML = `<div class="card" style="padding:28px;text-align:center"><div class="spinner" style="margin:0 auto 12px;border-color:var(--line);border-top-color:var(--red)"></div><div style="font-size:14px;color:var(--text2)">Anotándote en el sorteo…</div></div>`;
+      return;
+    }
+    const e = S.joinError;
+    let html;
+    if (e === 'not_eligible') {
+      html = `<div class="notice warn">Este sorteo es solo para ${esc(AUDIENCE_TEXT[g.targetAudience] || 'algunos usuarios')} de GoDelivery.</div>`;
+    } else if (e === 'closed' || ph !== 'open') {
+      html = `<div class="notice info">No llegaste a anotarte: la participación ya cerró. ¡Te esperamos en el próximo sorteo!</div>`;
+    } else {
+      html = `<div class="notice err"><div>No pudimos anotarte. Revisá tu conexión e intentá de nuevo.<br><button class="btn btn-red btn-sm" id="btn-retry">Reintentar</button></div></div>`;
+    }
+    body.innerHTML = html + `<button class="btn btn-white btn-block btn-sm" style="margin-top:10px" id="btn-logout">Usar otra cuenta</button>`;
+    $('btn-retry')?.addEventListener('click', () => joinIfNeeded(true));
+    $('btn-logout').addEventListener('click', () => auth.signOut());
+    return;
+  }
+
+  const e = S.entry;
+  const total = Math.max(Number(g.totalChances) || 0, S.top.reduce((s, u) => s + (Number(u.chances) || 0), 0), e.chances || 0);
+  const prob = total ? (e.chances / total) * 100 : 0;
+  const probTxt = prob >= 99.95 ? '100' : prob < 0.1 ? '<0,1' : prob.toLocaleString('es-AR', { maximumFractionDigits: 1 });
+  const name = S.user.displayName || e.userName || 'Vos';
+  const icons = { registration: '✓', app_installed: '🔔', app: '🔔', referral: '👥', order: '🛵' };
+  const breakdown = [...(e.breakdown || [])].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const rankTxt = S.myRank ? `Puesto ${S.myRank} en el ranking` : '';
+
+  body.innerHTML = `
+    <div class="card me-card">
+      <div class="me-head">
+        <div class="av">${avatar(S.user.photoURL, name)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="me-name">${esc(name)}</div>
+          <div class="me-status">${ph === 'open' ? 'Estás participando' : 'Participaste'}</div>
+        </div>
+        <button class="btn btn-ghost-ink btn-sm" id="btn-logout">Salir</button>
+      </div>
+      <div class="me-body">
+        <div>
+          <div class="me-big" id="me-big">${fmtInt(e.chances)}</div>
+          <div class="me-big-lbl">chance${e.chances === 1 ? '' : 's'}</div>
+        </div>
+        <div class="me-prob">
+          <b>${probTxt}% de probabilidad</b>
+          <span>de ganar el 1° premio${rankTxt ? ' · ' + esc(rankTxt) : ''}</span>
+          <div class="bar"><i id="me-bar"></i></div>
+        </div>
+      </div>
+      <details class="bk">
+        <summary>Cómo sumaste tus chances</summary>
+        ${breakdown.map(b => `
+          <div class="bk-row">
+            <span>${icons[b.type] || '⭐'}</span>
+            <div class="l">${esc(b.label)}${b.detail ? `<small>${esc(b.detail)}</small>` : ''}</div>
+            <span class="v">+${esc(b.amount)}</span>
+          </div>`).join('') || '<div class="bk-row">Todavía no hay movimientos.</div>'}
+      </details>
+    </div>`;
+  $('btn-logout').addEventListener('click', () => auth.signOut());
+  requestAnimationFrame(() => { const bar = $('me-bar'); if (bar) bar.style.width = Math.max(2, Math.min(100, prob)) + '%'; });
+}
+
+function bindLogin(root) {
+  root.querySelectorAll('[data-login]').forEach(b => b.addEventListener('click', () => login(b.dataset.login || 'google')));
+}
+
+const EARN_ICONS = {
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  bag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>'
+};
+
+function renderEarn() {
+  const r = rules(S.gw);
+  const e = S.entry;
+  const open = phase() === 'open';
+  const orders = (e?.breakdown || []).filter(b => b.type === 'order').length;
+  const refs = e?.referrals || (e?.breakdown || []).filter(b => b.type === 'referral').length;
+  const rows = [
+    r.registration > 0 && { ic: 'user', t: 'Anotate en el sorteo', s: 'Con tu cuenta de GoDelivery', chip: `+${r.registration}`, done: !!e },
+    r.order > 0 && { ic: 'bag', t: 'Hacé un pedido', s: orders ? `Llevás ${orders} pedido${orders === 1 ? '' : 's'} · cuenta cuando se entrega` : 'Cuenta cuando se entrega · sin límite', chip: `+${r.order} c/u`, action: open ? '<a class="btn btn-ink btn-sm" href="/#/">Pedir</a>' : '' },
+    r.referral > 0 && { ic: 'users', t: 'Invitá a un vecino', s: refs ? `Invitaste a ${refs} · seguí sumando` : 'Con tu link personal · sin límite', chip: `+${r.referral} c/u`, action: open && e ? '<a class="btn btn-ink btn-sm" href="#sec-share">Invitar</a>' : '' },
+    r.appInstalled > 0 && { ic: 'bell', t: 'Activá las notificaciones', s: 'Instalá la app y aceptá los avisos', chip: `+${r.appInstalled}`, done: !!e?.appBonus, action: open && !e?.appBonus ? '<a class="btn btn-ink btn-sm" href="/descargar">App</a>' : '' }
+  ].filter(Boolean);
+  $('earn-list').innerHTML = rows.map(x => `
+    <div class="earn-row${x.done ? ' done' : ''}">
+      <div class="earn-ic">${x.done ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' : EARN_ICONS[x.ic]}</div>
+      <div class="earn-t"><b>${esc(x.t)}</b><span>${esc(x.s)}</span></div>
+      ${x.action && !x.done ? x.action : `<span class="chip">${esc(x.chip)}</span>`}
+    </div>`).join('');
+  $('sec-earn').classList.toggle('hidden', phase() === 'drawn');
+}
+
+function shareLink() {
+  return `${PUBLIC_ORIGIN}/sorteo?ref=${encodeURIComponent(S.entry?.referralCode || '')}`;
+}
+
+function renderShare() {
+  const show = !!S.entry && phase() === 'open' && rules(S.gw).referral > 0;
+  $('sec-share').classList.toggle('hidden', !show);
+  if (!show) return;
+  $('share-link').value = shareLink();
+  $('ref-val').textContent = rules(S.gw).referral;
+  const refs = S.entry.referrals || 0;
+  $('ref-stat').classList.toggle('hidden', !refs);
+  $('ref-stat').textContent = refs ? `Ya se anotaron ${refs} vecino${refs === 1 ? '' : 's'} con tu link 🙌` : '';
+}
+
+function renderRank() {
+  const list = $('rank-list');
+  if (!S.top.length) {
+    list.innerHTML = '<div class="empty-ink">Todavía no hay participantes. ¡Sé el primero!</div>';
+    return;
+  }
+  const uid = S.user?.uid;
+  const row = (u, pos) => `
+    <div class="rk${u.userId === uid ? ' me' : ''}">
+      <div class="rk-pos">${pos}</div>
+      <div class="av">${avatar(u.photoURL, u.userName)}</div>
+      <div class="rk-name">${esc(u.userName || 'Vecino/a')}${u.userId === uid ? '<span class="rk-you">VOS</span>' : ''}</div>
+      <div class="rk-ch">${fmtInt(u.chances)}<small>ch.</small></div>
+    </div>`;
+  let html = S.top.map((u, i) => row(u, i + 1)).join('');
+  if (S.entry && !S.top.some(u => u.userId === uid)) {
+    html += `<div class="rk-gap">···</div>` + row(S.entry, S.myRank || '–');
+  }
+  list.innerHTML = html;
+}
+
+function renderWinners() {
+  const g = S.gw;
+  const show = phase() === 'drawn';
+  $('sec-winners').classList.toggle('hidden', !show);
+  if (!show) return;
+  const winners = [...(g.winners || [])].sort((a, b) => a.position - b.position);
+  const drawnMs = tsMs(g.drawnAt);
+  $('winners-sub').textContent = drawnMs
+    ? `Sorteado el ${fmtDrawDate(drawnMs).day} a las ${fmtDrawDate(drawnMs).time} hs entre ${fmtInt(g.participantsAtDraw ?? g.totalParticipants)} participantes.`
+    : '';
+  $('winners-list').innerHTML = winners.length ? winners.map(w => {
+    const me = S.user && w.userId === S.user.uid;
+    return `
+      <div class="card win${me ? ' me' : ''}">
+        <div class="medal ${['m1', 'm2', 'm3'][w.position - 1] || 'mx'}" style="width:40px;height:40px;font-size:14px">${esc(w.position)}°</div>
+        <div class="av">${avatar(w.photoURL, w.userName)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="win-name">${esc(w.userName || 'Ganador/a')}${me ? '<span class="win-me-tag">Vos</span>' : ''}</div>
+          <div class="win-prize">${esc(w.prizeAmount)}${w.prizeDescription ? ' · ' + esc(w.prizeDescription) : ''}</div>
+        </div>
+      </div>`;
+  }).join('') : '<div class="notice info">El sorteo cerró sin ganadores.</div>';
+  $('btn-replay').classList.toggle('hidden', !winners.length);
+}
+
+function renderSticky() {
+  const show = !!S.entry && phase() === 'open' && rules(S.gw).order > 0;
+  $('sticky').classList.toggle('show', show);
+  document.body.classList.toggle('has-sticky', show);
+  if (show) {
+    $('sticky-n').textContent = fmtInt(S.entry.chances);
+    $('sticky-btn').textContent = `Pedir y sumar +${rules(S.gw).order}`;
+  }
+}
+
+function renderFaq() {
+  const g = S.gw;
+  const r = rules(g);
+  const ends = tsMs(g.endsAt);
+  const when = ends ? `${fmtDrawDate(ends).day} a las ${fmtDrawDate(ends).time} hs` : 'la fecha que anunciemos';
+  const ways = [
+    r.registration > 0 && `anotarte (+${r.registration})`,
+    r.order > 0 && `cada pedido entregado (+${r.order})`,
+    r.referral > 0 && `cada vecino que se anote con tu link (+${r.referral})`,
+    r.appInstalled > 0 && `tener la app con notificaciones activas (+${r.appInstalled})`
+  ].filter(Boolean).join(', ');
+  const aud = AUDIENCE_TEXT[g.targetAudience];
+  const items = [
+    ['¿Cómo participo?', `Ingresá con tu cuenta de GoDelivery en esta página y quedás anotado/a automáticamente. Es gratis${aud ? ` y es solo para ${aud}` : ''}.`],
+    ['¿Cómo sumo chances?', `Sumás por ${ways}. Si hacés un pedido sin haberte anotado, te anotamos solos cuando se entrega.`],
+    ['¿Hasta cuándo puedo participar?', `Hasta el ${when}. Los pedidos cuentan si se entregan antes de ese momento.`],
+    ['¿Cómo se eligen los ganadores?', 'Al cierre el sistema sortea al azar entre todos los participantes. Cada chance es un número más en el bolillero: más chances, más probabilidades. Una misma persona no puede ganar dos premios.'],
+    ['¿Cómo me entero si gané?', 'Los ganadores se muestran en vivo en esta página y les llega una notificación. Nos contactamos con cada uno para entregarle su premio.']
+  ];
+  $('faq').innerHTML = items.map(([q, a]) => `<details><summary>${esc(q)}</summary><div class="a">${esc(a)}</div></details>`).join('');
+}
+
+function renderAll() {
+  if (!S.gw) return;
+  renderHero();
+  renderWinners();
+  renderParticipation();
+  renderEarn();
+  renderShare();
+  renderPrizes();
+  renderRank();
+  renderSticky();
+  renderFaq();
+}
+
+// ============ Show en vivo ============
+function openOverlay() {
+  $('ov').classList.add('open');
+  document.body.classList.add('overlay-open');
+}
+function closeOverlay() {
+  S.showToken++;
+  if (S.overlayMode === 'waiting') S.waitingDismissed = true;
+  S.overlayMode = null;
+  $('ov').classList.remove('open');
+  $('ov-confetti').innerHTML = '';
+  document.body.classList.remove('overlay-open');
+}
+$('ov-close').addEventListener('click', closeOverlay);
+
+function showWaiting() {
+  if (S.overlayMode || S.waitingDismissed) return;
+  S.overlayMode = 'waiting';
+  $('ov-in').innerHTML = `
+    <div class="ov-ring"></div>
+    <div class="ov-title">Quedate acá</div>
+    <div class="ov-sub">${S.gw.autoDraw === true ? 'La participación cerró. En instantes salen los ganadores.' : 'La participación cerró. El sorteo empieza en instantes.'}</div>
+    ${S.entry ? `<div class="ov-sub" style="margin-top:18px">Participás con <b style="color:#fff">${fmtInt(S.entry.chances)} chances</b></div>` : ''}`;
+  openOverlay();
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function playShow() {
+  const winners = [...(S.gw.winners || [])].sort((a, b) => b.position - a.position);
+  if (!winners.length) return;
+  const token = ++S.showToken;
+  const alive = () => token === S.showToken;
+  S.overlayMode = 'show';
+  S.showPlayedFor = tsMs(S.gw.drawnAt) || 'drawn';
+  openOverlay();
+  const box = $('ov-in');
+
+  for (let n = 5; n >= 1; n--) {
+    if (!alive()) return;
+    box.innerHTML = `<div class="ov-kicker">Eligiendo ganadores</div><div class="ov-num" style="${n <= 3 ? 'color:var(--gold)' : ''}">${n}</div>`;
+    await sleep(1000);
+  }
+
+  for (let i = 0; i < winners.length; i++) {
+    if (!alive()) return;
+    const w = winners[i];
+    const me = S.user && w.userId === S.user.uid;
+    box.innerHTML = `
+      <div class="ov-kicker">${esc(w.position)}° premio</div>
+      <div class="reveal${me ? ' is-me' : ''}">
+        <div class="av">${avatar(w.photoURL, w.userName)}</div>
+        <div class="reveal-name">${esc(w.userName || 'Ganador/a')}</div>
+        <div class="reveal-prize">${esc(w.prizeAmount)}</div>
+        ${w.prizeDescription ? `<div class="reveal-desc">${esc(w.prizeDescription)}</div>` : ''}
+        ${me ? '<div class="reveal-me">¡Sos vos! 🎉</div>' : ''}
+      </div>`;
+    burst($('ov'), me ? 70 : 44);
+    confetti($('ov-confetti'), me ? 40 : 16, { maxDelay: 1 });
+    await sleep(i === winners.length - 1 ? 4200 : 3600);
+  }
+  if (!alive()) return;
+
+  const iWon = S.user && winners.some(w => w.userId === S.user.uid);
+  const sorted = [...winners].reverse();
+  box.innerHTML = `
+    <div class="ov-kicker">Resultado oficial</div>
+    <div class="ov-title">${iWon ? '¡Ganaste!' : '¡Felicitaciones!'}</div>
+    ${iWon ? '<div class="ov-sub">Te va a llegar una notificación y nos contactamos para entregarte el premio.</div>' : ''}
+    <div class="sum-list">
+      ${sorted.map((w, i) => `
+        <div class="sum${S.user && w.userId === S.user.uid ? ' me' : ''}" style="animation-delay:${i * .12}s">
+          <div class="sum-pos">${esc(w.position)}°</div>
+          <div class="av">${avatar(w.photoURL, w.userName)}</div>
+          <div class="sum-t"><b>${esc(w.userName || 'Ganador/a')}</b><span>${esc(w.prizeAmount)}</span></div>
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-red btn-block" id="ov-done">Listo</button>`;
+  confetti($('ov-confetti'), 50, { maxDelay: 2 });
+  $('ov-done').addEventListener('click', () => { closeOverlay(); $('sec-winners').scrollIntoView({ behavior: 'smooth' }); });
+}
+
+function onPhaseChange(prev, next) {
+  if (next === 'closed' && prev === 'open') { S.waitingDismissed = false; showWaiting(); }
+  if (next === 'drawn' && prev && prev !== 'drawn') {
+    if (S.showPlayedFor !== (tsMs(S.gw.drawnAt) || 'drawn')) playShow();
+  }
+}
+
+$('btn-replay').addEventListener('click', () => playShow());
+
+// ============ Participación ============
+function takeRefCode() {
+  try {
+    const raw = localStorage.getItem('gd-sorteo-ref');
+    if (!raw) return '';
+    const { code, at } = JSON.parse(raw);
+    if (Date.now() - at > 14 * 864e5) { localStorage.removeItem('gd-sorteo-ref'); return ''; }
+    return code || '';
+  } catch (e) { return ''; }
+}
+
+(function captureRef() {
+  const params = new URLSearchParams(location.search);
+  const ref = (params.get('ref') || '').trim().toUpperCase();
+  if (!ref) return;
+  try { localStorage.setItem('gd-sorteo-ref', JSON.stringify({ code: ref.slice(0, 20), at: Date.now() })); } catch (e) {}
+  params.delete('ref');
+  const qs = params.toString();
+  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+})();
+
+async function joinIfNeeded(force = false) {
+  if (!S.user || !S.gwId || S.entry) return;
+  if (S.joinState === 'joining' || (S.joinState === 'failed' && !force)) return;
+  if (phase() !== 'open') { S.joinState = 'failed'; S.joinError = 'closed'; renderParticipation(); return; }
+  S.joinState = 'joining';
+  renderParticipation();
+  try {
+    const token = await S.user.getIdToken();
+    const res = await fetch(`${FN_BASE}/joinGiveaway`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ giveawayId: S.gwId, referredBy: takeRefCode() })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw Object.assign(new Error(data.message || 'join failed'), { code: data.error });
+    try { localStorage.removeItem('gd-sorteo-ref'); } catch (e) {}
+    S.joinState = 'joined';
+    if (data.created) toast('¡Listo! Ya estás participando 🎉');
+    // La entry llega por el listener; si tarda, se muestra el spinner.
+  } catch (err) {
+    console.error('[Sorteo] join error', err);
+    S.joinState = 'failed';
+    S.joinError = err.code || 'network';
+    renderParticipation();
+  }
+}
+
+function watchMyEntry() {
+  if (S.unsubEntry) { S.unsubEntry(); S.unsubEntry = null; }
+  S.entry = null;
+  if (!S.user || !S.gwId) return;
+  let first = true;
+  S.unsubEntry = db.collection('giveaways').doc(S.gwId).collection('entries').doc(S.user.uid)
+    .onSnapshot(doc => {
+      const prevChances = S.entry?.chances;
+      S.entry = doc.exists ? doc.data() : null;
+      if (S.entry && prevChances != null && S.entry.chances > prevChances) {
+        toast(`+${S.entry.chances - prevChances} chances 🎉`);
+      }
+      if (S.entry) S.joinState = 'joined';
+      renderAll();
+      refreshMyRank();
+      if (first && !S.entry) joinIfNeeded();
+      first = false;
+    }, err => console.error('[Sorteo] entry listener', err));
+}
+
+// Puesto propio cuando no está en el top 10 (una consulta de conteo, no lee las entries).
+async function refreshMyRank() {
+  clearTimeout(S.rankTimer);
+  S.rankTimer = setTimeout(async () => {
+    if (!S.entry || !S.gwId) { S.myRank = null; return; }
+    const inTop = S.top.findIndex(u => u.userId === S.user?.uid);
+    if (inTop >= 0) { S.myRank = inTop + 1; return; }
+    try {
+      const snap = await db.collection('giveaways').doc(S.gwId).collection('entries')
+        .where('chances', '>', S.entry.chances).count().get();
+      S.myRank = snap.data().count + 1;
+      renderRank();
+      renderParticipation();
+    } catch (e) { S.myRank = null; }
+  }, 600);
+}
+
+async function login(provider) {
+  try {
+    const p = provider === 'apple' ? new firebase.auth.OAuthProvider('apple.com') : new firebase.auth.GoogleAuthProvider();
+    if (provider !== 'apple') p.setCustomParameters({ prompt: 'select_account' });
+    const isIOSStandalone = /iPad|iPhone|iPod/.test(navigator.userAgent) && (navigator.standalone || matchMedia('(display-mode: standalone)').matches);
+    if (isIOSStandalone) return auth.signInWithRedirect(p);
+    await auth.signInWithPopup(p);
+  } catch (e) {
+    if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/internal-error'].includes(e.code)) {
+      const p = provider === 'apple' ? new firebase.auth.OAuthProvider('apple.com') : new firebase.auth.GoogleAuthProvider();
+      return auth.signInWithRedirect(p).catch(err => console.error(err));
+    }
+    if (!['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(e.code)) {
+      console.error('[Sorteo] login', e);
+      toast('No pudimos iniciar sesión. Probá de nuevo.');
+    }
+  }
+}
+auth.getRedirectResult().catch(() => {});
+
+// ============ Compartir ============
+$('btn-copy').addEventListener('click', async function () {
+  const link = shareLink();
+  try { await navigator.clipboard.writeText(link); }
+  catch (e) { $('share-link').select(); document.execCommand('copy'); }
+  this.textContent = '¡Copiado!';
+  this.classList.add('copy-ok');
+  setTimeout(() => { this.textContent = 'Copiar'; this.classList.remove('copy-ok'); }, 2000);
+});
+$('share-link').addEventListener('click', function () { this.select(); });
+$('btn-wa').addEventListener('click', () => {
+  const base = (S.gw.shareMessage || '').trim() || '🎉 ¡Estamos sorteando premios en GoDelivery Magdalena! Anotate gratis con mi link y los dos sumamos chances:';
+  window.open(`https://wa.me/?text=${encodeURIComponent(`${base}\n\n${shareLink()}`)}`, '_blank');
+});
+
+// ============ Admin ============
+async function checkAdmin(user) {
+  let admin = ADMIN_EMAILS.includes(user.email);
+  if (!admin) {
+    try {
+      const u = await db.collection('users').doc(user.uid).get();
+      const d = u.exists ? u.data() : {};
+      admin = ['admin', 'superadmin'].includes(d.role) || d.isAdmin === true;
+    } catch (e) {}
+  }
+  S.isAdmin = admin;
+  $('btn-sim').classList.toggle('hidden', !admin);
+}
+
+// Simulación local del show (no toca Firestore): para que el admin lo vea antes del día.
+$('btn-sim').addEventListener('click', () => {
+  const real = S.gw;
+  const names = ['María G.', 'Carlos T.', 'Ana M.', 'Pedro R.', 'Lucía F.'];
+  const winners = prizesOf(real).map((p, i) => ({
+    position: p.position || i + 1, userId: 'sim-' + i, userName: names[i % names.length],
+    photoURL: '', prizeAmount: p.amount, prizeDescription: p.description || ''
+  }));
+  S.gw = { ...real, winners, drawnAt: null };
+  playShow().finally(() => { S.gw = real; S.showPlayedFor = null; });
+});
+
+// ============ Carga ============
+async function findGiveaway() {
+  // 1) El visible (active) más relevante. 2) Si no hay, el último sorteado.
+  const pick = (docs) => docs
+    .map(d => ({ id: d.id, data: d.data() }))
+    .sort((a, b) => {
+      const rank = (g) => ({ active: 0, ended: 1, drawing: 1, drawn: 2 }[g.status] ?? 3);
+      return rank(a.data) - rank(b.data) || tsMs(b.data.endsAt) - tsMs(a.data.endsAt);
+    })[0];
+  const visible = await db.collection('giveaways').where('active', '==', true).get();
+  if (!visible.empty) return pick(visible.docs);
+  const drawn = await db.collection('giveaways').where('status', '==', 'drawn').get();
+  const recent = drawn.docs.filter(d => now() - tsMs(d.data().drawnAt) < 30 * 864e5);
+  return recent.length ? pick(recent) : null;
+}
+
+async function init() {
+  $('year').textContent = new Date().getFullYear();
+  await syncClock();
+
+  let found;
+  try {
+    found = await findGiveaway();
+  } catch (e) {
+    console.error('[Sorteo] load', e);
+  }
+  if (!found) {
+    $('screen-loading').classList.add('hidden');
+    $('screen-empty').classList.remove('hidden');
+    return;
+  }
+
+  S.gwId = found.id;
+  S.gw = found.data;
+  S.lastPhase = phase();
+  renderAll();
+  confetti($('hero-confetti'), 26);
+  $('screen-loading').classList.add('hidden');
+  $('app').classList.remove('hidden');
+
+  // Entrada con el sorteo ya hecho: show solo si salió recién; si no, directo a los ganadores.
+  if (S.lastPhase === 'drawn') {
+    if (now() - tsMs(S.gw.drawnAt) < SHOW_REPLAY_WINDOW_MS) playShow();
+  } else if (S.lastPhase === 'closed') {
+    showWaiting();
+  }
+
+  db.collection('giveaways').doc(S.gwId).onSnapshot(doc => {
+    if (!doc.exists) return;
+    S.gw = doc.data();
+    const prev = S.lastPhase;
+    S.lastPhase = phase();
+    renderAll();
+    if (prev !== S.lastPhase) onPhaseChange(prev, S.lastPhase);
+  }, err => console.error('[Sorteo] giveaway listener', err));
+
+  db.collection('giveaways').doc(S.gwId).collection('entries')
+    .orderBy('chances', 'desc').limit(10)
+    .onSnapshot(snap => {
+      S.top = snap.docs.map(d => ({ ...d.data(), userId: d.data().userId || d.id }));
+      renderRank();
+      renderHero();
+      refreshMyRank();
+    }, err => console.error('[Sorteo] ranking listener', err));
+
+  auth.onAuthStateChanged(user => {
+    S.user = user;
+    S.joinState = 'idle';
+    S.joinError = null;
+    S.myRank = null;
+    if (user) checkAdmin(user); else { S.isAdmin = false; $('btn-sim').classList.add('hidden'); }
+    watchMyEntry();
+    renderAll();
+  });
+
+  setInterval(tickCountdown, 1000);
+  tickCountdown();
+  // Al volver a la pestaña (celular bloqueado un rato) se recalcula la hora.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncClock(); tickCountdown(); } });
+}
+
+init();
+</script>
+</body>
+</html>
