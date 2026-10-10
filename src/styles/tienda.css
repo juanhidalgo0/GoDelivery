@@ -1,0 +1,138 @@
+/* Catálogo online del comercio (#/tienda/<slug>): la página que el comercio comparte por WhatsApp,
+   QR o redes. Estilo GO: papel, tinta, rojo y Montserrat. La dibuja renderDirectPage en
+   src/pages/comercio.js; los ids que usa la lógica (búsqueda, categorías, productos) son los mismos
+   que en la vista de la app. */
+
+.tnd {
+  --tnd-bg: var(--go-paper, #f4f2ee);
+  --tnd-card: var(--go-card, #fff);
+  --tnd-ink: var(--go-ink, #0b0b0c);
+  --tnd-tx: var(--go-text, #0b0b0c);
+  --tnd-tx2: var(--go-text-2, #57534e);
+  --tnd-tx3: var(--go-text-3, #78716c);
+  --tnd-line: var(--go-line, #e4dfd6);
+  --tnd-red: var(--go-red, #e11d48);
+  --tnd-green: #0e9f6e;
+  --tnd-font: var(--go-font, 'Montserrat', 'Inter', system-ui, sans-serif);
+  background: var(--tnd-bg);
+  color: var(--tnd-tx);
+  font-family: 'Inter', system-ui, sans-serif;
+  min-height: 100vh;
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+.tnd * { box-sizing: border-box; }
+.tnd-wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+/* Barra de arriba: aparece al bajar (la maneja el scroll handler de comercio.js) */
+.tnd-top {
+  position: sticky; top: 0; z-index: 100;
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) 16px 0;
+  display: flex; align-items: center; gap: 10px;
+  background: transparent; border-bottom: 1px solid transparent;
+  transition: background .2s ease, border-color .2s ease;
+}
+.tnd-top-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; opacity: 0; transform: translateY(4px); transition: opacity .2s ease, transform .2s ease; }
+.tnd-top-title img, .tnd-top-title .tnd-top-ph { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1px solid var(--tnd-line); background: #fff; }
+.tnd-top-title span { font-family: var(--tnd-font); font-weight: 800; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tnd-tx); }
+.tnd-icon-btn {
+  width: 38px; height: 38px; border-radius: 50%; border: 0; flex-shrink: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.92); color: var(--tnd-ink); box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  text-decoration: none;
+}
+
+/* Portada */
+.tnd-hero { position: relative; margin-top: calc(-56px - env(safe-area-inset-top, 0px)); height: clamp(190px, 46vw, 320px); overflow: hidden; background: var(--tnd-ink); }
+.tnd-hero > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; content-visibility: visible; }
+.tnd-hero-shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(11,11,12,.35) 0%, rgba(11,11,12,0) 35%, rgba(11,11,12,.5) 100%); }
+.tnd-hero-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #26262a, #0b0b0c 70%); }
+.tnd-hero-ph b { font-family: var(--tnd-font); font-size: 64px; font-weight: 900; color: rgba(255,255,255,.08); letter-spacing: -.04em; }
+
+/* Ficha del comercio */
+.tnd-head { position: relative; z-index: 2; margin-top: -56px; background: var(--tnd-card); border: 1px solid var(--tnd-line); border-radius: 24px; padding: 18px 18px 16px; box-shadow: 0 10px 30px rgba(11,11,12,.08); }
+.tnd-head-row { display: flex; gap: 14px; align-items: flex-end; }
+.tnd-logo { width: 84px; height: 84px; border-radius: 22px; object-fit: cover; flex-shrink: 0; margin-top: -48px; background: #fff; border: 4px solid var(--tnd-card); box-shadow: 0 6px 18px rgba(11,11,12,.16); }
+.tnd-logo-ph { display: flex; align-items: center; justify-content: center; font-family: var(--tnd-font); font-weight: 900; font-size: 30px; color: #fff; background: var(--tnd-ink); }
+.tnd-name { margin: 0; font-family: var(--tnd-font); font-size: clamp(21px, 5.6vw, 30px); font-weight: 800; letter-spacing: -.02em; line-height: 1.12; color: var(--tnd-tx); overflow-wrap: anywhere; }
+.tnd-sub { margin-top: 4px; font-size: 13px; color: var(--tnd-tx2); font-weight: 500; }
+.tnd-desc { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--tnd-tx2); }
+
+.tnd-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.tnd-fact { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--go-paper-2, #ebe7e0); color: var(--tnd-tx); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.tnd-fact svg { flex-shrink: 0; }
+.tnd-fact.is-open { background: rgba(14,159,110,.12); color: #047857; }
+.tnd-fact.is-closed { background: rgba(11,11,12,.08); color: var(--tnd-tx2); }
+.tnd-fact.is-paused { background: rgba(245,158,11,.15); color: #92400e; }
+.tnd-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+button.tnd-fact { border: 0; cursor: pointer; font-family: inherit; }
+
+.tnd-actions { display: flex; gap: 8px; margin-top: 14px; }
+.tnd-btn { flex: 1; min-width: 0; height: 44px; border-radius: 14px; border: 1px solid var(--tnd-line); background: var(--tnd-card); color: var(--tnd-tx); font: 600 13.5px 'Inter', system-ui, sans-serif; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.tnd-btn.is-wa { background: #25D366; border-color: #25D366; color: #fff; }
+.tnd-btn:active { transform: scale(.98); }
+
+/* Aviso de pausado / cerrado */
+.tnd-notice { display: flex; gap: 12px; align-items: center; margin-top: 14px; padding: 12px 14px; border-radius: 16px; background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); color: #92400e; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.tnd-notice.is-closed { background: rgba(11,11,12,.05); border-color: var(--tnd-line); color: var(--tnd-tx2); }
+
+/* Buscador y categorías (fijos al bajar) */
+.tnd-filters { position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 90; background: var(--tnd-bg); padding: 14px 0 10px; margin-top: 6px; }
+.tnd-search { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; border-radius: 14px; background: var(--tnd-card); border: 1px solid var(--tnd-line); }
+.tnd-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: 500 15px 'Inter', system-ui, sans-serif; color: var(--tnd-tx); }
+.tnd-search input::placeholder { color: var(--tnd-tx3); }
+.tnd-search button { border: 0; background: none; color: var(--tnd-tx3); cursor: pointer; padding: 4px; display: none; align-items: center; }
+.tnd-cats { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin-top: 10px; padding-bottom: 2px; }
+.tnd-cats::-webkit-scrollbar { display: none; }
+.tnd .tab-pill { flex-shrink: 0; height: 36px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--tnd-line); background: var(--tnd-card); color: var(--tnd-tx); font: 600 13.5px 'Inter', system-ui, sans-serif; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.tnd .tab-pill.active { background: var(--tnd-ink); border-color: var(--tnd-ink); color: #fff; }
+.tnd .sub-tab-pill { height: 32px !important; padding: 0 14px !important; border-radius: 999px !important; font: 600 12.5px 'Inter', system-ui, sans-serif !important; box-shadow: none !important; }
+.tnd-subcats { margin-top: 8px; }
+.tnd-subcats .tab-pills { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+
+/* Productos */
+.tnd-products { display: block; }
+.tnd-section { margin-top: 18px; }
+.tnd-section:first-child { margin-top: 6px; }
+.tnd-section-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-family: var(--tnd-font); font-size: 18px; font-weight: 800; letter-spacing: -.01em; color: var(--tnd-tx); }
+.tnd-section-title small { font: 500 12.5px 'Inter', system-ui, sans-serif; color: var(--tnd-tx3); }
+.tnd-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 760px) { .tnd-grid { grid-template-columns: 1fr 1fr; } }
+
+.tnd .product-card { position: relative; display: flex; gap: 14px; padding: 14px; min-height: 104px; background: var(--tnd-card); border: 1px solid var(--tnd-line); border-radius: 18px; cursor: pointer; transition: border-color .15s ease, transform .15s ease; text-align: left; }
+.tnd .product-card:hover { border-color: #d3ccc0; }
+.tnd .product-card:active { transform: scale(.99); }
+.tnd-p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tnd-p-name { font-family: var(--tnd-font); font-size: 15px; font-weight: 700; line-height: 1.25; color: var(--tnd-tx); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tnd-p-desc { margin-top: 4px; font-size: 13px; line-height: 1.4; color: var(--tnd-tx2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tnd-p-foot { margin-top: auto; padding-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tnd-p-price { font-family: var(--tnd-font); font-size: 16px; font-weight: 800; color: var(--tnd-tx); }
+.tnd-p-price.is-offer { color: var(--tnd-red); }
+.tnd-p-was { font-size: 12.5px; color: var(--tnd-tx3); text-decoration: line-through; }
+.tnd-p-tag { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: rgba(225,29,72,.1); color: var(--tnd-red); }
+.tnd-p-media { position: relative; width: 96px; height: 96px; flex-shrink: 0; align-self: center; }
+.tnd-p-media img { width: 100%; height: 100%; border-radius: 14px; object-fit: cover; background: var(--go-paper-2, #ebe7e0); display: block; }
+.tnd .product-card-add { position: absolute; right: -4px; bottom: -4px; width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--tnd-card); background: var(--tnd-ink); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,.18); }
+.tnd .product-card-add.success { background: var(--tnd-green); }
+.tnd-p-noimg .product-card-add { position: static; border: 0; width: 34px; height: 34px; margin-left: auto; box-shadow: none; }
+.tnd-p-state { position: absolute; left: 6px; bottom: 6px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: rgba(11,11,12,.8); padding: 3px 8px; border-radius: 999px; }
+.tnd-p-noimg .tnd-p-state { position: static; color: var(--tnd-tx2); background: var(--go-paper-2, #ebe7e0); margin-left: auto; }
+
+.tnd-empty { padding: 48px 16px; text-align: center; color: var(--tnd-tx2); font-size: 14px; }
+.tnd-empty b { display: block; font-family: var(--tnd-font); font-size: 17px; color: var(--tnd-tx); margin-bottom: 6px; }
+
+/* Pie */
+.tnd-foot { margin: 36px 0 0; padding: 22px 0 8px; border-top: 1px solid var(--tnd-line); display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: 12.5px; color: var(--tnd-tx3); }
+.tnd-foot a { color: var(--tnd-tx); font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.tnd-go { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--tnd-ink); color: #fff; font-family: var(--tnd-font); font-weight: 900; font-size: 10px; letter-spacing: -.04em; }
+
+@media (min-width: 760px) {
+  .tnd-head { padding: 22px 24px 20px; }
+  .tnd-logo { width: 104px; height: 104px; margin-top: -60px; }
+  .tnd-actions { max-width: 520px; }
+}
+.tnd-notice svg { flex-shrink: 0; width: 18px; height: 18px; }
+
+/* index.css pone content-visibility: auto a todas las imágenes; en esta página dejaba la portada
+   y algunas fotos sin pintar. Acá se dibujan siempre. */
+.tnd img { content-visibility: visible; }

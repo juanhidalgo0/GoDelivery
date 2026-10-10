@@ -2,21 +2,25 @@ import { db } from '../firebase.js';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { getState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
-import { isComercio, isAdmin, isSuperAdmin } from '../auth.js';
+import { isAdmin, isSuperAdmin } from '../auth.js';
 import { setBanner, clearBanner, activeBanners } from './banner-manager.js';
 import { showToast } from './toast.js';
 import { sendLocalNotification } from '../utils/notifications.js';
 import { AudioManager } from '../utils/audio-manager.js';
-import { FABStack } from '../utils/fab-stack.js';
+import { watchWaQuotes, stopWaQuotes } from './wa-quotes.js';
 
 let commerceUnsub = null;
 let comerciosListUnsub = null;
 let lastKnownPendingIds = new Set();
 let currentPendingOrders = [];
 let myComercioIds = [];
+// Consultas por WhatsApp esperando respuesta: también hacen sonar la alarma
+let waQuoteCount = 0;
+const comercioNames = {};
 
 // Sound URL - Ultra-Loud Attention Alert (Rhythmic & High Frequency)
-const SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3';
+// Archivo propio: suena aunque el CDN externo esté caído o la señal sea mala
+const SOUND_URL = '/sounds/pedido-nuevo.wav';
 
 let isMonitorInitialized = false;
 let isMutedGlobally = false;
@@ -25,25 +29,33 @@ export function initCommerceMonitor() {
   if (isMonitorInitialized) return;
   isMonitorInitialized = true;
 
+  // Con el primer clic/tecla la alarma queda habilitada (en PC el navegador la bloquea hasta entonces)
+  AudioManager.primeLoop(SOUND_URL);
+
   const user = getState().user;
   
-  if (user && (isComercio() || isAdmin() || isSuperAdmin())) {
-    startCommerceListListener(user);
-  }
+  if (user) startCommerceListListener(user);
 
+  // El perfil se vuelve a publicar seguido (rol, saldo, etc.): sólo se rearma si cambia
+  // quién es o qué rol tiene, para no cortar la alarma a cada rato
+  let watchKey = user ? watchKeyOf(user) : '';
   subscribe('user', (newUser) => {
-    if (newUser && (isComercio() || isAdmin() || isSuperAdmin())) {
-      startCommerceListListener(newUser);
-    } else {
-      stopAllMonitoring();
-    }
+    const key = newUser ? watchKeyOf(newUser) : '';
+    if (key === watchKey) return;
+    watchKey = key;
+    if (newUser) startCommerceListListener(newUser);
+    else stopAllMonitoring();
   });
+
+  // El aviso flotante dice si el navegador tiene el sonido bloqueado (PC sin un clic todavía)
+  window.addEventListener('go-audio-blocked', () => renderOrderAlert());
+  ['pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, () => setTimeout(renderOrderAlert, 0), { once: true, capture: true }));
 
   // Register global alarm mute listener exactly once
   window.addEventListener('mute-commerce-alarm', () => {
     isMutedGlobally = true;
     AudioManager.stopLoop(SOUND_URL);
-    console.log('🔇 Commerce pending order alarm muted globally.');
+    updateMutePill(false);
   });
 }
 
@@ -51,30 +63,50 @@ function unlockAudio() {
   // AudioManager handles this now
 }
 
+const watchKeyOf = (u) => `${u.uid}|${u.role || ''}|${u.isComercio ? 1 : 0}|${u.comercioId || ''}|${isAdmin() ? 1 : 0}`;
+
 function startCommerceListListener(user) {
   if (comerciosListUnsub) comerciosListUnsub();
-  
-  const q = query(collection(db, 'comercios'));
-  
+  comerciosListUnsub = null;
+  const admin = isAdmin() || isSuperAdmin();
+
+  // El admin atiende GoMarket (lo busca entre todos); el resto escucha los comercios de los
+  // que es dueño. No se mira el rol: hay dueños a los que nunca se les dio y igual reciben
+  // pedidos, y la consulta vacía de un cliente común no cuesta nada.
+  const q = admin
+    ? query(collection(db, 'comercios'))
+    : query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
+
   comerciosListUnsub = onSnapshot(q, (snap) => {
-    if (isAdmin() || isSuperAdmin()) {
+    let ids;
+    if (admin) {
       // Admin acts as GoMarket owner
       const goMarket = snap.docs.find(d => {
         const n = (d.data().name || '').toLowerCase();
         return n.includes('go!') && n.includes('market');
       });
-      myComercioIds = goMarket ? [goMarket.id] : [];
+      ids = goMarket ? [goMarket.id] : [];
     } else {
-      // Normal commerce acts as owner of their commerces
-      myComercioIds = snap.docs.filter(d => d.data().ownerId === user.uid).map(d => d.id);
+      ids = snap.docs.map(d => d.id);
+      // Comercio viejo sin ownerId: el usuario lo tiene anotado en su perfil
+      if (!ids.length && user.comercioId) ids.push(user.comercioId);
+      // Con varios comercios el aviso dice de cuál es el pedido
+      snap.docs.forEach(d => { comercioNames[d.id] = d.data().name || ''; });
     }
+    ids = ids.slice(0, 30); // tope del filtro 'in'
+
+    // Cualquier cambio en el doc del comercio (pausa, rating…) dispara esto: si la lista
+    // es la misma, la escucha de pedidos sigue como está y la alarma no se corta
+    const same = ids.length === myComercioIds.length && ids.every((id, i) => id === myComercioIds[i]);
+    if (same && (commerceUnsub || !ids.length)) return;
+    myComercioIds = ids;
 
     if (myComercioIds.length > 0) {
       startOrdersListener();
     } else {
       stopOrdersListener();
     }
-  });
+  }, (err) => console.warn('[Commerce Monitor] comercios:', err?.code || err));
 }
 
 let recurring5MinInterval = null;
@@ -82,6 +114,12 @@ let recurring5MinInterval = null;
 function startOrdersListener() {
   stopOrdersListener();
   if (myComercioIds.length === 0) return;
+
+  watchWaQuotes(myComercioIds, (n) => {
+    if (n > waQuoteCount) isMutedGlobally = false;
+    waQuoteCount = n;
+    syncAlarm();
+  });
 
   const q = query(
     collection(db, 'orders'),
@@ -107,13 +145,9 @@ function startOrdersListener() {
       isMutedGlobally = false; // Reset mute when new order arrives!
     }
 
-    if (orders.length > 0 && !isMutedGlobally) {
-      AudioManager.startLoop(SOUND_URL, 0.95);
-      if (hasNew) {
-        AudioManager.hapticError(); // Play a strong tactile alarm warning
-      }
-    } else {
-      AudioManager.stopLoop(SOUND_URL);
+    syncAlarm();
+    if (hasNew && orders.length > 0 && !isMutedGlobally) {
+      AudioManager.hapticError(); // Play a strong tactile alarm warning
     }
 
     if (hasNew && lastKnownPendingIds.size > 0) {
@@ -121,7 +155,7 @@ function startOrdersListener() {
       sendLocalNotification(
         `¡Nuevo${count > 1 ? 's' : ''} Pedido${count > 1 ? 's' : ''}!`, 
         `Tenés ${count} pedido${count > 1 ? 's' : ''} pendiente${count > 1 ? 's' : ''}.`,
-        { type: 'order', url: `#/mi-comercio/${myComercioIds[0]}/orders` }
+        { type: 'order', silent: true, url: `#/mi-comercio/${currentPendingOrders[0]?.comercioId || myComercioIds[0]}/orders` }
       );
     }
 
@@ -139,7 +173,7 @@ function startOrdersListener() {
             sendLocalNotification(
               `⚠️ ¡RECORDATORIO DE PEDIDO!`, 
               `Tenés ${count} pedido${count > 1 ? 's' : ''} pendiente${count > 1 ? 's' : ''} sin aceptar o rechazar.`,
-              { type: 'order', url: `#/mi-comercio/${myComercioIds[0]}/orders` }
+              { type: 'order', silent: true, url: `#/mi-comercio/${currentPendingOrders[0]?.comercioId || myComercioIds[0]}/orders` }
             );
 
             // Insert notification in Firestore for record
@@ -171,13 +205,22 @@ function startOrdersListener() {
     lastKnownPendingIds = new Set([...lastKnownPendingIds].filter(id => currentIds.has(id)));
 
     updateBannerState();
-    updateMutePill(orders.length > 0 && !isMutedGlobally);
-  });
+    updateMutePill((orders.length + waQuoteCount) > 0 && !isMutedGlobally);
+  }, (err) => console.warn('[Commerce Monitor] pedidos:', err?.code || err));
+}
+
+function syncAlarm() {
+  const ringing = (currentPendingOrders.length + waQuoteCount) > 0 && !isMutedGlobally;
+  if (ringing) AudioManager.startLoop(SOUND_URL, 0.95);
+  else AudioManager.stopLoop(SOUND_URL);
+  updateMutePill(ringing);
 }
 
 function stopOrdersListener() {
   if (commerceUnsub) commerceUnsub();
   commerceUnsub = null;
+  stopWaQuotes();
+  waQuoteCount = 0;
   if (recurring5MinInterval) {
     clearInterval(recurring5MinInterval);
     recurring5MinInterval = null;
@@ -217,55 +260,9 @@ function updateBannerState() {
 }
 
 function updateCommerceFAB(count, comercioId) {
-  let fab = document.getElementById('global-commerce-pending-fab');
-
-  if (!fab) {
-    fab = document.createElement('div');
-    fab.id = 'global-commerce-pending-fab';
-    fab.style.cssText = `
-      position: fixed; right: 20px;
-      padding: 12px 20px; border-radius: 30px;
-      display: flex; align-items: center; gap: 10px;
-      color: white; cursor: pointer; z-index: 1450;
-      box-shadow: 0 8px 32px rgba(227, 27, 35, 0.4);
-      transition: all 0.5s cubic-bezier(0.17, 0.89, 0.32, 1.27);
-      transform: scale(0) translateY(20px); opacity: 0;
-      border: 2px solid white; font-family: var(--font-display);
-      font-weight: 800; font-size: 13px;
-      background: linear-gradient(135deg, #FF4757 0%, #E31B23 100%);
-    `;
-    document.body.appendChild(fab);
-    
-    if (!document.getElementById('commerce-fab-styles')) {
-      const s = document.createElement('style');
-      s.id = 'commerce-fab-styles';
-      s.textContent = `
-        @keyframes commerce-pulse {
-          0% { box-shadow: 0 0 0 0 rgba(227, 27, 35, 0.4); }
-          70% { box-shadow: 0 0 0 15px rgba(227, 27, 35, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(227, 27, 35, 0); }
-        }
-        .commerce-fab-pulse { animation: commerce-pulse 1.5s infinite; }
-      `;
-      document.head.appendChild(s);
-    }
-
-    requestAnimationFrame(() => {
-      fab.style.transform = 'scale(1) translateY(0)';
-      fab.style.opacity = '1';
-      FABStack.reposition();
-    });
-  }
-
-  FABStack.reposition();
-  fab.className = 'commerce-fab-pulse';
-  fab.innerHTML = `
-    ${icon('bell', 20)}
-    <span>${count} Pedido${count > 1 ? 's' : ''} Pendiente${count > 1 ? 's' : ''}</span>
-    <div class="fab-toggle-dot"></div>
-  `;
-
-  fab.onclick = () => navigateToCommerceOrders(comercioId);
+  alertState.count = count;
+  alertState.comercioId = comercioId;
+  renderOrderAlert();
 }
 
 function navigateToCommerceOrders(comercioId) {
@@ -283,75 +280,68 @@ function navigateToCommerceOrders(comercioId) {
 }
 
 function clearCommerceIndicator() {
-  const fab = document.getElementById('global-commerce-pending-fab');
-  if (fab) {
-    fab.style.transform = 'scale(0) translateY(20px)';
-    fab.style.opacity = '0';
-    setTimeout(() => {
-      fab.remove();
-      FABStack.reposition();
-    }, 500);
-  }
+  alertState.count = 0;
+  renderOrderAlert();
 }
 
 function updateMutePill(show) {
-  let pill = document.getElementById('comercio-mute-alarm-pill');
-  if (show) {
-    if (!pill) {
-      pill = document.createElement('div');
-      pill.id = 'comercio-mute-alarm-pill';
-      pill.style.cssText = `
-        position: fixed;
-        bottom: 84px;
-        left: 50%;
-        transform: translateX(-50%) translateY(20px);
-        background: rgba(15, 23, 42, 0.95);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1.5px solid rgba(225, 29, 72, 0.35);
-        border-radius: 30px;
-        padding: 12px 24px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        z-index: 999999999;
-        cursor: pointer;
-        color: white;
-        font-family: var(--font-display);
-        font-weight: 900;
-        font-size: 12px;
-        letter-spacing: 0.05em;
-        box-shadow: 0 10px 30px rgba(225, 29, 72, 0.35);
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        opacity: 0;
-      `;
-      document.body.appendChild(pill);
+  // El panel del comercio muestra su propio aviso de "Silenciar" debajo del encabezado
+  window.__commerceAlarmRinging = !!show;
+  window.dispatchEvent(new CustomEvent('commerce-alarm', { detail: { ringing: !!show } }));
+  alertState.ringing = !!show;
+  renderOrderAlert();
+}
 
-      pill.onclick = () => {
-        AudioManager.hapticLight();
-        isMutedGlobally = true;
-        AudioManager.stopLoop(SOUND_URL);
-        updateMutePill(false);
-      };
+// ── Aviso de pedidos sin aceptar (fuera del panel) ──
+// Una sola pastilla GO!: contador, qué pasa, silenciar (sólo mientras suena) e ir a verlos.
+const alertState = { count: 0, comercioId: null, ringing: false };
+
+function renderOrderAlert() {
+  let el = document.getElementById('go-order-alert');
+  if (!alertState.count) {
+    if (el) {
+      el.classList.remove('is-in');
+      setTimeout(() => { if (!alertState.count) el.remove(); }, 300);
     }
-
-    pill.innerHTML = `
-      <span class="animate-pulse" style="display:inline-block; width:8px; height:8px; background:#e11d48; border-radius:50%; box-shadow:0 0 10px #e11d48;"></span>
-      <span style="font-size:16px; display:inline-flex; align-items:center;">🔔</span>
-      <span>SILENCIAR ALARMA PENDIENTE</span>
-    `;
-
-    requestAnimationFrame(() => {
-      pill.style.transform = 'translateX(-50%) translateY(0)';
-      pill.style.opacity = '1';
-    });
-  } else {
-    if (pill) {
-      pill.style.transform = 'translateX(-50%) translateY(20px)';
-      pill.style.opacity = '0';
-      setTimeout(() => {
-        pill.remove();
-      }, 400);
-    }
+    return;
   }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'go-order-alert';
+    el.className = 'go-order-alert';
+    el.setAttribute('role', 'status');
+    el.innerHTML = `
+      <button type="button" class="go-order-alert-main" data-alert="open">
+        <span class="go-order-alert-count"></span>
+        <span class="go-order-alert-text"><b></b><small>Tocá para verlos</small></span>
+      </button>
+      <button type="button" class="go-order-alert-mute" data-alert="mute" aria-label="Silenciar alarma">${icon('volumeOff', 18)}</button>
+      <button type="button" class="go-order-alert-go" data-alert="open" aria-label="Ver pedidos">${icon('chevronRight', 18)}</button>`;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-alert]');
+      if (!b) return;
+      if (b.dataset.alert === 'mute') {
+        AudioManager.hapticLight();
+        window.dispatchEvent(new Event('mute-commerce-alarm'));
+        return;
+      }
+      navigateToCommerceOrders(alertState.comercioId);
+    });
+    document.body.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('is-in')));
+  }
+  const n = alertState.count;
+  el.classList.toggle('is-ringing', alertState.ringing);
+  el.querySelector('.go-order-alert-count').textContent = n > 99 ? '99+' : String(n);
+  el.querySelector('.go-order-alert-text b').textContent = `${n} pedido${n === 1 ? '' : 's'} sin aceptar`;
+  // Dueño de varios comercios: dónde están esperando
+  const stores = [...new Set(currentPendingOrders.map(o => comercioNames[o.comercioId]).filter(Boolean))];
+  el.querySelector('.go-order-alert-text small').textContent = AudioManager.isAudioBlocked()
+    ? 'Sonido apagado · hacé clic para activarlo'
+    : myComercioIds.length > 1 && stores.length ? `En ${stores.join(' y ')} · tocá para verlos` : 'Tocá para verlos';
+  el.querySelector('.go-order-alert-mute').hidden = !alertState.ringing;
+  // Si hay otros avisos flotantes a la izquierda (pedido en curso, cadete), va por encima
+  const others = ['global-order-fab', 'global-active-delivery-fab', 'global-delivery-available-fab']
+    .filter(id => { const f = document.getElementById(id); return f && f.style.opacity !== '0'; }).length;
+  el.style.setProperty('--go-order-alert-lift', `${others * 68}px`);
 }

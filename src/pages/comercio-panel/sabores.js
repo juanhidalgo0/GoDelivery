@@ -6,53 +6,34 @@ import { getRouteParams } from '../../router.js';
 import { showToast } from '../../components/toast.js';
 import { showModal, closeModal, showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
-import { isAdmin } from '../../auth.js';
+import { enterCommercePanel, cpConfirm, cpSkeleton } from './shell.js';
 
 export async function renderComercioSabores() {
-  const content = document.getElementById('app-content');
-  const user = getState().user;
   const params = getRouteParams();
   const comercioId = params.id;
+  if (!comercioId) return;
 
-  if (!comercioId) {
-    location.hash = '#/profile';
-    return;
-  }
+  const content = await enterCommercePanel({
+    comercioId, tab: 'menu',
+    sub: { title: 'Sabores y gustos', back: `#/mi-comercio/${comercioId}/products` },
+  });
+  if (!content) return;
 
   content.innerHTML = `
-    <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--color-bg-secondary);">
-      <!-- Fixed Header -->
-      <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;height:64px;padding:0 16px;background: var(--go-ink);box-shadow:0 4px 12px rgba(0,0,0,0.1);flex-shrink:0;overflow:hidden;color:white;">
-        <div style="position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: rgba(255,255,255,0.08); border-radius: 50%; pointer-events: none;"></div>
-        
-        <div style="display:flex;align-items:center;gap:12px;position:relative;z-index:2;flex:1;min-width:0;">
-          <a href="#/mi-comercio/${comercioId}" style="display:flex;align-items:center;justify-content:center;background:none;border:none;color:white;cursor:pointer;padding:0;text-decoration:none;">
-            ${icon('chevronLeft', 28)}
-          </a>
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
-            <span id="sabores-title-text" style="font-weight:800;font-size:20px;color:white;letter-spacing:-0.02em;">Gestor de Sabores</span>
-            <p id="sabores-commerce-name" style="font-size:11px;color:rgba(255,255,255,0.85);margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Cargando...</p>
-          </div>
+    <div id="cp-sabores-root">
+      <div class="cp-sticky">
+        <div class="cp-row">
+          <label class="cp-search cp-grow">
+            <span>${icon('search', 18)}</span>
+            <input class="cp-input" type="search" id="sabores-search" placeholder="Buscar sabores" autocomplete="off" />
+          </label>
+          <button type="button" class="cp-btn" id="add-category-btn">${icon('plus', 16)} Grupo</button>
         </div>
-        <div style="display:flex; gap:8px; align-items:center; position:relative; z-index:2;">
-          <button id="save-sabores-btn" style="display:none; height:38px; padding:0 16px; border-radius:12px; background:white; color:var(--color-primary); font-weight:800; border:none; cursor:pointer;">Guardar</button>
-          <button class="hdr-icon-btn" id="add-category-btn" title="Nuevo Grupo" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.1);color:white;height:38px;padding:0 12px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:6px;border:none;cursor:pointer;transition:all 0.2s;font-size:13px;font-weight:700;">
-            ${icon('plus', 14)} Nuevo Grupo
-          </button>
-        </div>
+        <button type="button" class="cp-btn is-ink is-block" id="save-sabores-btn" style="display:none; margin-top:10px">${icon('check', 18)} Guardar cambios</button>
       </div>
-
-      <!-- Search & Main Body -->
-      <div style="flex:1;overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:16px;">
-        <div class="search-bar" style="margin-bottom:4px;">
-          <span class="search-icon">${icon('search', 20)}</span>
-          <input type="text" id="sabores-search" placeholder="Buscar sabores..." />
-        </div>
-
-        <div id="sabores-container" style="flex:1; display:flex; flex-direction:column; gap:16px;">
-          <div class="skeleton" style="height:100px; border-radius:16px;"></div>
-          <div class="skeleton" style="height:100px; border-radius:16px;"></div>
-        </div>
+      <div class="cp-page" style="padding-top:4px">
+        <p class="cp-muted" id="sabores-help" style="margin:0 2px 12px">Marcá qué gustos hay hoy. Si ponés un número, se descuenta con cada pedido; vacío es ilimitado.</p>
+        <div id="sabores-container" style="display:flex; flex-direction:column; gap:12px;">${cpSkeleton(2, 100)}</div>
       </div>
     </div>
   `;
@@ -80,14 +61,10 @@ export async function renderComercioSabores() {
       }
 
       // Update Header Text and Placeholders dynamically based on category
-      const titleEl = document.getElementById('sabores-title-text');
-      if (titleEl) titleEl.textContent = isHeladeria ? 'Gestor de Sabores' : 'Gustos y Variedades';
       
       const searchInput = document.getElementById('sabores-search');
       if (searchInput) searchInput.placeholder = isHeladeria ? 'Buscar sabores...' : 'Buscar gustos y variedades...';
 
-      const el = document.getElementById('sabores-commerce-name');
-      if (el) el.textContent = isAdmin() ? `Adm: ${data.name}` : data.name;
       if (!hasUnsavedChanges) {
         renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
       }
@@ -314,17 +291,18 @@ export async function renderComercioSabores() {
     }
   });
 
-  // Handle back navigation
-  document.querySelector('a[href="#/mi-comercio/' + comercioId + '"]')?.addEventListener('click', (e) => {
-    if (hasUnsavedChanges) {
-      e.preventDefault();
-      const leave = confirm('Tienes cambios sin guardar. ¿Estás seguro que deseas salir?');
-      if (leave) {
-        setUnsavedChanges(false);
-        location.hash = `#/mi-comercio/${comercioId}`;
-      }
+  // Volver con cambios sin guardar: se pregunta antes de perderlos
+  const backBtn = document.getElementById('cp-back');
+  const guardBack = async (e) => {
+    if (!hasUnsavedChanges) return;
+    e.preventDefault();
+    const leave = await cpConfirm({ title: 'Tenés cambios sin guardar', message: 'Si salís ahora, se pierden.', confirmText: 'Salir sin guardar', danger: true });
+    if (leave) {
+      setUnsavedChanges(false);
+      location.hash = `#/mi-comercio/${comercioId}/products`;
     }
-  });
+  };
+  backBtn?.addEventListener('click', guardBack);
 
   async function loadDefaultFlavors() {
     const iceCreamDefaults = [
@@ -564,6 +542,7 @@ export async function renderComercioSabores() {
 
   return {
     cleanup: () => {
+      backBtn?.removeEventListener('click', guardBack);
       unsubscribe();
     }
   };

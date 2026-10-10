@@ -10,7 +10,8 @@ import { icon } from '../../utils/icons.js';
 import { openCropper } from '../../utils/cropper.js';
 import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 import { isAdmin } from '../../auth.js';
-import { renderPendingCommissionStickyFooter } from '../../components/pending-commission-footer.js';
+import { escapeHtml } from '../../utils/escape.js';
+import { enterCommercePanel, cpEmpty, cpSkeleton, cpSheet } from './shell.js';
 
 let panelFilteredProducts = [];
 let panelDisplayedCount = 20;
@@ -20,169 +21,35 @@ let panelCategories = [];
 let isSyncAllowed = false;
 
 export async function renderComercioProducts() {
-  const content = document.getElementById('app-content');
   const user = getState().user;
   const params = getRouteParams();
   const comercioId = params.id;
+  if (!comercioId) return;
 
-  if (!comercioId) {
-    location.hash = '#/profile';
-    return;
-  }
+  const content = await enterCommercePanel({ comercioId, tab: 'menu' });
+  if (!content) return;
 
   content.innerHTML = `
-    <div class="panel-page" style="position:fixed; inset:0; width:100%; height:100dvh; display:flex; flex-direction:column; overflow:hidden; background:var(--color-bg); z-index:1000;">
-      <!-- Primary Top Bar -->
-      <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;height:64px;padding:0 16px;background: var(--go-ink);box-shadow:0 4px 12px rgba(0,0,0,0.1);flex-shrink:0;overflow:hidden;">
-        
-        <div style="display:flex;align-items:center;gap:12px;position:relative;z-index:2;flex:1;min-width:0;">
-          <a href="#/mi-comercio/${comercioId}" style="display:flex;align-items:center;justify-content:center;background:none;border:none;color:white;cursor:pointer;padding:0;text-decoration:none;">
-            ${icon('chevronLeft', 28)}
-          </a>
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
-            <span style="font-weight:800;font-size:19px;color:white;letter-spacing:-0.02em;">${isAdmin() ? 'Adm: Productos' : 'Productos'} (<span id="products-total-count">0</span>)</span>
-            <p id="panel-commerce-name" style="font-size:10.5px;color:rgba(255,255,255,0.85);margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></p>
-          </div>
-        </div>        <div style="display:flex; gap:8px; align-items:center; position:relative; z-index:2;">
-          <button class="hdr-icon-btn" id="add-product-btn" title="Agregar Producto" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.25);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
-            ${icon('plus', 22)}
-          </button>
-          <button class="hdr-icon-btn" id="open-products-sidebar-btn" title="Menú de Acciones" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.25);color:white;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;transition:all 0.2s;">
-            ${icon('menu', 20)}
-          </button>
+    <div id="cp-menu-root">
+      <div class="cp-sticky">
+        <div class="cp-row">
+          <label class="cp-search cp-grow">
+            <span>${icon('search', 18)}</span>
+            <input class="cp-input" type="search" id="products-search" placeholder="Buscar producto" autocomplete="off" />
+          </label>
+          <button type="button" class="cp-btn is-red" id="add-product-btn" aria-label="Nuevo producto" style="padding:0 14px">${icon('plus', 20)}<span class="cp-hide-xs">Nuevo</span></button>
         </div>
+        <div class="cp-chips" id="products-categories-filter" style="margin-top:10px"></div>
       </div>
-
-      <!-- Sticky Search Bar and Categories Filter -->
-      <div style="position:sticky;top:64px;z-index:90;background:var(--color-bg);padding:12px 16px 8px 16px;border-bottom:1px solid var(--color-border-light);box-shadow:0 2px 8px rgba(0,0,0,0.02);flex-shrink:0;">
-        <div class="search-bar" style="margin-bottom:8px; background:#ffffff; border:1.5px solid #e2e8f0; border-radius:12px;">
-          <span class="search-icon">${icon('search', 18)}</span>
-          <input type="text" id="products-search" placeholder="Buscar por nombre, código o categoría..." style="font-size:13px; font-weight:600;" />
+      <div class="cp-page" style="padding-top:4px">
+        <div class="cp-row" style="margin:2px 2px 10px">
+          <span class="cp-small cp-grow cp-ellipsis" id="products-summary">Cargando…</span>
+          <a class="cp-btn is-sm" href="#/mi-comercio/${comercioId}/categorias">${icon('list', 16)} Categorías</a>
+          <button type="button" class="cp-btn is-sm" id="open-products-sidebar-btn">${icon('settings', 16)} Más</button>
         </div>
-
-        <div id="products-categories-filter" class="tab-pills hide-scrollbar" style="margin-bottom:0; display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;">
-          <div class="skeleton" style="width:60px;height:32px;border-radius:20px;"></div>
-          <div class="skeleton" style="width:80px;height:32px;border-radius:20px;"></div>
-        </div>
+        <div class="cp-list" id="products-list">${cpSkeleton(4, 64)}</div>
+        <p class="cp-small" style="text-align:center; margin-top:4px">Tocá un producto para editarlo. El interruptor marca si hay o no hay.</p>
       </div>
-
-      <!-- Scrollable Product List -->
-      <div style="flex:1;overflow-y:auto;padding:16px 16px 24px 16px;-webkit-overflow-scrolling:touch;">
-        <div id="products-list" style="display:flex; flex-direction:column; gap:10px;">
-          <div class="skeleton" style="height:90px;border-radius:var(--radius-lg);"></div>
-          <div class="skeleton" style="height:90px;border-radius:var(--radius-lg);"></div>
-        </div>
-      </div>
-
-      <!-- Right Sidebar Drawer for Product Actions -->
-      <div id="products-right-drawer-overlay" style="position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; opacity:0; pointer-events:none; transition:opacity 0.28s ease; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);"></div>
-
-      <div id="products-right-drawer" style="position:fixed; top:0; right:0; bottom:0; width:85%; max-width:320px; background:var(--color-surface); z-index:2001; transform:translateX(100%); transition:transform 0.28s cubic-bezier(0.25, 0.8, 0.25, 1); display:flex; flex-direction:column; box-shadow:-10px 0 30px rgba(0,0,0,0.25);">
-        <div style="padding:20px 18px 16px 18px; background:var(--color-primary); color:white; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.1);">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <img id="products-sidebar-commerce-img" src="" style="width:38px; height:38px; border-radius:50%; object-fit:cover; border:1.5px solid rgba(255,255,255,0.6); display:none;" />
-            <div id="products-sidebar-commerce-placeholder" style="width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.3);">
-              ${icon('package', 20)}
-            </div>
-            <div>
-              <h3 id="products-sidebar-title" style="font-family:var(--font-display); font-size:15px; font-weight:900; margin:0; color:white;">Acciones de Catálogo</h3>
-              <span style="font-size:10px; opacity:0.85; font-weight:700;">Herramientas Masivas</span>
-            </div>
-          </div>
-          <button id="close-products-sidebar-btn" style="background:rgba(255,255,255,0.2); border:none; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-            ${icon('close', 16)}
-          </button>
-        </div>
-
-        <div style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:18px;">
-          <!-- Tools Section -->
-          <div>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              <button id="drawer-add-product-btn" class="drawer-menu-row">
-                <div class="drawer-icon-box" style="background:rgba(34,197,94,0.1); color:#22c55e;">${icon('plus', 18)}</div>
-                <div class="drawer-menu-text">
-                  <span class="drawer-title">Nuevo Producto</span>
-                  <span class="drawer-desc">Crear un producto individual</span>
-                </div>
-              </button>
-              <button id="drawer-bulk-increase-btn" class="drawer-menu-row">
-                <div class="drawer-icon-box" style="background:rgba(225,29,72,0.1); color:var(--color-primary);">${icon('percent', 18)}</div>
-                <div class="drawer-menu-text">
-                  <span class="drawer-title">Aumento Masivo</span>
-                  <span class="drawer-desc">Recargo en % o $ a categorías</span>
-                </div>
-              </button>
-              <button id="drawer-import-db-btn" class="drawer-menu-row">
-                <div class="drawer-icon-box" style="background:rgba(59,130,246,0.1); color:#3b82f6;">${icon('upload', 18)}</div>
-                <div class="drawer-menu-text">
-                  <span class="drawer-title">Importar Excel / CSV</span>
-                  <span class="drawer-desc">Carga masiva de catálogo</span>
-                </div>
-              </button>
-              <button id="drawer-export-db-btn" class="drawer-menu-row">
-                <div class="drawer-icon-box" style="background:rgba(168,85,247,0.1); color:#a855f7;">${icon('download', 18)}</div>
-                <div class="drawer-menu-text">
-                  <span class="drawer-title">Exportar Base de Datos</span>
-                  <span class="drawer-desc">Descargar catálogo completo</span>
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <style>
-        .drawer-menu-row {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 10px 12px;
-          border-radius: 12px;
-          background: var(--color-bg-secondary);
-          border: 1px solid var(--color-border-light);
-          text-decoration: none;
-          color: var(--color-text-primary);
-          cursor: pointer;
-          transition: all 0.2s ease;
-          width: 100%;
-          text-align: left;
-        }
-        .drawer-menu-row:hover {
-          background: var(--color-surface);
-          border-color: var(--color-primary);
-          transform: translateX(2px);
-        }
-        .drawer-icon-box {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          background: rgba(0,0,0,0.05);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-          color: var(--color-text-primary);
-        }
-        .drawer-menu-text {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          flex: 1;
-          min-width: 0;
-        }
-        .drawer-title {
-          font-size: 13px;
-          font-weight: 800;
-          color: var(--color-text-primary);
-        }
-        .drawer-desc {
-          font-size: 10px;
-          color: var(--color-text-secondary);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-      </style>
     </div>
   `;
 
@@ -211,17 +78,6 @@ export async function renderComercioProducts() {
     panelComercioData = comercioData;
     isSyncAllowed = (comercioId === '6R8ikb9wsjUCQuOANOMHuAZZxss2' || comercioData.ownerId === user.uid);
 
-    const nameContainer = document.getElementById('panel-commerce-name');
-    if (nameContainer) nameContainer.textContent = isAdmin() ? `Adm: ${comercioData.name}` : comercioData.name;
-
-    const commerceLogo = comercioData.logo || comercioData.imageUrl || comercioData.image;
-    const sidebarImg = document.getElementById('products-sidebar-commerce-img');
-    const sidebarPlaceholder = document.getElementById('products-sidebar-commerce-placeholder');
-    if (commerceLogo && sidebarImg && sidebarPlaceholder) {
-      sidebarImg.src = commerceLogo;
-      sidebarImg.style.display = 'block';
-      sidebarPlaceholder.style.display = 'none';
-    }
 
     const prodsSnap = await getDocs(collection(db, 'comercios', comercioId, 'products'));
     products = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -252,63 +108,62 @@ export async function renderComercioProducts() {
     updateTotalCount();
     renderCategoriesFilter(categories);
     renderProductsList(products, '', currentCategoryId);
-    renderPendingCommissionStickyFooter(comercioId, document.querySelector('.panel-page'));
   } catch (e) {
     console.error('Error loading products:', e);
-    showToast('Error al cargar productos', 'error');
-    location.hash = '#/profile';
+    const list = document.getElementById('products-list');
+    if (list) list.outerHTML = cpEmpty('alertTriangle', 'No pudimos cargar tu menú', 'Revisá la conexión y volvé a entrar.');
   }
 
   function renderCategoriesFilter(cats) {
     const container = document.getElementById('products-categories-filter');
     if (!container) return;
-
-    container.innerHTML = `
-      <button class="tab-pill ${currentCategoryId === 'all' ? 'active' : ''}" data-cat-id="all">Todos</button>
-      ${cats.map(c => `
-        <button class="tab-pill ${currentCategoryId === c.id ? 'active' : ''}" data-cat-id="${c.id}">${c.name}</button>
-      `).join('')}
-    `;
-
-    container.querySelectorAll('.tab-pill').forEach(btn => {
+    const offCount = products.filter(p => p.isAvailable === false).length;
+    const chip = (id, label, count = '') => `<button type="button" class="cp-chip ${currentCategoryId === id ? 'is-on' : ''}" data-cat-id="${id}">${label}${count !== '' ? ` <span class="cp-count">${count}</span>` : ''}</button>`;
+    container.innerHTML = chip('all', 'Todo', products.length)
+      + (offCount ? chip('__off', 'Sin stock', offCount) : '')
+      + cats.map(c => chip(c.id, escapeHtml(c.name))).join('');
+    container.querySelectorAll('[data-cat-id]').forEach(btn => {
       btn.onclick = () => {
         currentCategoryId = btn.dataset.catId;
-        container.querySelectorAll('.tab-pill').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        renderCategoriesFilter(categories);
         renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
       };
     });
+    const summary = document.getElementById('products-summary');
+    if (summary) summary.textContent = `${products.length} producto${products.length === 1 ? '' : 's'}${offCount ? ` · ${offCount} sin stock` : ''}`;
   }
 
-  // Drawer Sidebar Controls
-  const drawerOverlay = document.getElementById('products-right-drawer-overlay');
-  const drawer = document.getElementById('products-right-drawer');
-
+  // "Más": herramientas que se usan de vez en cuando
+  const closeDrawer = () => {};
   const openDrawer = () => {
-    if (drawerOverlay && drawer) {
-      drawerOverlay.style.opacity = '1';
-      drawerOverlay.style.pointerEvents = 'auto';
-      drawer.style.transform = 'translateX(0)';
-    }
+    const item = (k, ic, t, d) => `<button type="button" class="cp-item" data-tool="${k}"><span class="cp-item-icon">${icon(ic, 20)}</span><span class="cp-grow"><span class="cp-item-title">${t}</span><span class="cp-item-sub" style="display:block">${d}</span></span></button>`;
+    const sheet = cpSheet({
+      title: 'Herramientas del menú',
+      bodyHtml: `<div class="cp-list">
+        ${item('sabores', 'sparkles', 'Sabores y gustos', 'Helados, empanadas, pizzas: qué gustos hay hoy')}
+        ${item('increase', 'percent', 'Aumentar precios', 'Subí un % o un monto a una o varias categorías')}
+        ${item('import', 'upload', 'Cargar desde Excel o CSV', 'Muchos productos de una sola vez')}
+        ${item('export', 'download', 'Descargar mi menú', 'Copia de todos tus productos')}
+      </div>`,
+      actions: [{ label: 'Cerrar', cls: 'is-ghost' }],
+    });
+    sheet.el.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => {
+      sheet.close();
+      const k = b.dataset.tool;
+      if (k === 'sabores') location.hash = `#/mi-comercio/${comercioId}/sabores`;
+      if (k === 'increase') handleBulkIncrease();
+      if (k === 'import') handleImportDb();
+      if (k === 'export') handleExportDb();
+    }));
   };
-
-  const closeDrawer = () => {
-    if (drawerOverlay && drawer) {
-      drawerOverlay.style.opacity = '0';
-      drawerOverlay.style.pointerEvents = 'none';
-      drawer.style.transform = 'translateX(100%)';
-    }
-  };
-
   document.getElementById('open-products-sidebar-btn')?.addEventListener('click', openDrawer);
-  document.getElementById('close-products-sidebar-btn')?.addEventListener('click', closeDrawer);
-  drawerOverlay?.addEventListener('click', closeDrawer);
 
   const handleAddProduct = () => {
     closeDrawer();
     showProductModal(null, categories, comercioId, async (product) => {
       products.push(product);
       updateTotalCount();
+      renderCategoriesFilter(categories);
       renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
     }, (newCat) => {
       renderCategoriesFilter(categories);
@@ -327,47 +182,49 @@ export async function renderComercioProducts() {
     handleImportDatabase();
   };
 
-  const handleExportDb = () => {
-    closeDrawer();
-    exportDatabaseJSON();
-  };
-
-  document.getElementById('add-product-btn')?.addEventListener('click', handleAddProduct);
-  document.getElementById('drawer-add-product-btn')?.addEventListener('click', handleAddProduct);
-  document.getElementById('drawer-bulk-increase-btn')?.addEventListener('click', handleBulkIncrease);
-  document.getElementById('drawer-import-db-btn')?.addEventListener('click', handleImportDb);
-  document.getElementById('drawer-export-db-btn')?.addEventListener('click', handleExportDb);
-  document.getElementById('export-db-btn')?.addEventListener('click', handleExportDb);
-  document.getElementById('import-db-btn')?.addEventListener('click', handleImportDb);
-  // Export database
-  document.getElementById('export-db-btn')?.addEventListener('click', () => {
+  // Descarga un Excel con las mismas columnas que entiende "Cargar desde Excel": sirve de
+  // copia y para cambiar precios en la compu y volver a subirlos.
+  const handleExportDb = async () => {
     if (products.length === 0) {
-      showToast('No hay productos para exportar', 'warning');
+      showToast('Todavía no tenés productos para descargar', 'warning');
       return;
     }
     try {
-      showToast('Generando archivo de exportación...', 'info');
-      // Create a blob from the JSON string
-      const jsonString = JSON.stringify(products, null, 2);
-      const blob = new Blob([jsonString], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.href = url;
-      const commerceNameClean = (comercioData?.name || 'comercio').toLowerCase().replace(/[^a-z0-9]+/g, '_');
-      downloadAnchor.download = `productos_${commerceNameClean}.json`;
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      
-      // Cleanup
-      document.body.removeChild(downloadAnchor);
-      URL.revokeObjectURL(url);
-      showToast('Base de datos exportada con éxito', 'success');
+      showToast('Armando el archivo…', 'info');
+      const XLSXLib = await loadXLSX();
+      const rows = products.map(p => ({
+        nombre: p.name || '',
+        precio: Number(p.price) || 0,
+        categoria: categories.find(c => c.id === p.categoryId)?.name || '',
+        codigo: p.barcode || '',
+        stock: p.stockMode === 'limited' ? (p.stockQuantity ?? 0) : '',
+        descripcion: p.description || '',
+        imagen: p.image || p.imageUrl || '',
+        disponible: p.isAvailable === false ? 'no' : 'si',
+      }));
+      const sheet = XLSXLib.utils.json_to_sheet(rows);
+      const book = XLSXLib.utils.book_new();
+      XLSXLib.utils.book_append_sheet(book, sheet, 'Menú');
+      const clean = (comercioData?.name || 'comercio').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-');
+      XLSXLib.writeFile(book, `menu-${clean}.xlsx`);
     } catch (err) {
       console.error('Error exporting products:', err);
-      showToast('Error al exportar productos', 'error');
+      showToast('No se pudo armar el archivo. Probá de nuevo.', 'error');
     }
+  };
+
+  document.getElementById('add-product-btn')?.addEventListener('click', handleAddProduct);
+
+  let searchTimer = null;
+  document.getElementById('products-search')?.addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => renderProductsList(products, e.target.value || '', currentCategoryId), 150);
   });
+
+  const requestDelete = (product) => {
+    document.getElementById('products-list')?.dispatchEvent(new CustomEvent('click', { detail: { deleteId: product.id } }));
+  };
+
   // Actions
   document.getElementById('products-list')?.addEventListener('click', async (e) => {
     const editBtn = e.target.closest('[data-action="edit"]');
@@ -380,20 +237,23 @@ export async function renderComercioProducts() {
         showProductModal(product, categories, comercioId, (updated) => {
           const idx = products.findIndex(p => p.id === updated.id);
           if (idx >= 0) products[idx] = updated;
+          renderCategoriesFilter(categories);
           renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
         }, (newCat) => {
           renderCategoriesFilter(categories);
-        }, comercioData);
+        }, comercioData, requestDelete);
       }
     }
 
-    if (deleteBtn) {
-      const product = products.find(p => p.id === deleteBtn.dataset.id);
+    // El editor pide borrar despachando { deleteId } sobre la lista (ver requestDelete)
+    if (deleteBtn || e.detail?.deleteId) {
+      const product = products.find(p => p.id === (deleteBtn ? deleteBtn.dataset.id : e.detail.deleteId));
       if (product) {
         const doDeleteCloud = async () => {
           await deleteDoc(doc(db, 'comercios', comercioId, 'products', product.id));
           products = products.filter(p => p.id !== product.id);
           updateTotalCount();
+          renderCategoriesFilter(categories);
           renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
         };
 
@@ -456,6 +316,7 @@ export async function renderComercioProducts() {
         try {
           await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), { isAvailable: newAvail });
           product.isAvailable = newAvail;
+          renderCategoriesFilter(categories);
           renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
           showToast(newAvail ? 'Producto disponible' : 'Producto no disponible', 'info');
         } catch (e) {
@@ -735,6 +596,24 @@ export async function renderComercioProducts() {
   }
 }
 
+function stockLabel(p) {
+  const threshold = p.stockThreshold !== undefined ? p.stockThreshold : 3;
+  let qty = null;
+  if (p.useGlobalFlavors) {
+    const flavors = (p.allowedFlavors && p.allowedFlavors.length > 0)
+      ? (panelComercioData?.sabores || []).filter(s => p.allowedFlavors.includes(s.name))
+      : (panelComercioData?.sabores || []);
+    const unlimited = flavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
+    if (!unlimited) qty = flavors.reduce((sum, s) => sum + (parseInt(s.stock) || 0), 0);
+  } else if (p.stockMode === 'limited') {
+    qty = p.stockQuantity || 0;
+  }
+  if (qty === null) return '';
+  if (qty <= 0) return '<span class="cp-tag is-red">Se agotó</span>';
+  if (qty <= threshold) return `<span class="cp-tag is-amber">Quedan ${qty}</span>`;
+  return `<span class="cp-tag">${qty} en stock</span>`;
+}
+
 function renderProductsList(products, search, categoryId) {
   const container = document.getElementById('products-list');
   if (!container) return;
@@ -745,149 +624,78 @@ function renderProductsList(products, search, categoryId) {
   }
 
   let filtered = products;
-  if (categoryId && categoryId !== 'all') {
+  if (categoryId === '__off') {
+    filtered = filtered.filter(p => p.isAvailable === false);
+  } else if (categoryId && categoryId !== 'all') {
     filtered = filtered.filter(p => p.categoryId === categoryId);
   }
   if (search) {
-    const normalizeStr = str => (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const normalizeStr = str => (str || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
     const queryTokens = normalizeStr(search).split(/\s+/).filter(Boolean);
-
     filtered = filtered.filter(p => {
-      const nameNorm = normalizeStr(p.name);
-      const barcodeNorm = normalizeStr(p.barcode);
       const catNorm = p.categoryId ? normalizeStr(panelCategories.find(c => c.id === p.categoryId)?.name) : '';
-      const descNorm = normalizeStr(p.description);
-
-      const targetText = `${nameNorm} ${barcodeNorm} ${catNorm} ${descNorm}`;
+      const targetText = `${normalizeStr(p.name)} ${normalizeStr(p.barcode)} ${catNorm} ${normalizeStr(p.description)}`;
       return queryTokens.every(token => targetText.includes(token));
     });
   }
 
   if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">${icon('package', 40)}</div>
-        <div class="empty-state-title">${(search || categoryId !== 'all') ? 'Sin resultados' : 'Sin productos'}</div>
-        <div class="empty-state-text">${(search || categoryId !== 'all') ? 'Probá con otra búsqueda o categoría' : 'Agregá tu primer producto'}</div>
-      </div>
-    `;
+    const hasFilter = search || categoryId !== 'all';
+    container.innerHTML = hasFilter
+      ? cpEmpty('search', 'Sin resultados', 'Probá con otra búsqueda o categoría.')
+      : cpEmpty('restaurant', 'Tu menú está vacío', 'Cargá tu primer producto con el botón Nuevo, o muchos juntos desde Excel en "Más".');
     return;
   }
 
   panelFilteredProducts = filtered;
-  panelDisplayedCount = 20;
+  panelDisplayedCount = 30;
 
-  const renderPanelBatch = (startIndex, count) => {
-    const batch = panelFilteredProducts.slice(startIndex, startIndex + count);
-    return batch.map(p => {
-      let stockBadgeHtml = '';
-      if (p.useGlobalFlavors) {
-        let hasInfinite = false;
-        let totalQty = 0;
-        const activeFlavors = (p.allowedFlavors && p.allowedFlavors.length > 0)
-          ? (panelComercioData?.sabores || []).filter(s => p.allowedFlavors.includes(s.name))
-          : (panelComercioData?.sabores || []);
-        hasInfinite = activeFlavors.some(s => !s.isAvailable || s.stock === undefined || s.stock === null || s.stock === '');
-        
-        if (!hasInfinite) {
-          totalQty = activeFlavors.reduce((sum, s) => sum + (parseInt(s.stock) || 0), 0);
-          const threshold = p.stockThreshold !== undefined ? p.stockThreshold : 3;
-          if (totalQty <= 0) {
-            stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:900; background:rgba(239,68,68,0.12); color:#EF4444; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(239,68,68,0.25);">${icon('alertTriangle', 10)} Agotado</span>`;
-          } else if (totalQty <= threshold) {
-            stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:900; background:rgba(245,158,11,0.12); color:#F59E0B; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(245,158,11,0.25);">${icon('alertCircle', 10)} Stock Bajo: ${totalQty}</span>`;
-          } else {
-            stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:800; background:rgba(34,197,94,0.08); color:#22C55E; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(34,197,94,0.15);">Stock: ${totalQty}</span>`;
-          }
-        }
-      } else if (p.stockMode === 'limited') {
-        const qty = p.stockQuantity || 0;
-        const threshold = p.stockThreshold !== undefined ? p.stockThreshold : 3;
-        if (qty <= 0) {
-          stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:900; background:rgba(239,68,68,0.12); color:#EF4444; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(239,68,68,0.25);">${icon('alertTriangle', 10)} Agotado</span>`;
-        } else if (qty <= threshold) {
-          stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:900; background:rgba(245,158,11,0.12); color:#F59E0B; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(245,158,11,0.25);">${icon('alertCircle', 10)} Stock Bajo: ${qty}</span>`;
-        } else {
-          stockBadgeHtml = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:800; background:rgba(34,197,94,0.08); color:#22C55E; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid rgba(34,197,94,0.15);">Stock: ${qty}</span>`;
-        }
-      }
-
-      const productImgUrl = (p.image || p.imageUrl || p.croppedImage || '').trim();
-      const categoryName = p.categoryId ? (panelCategories.find(c => c.id === p.categoryId)?.name || '') : '';
-
-      return `
-        <div class="panel-product-card ${p.isAvailable === false ? 'unavailable' : ''}">
-          <div style="position:relative; width:56px; height:56px; flex-shrink:0; border-radius:12px; overflow:hidden; background:var(--color-bg-secondary); border:1px solid var(--color-border-light);">
-            <img src="${productImgUrl || '/logo.png'}" alt="${p.name}" class="panel-product-card-img" onerror="this.onerror=null; this.src='/logo.png';" style="width:100%; height:100%; object-fit:cover; opacity:${p.isAvailable === false ? '0.5' : '1'};" />
-            ${p.isAvailable === false ? `<span style="position:absolute; inset:0; background:rgba(0,0,0,0.35); color:white; font-size:8px; font-weight:900; display:flex; align-items:center; justify-content:center; text-transform:uppercase;">Pausado</span>` : ''}
-          </div>
-          <div class="panel-product-card-info" style="opacity:${p.isAvailable === false ? '0.7' : '1'}; flex:1; min-width:0;">
-            <div class="panel-product-card-name" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-              <span style="font-weight:800; color:var(--color-text-primary); font-size:14px;">${p.name}</span>
-              ${categoryName ? `<span style="font-size:9.5px; font-weight:750; background:var(--color-bg-secondary); color:var(--color-text-secondary); padding:2px 7px; border-radius:6px; border:1px solid var(--color-border-light);">${categoryName}</span>` : ''}
-              ${p.onlyInApp ? `<span style="font-family:var(--font-sans); font-size:8.5px; font-weight:900; background:rgba(126, 34, 206, 0.08); color:#7e22ce; padding:2px 6px; border-radius:6px; border:1px solid rgba(126, 34, 206, 0.15); display:inline-flex; align-items:center; gap:2px; text-transform:uppercase; vertical-align:middle; line-height:1;">📱 Solo App</span>` : ''}
-            </div>
-            <div class="panel-product-card-desc" style="font-size:11.5px; color:var(--color-text-secondary); margin-top:2px;">${p.description || 'Sin descripción'}</div>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
-              <div class="panel-product-card-price" style="margin:0; font-size:14px; font-weight:900; color:var(--color-primary);">${formatPrice(p.price)}</div>
-              ${stockBadgeHtml}
-            </div>
-          </div>
-          <div class="panel-product-card-actions" style="display:flex; align-items:center; gap:4px;">
-            <button class="btn btn-sm btn-ghost" data-action="toggle" data-id="${p.id}" title="${p.isAvailable === false ? 'Activar' : 'Desactivar'}">
-              ${icon('eye', 18)}
-            </button>
-            <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${p.id}" title="Editar">
-              ${icon('edit', 18)}
-            </button>
-            <button class="btn btn-sm btn-ghost delete" data-action="delete" data-id="${p.id}" title="Eliminar">
-              ${icon('trash', 18)}
-            </button>
-          </div>
-        </div>
-      `;
-    }).join('');
-  };
+  const renderPanelBatch = (startIndex, count) => panelFilteredProducts.slice(startIndex, startIndex + count).map(p => {
+    const off = p.isAvailable === false;
+    const img = (p.image || p.imageUrl || p.croppedImage || '').trim();
+    const categoryName = categoryId === 'all' && p.categoryId ? (panelCategories.find(c => c.id === p.categoryId)?.name || '') : '';
+    const name = escapeHtml(p.name || 'Sin nombre');
+    return `
+      <div class="cp-prod ${off ? 'is-off' : ''}">
+        <button type="button" class="cp-prod-edit" data-action="edit" data-id="${p.id}">
+          <img class="cp-prod-img" src="${img || '/logo.png'}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/logo.png'" />
+          <span class="cp-grow">
+            <span class="cp-prod-name" style="display:block">${name}</span>
+            <span class="cp-prod-price cp-row" style="flex-wrap:wrap; gap:6px; margin-top:4px">
+              <span class="cp-money">${formatPrice(p.price)}</span>
+              ${off ? '<span class="cp-tag is-red">Sin stock</span>' : stockLabel(p)}
+              ${p.onlyInApp ? '<span class="cp-tag">Sólo en la app</span>' : ''}
+              ${categoryName ? `<span class="cp-small">${escapeHtml(categoryName)}</span>` : ''}
+            </span>
+          </span>
+        </button>
+        <button type="button" class="cp-switch" role="switch" aria-checked="${!off}" aria-label="${off ? 'Marcar que hay' : 'Marcar sin stock'}: ${name}" data-action="toggle" data-id="${p.id}"></button>
+      </div>`;
+  }).join('');
 
   container.innerHTML = renderPanelBatch(0, panelDisplayedCount);
 
   const setupPanelSentinel = () => {
     if (panelDisplayedCount >= panelFilteredProducts.length) return;
-
     const sentinel = document.createElement('div');
     sentinel.id = 'panel-scroll-sentinel';
-    sentinel.style.cssText = 'grid-column: 1/-1; height: 60px; display: flex; align-items: center; justify-content: center; width: 100%;';
-    sentinel.innerHTML = `
-      <div style="width: 20px; height: 20px; border: 2px solid var(--color-border-light); border-top-color: var(--color-primary); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-    `;
+    sentinel.style.cssText = 'height: 40px;';
     container.appendChild(sentinel);
-
     panelScrollObserver = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        panelScrollObserver.disconnect();
-        const sent = document.getElementById('panel-scroll-sentinel');
-        if (sent) sent.remove();
-
-        const prevCount = panelDisplayedCount;
-        panelDisplayedCount = Math.min(panelDisplayedCount + 20, panelFilteredProducts.length);
-
-        const temp = document.createElement('div');
-        temp.innerHTML = renderPanelBatch(prevCount, panelDisplayedCount - prevCount);
-        while (temp.firstChild) {
-          container.appendChild(temp.firstChild);
-        }
-
-        setupPanelSentinel();
-      }
+      if (!entries[0].isIntersecting) return;
+      panelScrollObserver.disconnect();
+      sentinel.remove();
+      const prevCount = panelDisplayedCount;
+      panelDisplayedCount = Math.min(panelDisplayedCount + 30, panelFilteredProducts.length);
+      container.insertAdjacentHTML('beforeend', renderPanelBatch(prevCount, panelDisplayedCount - prevCount));
+      setupPanelSentinel();
     }, { threshold: 0.1 });
-
     panelScrollObserver.observe(sentinel);
   };
-
   setupPanelSentinel();
 }
 
-function showProductModal(product, categories, comercioId, onSave, onCategoryAdded) {
+function showProductModal(product, categories, comercioId, onSave, onCategoryAdded, _comercioData = null, onDelete = null) {
   const comercioCategory = panelComercioData?.category || 'Comida';
   let croppedImage = product ? (product.image || product.imageUrl || null) : null;
 
@@ -1249,10 +1057,12 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       </div>
     `,
     footer: `
+      ${product && onDelete ? `<button class="btn btn-ghost" id="prod-delete" style="color:var(--go-red); margin-right:auto">${icon('trash', 16)} Eliminar</button>` : ''}
       <button class="btn btn-ghost" id="prod-cancel">Cancelar</button>
       <button class="btn btn-primary" id="prod-save">Guardar</button>
     `
   });
+  document.getElementById('prod-delete')?.addEventListener('click', () => { closeModal(); onDelete(product); });
 
   // Options Management
   let optionsGroups = JSON.parse(JSON.stringify(product?.optionsGroups || []));
@@ -1497,7 +1307,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
     // Auto-check visible category flavors if no flavors in this category were explicitly checked yet
     if (selectedCat !== 'all') {
-      const catCheckboxes = Array.from(document.querySelectorAll(`.prod-flavor-item[data-category="${selectedCat}"] .prod-flavor-checkbox`));
+      const catCheckboxes = Array.from(document.querySelectorAll(`.prod-flavor-item[data-category="${CSS.escape(String(selectedCat))}"] .prod-flavor-checkbox`));
       const hasAnyChecked = catCheckboxes.some(cb => cb.checked);
       if (!hasAnyChecked) {
         catCheckboxes.forEach(cb => { cb.checked = true; });

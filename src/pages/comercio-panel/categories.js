@@ -1,187 +1,155 @@
-// GoDelivery — Comercio Categories Management
+// Menú → Categorías: agregar, renombrar, ordenar (como aparecen en la tienda), ocultar y borrar.
 import { db } from '../../firebase.js';
-import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, getDoc } from 'firebase/firestore';
-import { getState } from '../../state.js';
+import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
 import { getRouteParams } from '../../router.js';
 import { showToast } from '../../components/toast.js';
-import { showModal, closeModal, showConfirm } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
-import { isAdmin } from '../../auth.js';
+import { escapeHtml as esc } from '../../utils/escape.js';
+import { enterCommercePanel, cpEmpty, cpSkeleton, cpSheet, cpConfirm } from './shell.js';
 
 export async function renderComercioCategories() {
-  const content = document.getElementById('app-content');
-  const user = getState().user;
-  const params = getRouteParams();
-  const comercioId = params.id;
+  const comercioId = getRouteParams().id;
+  if (!comercioId) return;
+  const body = await enterCommercePanel({
+    comercioId, tab: 'menu',
+    sub: { title: 'Categorías', back: `#/mi-comercio/${comercioId}/products` },
+  });
+  if (!body) return;
 
-  if (!comercioId) {
-    location.hash = '#/profile';
-    return;
-  }
+  body.innerHTML = `
+    <div class="cp-page" id="cp-cats">
+      <p class="cp-muted" style="margin:0 2px 12px">Así se agrupan tus productos en la tienda, en este orden. Las ocultas no se ven.</p>
+      <div id="cp-cats-list">${cpSkeleton(4, 58)}</div>
+      <button type="button" class="cp-btn is-red is-block" data-act="add">${icon('plus', 18)} Nueva categoría</button>
+    </div>`;
+  const root = body.querySelector('#cp-cats');
+  const listEl = root.querySelector('#cp-cats-list');
+  let cats = [];
+  let countBy = {};
 
-  content.innerHTML = `
-    <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;">
-      <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background: var(--go-ink);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
-        <a href="#/mi-comercio/${comercioId}/orders" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);flex-shrink:0;">${icon('back', 18)}</a>
-        <div style="flex:1;min-width:0;">
-          <h1 style="font-family:var(--font-display);font-weight:800;font-size:18px;color:white;margin:0;line-height:1.2;">${isAdmin() ? 'Adm: Categorías' : 'Categorías'}</h1>
-          <p id="panel-commerce-name" style="font-size:12px;color:rgba(255,255,255,0.85);margin:2px 0 0;"></p>
-        </div>
-        <button class="btn btn-sm" id="add-cat-btn" style="border-radius:10px;font-size:12px;padding:8px 14px;background:white;color:var(--color-primary);border:none;font-weight:700;">
-          ${icon('plus', 14)} Agregar
+  const load = async () => {
+    try {
+      const [cSnap, pSnap] = await Promise.all([
+        getDocs(query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order'))),
+        getDocs(collection(db, 'comercios', comercioId, 'products')),
+      ]);
+      cats = cSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      countBy = {};
+      pSnap.docs.forEach(d => { const c = d.data().categoryId; if (c) countBy[c] = (countBy[c] || 0) + 1; });
+      paint();
+    } catch (e) {
+      console.error('Categorías:', e);
+      listEl.innerHTML = cpEmpty('alertTriangle', 'No pudimos cargar las categorías', 'Revisá la conexión y volvé a entrar.');
+    }
+  };
+
+  const paint = () => {
+    if (!cats.length) {
+      listEl.innerHTML = cpEmpty('list', 'Todavía no hay categorías', 'Por ejemplo: Pizzas, Empanadas, Bebidas.');
+      return;
+    }
+    listEl.innerHTML = `<div class="cp-list">${cats.map((c, i) => `
+      <div class="cp-item" style="cursor:default; gap:8px">
+        <span style="display:flex; flex-direction:column; gap:2px">
+          <button type="button" class="cp-btn is-sm is-ghost" data-up="${i}" aria-label="Subir ${esc(c.name)}" ${i === 0 ? 'disabled' : ''} style="min-height:26px; padding:0 6px">${icon('chevronUp', 16)}</button>
+          <button type="button" class="cp-btn is-sm is-ghost" data-down="${i}" aria-label="Bajar ${esc(c.name)}" ${i === cats.length - 1 ? 'disabled' : ''} style="min-height:26px; padding:0 6px">${icon('chevronDown', 16)}</button>
+        </span>
+        <button type="button" class="cp-grow" data-edit="${c.id}" style="background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit">
+          <span class="cp-item-title" style="${c.isActive === false ? 'color:var(--go-text-3)' : ''}">${esc(c.name)}</span>
+          <span class="cp-item-sub" style="display:block">${countBy[c.id] || 0} producto${countBy[c.id] === 1 ? '' : 's'}${c.isActive === false ? ' · oculta' : ''}</span>
         </button>
-      </div>
+        <button type="button" class="cp-switch" role="switch" aria-label="Mostrar ${esc(c.name)}" aria-checked="${c.isActive !== false}" data-toggle="${c.id}"></button>
+      </div>`).join('')}</div>`;
+  };
 
-      <div style="flex:1;overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch;">
-        <p style="color:var(--color-text-secondary);font-size:var(--font-sm);margin-bottom:var(--space-4);">
-          Organizá tus productos en categorías para que tus clientes encuentren lo que buscan.
-        </p>
-        <div id="categories-list"></div>
-      </div>
-    </div>
-  `;
-
-  let categories = [];
-
-  try {
-    const comercioSnap = await getDoc(doc(db, 'comercios', comercioId));
-    if (!comercioSnap.exists()) {
-      location.hash = '#/profile';
-      return;
-    }
-    const comercioData = comercioSnap.data();
-    if (comercioData.ownerId !== user.uid && !isAdmin()) {
-      location.hash = '#/profile';
-      return;
-    }
-    const nameContainer = document.getElementById('panel-commerce-name');
-    if (nameContainer) nameContainer.textContent = isAdmin() ? `Adm: ${comercioData.name}` : comercioData.name;
-
-    const snap = await getDocs(query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order')));
-    categories = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderList(categories);
-  } catch (e) {
-    console.error('Error loading categories:', e);
-    showToast('Error al cargar categorías', 'error');
-    location.hash = '#/profile';
-  }
-
-  document.getElementById('add-cat-btn')?.addEventListener('click', () => {
-    showCatModal(null, async (data) => {
-      try {
-        const newRef = doc(collection(db, 'comercios', comercioId, 'categories'));
-        const catData = { name: data.name, order: categories.length, isActive: true };
-        await setDoc(newRef, catData);
-        categories.push({ id: newRef.id, ...catData });
-        renderList(categories);
-        showToast('Categoría creada', 'success');
-      } catch (e) {
-        showToast('Error al crear', 'error');
-      }
+  const askName = (title, value = '') => new Promise((resolve) => {
+    let done = false;
+    const sheet = cpSheet({
+      title,
+      bodyHtml: `<input class="cp-input" id="cp-cat-name" maxlength="40" placeholder="Bebidas" value="${esc(value)}" />
+                 <p class="cp-small" id="cp-cat-err" style="color:var(--go-red); margin:6px 2px 0" hidden>Escribí un nombre.</p>`,
+      actions: [
+        { label: 'Cancelar', cls: 'is-ghost' },
+        { label: 'Guardar', cls: 'is-ink', onClick: (el) => {
+          const v = el.querySelector('#cp-cat-name').value.trim();
+          if (!v) { el.querySelector('#cp-cat-err').hidden = false; return false; }
+          done = true; resolve(v);
+        } },
+      ],
+      onClose: () => { if (!done) resolve(null); },
     });
+    const input = sheet.el.querySelector('#cp-cat-name');
+    input.addEventListener('input', () => { sheet.el.querySelector('#cp-cat-err').hidden = true; });
+    setTimeout(() => input.focus(), 250);
   });
 
-  document.getElementById('categories-list')?.addEventListener('click', async (e) => {
-    const editBtn = e.target.closest('[data-action="edit"]');
-    const deleteBtn = e.target.closest('[data-action="delete"]');
-    const toggleBtn = e.target.closest('[data-action="toggle"]');
+  const saveOrder = async () => {
+    const batch = writeBatch(db);
+    cats.forEach((c, i) => { c.order = i; batch.update(doc(db, 'comercios', comercioId, 'categories', c.id), { order: i }); });
+    await batch.commit();
+  };
 
-    if (editBtn) {
-      const cat = categories.find(c => c.id === editBtn.dataset.id);
-      if (cat) {
-        showCatModal(cat, async (data) => {
-          try {
-            await updateDoc(doc(db, 'comercios', comercioId, 'categories', cat.id), { name: data.name });
-            cat.name = data.name;
-            renderList(categories);
-            showToast('Categoría actualizada', 'success');
-          } catch (e) {
-            showToast('Error', 'error');
-          }
+  root.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-act],[data-up],[data-down],[data-edit],[data-toggle]');
+    if (!t) return;
+    const d = t.dataset;
+    try {
+      if (d.act === 'add') {
+        const name = await askName('Nueva categoría');
+        if (!name) return;
+        const ref = doc(collection(db, 'comercios', comercioId, 'categories'));
+        const data = { name, order: cats.length, isActive: true };
+        await setDoc(ref, data);
+        cats.push({ id: ref.id, ...data });
+        paint();
+        showToast('Categoría creada', 'success');
+      } else if (d.up !== undefined || d.down !== undefined) {
+        const i = Number(d.up ?? d.down);
+        const j = d.up !== undefined ? i - 1 : i + 1;
+        if (j < 0 || j >= cats.length) return;
+        [cats[i], cats[j]] = [cats[j], cats[i]];
+        paint();
+        await saveOrder();
+      } else if (d.toggle) {
+        const c = cats.find(x => x.id === d.toggle);
+        const next = c.isActive === false;
+        await updateDoc(doc(db, 'comercios', comercioId, 'categories', c.id), { isActive: next });
+        c.isActive = next;
+        paint();
+      } else if (d.edit) {
+        const c = cats.find(x => x.id === d.edit);
+        cpSheet({
+          title: c.name,
+          sub: `${countBy[c.id] || 0} producto(s) en esta categoría.`,
+          actions: [
+            { label: 'Cambiar nombre', cls: 'is-ink', onClick: async () => {
+              const name = await askName('Cambiar nombre', c.name);
+              if (!name || name === c.name) return;
+              await updateDoc(doc(db, 'comercios', comercioId, 'categories', c.id), { name });
+              c.name = name; paint(); showToast('Nombre cambiado', 'success');
+            } },
+            { label: 'Borrar categoría', cls: 'is-danger', onClick: async () => {
+              const n = countBy[c.id] || 0;
+              const ok = await cpConfirm({
+                title: `¿Borrar "${c.name}"?`,
+                message: n ? `Sus ${n} producto(s) no se borran: quedan "sin categoría" y los podés mover editándolos.` : 'No tiene productos.',
+                confirmText: 'Borrar', danger: true,
+              });
+              if (!ok) return;
+              await deleteDoc(doc(db, 'comercios', comercioId, 'categories', c.id));
+              cats = cats.filter(x => x.id !== c.id);
+              paint(); showToast('Categoría borrada', 'info');
+            } },
+            { label: 'Cerrar', cls: 'is-ghost' },
+          ],
         });
       }
-    }
-
-    if (deleteBtn) {
-      const cat = categories.find(c => c.id === deleteBtn.dataset.id);
-      if (cat) {
-        showConfirm({
-          title: 'Eliminar categoría',
-          message: `¿Eliminar "${cat.name}"?`,
-          confirmText: 'Eliminar',
-          danger: true,
-          onConfirm: async () => {
-            try {
-              await deleteDoc(doc(db, 'comercios', comercioId, 'categories', cat.id));
-              categories = categories.filter(c => c.id !== cat.id);
-              renderList(categories);
-              showToast('Categoría eliminada', 'info');
-            } catch (e) {
-              showToast('Error', 'error');
-            }
-          }
-        });
-      }
-    }
-
-    if (toggleBtn) {
-      const cat = categories.find(c => c.id === toggleBtn.dataset.id);
-      if (cat) {
-        const newActive = cat.isActive === false;
-        try {
-          await updateDoc(doc(db, 'comercios', comercioId, 'categories', cat.id), { isActive: newActive });
-          cat.isActive = newActive;
-          renderList(categories);
-        } catch (e) {
-          showToast('Error', 'error');
-        }
-      }
+    } catch (err) {
+      console.error(err);
+      showToast('No se pudo guardar. Probá de nuevo.', 'error');
+      load();
     }
   });
-}
 
-function renderList(categories) {
-  const container = document.getElementById('categories-list');
-  if (!container) return;
-
-  if (categories.length === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('tag', 40)}</div><div class="empty-state-title">Sin categorías</div><div class="empty-state-text">Creá categorías para organizar tus productos</div></div>`;
-    return;
-  }
-
-  container.innerHTML = categories.map(c => `
-    <div class="category-item" style="opacity:${c.isActive === false ? '0.5' : '1'};">
-      <span class="category-item-name">${c.name}</span>
-      ${c.isActive === false ? '<span class="badge badge-danger">Inactiva</span>' : ''}
-      <div class="category-item-actions">
-        <button class="btn btn-sm btn-ghost" data-action="toggle" data-id="${c.id}">${c.isActive === false ? icon('eye', 16) : icon('eye', 16)}</button>
-        <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${c.id}">${icon('edit', 16)}</button>
-        <button class="btn btn-sm btn-ghost" data-action="delete" data-id="${c.id}" style="color:var(--color-danger);">${icon('trash', 16)}</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-function showCatModal(category, onSave) {
-  showModal({
-    title: category ? 'Editar Categoría' : 'Nueva Categoría',
-    content: `
-      <div class="input-group">
-        <label>Nombre</label>
-        <input type="text" class="input" id="ccat-name" value="${category?.name || ''}" placeholder="Ej: Bebidas" />
-      </div>
-    `,
-    footer: `
-      <button class="btn btn-ghost" id="ccat-cancel">Cancelar</button>
-      <button class="btn btn-primary" id="ccat-save">Guardar</button>
-    `
-  });
-
-  document.getElementById('ccat-cancel')?.addEventListener('click', closeModal);
-  document.getElementById('ccat-save')?.addEventListener('click', () => {
-    const name = document.getElementById('ccat-name')?.value.trim();
-    if (!name) { showToast('Ingresá un nombre', 'warning'); return; }
-    closeModal();
-    onSave({ name });
-  });
+  load();
 }

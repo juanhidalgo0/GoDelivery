@@ -5,37 +5,22 @@ import { getRouteParams } from '../../router.js';
 import { getState } from '../../state.js';
 import { formatPrice } from '../../utils/format.js';
 import { icon } from '../../utils/icons.js';
-import { isAdmin } from '../../auth.js';
+import { enterCommercePanel, cpSkeleton } from './shell.js';
 
 export async function renderComercioMetrics() {
-  const content = document.getElementById('app-content');
   const params = getRouteParams();
   const comercioId = params.id;
+  if (!comercioId) return;
 
-  if (!comercioId) {
-    location.hash = '#/profile';
-    return;
-  }
+  const content = await enterCommercePanel({
+    comercioId, tab: 'numbers',
+    sub: { title: 'Métricas detalladas', back: `#/mi-comercio/${comercioId}` },
+  });
+  if (!content) return;
 
-  // Render Premium Shell with Loader
   content.innerHTML = `
-    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; overflow:hidden; background:var(--color-bg);">
-      <!-- Premium Fixed Header -->
-      <div  class="go-page-header" style="position:sticky; top:0; z-index:100; display:flex; align-items:center; gap:16px; padding:16px 20px; background: var(--go-ink); box-shadow:0 4px 12px rgba(0,0,0,0.1); flex-shrink:0; color:white;">
-        <a href="#/mi-comercio/${comercioId}" style="display:flex; align-items:center; justify-content:center; background:none; border:none; color:white; cursor:pointer; padding:0; text-decoration:none;" title="Volver al Menú">${icon('chevronLeft', 28)}</a>
-        <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;">
-          <h1 style="font-family:var(--font-display); font-weight:900; font-size:20px; color:white; margin:0; line-height:1.1; letter-spacing:-0.03em;">${isAdmin() ? 'Adm: Dashboard' : 'Dashboard'}</h1>
-          <p id="panel-commerce-name" style="font-size:11px; color:rgba(255,255,255,0.85); margin:0; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></p>
-        </div>
-      </div>
-
-      <!-- Scrollable BI Content -->
-      <div id="metrics-scroll-container" style="flex:1; overflow-y:auto; padding:20px; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:24px;">
-        <div style="display: flex; align-items: center; justify-content: center; padding: 40px; gap: 8px; color: var(--color-text-secondary); font-size: 14px; font-weight: 700;">
-          <div class="spinner-mini" style="width:18px; height:18px; border-width:2.5px; border-top-color:var(--color-primary); margin:0;"></div>
-          Analizando transacciones y stock de productos...
-        </div>
-      </div>
+    <div id="metrics-scroll-container" class="cp-page" style="display:flex; flex-direction:column; gap:24px;">
+      ${cpSkeleton(1, 120)}${cpSkeleton(2, 180)}
     </div>
   `;
 
@@ -44,10 +29,8 @@ export async function renderComercioMetrics() {
     const name = comercioSnap.exists() ? (comercioSnap.data().name || '') : '';
     const isGoMarket = name.toLowerCase().includes('go!') && name.toLowerCase().includes('market');
 
-    const user = getState().user;
-    const ordersQuery = (isAdmin() || !user)
-      ? query(collection(db, 'orders'), where('comercioId', '==', comercioId))
-      : query(collection(db, 'orders'), where('comercioId', '==', comercioId), where('commerceOwnerId', '==', user.uid));
+    // Los pedidos no guardan el dueño: las reglas ya limitan a los del propio comercio
+    const ordersQuery = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
 
     const [ordersSnap, prodsSnap, reviewsSnap] = await Promise.all([
       getDocs(ordersQuery).catch(err => { console.error("Metrics: Orders query failed:", err); throw err; }),
@@ -58,10 +41,6 @@ export async function renderComercioMetrics() {
       })
     ]);
 
-    const nameContainer = document.getElementById('panel-commerce-name');
-    if (nameContainer && comercioSnap.exists()) {
-      nameContainer.textContent = isAdmin() ? `Adm: ${name}` : name;
-    }
 
     const orders = ordersSnap.docs.map(doc => {
       const data = doc.data();

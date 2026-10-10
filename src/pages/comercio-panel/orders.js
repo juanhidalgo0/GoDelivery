@@ -9,615 +9,392 @@ import { showToast } from '../../components/toast.js';
 import { showConfirm, showModal, closeModal } from '../../components/modal.js';
 import { getUnreadCount, onUnreadChange } from '../../components/chat-notifier.js';
 import { openChat } from '../../components/chat.js';
+import { enterCommercePanel, getPanelComercio, cpEmpty, cpSkeleton } from './shell.js';
+import { askPrepAndAccept, askReasonAndCancel, markReady, completeOrder } from './order-actions.js';
 
 let ordersUnsub = null;
-let commerceHeaderUnsub = null;
 const clientUserCache = {};
 
-export async function renderComercioOrders(manualId = null) {
-  const params = getRouteParams();
-  const comercioId = manualId || params.id;
-  if (!comercioId) return;
+const READY_UNDO_MS = 5000;
+const LATE_PENDING_MIN = 5;
 
-  // Dynamically inject styles into head to guarantee active CSS rules
+const tsMs = (ts) => (!ts ? 0 : ts.toMillis ? ts.toMillis() : ts.seconds ? ts.seconds * 1000 : new Date(ts).getTime());
+const hhmm = (ms) => new Date(ms).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+const minsSince = (ms) => Math.max(0, Math.floor((Date.now() - ms) / 60000));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const isTakeawayOrder = (o) => o.deliveryType === 'takeaway' || o.deliveryType === 'retiro';
+const isCadeteriaOrder = (o) => o.isCommerceCadeteria || o.orderType === 'cadeteria' || o.favorType === 'cadeteria';
+const productsTotal = (o) => (isCadeteriaOrder(o) ? (o.total || o.deliveryCost || 0) : (o.subtotal ?? (o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))));
+
+const PAYMENT_LABEL = { efectivo: 'Efectivo', cash: 'Efectivo', transferencia: 'Transferencia', transfer: 'Transferencia', mercadopago: 'Mercado Pago', mp: 'Mercado Pago', tarjeta: 'Tarjeta' };
+
+// Columna de cada pedido en el tablero
+function groupOf(o, pendingReady) {
+  if (pendingReady.has(o.id)) return 'ready';
+  if (isCadeteriaOrder(o)) return ['completed', 'cancelled', 'delivering'].includes(o.status) ? null : 'ready';
+  if (o.status === 'pending') return 'pending';
+  if (o.status === 'confirmed' || o.status === 'preparing') return 'preparing';
+  if (o.status === 'ready' || o.status === 'accepted') return 'ready';
+  return null;
+}
+
+function ensureOrderStyles() {
+  // El detalle, "Modificar", "Pedido manual" y "Mis repartidores" siguen usando estos estilos
   let styleEl = document.getElementById('orders-panel-styles');
   if (!styleEl) {
     styleEl = document.createElement('style');
     styleEl.id = 'orders-panel-styles';
     document.head.appendChild(styleEl);
+    styleEl.innerHTML = getOrderStyles().replace('<style>', '').replace('</style>', '');
   }
-  styleEl.innerHTML = getOrderStyles().replace('<style>', '').replace('</style>', '');
+}
 
-  const panelId = 'page-commerce';
-  const content = document.getElementById(panelId) || document.getElementById('app-content');
+export async function renderComercioOrders(manualId = null) {
+  const comercioId = manualId || getRouteParams().id;
+  if (!comercioId) return;
+  ensureOrderStyles();
 
-  // Always clean up/remove old drawer and backdrop to prevent duplicates
-  document.getElementById('commerce-drawer-backdrop')?.remove();
-  document.getElementById('commerce-drawer')?.remove();
+  const body = await enterCommercePanel({ comercioId, tab: 'orders', pin: false });
+  if (!body) return;
 
-  // Create and append backdrop and drawer dynamically to document.body
-  const backdropEl = document.createElement('div');
-  backdropEl.id = 'commerce-drawer-backdrop';
-  backdropEl.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; opacity: 0; pointer-events: none; transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);";
-  document.body.appendChild(backdropEl);
+  const state = {
+    group: 'pending',
+    view: 'board',            // board | history
+    historyRange: 'today',    // today | yesterday | week
+    orders: [],
+    loaded: false,
+    seen: new Set(),
+    freshIds: new Set(),
+    pendingReady: new Map(),  // id -> timeout: "listo" con unos segundos para deshacer
+  };
 
-  const drawerEl = document.createElement('div');
-  drawerEl.id = 'commerce-drawer';
-  drawerEl.style.cssText = "position: fixed; top: 0; right: 0; bottom: 0; width: 300px; background: var(--color-surface); box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 10001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; border-top-left-radius: 20px; border-bottom-left-radius: 20px;";
-  drawerEl.innerHTML = `
-    <div class="commerce-drawer-header">
-      <h2 class="commerce-drawer-title">Opciones de Gestión</h2>
-      <button id="commerce-drawer-close-btn" class="commerce-drawer-close">${icon('close', 16)}</button>
-    </div>
-    <div id="commerce-drawer-body-container" class="commerce-drawer-body"></div>
-  `;
-  document.body.appendChild(drawerEl);
+  body.innerHTML = `
+    <div id="cp-orders-root">
+      <div class="cp-sticky" id="cp-orders-top"></div>
+      <div class="cp-page is-wide" id="cp-orders-main">${cpSkeleton(3, 150)}</div>
+    </div>`;
+  const root = body.querySelector('#cp-orders-root');
+  const top = root.querySelector('#cp-orders-top');
+  const main = root.querySelector('#cp-orders-main');
 
-  // SMART RENDER: Only set shell if it's not already there to avoid white flash
-  if (!content.querySelector('.orders-panel-page')) {
-    content.innerHTML = `
-      <div class="orders-panel-page">
-        <div id="orders-header-container"></div>
-        <div id="orders-tabs-container"></div>
-        <div class="orders-scroll-area">
-          <div id="orders-list-container">
-            <div class="loader-container"><div class="loader"></div></div>
-          </div>
+  const counts = () => {
+    const c = { pending: 0, preparing: 0, ready: 0 };
+    state.orders.forEach(o => { const g = groupOf(o, state.pendingReady); if (g) c[g]++; });
+    return c;
+  };
+
+  const renderTop = () => {
+    if (state.view === 'history') {
+      const r = (k, l) => `<button type="button" class="cp-chip ${state.historyRange === k ? 'is-on' : ''}" data-range="${k}">${l}</button>`;
+      top.innerHTML = `
+        <div class="cp-row" style="margin-bottom:10px">
+          <button type="button" class="cp-btn is-sm" data-act="board">${icon('chevronLeft', 16)} Pedidos</button>
+          <h2 class="cp-title cp-grow" style="text-align:right">Historial</h2>
         </div>
+        <div class="cp-chips">${r('today', 'Hoy')}${r('yesterday', 'Ayer')}${r('week', 'Últimos 7 días')}</div>`;
+      return;
+    }
+    const c = counts();
+    const seg = (k, l) => `<button type="button" class="cp-chip ${state.group === k ? 'is-on' : ''}" data-group="${k}">${l}<span class="cp-count">${c[k]}</span></button>`;
+    top.innerHTML = `
+      <div class="cp-seg cp-orders-seg">${seg('pending', 'Nuevos')}${seg('preparing', 'Preparando')}${seg('ready', 'Listos')}</div>
+      <div class="cp-chips" style="margin-top:10px">
+        <button type="button" class="cp-chip" data-act="manual">${icon('plus', 16)} Pedido manual</button>
+        <button type="button" class="cp-chip" data-act="history">${icon('history', 16)} Historial</button>
+        <button type="button" class="cp-chip" data-act="drivers">${icon('bike', 16)} Mis repartidores</button>
+      </div>`;
+  };
+
+  const timeTag = (o) => {
+    if (state.pendingReady.has(o.id)) return '<span class="cp-tag is-green">Listo</span>';
+    const g = groupOf(o, state.pendingReady);
+    if (isCadeteriaOrder(o)) {
+      const t = o.status === 'pending' ? 'Buscando cadete' : o.status === 'accepted' ? 'Cadete yendo al local' : 'Cadetería';
+      return `<span class="cp-tag">${t}</span>`;
+    }
+    if (g === 'pending') {
+      if (o.isScheduled && o.scheduledTime) return `<span class="cp-tag is-amber">Programado ${esc(o.scheduledTime)}</span>`;
+      const m = minsSince(tsMs(o.createdAt));
+      return `<span class="cp-tag ${m >= LATE_PENDING_MIN ? 'is-red' : 'is-amber'}">${m < 1 ? 'Recién' : `Hace ${m} min`}</span>`;
+    }
+    if (g === 'preparing') {
+      const due = tsMs(o.estimatedReadyAt);
+      if (!due) return `<span class="cp-tag">Aceptado ${hhmm(tsMs(o.confirmedAt) || Date.now())}</span>`;
+      const left = Math.round((due - Date.now()) / 60000);
+      return left >= 0
+        ? `<span class="cp-tag is-green">Faltan ${left} min</span>`
+        : `<span class="cp-tag is-red">Atrasado ${-left} min</span>`;
+    }
+    if (g === 'ready') {
+      const m = minsSince(tsMs(o.readyAt) || Date.now());
+      return `<span class="cp-tag is-green">Listo ${m < 1 ? 'recién' : `hace ${m} min`}</span>`;
+    }
+    return '';
+  };
+
+  const itemsHtml = (o) => {
+    const items = Array.isArray(o.items) ? o.items : [];
+    const shown = items.slice(0, 5).map(it => {
+      const opts = Array.isArray(it.options) && it.options.length
+        ? `<div class="cp-small" style="margin-left:22px">${esc(it.options.map(op => op?.name || op?.label || op).filter(Boolean).join(', '))}</div>` : '';
+      const note = it.notes ? `<div class="cp-small" style="margin-left:22px; color:#b45309">“${esc(it.notes)}”</div>` : '';
+      return `<div><b>${it.qty || it.quantity || 1}×</b> ${esc(it.name)}</div>${opts}${note}`;
+    }).join('');
+    const more = items.length > 5 ? `<div class="cp-small">+ ${items.length - 5} productos más</div>` : '';
+    return shown + more;
+  };
+
+  const actionsHtml = (o) => {
+    const g = groupOf(o, state.pendingReady);
+    if (isCadeteriaOrder(o)) return '';
+    if (g === 'pending') return `
+      <div class="cp-actions">
+        <button type="button" class="cp-btn" data-do="reject" data-id="${o.id}">Rechazar</button>
+        <button type="button" class="cp-btn is-go" data-do="accept" data-id="${o.id}">${icon('check', 18)} Aceptar</button>
+      </div>`;
+    if (g === 'preparing') return `
+      <button type="button" class="cp-btn is-ink is-block" data-do="ready" data-id="${o.id}">${icon('readyBox', 18)} Está listo</button>`;
+    if (g === 'ready' && isTakeawayOrder(o) && !state.pendingReady.has(o.id)) return `
+      <button type="button" class="cp-btn is-go is-block" data-do="complete" data-id="${o.id}">${icon('checkCircle', 18)} Ya lo retiró</button>`;
+    if (g === 'ready') {
+      const who = o.driverName
+        ? `${icon('bike', 16)} <span><b>${esc(o.driverName)}</b> ${o.status === 'accepted' ? 'viene a buscarlo' : 'lo va a llevar'}</span>`
+        : o.queueTargetDriverName
+          ? `${icon('hourglass', 16)} <span>Ofrecido a <b>${esc(o.queueTargetDriverName)}</b></span>`
+          : `${icon('hourglass', 16)} <span>Buscando cadete…</span>`;
+      return `<div class="cp-row cp-muted" style="background:var(--go-paper); border-radius:12px; padding:10px 12px">${who}</div>`;
+    }
+    return '';
+  };
+
+  const cardHtml = (o) => {
+    const g = groupOf(o, state.pendingReady);
+    const unread = getUnreadCount(o.id, 'client-commerce');
+    const tags = [
+      isCadeteriaOrder(o) ? `<span class="cp-tag">${icon('bike', 12)} Cadetería · ${o.stopsCount || 1} envío${(o.stopsCount || 1) > 1 ? 's' : ''}</span>` : '',
+      !isCadeteriaOrder(o) ? (isTakeawayOrder(o) ? `<span class="cp-tag is-green">${icon('shoppingBag', 12)} Retira en el local</span>` : `<span class="cp-tag">${icon('bike', 12)} Envío</span>`) : '',
+      o.paymentMethod ? `<span class="cp-tag">${PAYMENT_LABEL[String(o.paymentMethod).toLowerCase()] || esc(o.paymentMethod)}</span>` : '',
+      (o.source === 'catalogo_whatsapp' || o.isDirectOrder) ? `<span class="cp-tag is-green">${icon('whatsapp', 12)} Tu catálogo</span>` : '',
+      o.isManual ? '<span class="cp-tag">Manual</span>' : '',
+      o.isModified ? '<span class="cp-tag is-amber">Modificado</span>' : '',
+    ].filter(Boolean).join('');
+
+    let progress = '';
+    if (g === 'preparing' && o.estimatedReadyAt && o.confirmedAt) {
+      const start = tsMs(o.confirmedAt), end = tsMs(o.estimatedReadyAt);
+      const pct = Math.max(4, Math.min(100, ((Date.now() - start) / Math.max(1, end - start)) * 100));
+      progress = `<div class="cp-progress ${Date.now() > end ? 'is-late' : ''}" style="margin-bottom:12px"><i style="width:${pct}%"></i></div>`;
+    }
+
+    return `
+      <article class="cp-card cp-order-card ${g === 'pending' ? 'is-accent' : ''} ${state.freshIds.has(o.id) ? 'is-new' : ''}" data-id="${o.id}">
+        <div class="cp-order-head" data-open="${o.id}" style="cursor:pointer">
+          <div class="cp-grow">
+            <div class="cp-order-num">#${esc(o.orderId || '—')} · ${esc(isCadeteriaOrder(o) ? 'Cadetería' : (o.userName || o.guestName || 'Cliente'))}</div>
+            <div class="cp-small">Entró ${hhmm(tsMs(o.createdAt) || Date.now())}${o.deliveryAddress && !isTakeawayOrder(o) ? ` · ${esc(o.deliveryAddress)}` : ''}</div>
+          </div>
+          ${timeTag(o)}
+        </div>
+        <div class="cp-order-items" data-open="${o.id}" style="cursor:pointer">${itemsHtml(o)}</div>
+        ${o.notes ? `<div class="cp-order-note">${icon('info', 14)} ${esc(o.notes)}</div>` : ''}
+        <div class="cp-order-meta">${tags}</div>
+        <div class="cp-order-foot">
+          <span class="cp-grow">${isCadeteriaOrder(o) ? 'Costo del envío' : 'Productos'} <span class="cp-money">${formatPrice(productsTotal(o))}</span></span>
+          ${isCadeteriaOrder(o) ? '' : `<button type="button" class="cp-btn is-sm" data-do="chat" data-id="${o.id}" style="position:relative">
+            ${icon('chatBubble', 16)} Chat
+            ${unread > 0 ? `<span class="cp-badge" style="top:-6px; left:auto; right:-6px">${unread}</span>` : ''}
+          </button>`}
+          <button type="button" class="cp-btn is-sm" data-open="${o.id}">Detalle</button>
+        </div>
+        ${progress}
+        ${actionsHtml(o)}
+      </article>`;
+  };
+
+  const emptyFor = {
+    pending: () => cpEmpty('clock', 'Sin pedidos nuevos', 'Cuando entre uno va a sonar la alarma y aparece acá.'),
+    preparing: () => cpEmpty('restaurant', 'Nada en preparación', 'Los pedidos que aceptes aparecen acá con su tiempo.'),
+    ready: () => cpEmpty('readyBox', 'Nada esperando', 'Acá ves los pedidos listos hasta que se los llevan.'),
+  };
+
+  const renderBoard = () => {
+    const byGroup = { pending: [], preparing: [], ready: [] };
+    state.orders.forEach(o => { const g = groupOf(o, state.pendingReady); if (g) byGroup[g].push(o); });
+    // La cocina trabaja en orden de llegada: el más viejo arriba
+    byGroup.pending.sort((a, b) => (b.isScheduled ? -1 : 0) - (a.isScheduled ? -1 : 0) || tsMs(a.createdAt) - tsMs(b.createdAt));
+    byGroup.preparing.sort((a, b) => (tsMs(a.estimatedReadyAt) || tsMs(a.confirmedAt)) - (tsMs(b.estimatedReadyAt) || tsMs(b.confirmedAt)));
+    byGroup.ready.sort((a, b) => tsMs(a.readyAt) - tsMs(b.readyAt));
+
+    const col = (k, title) => `
+      <section class="cp-col ${state.group === k ? 'is-active' : ''}">
+        <div class="cp-orders-col-title">${title} <span class="cp-tag">${byGroup[k].length}</span></div>
+        ${byGroup[k].length ? byGroup[k].map(cardHtml).join('') : emptyFor[k]()}
+      </section>`;
+    main.innerHTML = `<div class="cp-orders-grid">${col('pending', 'Nuevos')}${col('preparing', 'Preparando')}${col('ready', 'Listos')}</div>`;
+    state.freshIds.clear();
+  };
+
+  const renderHistory = () => {
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const from = state.historyRange === 'today' ? startToday : state.historyRange === 'yesterday' ? startToday - 86400000 : startToday - 6 * 86400000;
+    const to = state.historyRange === 'yesterday' ? startToday : Infinity;
+    const list = state.orders
+      .filter(o => ['completed', 'cancelled', 'delivering'].includes(o.status))
+      .filter(o => { const t = tsMs(o.createdAt); return t >= from && t < to; })
+      .sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt));
+
+    if (!list.length) { main.innerHTML = cpEmpty('history', 'Sin pedidos en este período'); return; }
+    const done = list.filter(o => o.status !== 'cancelled');
+    const total = done.reduce((s, o) => s + (Number(productsTotal(o)) || 0), 0);
+    main.innerHTML = `
+      <div class="cp-metrics">
+        <div class="cp-metric"><div class="cp-metric-label">Entregados</div><div class="cp-metric-value">${done.length}</div></div>
+        <div class="cp-metric"><div class="cp-metric-label">Vendido</div><div class="cp-metric-value">${formatPrice(total)}</div></div>
       </div>
-      ${getOrderStyles()}
-    `;
-  }
-
-  let activeFilter = 'pending';
-  let viewMode = 'management';
-  let allOrders = [];
-  let isAlarmMutedLocally = false;
-
-  const updateMutePill = () => {
-    // Handled globally by commerce-monitor.js
+      <div class="cp-list">
+        ${list.map(o => `
+          <button type="button" class="cp-item" data-open="${o.id}">
+            <span class="cp-grow">
+              <span class="cp-item-title">#${esc(o.orderId || '—')} · ${esc(o.userName || o.guestName || 'Cliente')}</span>
+              <span class="cp-item-sub" style="display:block">${hhmm(tsMs(o.createdAt))} · ${formatDate(new Date(tsMs(o.createdAt)))}${o.status === 'cancelled' && o.cancelReason ? ` · ${esc(o.cancelReason)}` : ''}</span>
+            </span>
+            <span style="text-align:right">
+              <span class="cp-money" style="display:block">${formatPrice(productsTotal(o))}</span>
+              ${o.status === 'cancelled' ? '<span class="cp-tag is-red">Cancelado</span>' : o.status === 'delivering' ? '<span class="cp-tag">En camino</span>' : '<span class="cp-tag is-green">Entregado</span>'}
+            </span>
+          </button>`).join('')}
+      </div>
+      <p class="cp-small" style="text-align:center">Muestra los últimos 150 pedidos. Para ver más, entrá a Números.</p>`;
   };
 
-  const renderHeader = async () => {
-    const headerContainer = document.getElementById('orders-header-container');
-    if (!headerContainer) return;
-
-    if (viewMode === 'management') {
-      // PRE-FETCH/CACHE LOGIC: Use state if available to render instantly
-      const cached = getState().currentComercio;
-      const comData = (cached && cached.id === comercioId) ? cached : null;
-      
-      let isPaused = comData ? !!comData.isPaused : false;
-      let comercioName = comData ? comData.name : 'Cargando...';
-      let logoUrl = comData?.logo || '/logo.png';
-
-      // Render instantly with what we have
-      const isNative = !!window.Capacitor;
-      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-      const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
-
-      const renderHeaderContent = () => {
-        headerContainer.innerHTML = `
-          <div class="go-page-header orders-sticky-header-container"  style="background: var(--go-ink); box-shadow: 0 4px 12px rgba(var(--color-primary-rgb),0.2); padding-top: ${topPadding};">
-            <div class="orders-sticky-header" style="position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 14px 20px;">
-
-              <div class="orders-header-left" style="position: relative; z-index: 2; display: flex; align-items: center; min-width: 0; flex: 1; gap: 10px;">
-                ${window.innerWidth >= 1024 ? `
-                  <a href="#/" style="display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.25); text-decoration: none; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                    ${icon('chevronLeft', 22)}
-                  </a>
-                ` : ''}
-                <div class="orders-header-icon-wrap" style="width:42px; height:42px; border-radius:50%; overflow:hidden; border:2px solid white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: var(--shadow-sm); background: white;">
-                  <img src="${logoUrl}" style="width:100%; height:100%; object-fit:cover;" />
-                </div>
-                <div class="orders-header-info" style="min-width: 0; flex: 1;">
-                  <h1 class="orders-header-title" style="font-family:var(--font-display); font-weight:900; font-size:21px; color:white; margin:0; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${comercioName}</h1>
-                </div>
-              </div>
-
-              <!-- Quick Action & Hamburger Menu -->
-              <div style="display: flex; align-items: center; gap: 8px; position: relative; z-index: 2;">
-                <button id="header-menu-btn" style="width: 40px; height: 40px; border-radius: 12px; border: none; background: rgba(255,255,255,0.15); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                  ${icon('menu', 22)}
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-
-        // Render drawer body content dynamically
-        const bodyContainer = document.getElementById('commerce-drawer-body-container');
-        if (bodyContainer) {
-          bodyContainer.innerHTML = `
-            <!-- Direct WhatsApp Catalog & QR Drawer Item -->
-            <button class="commerce-drawer-item" id="drawer-whatsapp-catalog-btn">
-              <div class="drawer-item-icon-wrap" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">
-                ${icon('whatsapp', 18)}
-              </div>
-              <div style="flex:1; display:flex; flex-direction:column; text-align:left;">
-                <span style="font-weight:700; color:#10b981;">Catálogo WhatsApp / QR</span>
-                <span style="font-size:10px; color:var(--color-text-tertiary);">Link directo y código QR</span>
-              </div>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
-            <!-- Manual Order (Emerald) -->
-            <button class="commerce-drawer-item" id="drawer-manual-btn">
-              <div class="drawer-item-icon-wrap" style="background: rgba(16, 185, 129, 0.09); color: #10b981;">
-                ${icon('plus', 18)}
-              </div>
-              <span style="flex:1;">Nuevo Pedido Manual</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
-            <!-- Pause / Play Button (Red/Green) -->
-            <button class="commerce-drawer-item" id="drawer-pause-btn">
-              <div class="drawer-item-icon-wrap" style="background: ${isPaused ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.09)'}; color: ${isPaused ? '#22c55e' : '#ef4444'};">
-                ${isPaused ? icon('play', 18) : icon('pause', 18)}
-              </div>
-              <span style="flex:1;">${isPaused ? 'Reanudar Ventas' : 'Pausar Ventas'}</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
-            <!-- Deliveries Button (PedidosYa Red Style) -->
-            <button class="commerce-drawer-item" id="drawer-deliveries-btn">
-              <div class="drawer-item-icon-wrap" style="background: rgba(227, 0, 27, 0.09); color: #E3001B;">
-                ${icon('users', 18)}
-              </div>
-              <span style="flex:1;">Mis Repartidores (Propios)</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
-            <!-- History (Slate) - SWAPPED position -->
-            <button class="commerce-drawer-item" id="drawer-history-btn">
-              <div class="drawer-item-icon-wrap" style="background: rgba(100, 116, 139, 0.09); color: #64748b;">
-                ${icon('history', 18)}
-              </div>
-              <span style="flex:1;">Ver Historial</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
-            <!-- Support Button (Blue/Sky) - SWAPPED position -->
-            <button class="commerce-drawer-item" id="drawer-support-btn">
-              <div class="drawer-item-icon-wrap" style="background: rgba(14, 165, 233, 0.08); color: #0284c7;">
-                ${icon('headset', 18)}
-              </div>
-              <span style="flex:1;">Soporte Técnico</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </button>
-
-            <!-- Divider -->
-            <div style="height: 1px; background: var(--color-border-light); margin: 8px 0;"></div>
-
-            <!-- View Store (Cyan) -->
-            <a href="#/comercio/${comercioId}" class="commerce-drawer-item" id="drawer-store-link">
-              <div class="drawer-item-icon-wrap" style="background: rgba(6, 182, 212, 0.09); color: #06b6d4;">
-                ${icon('eye', 18)}
-              </div>
-              <span style="flex:1; color:var(--color-text-primary);">Ver Tienda Online</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </a>
-
-            <!-- General Panel (Indigo) -->
-            <a href="#/mi-comercio/${comercioId}" class="commerce-drawer-item" id="drawer-panel-link">
-              <div class="drawer-item-icon-wrap" style="background: rgba(99, 102, 241, 0.09); color: #6366f1;">
-                ${icon('grid', 18)}
-              </div>
-              <span style="flex:1; color:var(--color-text-primary);">Panel General</span>
-              <span style="color:var(--color-text-tertiary); display:flex; align-items:center;">${icon('chevronRight', 16)}</span>
-            </a>
-          `;
-        }
-
-        const closeDrawer = () => {
-          const drawer = document.getElementById('commerce-drawer');
-          const backdrop = document.getElementById('commerce-drawer-backdrop');
-          if (drawer && backdrop) {
-            drawer.style.transform = 'translateX(100%)';
-            backdrop.style.opacity = '0';
-            backdrop.style.pointerEvents = 'none';
-          }
-        };
-
-        // Open Drawer Click
-        document.getElementById('header-menu-btn')?.addEventListener('click', () => {
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          const drawer = document.getElementById('commerce-drawer');
-          const backdrop = document.getElementById('commerce-drawer-backdrop');
-          if (drawer && backdrop) {
-            drawer.style.transform = 'translateX(0)';
-            backdrop.style.opacity = '1';
-            backdrop.style.pointerEvents = 'auto';
-          }
-        });
-
-        // Close events
-        document.getElementById('commerce-drawer-backdrop')?.addEventListener('click', closeDrawer);
-        document.getElementById('commerce-drawer-close-btn')?.addEventListener('click', closeDrawer);
-
-        // Bind items
-        document.getElementById('drawer-whatsapp-catalog-btn')?.addEventListener('click', async () => {
-          closeDrawer();
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          const { openWhatsAppCatalogModal } = await import('../../components/whatsapp-catalog-modal.js');
-          openWhatsAppCatalogModal(comercioId, comData);
-        });
-
-        document.getElementById('drawer-manual-btn')?.addEventListener('click', () => {
-          closeDrawer();
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          showNewManualOrderModal(comercioId);
-        });
-
-        document.getElementById('drawer-pause-btn')?.addEventListener('click', async () => {
-          closeDrawer();
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          if (!isPaused) {
-            showConfirm({
-              title: 'Pausar Comercio',
-              message: 'Esta acción va a pausar tu comercio marcándolo como cerrado temporalmente y no podrás recibir pedidos hasta volver a activarlo. ¿Deseas pausar?',
-              confirmText: 'Sí, pausar',
-              danger: true,
-              onConfirm: async () => {
-                await updateDoc(doc(db, 'comercios', comercioId), { isPaused: true });
-                showToast('Comercio pausado', 'info');
-              }
-            });
-          } else {
-            await updateDoc(doc(db, 'comercios', comercioId), { isPaused: false });
-            showToast('Comercio reactivado', 'success');
-          }
-        });
-
-        document.getElementById('drawer-deliveries-btn')?.addEventListener('click', () => {
-          closeDrawer();
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          showOwnDeliveriesModal(comercioId);
-        });
-
-        document.getElementById('drawer-support-btn')?.addEventListener('click', async () => {
-          closeDrawer();
-          import('../../utils/audio-manager.js').then(m => m.AudioManager.hapticLight());
-          try {
-            const { openSupportTicketModal } = await import('../../components/support-bot.js');
-            await openSupportTicketModal(comercioId, `Comercio: ${comercioName}`);
-          } catch (err) {
-            console.error('Error opening support ticket chat:', err);
-            showToast('Error al abrir chat de soporte', 'danger');
-          }
-        });
-
-        document.getElementById('drawer-history-btn')?.addEventListener('click', () => {
-          closeDrawer();
-          viewMode = 'history';
-          renderView();
-        });
-
-        document.getElementById('drawer-store-link')?.addEventListener('click', () => closeDrawer());
-        document.getElementById('drawer-panel-link')?.addEventListener('click', () => closeDrawer());
-      };
-
-      // Initial draw
-      renderHeaderContent();
-
-      // Subscribe to real-time updates for settings/status of the shop
-      if (commerceHeaderUnsub) {
-        commerceHeaderUnsub();
-      }
-      commerceHeaderUnsub = onSnapshot(doc(db, 'comercios', comercioId), (snap) => {
-        if (snap.exists()) {
-          const freshData = snap.data();
-          isPaused = !!freshData.isPaused;
-          comercioName = freshData.name || '';
-          logoUrl = freshData.logo || '/logo.png';
-          
-          import('../../state.js').then(m => m.setState('currentComercio', { id: snap.id, ...freshData }));
-          renderHeaderContent();
-        }
-      });
-
-    } else {
-      const isNative = !!window.Capacitor;
-      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-      const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
-
-      headerContainer.innerHTML = `
-        <div class="orders-sticky-header-container" style="padding-top: ${topPadding};">
-          <div class="orders-sticky-header history-header">
-            <button class="hdr-icon-btn" id="back-to-mgmt" title="Volver">${icon('back', 18)}</button>
-            <div class="orders-header-info">
-              <h1 class="orders-header-title">Historial</h1>
-              <p class="orders-header-subtitle">Pedidos finalizados y cancelados</p>
-            </div>
-          </div>
-        </div>
-      `;
-
-      document.getElementById('back-to-mgmt')?.addEventListener('click', () => {
-        viewMode = 'management';
-        renderView();
-      });
-    }
+  const render = () => {
+    renderTop();
+    if (!state.loaded) return;
+    if (state.view === 'history') renderHistory(); else renderBoard();
   };
 
-  const renderTabs = () => {
-    const tabsContainer = document.getElementById('orders-tabs-container');
-    if (!tabsContainer) return;
-
-    if (viewMode === 'management') {
-      tabsContainer.innerHTML = `
-        <div class="orders-tab-bar-pro">
-          <button class="tab-pill-pro ${activeFilter === 'pending' ? 'active active-pending' : ''}" data-filter="pending">
-            <div class="tab-icon">${icon('clock', 20)}</div>
-            <div class="tab-label-group">
-              <span class="tab-label">Pendientes</span>
-              <span class="tab-count-badge" id="count-pending">0</span>
-            </div>
-          </button>
-          <button class="tab-pill-pro ${activeFilter === 'confirmed' ? 'active active-confirmed' : ''}" data-filter="confirmed">
-            <div class="tab-icon">${icon('restaurant', 20)}</div>
-            <div class="tab-label-group">
-              <span class="tab-label">Preparando</span>
-              <span class="tab-count-badge" id="count-confirmed">0</span>
-            </div>
-          </button>
-          <button class="tab-pill-pro ${activeFilter === 'ready' ? 'active active-ready' : ''}" data-filter="ready">
-            <div class="tab-icon">${icon('readyBox', 20)}</div>
-            <div class="tab-label-group">
-              <span class="tab-label">Listos</span>
-              <span class="tab-count-badge" id="count-ready">0</span>
-            </div>
-          </button>
-        </div>
-      `;
-      tabsContainer.querySelectorAll('.tab-pill-pro').forEach(btn => {
-        btn.addEventListener('click', () => {
-          activeFilter = btn.dataset.filter;
-          renderTabs();
-          renderFilteredOrders(allOrders, activeFilter, comercioId, false);
-        });
-      });
-      updateAllCounts(allOrders);
-    } else {
-      tabsContainer.innerHTML = '';
-    }
+  // ---- acciones
+  const findOrder = (id) => state.orders.find(o => o.id === id);
+  const commitReady = (id) => {
+    const t = state.pendingReady.get(id);
+    if (t === undefined) return;
+    clearTimeout(t);
+    state.pendingReady.delete(id);
+    const o = findOrder(id);
+    if (o) markReady(o).catch(() => showToast('No se pudo marcar como listo. Probá de nuevo.', 'error'));
   };
-
-  const renderView = () => {
-    renderHeader();
-    renderTabs();
-    if (viewMode === 'management') {
-      renderFilteredOrders(allOrders, activeFilter, comercioId, false);
-    } else {
-      renderFilteredOrders(allOrders, 'completed', comercioId, true);
-    }
-    updateMutePill();
-  };
-
-  let isInitial = true;
-  
-  const handleSnapshot = (snap) => {
-    const newOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => {
-        const aSched = !!a.isScheduled;
-        const bSched = !!b.isScheduled;
-        if (aSched && !bSched) return -1;
-        if (!aSched && bSched) return 1;
-        return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
-      });
-
-    // Detect new pending orders to show toast (Only after initial load)
-    if (!isInitial) {
-      snap.docChanges().forEach(change => {
-        if (change.type === 'added') {
-          const order = { id: change.doc.id, ...change.doc.data() };
-          if (order.status === 'pending') {
-            showToast(`¡Nuevo pedido #${order.orderId || ''}!`, 'success');
-            isAlarmMutedLocally = false; // Reset mute when a new pending order arrives
-            if (typeof playNotificationSound === 'function') playNotificationSound();
-          }
-        }
-      });
-    }
-
-    isInitial = false;
-    allOrders = newOrders;
-    renderView();
-
-    // Auto-open specific order if orderId query param matches in the hash
-    const hashQuery = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
-    const hashParams = new URLSearchParams(hashQuery);
-    const targetOrderId = hashParams.get('orderId');
-    if (targetOrderId) {
-      const order = allOrders.find(o => o.id === targetOrderId);
-      if (order) {
-        // Strip the orderId parameter from URL to prevent infinite reopening loops without triggering hashchange
-        const cleanHash = window.location.hash.split('?')[0];
-        window.history.replaceState(null, '', window.location.pathname + cleanHash);
-        showOrderDetailModal(order);
-      }
-    }
-  };
-
-  const attemptOptimizedQuery = () => {
-    const qOpt = query(collection(db, 'orders'), where('comercioId', '==', comercioId), orderBy('createdAt', 'desc'), limit(150));
-    ordersUnsub = onSnapshot(qOpt, handleSnapshot, (err) => {
-      if (err.message && err.message.includes('index')) {
-        console.warn('Falta índice compuesto. Intentando fallback sin límite...', err.message);
-        if (ordersUnsub) ordersUnsub();
-        // Fallback to the original unoptimized query if the index hasn't been created yet
-        const qFallback = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
-        ordersUnsub = onSnapshot(qFallback, handleSnapshot);
-      } else {
-        console.error('Error listening to orders:', err);
-      }
+  const showUndo = (o) => {
+    document.getElementById('cp-undo')?.remove();
+    const bar = document.createElement('div');
+    bar.className = 'cp-undo';
+    bar.id = 'cp-undo';
+    bar.innerHTML = `<span>Pedido #${esc(o.orderId || '')} listo</span><button type="button">Deshacer</button>`;
+    document.body.appendChild(bar);
+    bar.querySelector('button').addEventListener('click', () => {
+      clearTimeout(state.pendingReady.get(o.id));
+      state.pendingReady.delete(o.id);
+      bar.remove();
+      render();
     });
+    setTimeout(() => bar.remove(), READY_UNDO_MS);
   };
 
-  attemptOptimizedQuery();
+  root.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-do],[data-open],[data-group],[data-act],[data-range]');
+    if (!t || !root.contains(t)) return;
+    const d = t.dataset;
+    if (d.group) { state.group = d.group; render(); return; }
+    if (d.range) { state.historyRange = d.range; render(); return; }
+    if (d.act === 'history') { state.view = 'history'; body.scrollTop = 0; render(); return; }
+    if (d.act === 'board') { state.view = 'board'; render(); return; }
+    if (d.act === 'manual') { showNewManualOrderModal(comercioId); return; }
+    if (d.act === 'drivers') { showOwnDeliveriesModal(comercioId); return; }
+    if (d.open) { const o = findOrder(d.open); if (o) showOrderDetailModal(o); return; }
 
-  const unreadUnsub = onUnreadChange(() => {
-    updateAllUnreadBadges(allOrders);
+    const o = findOrder(d.id);
+    if (!o) return;
+    if (d.do === 'accept') {
+      if (await askPrepAndAccept(o, getPanelComercio())) { state.group = 'preparing'; render(); }
+    } else if (d.do === 'reject') {
+      await askReasonAndCancel(o);
+    } else if (d.do === 'ready') {
+      try { navigator.vibrate?.(30); } catch (err) {}
+      state.pendingReady.set(o.id, setTimeout(() => { commitReady(o.id); render(); }, READY_UNDO_MS));
+      showUndo(o);
+      render();
+    } else if (d.do === 'complete') {
+      t.disabled = true;
+      completeOrder(o).catch(() => { t.disabled = false; showToast('No se pudo marcar como entregado.', 'error'); });
+    } else if (d.do === 'chat') {
+      openChat({ orderId: o.id, type: o.isManual ? 'commerce-delivery' : 'client-commerce', otherName: o.isManual ? (o.driverName || 'Repartidor') : o.userName, orderNum: o.orderId, senderDisplayName: 'Comercio' });
+    }
   });
 
-  const readyCheckerInterval = setInterval(() => {
-    const nowMs = Date.now();
-    allOrders.forEach(o => {
-      if (o.isManual && o.status === 'confirmed' && o.dispatchAt) {
-        const dispatchTime = o.dispatchAt.toMillis ? o.dispatchAt.toMillis() : new Date(o.dispatchAt).getTime();
-        if (nowMs >= dispatchTime) {
-          console.log(`Auto-readying manual order #${o.orderId} (dispatch time reached)`);
-          updateDoc(doc(db, 'orders', o.id), {
-            status: 'ready',
-            readyAt: serverTimestamp()
-          }).catch(err => console.error("Error auto-readying manual order:", err));
-        }
+  // ---- datos en vivo
+  const handleSnapshot = (snap) => {
+    const next = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (state.loaded) {
+      next.forEach(o => { if (o.status === 'pending' && !state.seen.has(o.id)) { state.freshIds.add(o.id); showToast(`Nuevo pedido #${o.orderId || ''}`, 'success'); } });
+    } else if (next.some(o => o.status === 'pending')) {
+      state.group = 'pending';
+    } else if (next.some(o => ['confirmed', 'preparing'].includes(o.status))) {
+      state.group = 'preparing';
+    }
+    next.forEach(o => state.seen.add(o.id));
+    state.orders = next;
+    state.loaded = true;
+    render();
+
+    const hashParams = new URLSearchParams(location.hash.split('?')[1] || '');
+    const openId = hashParams.get('orderId');
+    const chatId = hashParams.get('chatOrder');
+    if (openId || chatId) {
+      history.replaceState(null, '', location.pathname + location.search + location.hash.split('?')[0]);
+      const o = findOrder(openId || chatId);
+      if (o && openId) showOrderDetailModal(o);
+      if (o && chatId) openChat({ orderId: o.id, type: 'client-commerce', otherName: o.userName, orderNum: o.orderId, senderDisplayName: 'Comercio' });
+    }
+  };
+
+  if (ordersUnsub) ordersUnsub();
+  ordersUnsub = onSnapshot(
+    query(collection(db, 'orders'), where('comercioId', '==', comercioId), orderBy('createdAt', 'desc'), limit(150)),
+    handleSnapshot,
+    (err) => {
+      if (String(err?.message || '').includes('index')) {
+        ordersUnsub = onSnapshot(query(collection(db, 'orders'), where('comercioId', '==', comercioId)), handleSnapshot);
+      } else {
+        console.error('Error escuchando pedidos:', err);
+        main.innerHTML = cpEmpty('alertTriangle', 'No pudimos cargar los pedidos', 'Revisá la conexión a internet.', `<button class="cp-btn is-ink" onclick="location.reload()">Reintentar</button>`);
+      }
+    }
+  );
+
+  const unreadUnsub = onUnreadChange(() => { if (state.view === 'board') render(); });
+
+  // Los tiempos de las tarjetas se actualizan solos; los pedidos manuales programados
+  // pasan a "Listo" a la hora de despacho que eligió el comercio.
+  const tick = setInterval(() => {
+    const now = Date.now();
+    state.orders.forEach(o => {
+      if (o.isManual && o.status === 'confirmed' && o.dispatchAt && now >= tsMs(o.dispatchAt)) {
+        updateDoc(doc(db, 'orders', o.id), { status: 'ready', readyAt: serverTimestamp() }).catch(() => {});
       }
     });
-    renderView();
+    if (!document.querySelector('.cp-sheet') && state.view === 'board') render();
   }, 30000);
 
   return {
     cleanup: () => {
-      clearInterval(readyCheckerInterval);
-      if (ordersUnsub) ordersUnsub();
-      if (commerceHeaderUnsub) {
-        commerceHeaderUnsub();
-        commerceHeaderUnsub = null;
-      }
+      clearInterval(tick);
+      [...state.pendingReady.keys()].forEach(commitReady);
+      document.getElementById('cp-undo')?.remove();
+      if (ordersUnsub) { ordersUnsub(); ordersUnsub = null; }
       if (unreadUnsub) unreadUnsub();
-      const pill = document.getElementById('comercio-mute-alarm-pill');
-      if (pill) pill.remove();
-      document.getElementById('commerce-drawer-backdrop')?.remove();
-      document.getElementById('commerce-drawer')?.remove();
-    }
+    },
   };
-}
-
-function updateAllCounts(orders) {
-  const counts = {
-    pending: orders.filter(o => o.status === 'pending').length,
-    confirmed: orders.filter(o => o.status === 'confirmed').length,
-    ready: orders.filter(o => o.status === 'ready').length,
-    delivering: orders.filter(o => o.status === 'delivering').length
-  };
-  Object.entries(counts).forEach(([status, count]) => {
-    const el = document.getElementById(`count-${status}`);
-    if (el) {
-      el.textContent = count;
-      el.style.display = count > 0 ? 'flex' : 'none';
-    }
-  });
-}
-
-function renderFilteredOrders(orders, filter, comercioId, isHistory) {
-  const container = document.getElementById('orders-list-container');
-  if (!container) return;
-
-  let filtered;
-  if (isHistory) {
-    filtered = orders.filter(o => o.status === 'completed' || o.status === 'cancelled');
-  } else {
-    filtered = orders.filter(o => o.status === filter);
-  }
-
-  if (filtered.length === 0) {
-    const emptyMsg = isHistory ? 'Sin historial' : { pending: 'Sin pendientes', confirmed: 'Nada en preparación', ready: 'Nada listo', delivering: 'En camino' }[filter];
-    container.innerHTML = `<div class="orders-empty-state">${icon('shoppingBag', 48)}<p>${emptyMsg || 'Sin pedidos'}</p></div>`;
-    return;
-  }
-
-  container.innerHTML = `<div class="orders-card-list">${filtered.map(o => renderOrderCard(o, isHistory)).join('')}</div>`;
-  attachOrderListeners(container, filtered, comercioId);
-  updateAllUnreadBadges(filtered);
-}
-
-function renderOrderCard(o, isHistory = false) {
-  const isTakeaway = o.deliveryType === 'takeaway' || o.deliveryType === 'retiro';
-  const isDirect = o.source === 'catalogo_whatsapp' || o.isDirectOrder === true;
-  const isCadeteria = o.isCommerceCadeteria || o.orderType === 'cadeteria' || o.favorType === 'cadeteria';
-  const statusLabel = isCadeteria ? (o.status === 'pending' ? 'Buscando cadete' : (o.status === 'accepted' ? 'Cadete yendo al local' : (o.status === 'delivering' ? 'En reparto' : getStatusLabel(o.status)))) : (o.isScheduled ? 'Programado' : getStatusLabel(o.status));
-  const formatH = (ts) => ts ? ts.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---';
-
-  const cadeteriaBadge = isCadeteria ? `
-    <div style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
-      🛵 Cadetería (${o.stopsCount || 1} Envío${(o.stopsCount || 1) > 1 ? 's' : ''})
-    </div>
-  ` : '';
-
-  const scheduledBadge = o.isScheduled ? `
-    <div class="scheduled-badge-violet" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
-      📅 Programado: ${o.scheduledTime}
-    </div>
-  ` : '';
-
-  const takeawayBadge = isTakeaway ? `
-    <div style="background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
-      🛍️ Retiro en Local
-    </div>
-  ` : '';
-
-  const directBadge = isDirect ? `
-    <div style="background: rgba(37, 211, 102, 0.12); color: #16a34a; border: 1px solid rgba(37, 211, 102, 0.25); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; text-transform: uppercase;">
-      ${icon('whatsapp', 10)} Catálogo WhatsApp
-    </div>
-  ` : '';
-
-  let timerHtml = '';
-  if (o.status === 'confirmed' && o.estimatedReadyAt) {
-    const readyTime = o.estimatedReadyAt.toDate ? o.estimatedReadyAt.toDate() : new Date(o.estimatedReadyAt);
-    const timeStr = readyTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const diffMs = readyTime.getTime() - Date.now();
-    const diffMins = Math.max(0, Math.floor(diffMs / 60000));
-    timerHtml = `
-      <div style="margin-top: 6px; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; color: #3b82f6;">
-        ⏱️ Entregar listo a las ${timeStr} (En ${diffMins} min)
-      </div>
-    `;
-  }
-
-  const cardClass = isCadeteria ? 'cadeteria-card' : (o.isScheduled ? 'scheduled' : o.status);
-
-  return `
-    <div class="order-card-pro simplified-card ${cardClass}" data-id="${o.id}">
-      <div class="card-side-indicator" style="${isCadeteria ? 'background: #8b5cf6;' : ''}"></div>
-      <div class="card-main-content">
-        <div class="card-top-row">
-          <span class="order-id-red" style="${isCadeteria ? 'color: #8b5cf6;' : ''}">#${o.orderId || '---'}</span>
-          <span class="order-time-grey">${formatDate(o.createdAt?.toDate())}</span>
-          <div class="card-status-badge" style="${isCadeteria ? 'background: rgba(139, 92, 246, 0.12); color: #8b5cf6;' : ''}">${statusLabel}</div>
-        </div>
-        <div class="simplified-card-body">
-          <div class="customer-info-minimal">
-            <strong>${isCadeteria ? '🛵 Cadetería On-Demand' : (o.userName || 'Cliente')}</strong>
-            <span class="order-exact-time">${icon('clock', 10)} ${formatH(o.createdAt)}</span>
-            <div style="display:flex; flex-wrap:wrap; gap:4px;">
-              ${cadeteriaBadge}
-              ${scheduledBadge}
-              ${takeawayBadge}
-              ${directBadge}
-            </div>
-            ${timerHtml}
-          </div>
-          <div class="card-right-section">
-            <div class="price-main">${formatPrice(isCadeteria ? (o.total || o.deliveryCost || 2000) : (o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0)))}</div>
-            <div class="expand-indicator">${icon('chevronDown', 14)}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function attachOrderListeners(container, orders, comercioId) {
-  container.querySelectorAll('.order-card-pro').forEach(card => {
-    card.addEventListener('click', () => {
-      const order = orders.find(o => o.id === card.dataset.id);
-      if (order) showOrderDetailModal(order);
-    });
-  });
 }
 
 function getFlavorIcon(comercio) {
@@ -903,137 +680,25 @@ function showOrderDetailModal(initialOrder) {
       printComanda(o);
     });
     
-    modalEl.querySelector('.confirm-order-btn')?.addEventListener('click', () => {
-      showConfirm({
-        title: 'Confirmar',
-        message: '¿Estás seguro que deseas confirmar este pedido? Se notificará al cliente.',
-        onConfirm: async () => {
-          const { runTransaction, doc: fDoc, serverTimestamp } = await import('firebase/firestore');
-          try {
-            await runTransaction(db, async (transaction) => {
-              const orderRef = fDoc(db, 'orders', o.id);
-              const orderSnap = await transaction.get(orderRef);
-              if (!orderSnap.exists()) throw "Pedido no encontrado";
-
-              if (orderSnap.data().status !== 'pending') {
-                throw "El pedido ya no está pendiente (fue cancelado o modificado).";
-              }
-
-              transaction.update(orderRef, {
-                status: 'confirmed',
-                confirmedAt: serverTimestamp()
-              });
-            });
-            if (modalUnsub) modalUnsub();
-            closeModal();
-            showToast('Pedido confirmado', 'success');
-          } catch (err) {
-            console.error('Error confirming order:', err);
-            showToast(typeof err === 'string' ? err : 'Error al confirmar', 'error');
-          }
-        }
-      });
+    // Mismas acciones que la tarjeta: aceptar pide el tiempo, rechazar/cancelar piden el motivo
+    const closeDetail = () => { if (modalUnsub) modalUnsub(); closeModal(); };
+    modalEl.querySelector('.confirm-order-btn')?.addEventListener('click', async () => {
+      if (await askPrepAndAccept(o, getPanelComercio() || commerceData)) closeDetail();
     });
-
-    modalEl.querySelector('.reject-order-btn')?.addEventListener('click', () => {
-      showConfirm({
-        title: 'Rechazar',
-        message: '¿Estás seguro que deseas rechazar este pedido? Esta acción no se puede deshacer.',
-        danger: true,
-        onConfirm: async () => {
-          try {
-            const { runTransaction, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
-            await runTransaction(db, async (transaction) => {
-              const orderRef = fDoc(db, 'orders', o.id);
-              const orderSnap = await transaction.get(orderRef);
-              if (!orderSnap.exists()) throw "Order not found";
-
-              const orderData = orderSnap.data();
-
-              if (orderData.status !== 'pending') {
-                throw "El pedido ya no está pendiente.";
-              }
-
-              transaction.update(orderRef, {
-                status: 'cancelled',
-                cancelledAt: serverTimestamp(),
-                cancelledBy: 'comercio',
-                cancelReason: 'Rechazado por el comercio'
-              });
-
-              if (orderData.pointsRedeemed > 0 && orderData.userId) {
-                const userRef = fDoc(db, 'users', orderData.userId);
-                transaction.update(userRef, {
-                  points: increment(orderData.pointsRedeemed)
-                });
-              }
-            });
-
-            if (modalUnsub) modalUnsub();
-            closeModal();
-            showToast('Pedido rechazado y puntos devueltos', 'info');
-          } catch (err) {
-            console.error('Error rejecting order:', err);
-            showToast('Error al procesar cancelación', 'error');
-          }
-        }
-      });
+    modalEl.querySelector('.reject-order-btn')?.addEventListener('click', async () => {
+      if (await askReasonAndCancel(o)) closeDetail();
     });
-
-    modalEl.querySelector('.ready-order-btn')?.addEventListener('click', () => {
-      showConfirm({
-        title: 'Marcar Listo',
-        message: '¿El pedido ya está preparado para entregar o enviar?',
-        onConfirm: async () => {
-          await updateDoc(doc(db, 'orders', o.id), { status: 'ready', readyAt: serverTimestamp() });
-          if (o.confirmedAt) {
-            await updateCommerceAveragePrepTime(o.comercioId, o.confirmedAt);
-          }
-          if (modalUnsub) modalUnsub();
-          closeModal(); showToast('Listo', 'success');
-        }
-      });
+    modalEl.querySelector('.cancel-confirmed-btn')?.addEventListener('click', async () => {
+      if (await askReasonAndCancel(o)) closeDetail();
     });
-
-    modalEl.querySelector('.cancel-confirmed-btn')?.addEventListener('click', () => {
-      showConfirm({
-        title: 'Cancelar Pedido',
-        message: '¿Estás seguro que deseas cancelar este pedido que ya está en preparación? Se notificará al cliente.',
-        danger: true,
-        onConfirm: async () => {
-          const { runTransaction, doc: fDoc, serverTimestamp, increment } = await import('firebase/firestore');
-          try {
-            await runTransaction(db, async (transaction) => {
-              const orderRef = fDoc(db, 'orders', o.id);
-              const orderSnap = await transaction.get(orderRef);
-              if (!orderSnap.exists()) throw "Order not found";
-              const orderData = orderSnap.data();
-
-              transaction.update(orderRef, {
-                status: 'cancelled',
-                cancelledAt: serverTimestamp(),
-                cancelledBy: 'comercio',
-                cancelReason: 'Cancelado por el comercio'
-              });
-
-              if (orderData.pointsRedeemed > 0 && orderData.userId) {
-                transaction.update(fDoc(db, 'users', orderData.userId), { points: increment(orderData.pointsRedeemed) });
-              }
-            });
-            if (modalUnsub) modalUnsub();
-            closeModal();
-            showToast('Pedido cancelado', 'info');
-          } catch (err) {
-            showToast('Error al cancelar', 'error');
-          }
-        }
-      });
+    modalEl.querySelector('.ready-order-btn')?.addEventListener('click', async () => {
+      await markReady(o);
+      closeDetail();
+      showToast(`Pedido #${o.orderId || ''} listo`, 'success');
     });
-
     modalEl.querySelector('.complete-order-btn')?.addEventListener('click', async () => {
-      await updateDoc(doc(db, 'orders', o.id), { status: 'completed', completedAt: serverTimestamp() });
-      if (modalUnsub) modalUnsub();
-      closeModal(); showToast('Entregado', 'success');
+      await completeOrder(o);
+      closeDetail();
     });
 
     modalEl.querySelector('.chat-order-btn')?.addEventListener('click', () => {
@@ -1365,12 +1030,11 @@ function showModifyOrderModal(order) {
         const appFee = Number(order.appUsageFee || order.serviceFee || 0);
         const pointsDiscount = Number(order.discountAmount || order.discount || 0);
         const couponDiscount = Number(order.couponDiscount || 0);
-        const tip = Number(order.tip || order.tipAmount || 0);
-        const rainSurcharge = Number(order.rainSurcharge || 0);
-        const nightSurcharge = Number(order.nightSurcharge || 0);
         const totalDiscounts = pointsDiscount + couponDiscount;
 
-        const nT = Math.max(0, nS + (order.deliveryCost || 0) + appFee + tip + rainSurcharge + nightSurcharge - totalDiscounts);
+        // deliveryCost ya incluye la propina y los recargos de lluvia y nocturno (createOrder):
+        // sumarlos de nuevo le cobraba de más al cliente cada vez que el comercio modificaba el pedido.
+        const nT = Math.max(0, nS + Number(order.deliveryCost || 0) + appFee - totalDiscounts);
         await updateDoc(doc(db, 'orders', order.id), { 
           items: nI, 
           subtotal: nS, 
@@ -2750,32 +2414,8 @@ function getOrderStyles() {
   </style>`;
 }
 
-function playNotificationSound() { try { const sound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'); sound.volume = 0.9; sound.play().catch(e => { }); } catch (err) { } }
 
-async function updateCommerceAveragePrepTime(comercioId, orderConfirmedAt) {
-  if (!orderConfirmedAt) return;
-  try {
-    const { doc, getDoc, updateDoc } = await import('firebase/firestore');
-    const confTime = orderConfirmedAt.seconds ? orderConfirmedAt.seconds * 1000 : new Date(orderConfirmedAt).getTime();
-    const durationMin = Math.round((Date.now() - confTime) / 60000);
-    
-    if (durationMin < 1 || durationMin > 180) return;
-    
-    const commerceRef = doc(db, 'comercios', comercioId);
-    const commerceSnap = await getDoc(commerceRef);
-    if (commerceSnap.exists()) {
-      const data = commerceSnap.data();
-      const currentAvg = typeof data.averagePrepTime === 'number' ? data.averagePrepTime : 15;
-      const alpha = 0.2;
-      const newAvg = Math.max(5, Math.min(90, Math.round((alpha * durationMin) + ((1 - alpha) * currentAvg))));
-      await updateDoc(commerceRef, { averagePrepTime: newAvg });
-    }
-  } catch (err) {
-    console.warn('Error updating commerce average prep time:', err);
-  }
-}
-
-async function showOwnDeliveriesModal(comercioId) {
+export async function showOwnDeliveriesModal(comercioId) {
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'padding:24px; background:var(--color-bg); display:flex; flex-direction:column; gap:16px; max-height:85dvh; overflow-y:auto; scrollbar-width:none;';
 

@@ -1,313 +1,135 @@
-
+// Números → Pagos y comisiones: cuánto le debés a GO!, pedido por pedido, y los pagos que ya hiciste.
 import { db } from '../../firebase.js';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { getState } from '../../state.js';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
+import { escapeHtml as esc } from '../../utils/escape.js';
+import { COMMERCE_COMMISSION_ENABLED } from '../../utils/commerce-fees.js';
+import { enterCommercePanel, getPanelComercio, cpEmpty, cpSkeleton } from './shell.js';
+
+const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const tsMs = (ts) => (!ts ? 0 : ts.toMillis ? ts.toMillis() : ts.seconds ? ts.seconds * 1000 : new Date(ts).getTime());
+const isPendingCommission = (o) => o.status === 'completed' && (!o.commissionStatus || o.commissionStatus === 'pending');
 
 export async function renderComercioFinances() {
-  const content = document.getElementById('app-content');
-  const user = getState().user;
-  const params = getRouteParams();
-  const comercioId = params.id;
-  
-  if (!comercioId) {
-    location.hash = '#/profile';
-    return;
-  }
+  const comercioId = getRouteParams().id;
+  if (!comercioId) return;
+  const body = await enterCommercePanel({
+    comercioId, tab: 'numbers',
+    sub: { title: 'Pagos y comisiones', back: `#/mi-comercio/${comercioId}` },
+  });
+  if (!body) return;
 
-  const { isAdmin } = await import('../../auth.js');
+  let month = 'all';
+  let view = 'orders';
+  let orders = [];
+  let settlements = [];
+
+  body.innerHTML = `
+    <div class="cp-page" id="cp-fin">
+      <div id="cp-fin-summary">${cpSkeleton(1, 120)}</div>
+      <div class="cp-seg" id="cp-fin-view" style="margin:4px 0 10px"></div>
+      <div class="cp-chips" id="cp-fin-months" style="margin-bottom:12px"></div>
+      <div id="cp-fin-list">${cpSkeleton(4, 64)}</div>
+    </div>`;
+  const root = body.querySelector('#cp-fin');
+
+  const inMonth = (ms) => {
+    if (month === 'all') return true;
+    const [y, m] = month.split('-').map(Number);
+    const d = new Date(ms);
+    return d.getFullYear() === y && d.getMonth() + 1 === m;
+  };
+
+  const paint = () => {
+    const pendingAll = orders.filter(isPendingCommission).reduce((s, o) => s + (Number(o.commissionAmount) || 0), 0);
+    const paidAll = orders.filter(o => o.status === 'completed' && o.commissionStatus === 'paid').reduce((s, o) => s + (Number(o.commissionAmount) || 0), 0);
+    const rate = getPanelComercio()?.commissionRate;
+
+    root.querySelector('#cp-fin-summary').innerHTML = !COMMERCE_COMMISSION_ENABLED ? `
+      <div class="cp-card">
+        <div class="cp-strong" style="font-size:16px">Hoy GO! no cobra comisión</div>
+        <div class="cp-muted" style="margin-top:4px">Los comercios usan la app gratis. Abajo queda el historial de lo que se pagó antes.</div>
+      </div>` : `
+      <div class="cp-card ${pendingAll > 0 ? 'is-warn' : ''}">
+        <div class="cp-small">Le debés a GO!</div>
+        <div class="cp-money" style="font-size:28px; margin:2px 0 6px">${formatPrice(pendingAll)}</div>
+        <div class="cp-muted">Es la comisión${typeof rate === 'number' ? ` (${Math.round(rate * 100)}%)` : ''} de los pedidos entregados por la app que todavía no pagaste. Los pedidos manuales y los de tu catálogo de WhatsApp no pagan comisión.</div>
+        <div class="cp-row" style="margin-top:10px"><span class="cp-small cp-grow">Ya pagaste en total</span><span class="cp-strong">${formatPrice(paidAll)}</span></div>
+        <button type="button" class="cp-btn is-block" data-act="support" style="margin-top:12px">${icon('headset', 18)} Coordinar un pago con GO!</button>
+      </div>`;
+
+    const seg = (k, l) => `<button type="button" class="cp-chip ${view === k ? 'is-on' : ''}" data-view="${k}">${l}</button>`;
+    root.querySelector('#cp-fin-view').innerHTML = seg('orders', 'Pedido por pedido') + seg('payments', 'Pagos hechos');
+
+    const now = new Date();
+    const chip = (v, l) => `<button type="button" class="cp-chip ${month === v ? 'is-on' : ''}" data-month="${v}">${l}</button>`;
+    root.querySelector('#cp-fin-months').innerHTML = chip('all', 'Todo') + Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      return chip(`${d.getFullYear()}-${d.getMonth() + 1}`, `${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`);
+    }).join('');
+
+    const list = root.querySelector('#cp-fin-list');
+    if (view === 'orders') {
+      const rows = orders.filter(o => ['completed', 'cancelled'].includes(o.status) && inMonth(tsMs(o.createdAt)));
+      if (!rows.length) { list.innerHTML = cpEmpty('receipt', 'Sin pedidos en este período'); return; }
+      list.innerHTML = `<div class="cp-list">${rows.map(o => {
+        const cancelled = o.status === 'cancelled';
+        const paid = o.commissionStatus === 'paid';
+        const amount = cancelled ? 0 : Number(o.commissionAmount) || 0;
+        const tag = cancelled ? '<span class="cp-tag">Cancelado</span>' : amount === 0 ? '<span class="cp-tag">Sin comisión</span>' : paid ? '<span class="cp-tag is-green">Pagada</span>' : '<span class="cp-tag is-amber">Pendiente</span>';
+        return `
+          <div class="cp-item" style="cursor:default">
+            <span class="cp-grow">
+              <span class="cp-item-title">Pedido #${esc(o.orderId || o.id.slice(0, 6))}</span>
+              <span class="cp-item-sub" style="display:block">${new Date(tsMs(o.createdAt)).toLocaleDateString('es-AR')} · ${esc(o.userName || o.guestName || 'Cliente')} · vendiste ${formatPrice(o.subtotal || 0)}</span>
+              ${o.couponCode ? `<span class="cp-item-sub" style="display:block">Cupón ${esc(o.couponCode)}: -${formatPrice(o.couponDiscount || 0)} ${o.couponAbsorbedBy === 'comercio' ? '(lo pusiste vos)' : '(lo puso GO!)'}</span>` : ''}
+            </span>
+            <span style="text-align:right">
+              <span class="cp-money" style="display:block">${formatPrice(amount)}</span>
+              ${tag}
+            </span>
+          </div>`;
+      }).join('')}</div>`;
+    } else {
+      const rows = settlements.filter(s => inMonth(tsMs(s.createdAt)));
+      if (!rows.length) { list.innerHTML = cpEmpty('wallet', 'Todavía no hay pagos registrados', 'Cuando GO! registra un pago tuyo, aparece acá.'); return; }
+      list.innerHTML = `<div class="cp-list">${rows.map(s => `
+        <div class="cp-item" style="cursor:default">
+          <span class="cp-item-icon">${icon('checkCircle', 20)}</span>
+          <span class="cp-grow">
+            <span class="cp-item-title">Pago registrado</span>
+            <span class="cp-item-sub" style="display:block">${new Date(tsMs(s.createdAt)).toLocaleDateString('es-AR')}${(s.orderCount || s.ordersCount) ? ` · ${s.orderCount || s.ordersCount} pedidos` : ''}</span>
+          </span>
+          <span class="cp-money">${formatPrice(Number(s.amountCollected ?? s.amount) || 0)}</span>
+        </div>`).join('')}</div>`;
+    }
+  };
+
+  root.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-month],[data-view],[data-act]');
+    if (!t) return;
+    if (t.dataset.month) month = t.dataset.month;
+    if (t.dataset.view) view = t.dataset.view;
+    if (t.dataset.act === 'support') {
+      const { openSupportTicketModal } = await import('../../components/support-bot.js');
+      openSupportTicketModal(comercioId, `Pago de comisiones: ${getPanelComercio()?.name || ''}`);
+      return;
+    }
+    paint();
+  });
 
   try {
-    const comercioSnap = await getDoc(doc(db, 'comercios', comercioId));
-    if (!comercioSnap.exists()) {
-      location.hash = '#/profile';
-      return;
-    }
-    const comercioData = comercioSnap.data();
-    if (comercioData.ownerId !== user?.uid && !isAdmin()) {
-      location.hash = '#/profile';
-      return;
-    }
-
-    content.innerHTML = `
-      <div class="panel-page" style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;">
-        <div  class="go-page-header" style="position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;padding:16px 20px;background: var(--go-ink);border-bottom:1px solid rgba(255,255,255,0.1);box-shadow:0 2px 12px rgba(0,0,0,0.08);flex-shrink:0;color:white;">
-          <a href="#/mi-comercio/${comercioId}" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);flex-shrink:0;">${icon('back', 18)}</a>
-          <div style="flex:1;min-width:0;">
-            <h1 style="font-family:var(--font-display);font-weight:800;font-size:18px;color:white;margin:0;line-height:1.2;">${isAdmin() ? 'Adm: Finanzas' : 'Comisiones y Finanzas'}</h1>
-            <p style="font-size:12px;color:rgba(255,255,255,0.85);margin:2px 0 0;">${isAdmin() ? `Adm: Resumen de ${comercioData.name}` : `Resumen financiero de ${comercioData.name}`}</p>
-          </div>
-        </div>
-
-        <div style="flex:1;overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch;">
-          <div class="filter-container" style="margin-bottom: var(--space-4); overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
-            <div id="month-chips" style="display: flex; gap: var(--space-2); padding-bottom: var(--space-2);">
-              <button class="chip active" data-value="all">Todos</button>
-              ${generateMonthChips()}
-            </div>
-          </div>
-
-          <div class="tab-pills" style="margin-bottom: var(--space-4); background: var(--color-bg-secondary); padding: 4px; border-radius: 12px; display: flex; gap: 4px;">
-            <button class="tab-pill active" data-finance-tab="orders" style="flex: 1; padding: 10px; font-size: 13px;">Movimientos</button>
-            <button class="tab-pill" data-finance-tab="payments" style="flex: 1; padding: 10px; font-size: 13px;">Pagos Realizados</button>
-          </div>
-
-          <div id="finances-summary" style="margin-bottom: var(--space-6);"></div>
-          <div id="finances-list">
-            <div class="loader-dots" style="margin: 4rem auto;"><span></span><span></span><span></span></div>
-          </div>
-        </div>
-      </div>
-    `;
-
-    const [ordersSnap, settlementsSnap] = await Promise.all([
+    const [oSnap, sSnap] = await Promise.all([
       getDocs(query(collection(db, 'orders'), where('comercioId', '==', comercioId))),
-      getDocs(query(collection(db, 'settlements'), where('comercioId', '==', comercioId)))
+      getDocs(query(collection(db, 'settlements'), where('comercioId', '==', comercioId))).catch(() => ({ docs: [] })),
     ]);
-
-    const orders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-      
-    const settlements = settlementsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-
-    let activeFinanceTab = 'orders';
-
-    const chips = document.querySelectorAll('#month-chips .chip');
-    const tabs = document.querySelectorAll('.tab-pill[data-finance-tab]');
-
-    const refreshView = () => {
-      const filter = document.querySelector('#month-chips .chip.active').dataset.value;
-      if (activeFinanceTab === 'orders') {
-        filterAndRenderOrders(orders, filter);
-      } else {
-        filterAndRenderPayments(settlements, filter);
-      }
-    };
-
-    chips.forEach(chip => {
-      chip.addEventListener('click', () => {
-        chips.forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        refreshView();
-      });
-    });
-
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        activeFinanceTab = tab.dataset.financeTab;
-        refreshView();
-      });
-    });
-
-    refreshView();
-
-
-
+    orders = oSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt));
+    settlements = sSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt));
+    paint();
   } catch (err) {
-    console.error('Error loading finances:', err);
+    console.error('Pagos:', err);
+    root.innerHTML = cpEmpty('alertTriangle', 'No pudimos cargar tus pagos', 'Revisá la conexión y volvé a entrar.');
   }
 }
-
-function generateMonthChips() {
-  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-  const now = new Date();
-  let chips = '';
-  for (let i = 0; i < 6; i++) { // Show last 6 months for better UX
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const val = `${d.getFullYear()}-${d.getMonth() + 1}`;
-    chips += `<button class="chip" data-value="${val}">${months[d.getMonth()]} ${d.getFullYear()}</button>`;
-  }
-  return chips;
-}
-
-
-function filterAndRenderOrders(orders, filterValue) {
-  const container = document.getElementById('finances-list');
-  const summary = document.getElementById('finances-summary');
-  
-  let filtered = orders;
-  if (filterValue !== 'all') {
-    const [year, month] = filterValue.split('-').map(Number);
-    filtered = orders.filter(o => {
-      const d = o.createdAt?.toDate();
-      return d && d.getFullYear() === year && d.getMonth() + 1 === month;
-    });
-  }
-
-  // Filter for completed orders to compute valid commission metrics
-  const completedOrders = filtered.filter(o => o.status === 'completed');
-  
-  const pending = completedOrders.reduce((sum, o) => {
-    const isPending = !o.commissionStatus || o.commissionStatus === 'pending';
-    return sum + (isPending ? (o.commissionAmount || 0) : 0);
-  }, 0);
-  
-  const paid = completedOrders.reduce((sum, o) => sum + (o.commissionStatus === 'paid' ? (o.commissionAmount || 0) : 0), 0);
-
-  const totalBilled = completedOrders.reduce((sum, o) => sum + (o.subtotal || o.total || 0), 0);
-  const avgTicket = completedOrders.length > 0 ? (totalBilled / completedOrders.length) : 0;
-  const avgCommission = completedOrders.length > 0 ? ((pending + paid) / completedOrders.length) : 0;
-
-  summary.style.display = 'block';
-  summary.innerHTML = `
-    <!-- Top Commission Cards -->
-    <div class="admin-stats-grid" style="grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-bottom: var(--space-4);">
-      <div class="stat-card finance-summary-card pending" style="padding: var(--space-4); border-radius: var(--radius-2xl); position: relative; overflow: hidden; background: var(--color-bg-secondary); border: 1px solid var(--color-border); box-shadow: var(--shadow-sm);">
-        <div style="position: relative; z-index: 2; text-align:left;">
-          <div style="font-size: 26px; font-weight: 950; color: var(--color-primary); margin-bottom: 2px; letter-spacing: -0.5px;">$${pending.toLocaleString('es-AR')}</div>
-          <div style="font-size: 10px; font-weight: 850; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.8px;">Comisión Pendiente</div>
-        </div>
-        <div style="position: absolute; right: -8px; bottom: -8px; opacity: 0.04; transform: rotate(-15deg); color: var(--color-primary);">
-          ${icon('zap', 56)}
-        </div>
-      </div>
-      
-      <div class="stat-card finance-summary-card paid" style="padding: var(--space-4); border-radius: var(--radius-2xl); position: relative; overflow: hidden; background: var(--color-bg-secondary); border: 1px solid var(--color-border); box-shadow: var(--shadow-sm);">
-        <div style="position: relative; z-index: 2; text-align:left;">
-          <div style="font-size: 26px; font-weight: 950; color: #10B981; margin-bottom: 2px; letter-spacing: -0.5px;">$${paid.toLocaleString('es-AR')}</div>
-          <div style="font-size: 10px; font-weight: 850; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.8px;">Comisión Pagada</div>
-        </div>
-        <div style="position: absolute; right: -8px; bottom: -8px; opacity: 0.04; transform: rotate(-15deg); color: #10B981;">
-          ${icon('checkCircle', 56)}
-        </div>
-      </div>
-    </div>
-  `;
-
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state-mini" style="padding: 5rem 1rem; background: var(--color-bg-secondary); border-radius: var(--radius-2xl); border: 1px dashed var(--color-border);">
-        <div style="opacity: 0.3; margin-bottom: 1.5rem; color: var(--color-text-tertiary);">${icon('scroll', 56)}</div>
-        <p style="color: var(--color-text-secondary); font-weight: 500;">No hay movimientos en este periodo</p>
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="finance-list" style="display: flex; flex-direction: column; gap: var(--space-3); margin-top: 16px;">
-      ${filtered.map(o => {
-        const isCancelled = o.status === 'cancelled';
-        const isPending = !isCancelled && (!o.commissionStatus || o.commissionStatus === 'pending');
-        const isPaid = !isCancelled && o.commissionStatus === 'paid';
-        
-        let statusText = 'Pendiente';
-        let statusColor = 'var(--color-primary)';
-        let bgIconColor = 'rgba(227, 27, 35, 0.1)';
-        let statusIcon = 'package';
-        let displayCommission = o.commissionAmount || 0;
-        
-        if (isCancelled) {
-          statusText = 'Cancelado';
-          statusColor = 'var(--color-text-tertiary)';
-          bgIconColor = 'var(--color-bg-secondary)';
-          statusIcon = 'close';
-          displayCommission = 0;
-        } else if (isPaid) {
-          statusText = 'Pagado';
-          statusColor = '#10B981';
-          bgIconColor = 'rgba(16, 185, 129, 0.1)';
-          statusIcon = 'checkCircle';
-        }
-
-        return `
-          <div class="finance-list-item" style="padding: var(--space-4); display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); transition: all 0.2s ease;">
-            <div style="display: flex; align-items: center; gap: var(--space-4); min-width: 0;">
-              <div style="width: 48px; height: 48px; background: ${bgIconColor}; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: ${statusColor};">
-                ${icon(statusIcon, 24)}
-              </div>
-
-              <div style="min-width: 0; text-align: left;">
-                <div style="font-weight: 800; font-size: 15px; color: var(--color-text); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  Pedido #${o.orderId || o.id.slice(0,6)}
-                </div>
-                <div style="font-size: 12px; color: var(--color-text-tertiary); display: flex; align-items: center; gap: 6px; font-weight: 500;">
-                  <span>${o.createdAt?.toDate()?.toLocaleDateString() || '-'}</span>
-                  <span style="width: 4px; height: 4px; background: var(--color-border); border-radius: 50%;"></span>
-                  <span>${o.userName || 'Cliente'}</span>
-                </div>
-                ${o.couponCode ? `
-                  <div style="font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); margin-top: 6px; display: flex; align-items: center; gap: 6px;">
-                    <span>Cupón: <span style="font-family: monospace; background: var(--color-bg-secondary); padding: 1px 4px; border-radius: 4px; border: 1px solid var(--color-border-light);">${o.couponCode}</span></span>
-                    <span style="color: ${o.couponAbsorbedBy === 'comercio' ? '#ef4444' : 'var(--color-text-tertiary)'};">
-                      -${formatPrice(o.couponDiscount)} (${o.couponAbsorbedBy === 'comercio' ? 'asumido por vos' : 'asumido por GoDelivery'})
-                    </span>
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-            
-            <div style="text-align: right; flex-shrink: 0;">
-              <div style="font-weight: 900; font-size: 17px; color: ${isCancelled ? 'var(--color-text-tertiary)' : 'var(--color-text)'}; margin-bottom: 2px; letter-spacing: -0.5px;">
-                $${displayCommission.toLocaleString('es-AR')}
-              </div>
-              <div style="font-size: 10px; font-weight: 800; color: ${statusColor}; text-transform: uppercase; letter-spacing: 0.5px;">
-                ${statusText}
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-  `;
-}
-
-function filterAndRenderPayments(settlements, filterValue) {
-  const container = document.getElementById('finances-list');
-  const summary = document.getElementById('finances-summary');
-  summary.style.display = 'none'; // No summary for payments tab
-  
-  let filtered = settlements;
-  if (filterValue !== 'all') {
-    const [year, month] = filterValue.split('-').map(Number);
-    filtered = settlements.filter(s => {
-      const d = s.createdAt?.toDate();
-      return d && d.getFullYear() === year && d.getMonth() + 1 === month;
-    });
-  }
-
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state-mini" style="padding: 5rem 1rem; background: var(--color-bg-secondary); border-radius: var(--radius-2xl); border: 1px dashed var(--color-border);">
-        <div style="opacity: 0.3; margin-bottom: 1.5rem; color: var(--color-text-tertiary);">${icon('bank', 56)}</div>
-        <p style="color: var(--color-text-secondary); font-weight: 500;">Aún no hay registros de cobros</p>
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="finance-list" style="display: flex; flex-direction: column; gap: var(--space-3);">
-      ${filtered.map(s => `
-        <div class="finance-list-item" style="padding: var(--space-5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: var(--space-4);">
-            <div style="width: 52px; height: 52px; background: rgba(16, 185, 129, 0.15); border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #10B981; border: 1px solid rgba(16, 185, 129, 0.2);">
-              ${icon('creditCard', 28)}
-            </div>
-            <div>
-              <div style="font-weight: 800; font-size: 16px; color: var(--color-text); margin-bottom: 2px;">Pago Confirmado</div>
-              <div style="font-size: 12px; color: var(--color-text-tertiary); font-weight: 500;">
-                ${s.createdAt?.toDate()?.toLocaleDateString() || '-'} • ${s.orderCount} pedidos liquidados
-              </div>
-            </div>
-          </div>
-          <div style="text-align: right;">
-            <div style="font-weight: 900; font-size: 18px; color: #10B981; letter-spacing: -0.5px;">
-              $${(s.amountCollected || 0).toLocaleString('es-AR')}
-            </div>
-            <div style="font-size: 10px; font-weight: 800; color: var(--color-text-tertiary); text-transform: uppercase;">Monto Liquidado</div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
-
-
-
