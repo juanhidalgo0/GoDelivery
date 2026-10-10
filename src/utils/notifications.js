@@ -6,6 +6,19 @@ import { getState } from '../state.js';
 import { showToast } from '../components/toast.js';
 import { addDoc, collection } from 'firebase/firestore';
 import { AudioManager } from './audio-manager.js';
+import { showInAppBanner } from '../components/in-app-banner.js';
+
+// Foreground push → banner, unless the screen already shows what it's about.
+function showPushBanner({ title, body, url, tag, type }) {
+  if (!title) return;
+  // Driver mode has its own full-screen offer alert and dock; banners would cover the map.
+  if (window.location.hash.startsWith('#/delivery') || document.body.classList.contains('is-delivery-mode')) return;
+  const target = (url || '').split('#')[1] || '';
+  const here = window.location.hash.replace(/^#/, '');
+  // Chat already open on that conversation: the message is on screen.
+  if (type === 'chat_message' && target && here === target) return;
+  showInAppBanner({ title, body, url, tag });
+}
 
 // TODO: Replace with your VAPID key from Firebase Console
 // Go to: Firebase Console → Project Settings → Cloud Messaging → Web Push certificates → Generate key pair
@@ -33,8 +46,21 @@ async function loadNativePushPlugin() {
   const cap = window.Capacitor;
   const hasFirebaseMessaging = typeof cap?.isPluginAvailable === 'function' && cap.isPluginAvailable('FirebaseMessaging');
   if (hasFirebaseMessaging) {
-    const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
-    return FirebaseMessaging;
+    const { FirebaseMessaging: FM } = await import('@capacitor-firebase/messaging');
+    // Nunca resolver una promesa con el plugin mismo: es un proxy de Capacitor y al buscarle
+    // ".then" llama al método nativo "then", que no existe ("FirebaseMessaging.then() is not
+    // implemented on ios"). Eso rompía el alta de push en todos los iPhone. Por la misma razón
+    // FM.isLegacy era una función (verdadero). Un objeto común que delega evita las dos cosas.
+    return {
+      isLegacy: false,
+      checkPermissions: () => FM.checkPermissions(),
+      requestPermissions: () => FM.requestPermissions(),
+      createChannel: (channel) => FM.createChannel(channel),
+      deleteChannel: (options) => FM.deleteChannel(options),
+      removeAllDeliveredNotifications: () => FM.removeAllDeliveredNotifications(),
+      addListener: (eventName, cb) => FM.addListener(eventName, cb),
+      getToken: (options) => FM.getToken(options),
+    };
   }
 
   const { registerPlugin } = await import('@capacitor/core');
@@ -52,6 +78,8 @@ async function loadNativePushPlugin() {
     checkPermissions: () => Legacy.checkPermissions(),
     requestPermissions: () => Legacy.requestPermissions(),
     createChannel: (channel) => Legacy.createChannel(channel),
+    deleteChannel: (options) => Legacy.deleteChannel(options),
+    removeAllDeliveredNotifications: () => Legacy.removeAllDeliveredNotifications(),
     registerActionTypes: (types) => Legacy.registerActionTypes(types),
     addListener: (eventName, cb) => {
       if (eventName === 'tokenReceived') {
@@ -185,6 +213,17 @@ export async function initPushNotifications() {
       
       if (permStatus.receive === 'granted') {
         if (window.Capacitor.getPlatform() === 'android') {
+          // res/raw/alert.wav viene en el binario desde la 1.7.7 (versionCode 66). En una app
+          // más vieja, un canal con ese sonido apunta a un archivo que no existe y el pedido
+          // entra mudo. Ahí el canal del comercio se borra: la push cae al canal "default"
+          // (AndroidManifest), que suena con el tono del teléfono. Al actualizar la app se
+          // vuelve a crear y Android le devuelve su configuración, que ya encuentra alert.wav.
+          let hasAlertSound = true;
+          try {
+            const { App } = await import('@capacitor/app');
+            const info = await App.getInfo();
+            hasAlertSound = !(Number(info.build) < 66);
+          } catch (e) {}
           try {
             await FirebaseMessaging.createChannel({
               id: 'default',
@@ -223,6 +262,35 @@ export async function initPushNotifications() {
               vibration: true,
               sound: 'alert.mp3'
             });
+            // A new order for the store has to be heard from the kitchen, like the offers.
+            if (!hasAlertSound) {
+              try { await FirebaseMessaging.deleteChannel({ id: 'store_orders' }); } catch (e) {}
+            } else await FirebaseMessaging.createChannel({
+              id: 'store_orders',
+              name: 'Pedidos nuevos del comercio',
+              description: 'Suena fuerte cuando entra un pedido a tu comercio',
+              importance: 5,
+              visibility: 1,
+              vibration: true,
+              sound: 'alert.mp3'
+            });
+            await FirebaseMessaging.createChannel({
+              id: 'chat_alerts',
+              name: 'Mensajes',
+              description: 'Mensajes del repartidor, del comercio o de soporte',
+              importance: 4,
+              visibility: 0,
+              vibration: true
+            });
+            // Separate so people can mute promos without losing the updates of their orders.
+            await FirebaseMessaging.createChannel({
+              id: 'promos',
+              name: 'Novedades y promociones',
+              description: 'Descuentos, sorteos y novedades de GO!',
+              importance: 3,
+              visibility: 1,
+              vibration: false
+            });
             await FirebaseMessaging.createChannel({
               id: 'auto_accept_alerts',
               name: 'Pedidos Auto-aceptados',
@@ -243,8 +311,8 @@ export async function initPushNotifications() {
               types: [{
                 id: 'ORDER_OFFER',
                 actions: [
-                  { id: 'ACCEPT_ORDER', title: '⚡ ACEPTAR PEDIDO', foreground: true },
-                  { id: 'VIEW_ORDER', title: 'Ver Detalles', foreground: true }
+                  { id: 'ACCEPT_ORDER', title: 'Aceptar', foreground: true },
+                  { id: 'VIEW_ORDER', title: 'Ver detalles', foreground: true }
                 ]
               }]
             });
@@ -269,8 +337,8 @@ export async function initPushNotifications() {
           const notification = event.notification || {};
           const { title, body } = notification;
           const isOnDelivery = window.location.hash.startsWith('#/delivery');
-          const isAdminAlert = (title && title.includes('[SOPORTE')) || 
-                               (notification.data && (notification.data.type === 'admin_support_alert' || notification.data.channelId === 'admin_alerts'));
+          const pushData = notification.data || {};
+          const isAdminAlert = pushData.type === 'admin_support_alert' || pushData.channelId === 'admin_alerts';
 
           // If user is operating as delivery driver, suppress admin duplicate push in foreground so audio is not interrupted
           if (isOnDelivery && isAdminAlert) {
@@ -279,11 +347,9 @@ export async function initPushNotifications() {
           }
 
           if (title) {
-            showToast(`${title}: ${body}`, 'info', /c[oó]digo/i.test(`${title} ${body}`) ? 12000 : undefined); // con el código de entrega, que dure
-            
-            // Check if this is an exclusive offer notification to trigger continuous loops
-            const isExclusive = title.includes("OFERTA") || title.includes("Oferta Exclusiva") || (notification.data && (notification.data.type === "exclusive_offer" || notification.data.tag?.includes("exclusive-offer")));
-            const isAutoAccept = title.includes("auto-aceptado") || (notification.data && (notification.data.type === "auto_accept" || notification.data.channelId === "auto_accept_alerts"));
+            const isExclusive = pushData.type === 'exclusive_offer' || pushData.type === 'new_exclusive_offer' || pushData.channelId === 'exclusive_offers' || String(pushData.tag || '').includes('exclusive-offer');
+            const isAutoAccept = pushData.type === 'auto_accept' || pushData.channelId === 'auto_accept_alerts';
+            if (!isExclusive) showPushBanner({ title, body, url: pushData.url, tag: pushData.tag, type: pushData.type });
 
             if (isExclusive) {
               // A push can arrive late (bad signal, or the second push of the same offer) when
@@ -450,7 +516,7 @@ export async function initPushNotifications() {
       navigator.serviceWorker.addEventListener('message', async (event) => {
         if (event.data && event.data.type === 'PUSH_RECEIVED') {
           console.log('Foreground PWA push received:', event.data);
-          const { title, body, url, tag } = event.data;
+          const { title, body, url, tag, pushType } = event.data;
           const dedupKey = tag || `${title}||${body}`;
 
           if (recentlyNotified.has(dedupKey)) {
@@ -472,11 +538,10 @@ export async function initPushNotifications() {
             });
           }
 
-          // Show in-app premium toast
           if (title) {
-            showToast(`${title}: ${body}`, 'info', /c[oó]digo/i.test(`${title} ${body}`) ? 12000 : undefined); // con el código de entrega, que dure
+            showPushBanner({ title, body, url, tag, type: pushType });
             AudioManager.playSound('/assets/sounds/notification.mp3');
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+            if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
           }
         }
       });
@@ -506,9 +571,9 @@ export async function initPushNotifications() {
           });
         }
         if (title) {
-          showToast(`${title}: ${body}`, 'info', /c[oó]digo/i.test(`${title} ${body}`) ? 12000 : undefined); // con el código de entrega, que dure
+          showPushBanner({ title, body, url: payload.data?.url, tag, type: payload.data?.type });
           AudioManager.playSound('/assets/sounds/notification.mp3');
-          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
         }
       });
     }
@@ -555,8 +620,10 @@ export async function sendLocalNotification(title, body, options = {}) {
     });
   }
 
-  // Play foreground sound and vibrate (does not require native notification permission)
-  AudioManager.playSound('/assets/sounds/notification.mp3');
+  // Play foreground sound and vibrate (does not require native notification permission).
+  // silent: quien llama ya hace sonar su propia alarma (pedidos del comercio); un segundo
+  // audio encima puede cortarla en iPhone.
+  if (!options.silent) AudioManager.playSound('/assets/sounds/notification.mp3');
   
   if (navigator.vibrate) {
     navigator.vibrate([200, 100, 200, 100, 300]);
@@ -734,6 +801,19 @@ export async function requestWebPushPermission() {
 
 
 
+
+/**
+ * Opening the app means the user saw what's new: clear its notifications from the tray,
+ * like WhatsApp or Uber do. Called when the native app returns to the foreground.
+ */
+export async function clearDeliveredNotifications() {
+  const isNativeApp = window.Capacitor?.getPlatform && window.Capacitor.getPlatform() !== 'web';
+  if (!isNativeApp) return;
+  try {
+    const plugin = await getNativePushPlugin();
+    await plugin.removeAllDeliveredNotifications?.();
+  } catch (e) {}
+}
 
 // Drivers depend on push to hear about offers while the phone is in their pocket. Startup
 // registration alone was not enough: it runs only after onboarding, only if someone was

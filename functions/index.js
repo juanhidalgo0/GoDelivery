@@ -3755,6 +3755,68 @@ exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
   }
 });
 
+// Pedido de comercio sin aceptar: con el celular bloqueado la app no puede hacer sonar su
+// alarma (iOS suspende el JS al rato), así que el aviso se repite por push cada 2 minutos
+// mientras siga pendiente, hasta 8 veces. Mismo tag que el aviso original: reemplaza la
+// notificación en vez de apilar otra, pero vuelve a sonar. El registro va aparte
+// (storeOrderReminders) para no disparar los triggers de orders.
+const STORE_REMINDER_EVERY_MS = 2 * 60 * 1000;
+const STORE_REMINDER_MAX = 8;
+exports.remindPendingStoreOrders = onSchedule({ schedule: "every 2 minutes", maxInstances: 1, timeoutSeconds: 120 }, async () => {
+  const now = Date.now();
+  const snap = await db.collection("orders").where("status", "==", "pending").get();
+  let adminTokensCache = null;
+  const adminTokens = async () => (adminTokensCache = adminTokensCache || await getAdminTokens());
+
+  for (const docSnap of snap.docs) {
+    const o = docSnap.data();
+    if (!o.comercioId || o.isFavor || o.isTrip || o.isScheduled) continue;
+    const age = now - tsToMs(o.createdAt);
+    if (!(age >= STORE_REMINDER_EVERY_MS - 15000) || age > 40 * 60 * 1000) continue;
+
+    try {
+      const remRef = db.collection("storeOrderReminders").doc(docSnap.id);
+      const rem = (await remRef.get()).data() || {};
+      const count = rem.count || 0;
+      if (count >= STORE_REMINDER_MAX) continue;
+      if (rem.lastAt && now - tsToMs(rem.lastAt) < STORE_REMINDER_EVERY_MS - 15000) continue;
+
+      const comercioDoc = await db.collection("comercios").doc(o.comercioId).get();
+      if (!comercioDoc.exists) continue;
+      const com = comercioDoc.data();
+      const name = (com.name || "").toLowerCase();
+      const isGoMarket = name.includes("go!") && name.includes("market");
+
+      let tokens = [];
+      if (isGoMarket) {
+        tokens = await adminTokens();
+      } else {
+        let ownerId = com.ownerId;
+        if (!ownerId) {
+          const q = await db.collection("users").where("comercioId", "==", o.comercioId).limit(1).get();
+          if (!q.empty) ownerId = q.docs[0].id;
+        }
+        if (ownerId) {
+          const admins = new Set(await adminTokens());
+          tokens = (await getUserTokens(ownerId)).filter(t => !admins.has(t));
+        }
+      }
+
+      await remRef.set({ count: count + 1, lastAt: new Date(), comercioId: o.comercioId }, { merge: true });
+      if (!tokens.length) continue;
+
+      const orderNum = o.orderId || docSnap.id.slice(0, 6);
+      const minutes = Math.max(1, Math.round(age / 60000));
+      await sendPush(tokens, {
+        title: `Pedido #${orderNum} sin aceptar`,
+        body: `Entró hace ${minutes} min. ${orderLine(o)}. Aceptalo o rechazalo.`
+      }, { tag: `new-order-${docSnap.id}`, url: `#/mi-comercio/${o.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
+    } catch (err) {
+      logger.error(`[StoreReminder] ${docSnap.id}:`, err);
+    }
+  }
+});
+
 // settings/weather.isRaining es siempre lo que detecta el modo automático (también con el
 // modo manual puesto, así al volver a "Automático" ya está al día). El modo manual se
 // aplica al leer, en el cliente (state.js) y al crear pedidos.
