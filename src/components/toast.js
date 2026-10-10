@@ -1,9 +1,12 @@
 // GoDelivery — Premium Toast Notification System
 import { icon } from '../utils/icons.js';
+import { reportUserFacingError } from '../utils/error-reporter.js';
 
 const activeToasts = new Set();
 
 export function showToast(message, type = 'info', duration = 2500) {
+  // Detector de errores: el mensaje de error que vio la persona queda en Admin → Errores
+  if (type === 'error') reportUserFacingError(message);
   // Suppress all toast banners when operating in delivery driver mode
   if (window.location.hash.startsWith('#/delivery') || document.body.classList.contains('is-delivery-mode')) {
     console.log('[Toast suppressed in delivery mode]:', message);

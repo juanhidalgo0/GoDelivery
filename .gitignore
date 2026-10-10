@@ -37,3 +37,4 @@ whatsapp-bot/serviceAccountKey.json
 *.env
 serviceAccountKey.json
 
+.asset-history/
