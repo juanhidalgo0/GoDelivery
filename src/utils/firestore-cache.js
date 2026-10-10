@@ -68,7 +68,8 @@ export async function getDocsOptimized(queryRef, cacheKey, ttlMs = 5 * 60 * 1000
     // Return an empty snapshot but mark it as errored so callers can tell
     // "no data" apart from "query failed" and show a retry option instead
     // of silently rendering an empty page.
-    return { empty: true, docs: [], size: 0, forEach: () => {}, error: true };
+    // reason: el motivo (timeout, permission-denied, falta un índice…) para el detector de errores
+    return { empty: true, docs: [], size: 0, forEach: () => {}, error: true, reason: String(err?.code || err?.message || err).slice(0, 120) };
   }
 }
 

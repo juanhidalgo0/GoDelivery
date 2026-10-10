@@ -5,10 +5,12 @@ import {
   persistentLocalCache, 
   persistentMultipleTabManager,
   clearIndexedDbPersistence,
-  connectFirestoreEmulator
+  connectFirestoreEmulator,
+  memoryLocalCache
 } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getMessaging, isSupported } from 'firebase/messaging';
+import { watchFirestoreHealth } from './utils/firestore-recovery.js';
 
 const isTestingHost = typeof window !== 'undefined' && (
   window.location.hostname.includes('godelivery-testing') ||
@@ -64,12 +66,23 @@ googleProvider.setCustomParameters({
 // Modern Firestore initialization with Persistent Local Cache & Multi-Tab Synchronization
 let dbInstance;
 try {
+  // Contra los emuladores, caché en memoria: la caché de IndexedDB compartida entre pestañas
+  // hace fallar al SDK (INTERNAL ASSERTION ca9) al probar varias cuentas a la vez.
+  if (useEmulators) throw Object.assign(new Error('emulators'), { useMemory: true });
+  // En iPhone, también en memoria: con la caché de IndexedDB el SDK se seguía rompiendo
+  // ("Firestore quedó inservible" una y otra vez) aun con firebase 12.19, y el sistema corta la
+  // base local en segundo plano ("Indexed Database server lost"). En Android 12.19 alcanzó.
+  const isIOS = window.Capacitor?.getPlatform?.() === 'ios' || /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (isIOS) throw Object.assign(new Error('ios'), { useMemory: true });
   dbInstance = initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
     })
   });
 } catch (err) {
+  if (err?.useMemory) {
+    dbInstance = initializeFirestore(app, { localCache: memoryLocalCache() });
+  } else {
   console.warn('[Firebase] persistentLocalCache with tabManager error, falling back to standard cache or memory:', err);
   try {
     dbInstance = initializeFirestore(app, {
@@ -78,8 +91,11 @@ try {
   } catch (fallbackErr) {
     dbInstance = initializeFirestore(app, {});
   }
+  }
 }
 export const db = dbInstance;
+// If the Firestore client breaks internally (a known SDK bug), reload instead of staying frozen
+watchFirestoreHealth();
 if (useEmulators) {
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
   console.log('🎮 Connected to the local Firebase emulators (demo-godelivery)');
