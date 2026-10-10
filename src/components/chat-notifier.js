@@ -85,10 +85,17 @@ function listenToChat(chatId, userId, chatData) {
           }
 
           // Verify if userId is an actual party to this order
-          const isActualParty = order.userId === userId || 
-                                order.driverId === userId || 
-                                order.comercioId === userId || 
-                                order.comercioOwnerId === userId;
+          // Orders don't carry the shop owner's uid: the owner counts as a party when the chat
+          // lists them (chat.js adds them to shop chats, never to the private client-driver one).
+          const me = getState().user || {};
+          const isShopOwnerHere = chatData.type !== 'client-delivery' &&
+                                  (chatData.participants || []).includes(userId) &&
+                                  (me.role === 'comercio' || me.isComercio === true);
+          const isActualParty = order.userId === userId ||
+                                order.driverId === userId ||
+                                order.comercioId === userId ||
+                                order.comercioOwnerId === userId ||
+                                isShopOwnerHere;
 
           if (!isActualParty) {
             // User is only an auditor/admin inspecting this chat. Do NOT count unread!
@@ -136,7 +143,7 @@ function listenToChat(chatId, userId, chatData) {
 
               const clickUrl = order 
                 ? (order.userId !== userId 
-                    ? (order.driverId === userId ? `#/delivery-panel?chatOrder=${order.id}` : `#/comercio-panel/orders?id=${order.comercioId}&chatOrder=${order.id}`)
+                    ? (order.driverId === userId ? `#/delivery-panel?chatOrder=${order.id}` : `#/mi-comercio/${order.comercioId}/orders?chatOrder=${order.id}`)
                     : `#/pedido/${order.id}`)
                 : `#/mis-chats`;
 
@@ -159,6 +166,18 @@ function listenToChat(chatId, userId, chatData) {
     notifyUnreadChange();
   });
   activeListeners.push(unsub);
+}
+
+// Chat ids are `${orderId}_${type}`; the type decides which conversation opens.
+function splitChatId(chatId) {
+  const [orderId, ...rest] = String(chatId).split('_');
+  return { orderId, type: rest.join('_') || 'client-delivery' };
+}
+
+function otherNameFor(type, order, userId) {
+  if (type === 'client-commerce') return userId === order.userId ? (order.comercioName || 'Comercio') : (order.userName || 'Cliente');
+  if (type === 'commerce-delivery') return userId === order.driverId ? (order.comercioName || 'Comercio') : (order.driverName || 'Repartidor');
+  return userId === order.userId ? (order.driverName || 'Repartidor') : (order.userName || 'Cliente');
 }
 
 function notifyUnreadChange() {
@@ -254,9 +273,7 @@ function updateGlobalFAB() {
   fab.onclick = async () => {
     const activeChatId = Object.keys(unreadCounts).find(key => unreadCounts[key] > 0);
     if (activeChatId) {
-      const isCommerce = activeChatId.includes('commerce');
-      const parts = activeChatId.split('_');
-      const orderId = parts[0];
+      const { orderId, type } = splitChatId(activeChatId);
       const { openChat } = await import('../components/chat.js');
       
       let otherPartyName = 'Chat';
@@ -268,18 +285,13 @@ function updateGlobalFAB() {
         const userId = getState().user?.uid;
         const isCommerceOrDelivery = orderData.userId !== userId;
 
-        if (isCommerceOrDelivery) {
-          otherPartyName = orderData.userName || 'Cliente';
-          myDisplayName = orderData.driverId === userId ? 'Repartidor' : 'Comercio';
-        } else {
-          otherPartyName = isCommerce ? (orderData.comercioName || 'Comercio') : (orderData.driverName || 'Repartidor');
-          myDisplayName = 'Cliente';
-        }
+        otherPartyName = otherNameFor(type, orderData, userId);
+        myDisplayName = !isCommerceOrDelivery ? (getState().user?.displayName || 'Cliente') : (orderData.driverId === userId ? (getState().user?.displayName || 'Repartidor') : 'Comercio');
       }
 
       openChat({
         orderId: orderId,
-        type: isCommerce ? 'client-commerce' : 'client-delivery',
+        type,
         otherName: otherPartyName,
         orderNum: orderId.slice(0, 6).toUpperCase(),
         senderDisplayName: myDisplayName
@@ -327,14 +339,14 @@ function showGlobalMessageBanner(sender, text, orderId, chatId, isCommerceOrDeli
       const { openChat } = await import('../components/chat.js');
       let myDisplayName = 'Usuario';
       if (isCommerceOrDelivery && order) {
-        myDisplayName = order.driverId === getState().user.uid ? 'Repartidor' : 'Comercio';
+        myDisplayName = order.driverId === getState().user.uid ? (getState().user?.displayName || 'Repartidor') : 'Comercio';
       } else {
-        myDisplayName = 'Cliente';
+        myDisplayName = getState().user?.displayName || 'Cliente';
       }
 
       openChat({
         orderId: orderId,
-        type: chatId.includes('commerce') ? 'client-commerce' : 'client-delivery',
+        type: splitChatId(chatId).type,
         otherName: sender,
         orderNum: orderId.slice(0, 6).toUpperCase(),
         senderDisplayName: myDisplayName

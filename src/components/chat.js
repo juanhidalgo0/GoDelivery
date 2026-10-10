@@ -5,8 +5,34 @@ import { getState } from '../state.js';
 import { showModal, closeModal } from './modal.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
 import { icon } from '../utils/icons.js';
+import { fitToVisibleViewport, autoGrowTextarea, keepFocusOnTap } from '../utils/keyboard-fit.js';
 
-let isChatOpening = false;
+// Guards a double tap only. It used to stay true until the modal's onClose ran, so any early
+// return in between (or a modal closed some other way) left every chat button dead until restart.
+let lastOpenAt = 0;
+let lastOpenKey = '';
+
+// Who belongs in each chat. The chat with the driver is private: the shop is not a participant.
+async function chatPartiesFor(type, orderData) {
+  if (!orderData) return [];
+  const parties = [];
+  const shopOwner = async () => {
+    if (orderData.comercioOwnerId) return orderData.comercioOwnerId;
+    if (!orderData.comercioId) return null;
+    try {
+      const snap = await getDoc(doc(db, 'comercios', orderData.comercioId));
+      return snap.exists() ? (snap.data().ownerId || null) : null;
+    } catch (e) { return null; }
+  };
+  if (type === 'client-delivery') {
+    parties.push(orderData.userId, orderData.driverId);
+  } else if (type === 'client-commerce') {
+    parties.push(orderData.userId, orderData.comercioId, await shopOwner());
+  } else if (type === 'commerce-delivery') {
+    parties.push(orderData.comercioId, await shopOwner(), orderData.driverId);
+  }
+  return [...new Set(parties.filter(Boolean))];
+}
 
 window.playCustomAudio = function(btnEl) {
   const container = btnEl.closest('.wa-audio-player');
@@ -113,8 +139,10 @@ window.playCustomAudio = function(btnEl) {
  * Opens a chat modal for a given order.
  */
 export async function openChat(options) {
-  if (isChatOpening) return;
-  isChatOpening = true;
+  const openKey = typeof options === 'string' ? options : `${options?.orderId}_${options?.type || 'client-delivery'}`;
+  if (openKey === lastOpenKey && Date.now() - lastOpenAt < 1500) return;
+  lastOpenKey = openKey;
+  lastOpenAt = Date.now();
 
   let orderId, type, otherName, orderNum, senderDisplayName, isAudit;
   if (typeof options === 'string') {
@@ -132,18 +160,15 @@ export async function openChat(options) {
     senderDisplayName = options.senderDisplayName || 'Usuario';
     isAudit = options.isAudit === true;
   } else {
-    isChatOpening = false;
     return;
   }
 
   if (!orderId) {
-    isChatOpening = false;
     return;
   }
 
   const user = getState().user;
   if (!user) {
-    isChatOpening = false;
     return;
   }
 
@@ -171,7 +196,6 @@ export async function openChat(options) {
     }
 
     if (!isParticipant && (user.role === 'comercio' || user.role === 'commerce' || user.comercioId)) {
-      isChatOpening = false;
       const { showToast } = await import('./toast.js');
       showToast('⚠️ El chat entre el cliente y el repartidor es privado.', 'warning');
       return;
@@ -181,6 +205,18 @@ export async function openChat(options) {
   const chatId = `${orderId}_${type}`;
   const chatRef = doc(db, 'chats', chatId);
   const messagesRef = collection(chatRef, 'messages');
+
+  // Already on screen (a banner tapped while the same chat is open): nothing to do.
+  if (document.getElementById(`chat-messages-${chatId}`)) return;
+
+  // Create the chat doc right away instead of after loading the order. Not awaited: offline the
+  // write only resolves once the server has it, and the chat must open anyway.
+  const chatDocReady = isAudit ? Promise.resolve() : setDoc(chatRef, {
+    orderId,
+    type,
+    participants: arrayUnion(user.uid),
+    lastActivityAt: serverTimestamp(),
+  }, { merge: true }).catch(err => console.warn('[chat] could not create chat doc yet:', err));
 
   let unsub = () => {};
   let orderUnsub = () => {};
@@ -237,7 +273,7 @@ export async function openChat(options) {
         <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen" style="color:var(--color-text-secondary);">${icon('camera', 22)}</button>
         <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" />
         <input type="file" id="chat-file-camera-${chatId}" style="display:none" accept="image/*" capture="environment" />
-        <input type="text" id="chat-input-${chatId}" class="chat-input" placeholder="Escribí un mensaje..." autocomplete="off" />
+        <textarea id="chat-input-${chatId}" class="chat-input" rows="1" placeholder="Escribí un mensaje..." autocomplete="off" enterkeyhint="send"></textarea>
         
         <div id="chat-audio-indicator-${chatId}" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 16px; border-radius:18px; z-index:50; border:1.5px solid var(--color-border);">
           <div style="display:flex; align-items:center; gap:8px;">
@@ -255,7 +291,9 @@ export async function openChat(options) {
     </div>
   `;
 
-  let viewportListener = null;
+  let stopKeyboardFit = () => {};
+  let chatClosed = false;
+  let retryTimer = null;
 
   const modalInstance = showModal({
     title: '',
@@ -266,16 +304,14 @@ export async function openChat(options) {
     fullscreen: true,
     slideFromRight: true,
     onClose: () => {
+      chatClosed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       if (unsub) unsub();
       if (orderUnsub) orderUnsub();
       if (chatDocUnsub) chatDocUnsub();
       if (otherUserUnsub) otherUserUnsub();
-      if (viewportListener && window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', viewportListener);
-        window.visualViewport.removeEventListener('scroll', viewportListener);
-      }
+      stopKeyboardFit();
       updateTypingStatus(chatRef, user.uid, false);
-      isChatOpening = false;
     }
   });
 
@@ -292,30 +328,35 @@ export async function openChat(options) {
   // Setup input listeners IMMEDIATELY (0ms) on DOM insertion so input doesn't wait for network
   setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName);
 
-  // Visual Viewport Adaptability for Keyboard (WhatsApp style)
-  if (window.visualViewport) {
-    viewportListener = () => {
-      const keyboardHeight = window.innerHeight - window.visualViewport.height;
-      if (keyboardHeight > 80) {
-        chatContainer.style.paddingBottom = `${keyboardHeight}px`;
-        setTimeout(() => {
-          if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-          }
-        }, 80);
-      } else {
-        chatContainer.style.paddingBottom = '0px';
-      }
-    };
-    window.visualViewport.addEventListener('resize', viewportListener);
-    window.visualViewport.addEventListener('scroll', viewportListener);
-  }
+  // Con el teclado abierto el cuadro de texto queda siempre justo arriba (ver utils/keyboard-fit.js)
+  stopKeyboardFit = fitToVisibleViewport(chatContainer, messagesContainer);
 
-  // Real-time messages listener
+  // Real-time messages listener. A listener that errors is dead for good, and before this
+  // nothing noticed: the chat stayed blank and "sending" looked broken. It is retried instead.
   const q = query(messagesRef, orderBy('timestamp', 'asc'));
   let isInitialLoad = true;
-  unsub = onSnapshot(q, (snap) => {
+  let listenAttempts = 0;
+  const onMessagesError = (err) => {
+    console.warn('[chat] messages listener error:', err?.code || err);
+    if (chatClosed) return;
+    listenAttempts++;
+    const delay = Math.min(1000 * 2 ** (listenAttempts - 1), 15000);
+    retryTimer = setTimeout(async () => {
+      if (chatClosed) return;
+      await chatDocReady;
+      if (!chatClosed) listenToMessages();
+    }, delay);
+    if (listenAttempts === 3) {
+      messagesContainer.innerHTML = `<div class="chat-empty"><p>Reconectando el chat…</p><span>Revisá tu conexión. Los mensajes van a aparecer solos.</span></div>`;
+    }
+  };
+  const listenToMessages = () => {
+    if (unsub) unsub();
+    unsub = onSnapshot(q, onMessagesSnapshot, onMessagesError);
     registerUnsubscribe(unsub);
+  };
+  const onMessagesSnapshot = (snap) => {
+    listenAttempts = 0;
     const messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     // Play sound for incoming message
@@ -336,12 +377,13 @@ export async function openChat(options) {
     renderMessages(messagesContainer, messages, user.uid, { chatId, orderId, chatType: type, isAudit });
     initReactionListeners(messagesContainer, user, messagesRef, chatId);
 
-    // Mark unread messages as read
+    // Mark unread messages as read (not when an admin is only auditing: that would mark them
+    // seen for the real recipient)
     let markedAny = false;
-    snap.docs.forEach(d => {
+    if (!isAudit) snap.docs.forEach(d => {
       const msg = d.data();
       if (msg.senderId !== user.uid && !msg.read) {
-        updateDoc(doc(messagesRef, d.id), { read: true, readAt: new Date().toISOString() });
+        updateDoc(doc(messagesRef, d.id), { read: true, readAt: new Date().toISOString() }).catch(() => {});
         markedAny = true;
       }
     });
@@ -350,7 +392,9 @@ export async function openChat(options) {
         [`unread.${user.uid}`]: 0
       }).catch(() => {});
     }
-  });
+  };
+  chatDocReady.then(() => {}, () => {});
+  listenToMessages();
 
   // Background Tasks (Status & Init)
   orderUnsub = () => { };
@@ -448,22 +492,17 @@ export async function openChat(options) {
           registerUnsubscribe(otherUserUnsub);
         }
 
-        // 2. Ensure chat document exists (only if not auditing)
+        // 2. Add every party of the chat, so each one sees it in their list and gets the
+        // in-app alert (not awaited: offline it would hold up the rest of the setup)
         if (!isAudit) {
-          const parts = [user.uid];
-          if (otherId) parts.push(otherId);
-          await setDoc(chatRef, {
+          const parts = [user.uid, ...(await chatPartiesFor(type, orderData))];
+          setDoc(chatRef, {
             orderId,
             type,
             participants: arrayUnion(...parts),
-            lastActivityAt: serverTimestamp(),
-          }, { merge: true });
+            unread: { [user.uid]: 0 },
+          }, { merge: true }).catch(err => console.warn('[chat] participants update failed:', err));
         }
-
-        // Clear unread flag for this user
-        await updateDoc(chatRef, {
-          [`unread.${user.uid}`]: 0
-        }).catch(() => {});
       }
 
       // Update UI with footer and status ONLY if read-only (do not destroy active DOM input)
@@ -514,7 +553,7 @@ export async function openChat(options) {
           }
         });
         showTypingIndicator(chatId, otherIsTyping, otherName);
-      });
+      }, err => console.warn('[chat] typing listener error:', err?.code || err));
       registerUnsubscribe(chatDocUnsub);
     } catch (e) {
       console.error('Chat background init error:', e);
@@ -530,88 +569,34 @@ export async function openChat(options) {
   });
 }
 
+// Chat list preview + per-person unread counters. The push and the in-app notification for the
+// recipients come from the server (onNewChatMessage in functions/index.js).
 async function updateChatMetadata(chatRef, uid, lastMessageText) {
   try {
-    let chatSnap = await getDoc(chatRef);
-    let chatData = chatSnap.exists() ? chatSnap.data() : {};
-    let participants = chatData.participants || [uid];
-
-    const chatId = chatRef.id;
-    const parts = chatId.split('_');
-    const orderId = chatData.orderId || parts[0];
-    const chatType = chatData.type || parts[1];
-
-    let orderParties = new Set();
-    if (orderId) {
-      try {
-        const orderSnap = await getDoc(doc(db, 'orders', orderId));
-        if (orderSnap.exists()) {
-          const oData = orderSnap.data();
-          if (oData.userId) orderParties.add(oData.userId);
-          if (oData.driverId) orderParties.add(oData.driverId);
-          if (oData.comercioId) orderParties.add(oData.comercioId);
-          if (oData.comercioOwnerId) orderParties.add(oData.comercioOwnerId);
-          
-          if (orderParties.size > 0) {
-            participants = Array.from(orderParties);
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch order for chat metadata fallback:', err);
-      }
+    const [orderId, ...typeParts] = chatRef.id.split('_');
+    const chatType = typeParts.join('_');
+    let parties = [];
+    try {
+      const orderSnap = await getDoc(doc(db, 'orders', orderId));
+      if (orderSnap.exists()) parties = await chatPartiesFor(chatType, orderSnap.data());
+    } catch (err) {
+      console.warn('Failed to fetch order for chat metadata:', err);
     }
 
-    const updates = {
-      orderId: orderId || '',
-      type: chatType || '',
-      participants: arrayUnion(...participants),
+    // A nested map: setDoc does not read dotted keys as paths, so `unread.<uid>` used to land in
+    // literal top-level fields that nothing reads, and the real counters never went up.
+    const unread = { [uid]: 0 };
+    parties.filter(p => p !== uid).forEach(p => { unread[p] = increment(1); });
+
+    await setDoc(chatRef, {
+      orderId,
+      type: chatType,
+      participants: arrayUnion(uid, ...parties),
       lastMessage: lastMessageText,
       lastMessageAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
-      [`unread.${uid}`]: 0
-    };
-
-    participants.forEach(pId => {
-      if (pId !== uid && (orderParties.size === 0 || orderParties.has(pId))) {
-        updates[`unread.${pId}`] = increment(1);
-      }
-    });
-
-    await setDoc(chatRef, updates, { merge: true });
-
-    // Push notification trigger to all other participants
-    const { collection, addDoc } = await import('firebase/firestore');
-    
-    let displayName = chatType === 'client-commerce' ? (uid === (chatData.userId || orderId) ? 'Cliente' : 'Comercio') : 'Mensaje';
-    if (orderId) {
-      const orderSnap = await getDoc(doc(db, 'orders', orderId));
-      if (orderSnap.exists()) {
-        const orderData = orderSnap.data();
-        if (chatType === 'client-commerce') {
-          displayName = uid === orderData.userId ? (orderData.userName || 'Cliente') : (orderData.comercioName || 'Comercio');
-        } else if (chatType === 'client-delivery') {
-          displayName = uid === orderData.userId ? (orderData.userName || 'Cliente') : (orderData.driverName || 'Repartidor');
-        } else if (chatType === 'commerce-delivery') {
-          displayName = uid === orderData.comercioId ? (orderData.comercioName || 'Comercio') : (orderData.driverName || 'Repartidor');
-        }
-      }
-    }
-
-    for (const pId of participants) {
-      if (pId !== uid) {
-        await addDoc(collection(db, 'notifications'), {
-          userId: pId,
-          title: `💬 ${displayName}`,
-          body: lastMessageText,
-          type: 'new_chat_message',
-          chatId: chatRef.id,
-          orderId: orderId || '',
-          url: `#/mis-chats?chatId=${chatRef.id}`,
-          createdAt: new Date(),
-          read: false
-        });
-      }
-    }
+      unread,
+    }, { merge: true });
   } catch (e) {
     console.error("Error updating chat metadata:", e);
   }
@@ -906,6 +891,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   emojiPicker?.querySelectorAll('.emoji-item-v2').forEach(item => {
     item.addEventListener('click', () => {
       input.value += item.textContent;
+      input.dispatchEvent(new Event('input')); // agranda el cuadro si hace falta
       input.focus();
     });
   });
@@ -1017,6 +1003,8 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   // Do not auto-focus input on chat open so virtual keyboard stays closed
 
   const displayName = senderDisplayName || user.displayName || 'Usuario';
+  // Only this chat's footer counts: another chat closing on screen must not block this one.
+  const isChatClosed = () => !!document.getElementById(`chat-footer-area-${chatId}`)?.querySelector('.chat-closed-bar');
 
   attachBtn?.addEventListener('click', () => {
     showModal({
@@ -1126,7 +1114,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
 
   const handleFileSelect = async (rawFile) => {
     if (!rawFile) return;
-    if (document.querySelector('.chat-closed-bar')) {
+    if (isChatClosed()) {
       import('./toast.js').then(m => m.showToast('El chat ha finalizado. No podés enviar mensajes.', 'warning'));
       return;
     }
@@ -1170,16 +1158,22 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     }
   };
 
+  // The picker sheet was already closed by its own buttons; closing again here closed the chat.
   fileInputGallery?.addEventListener('change', (e) => {
-    closeModal();
     handleFileSelect(e.target.files[0]);
+    e.target.value = '';
   });
 
   fileInputCamera?.addEventListener('change', (e) => {
-    closeModal();
     handleFileSelect(e.target.files[0]);
+    e.target.value = '';
   });
 
+
+  // El cuadro crece con el texto (antes era de una sola línea y un mensaje largo se corría hacia el
+  // costado sin que se viera lo escrito), y tocar enviar no cierra el teclado.
+  const autoGrow = autoGrowTextarea(input);
+  keepFocusOnTap(input, sendBtn, micBtn);
 
   // Typing status logic
   let typingTimeout = null;
@@ -1194,12 +1188,13 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   const sendMessage = async () => {
     const text = input.value.trim();
     if (!text) return;
-    if (document.querySelector('.chat-closed-bar')) {
+    if (isChatClosed()) {
       import('./toast.js').then(m => m.showToast('El chat ha finalizado. No podés enviar mensajes.', 'warning'));
       return;
     }
 
     input.value = '';
+    autoGrow();
     input.focus();
 
     import('../utils/audio-manager.js').then(m => {
@@ -1223,7 +1218,8 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
       await updateChatMetadata(chatRef, user.uid, text);
     } catch (err) {
       console.error('Error sending message:', err);
-      input.value = text;
+      if (!input.value) { input.value = text; autoGrow(); }
+      import('./toast.js').then(m => m.showToast('No se pudo enviar el mensaje. Probá de nuevo.', 'error'));
     }
   };
 

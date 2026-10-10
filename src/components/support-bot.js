@@ -2,6 +2,17 @@
 import { getState, subscribe } from '../state.js';
 import { db } from '../firebase.js';
 import { icon } from '../utils/icons.js';
+import { fitToVisibleViewport } from '../utils/keyboard-fit.js';
+
+// Con la ventana de soporte abierta, el cuadro de texto queda siempre arriba del teclado. Solo
+// mientras está abierta: cerrada se esconde corrida a la derecha (transform) y el ajuste la movería.
+let stopPanelKeyboardFit = () => {};
+function setPanelKeyboardFit(on) {
+  stopPanelKeyboardFit();
+  stopPanelKeyboardFit = () => {};
+  const panel = document.getElementById('support-bot-window-panel');
+  if (on && panel) stopPanelKeyboardFit = fitToVisibleViewport(panel, document.getElementById('support-bot-messages'));
+}
 
 export function initSupportBot() {
   // Prevent duplicate insertion
@@ -483,12 +494,8 @@ export function initSupportBot() {
       ];
     } else if (isComercio()) {
       roleText = 'Comercio';
-      // Dynamically get commerce commission
-      const rate = commerceCommissionRate !== null ? commerceCommissionRate : (getState().commissionRate || 0.10);
-      const commissionPct = `${Math.round(rate * 100)}%`;
-      
       questions = [
-        { text: 'Consultar mi porcentaje de comisión actual', val: `Hola soporte, quisiera consultar mi porcentaje de comisión actual por pedido en la app. En mis registros figura una comisión de: ${commissionPct}. ¿Me podrían confirmar si es la correcta y detallar cómo se liquida?` },
+        { text: '¿GO! me cobra comisión?', val: 'Hola soporte, ¿GO! le cobra comisión a mi comercio por los pedidos?' },
         { text: '¿Cómo confirmo y marco un pedido como Listo?', val: 'Hola soporte, ¿cómo funciona el flujo correcto para recibir un pedido pendiente, confirmarlo, gestionarlo en preparación y marcarlo como listo para retirar?' },
         { text: 'Dudas sobre el retiro de pedidos', val: 'Hola soporte, ¿en qué momento exacto vienen los repartidores a retirar los pedidos que marcamos listos y cómo se les asigna?' },
         { text: 'Gestión de Stock de mis productos', val: 'Hola soporte, ¿cómo puedo pausar, desactivar productos sin stock o modificar productos de forma masiva en mi menú?' }
@@ -575,9 +582,8 @@ export function initSupportBot() {
         return s.includes('porcentaje') || s.includes('comisión') || s.includes('comision');
       },
       get answer() {
-        const rate = commerceCommissionRate !== null ? commerceCommissionRate : (getState().commissionRate || 0.10);
-        const pct = `${Math.round(rate * 100)}%`;
-        return `Como comercio asociado, tu comisión actual asignada en GoDelivery es del **${pct}** por pedido. Esta comisión se calcula exclusivamente sobre el subtotal neto de los productos vendidos por cada pedido. Las tarifas de envío y servicio no sufren descuentos, garantizando un reparto transparente.`;
+        // Por ahora los comercios usan GO! gratis (ver utils/commerce-fees.js)
+        return `Hoy **GO! no le cobra comisión a los comercios**: usás la app gratis y todo lo que vendés es tuyo. Si eso cambia, te vamos a avisar con tiempo.`;
       }
     },
     {
@@ -1073,6 +1079,7 @@ export function initSupportBot() {
       fab.classList.add('open');
       if (iconContainer) iconContainer.innerHTML = icon('close', 24);
       panel.classList.add('show');
+      setPanelKeyboardFit(true);
       unreadBadge.style.display = 'none';
 
       // Clear unread flag
@@ -1085,6 +1092,7 @@ export function initSupportBot() {
       fab.classList.remove('open');
       if (iconContainer) iconContainer.innerHTML = icon('chatBubble', 26);
       panel.classList.remove('show');
+      setPanelKeyboardFit(false);
     }
   };
 
@@ -1106,6 +1114,7 @@ export function initSupportBot() {
       if (fabEl) fabEl.style.display = 'none';
       if (panelEl) {
         panelEl.classList.remove('show');
+        setPanelKeyboardFit(false);
         if (fabEl) {
           fabEl.classList.remove('open');
           const iconContainer = document.getElementById('support-bot-icon-container');
@@ -1151,13 +1160,22 @@ export async function openSupportTicketModal(orderId, orderNum) {
   const ticketDocId = isFullTicketId ? orderId : `ticket_${orderId}`;
   const displayTicketNum = orderNum || (isFullTicketId ? (orderId.toString().includes('_') ? orderId.split('_')[1] : orderId.slice(0, 6).toUpperCase()) : orderId);
   
+  // A ticket that doesn't exist yet (opened with the order or shop id) came back as
+  // permission-denied with older rules, and this threw before the chat ever showed.
+  const ticketExists = async (ref) => {
+    try {
+      return (await getDoc(ref)).exists();
+    } catch (e) {
+      if (e?.code === 'permission-denied') return false;
+      throw e;
+    }
+  };
+
   // Create reference trying both the exact orderId and ticket_ prefix if needed
   let chatRef = doc(db, 'support_chats', orderId);
-  const rawSnap = await getDoc(chatRef);
-  if (!rawSnap.exists() && orderId !== ticketDocId) {
+  if (!(await ticketExists(chatRef)) && orderId !== ticketDocId) {
     const altRef = doc(db, 'support_chats', ticketDocId);
-    const altSnap = await getDoc(altRef);
-    if (altSnap.exists()) {
+    if (await ticketExists(altRef)) {
       chatRef = altRef;
     }
   }
@@ -1172,7 +1190,7 @@ export async function openSupportTicketModal(orderId, orderNum) {
   contentEl.className = 'ticket-chat-viewport';
   contentEl.innerHTML = `
     <!-- Header -->
-    <div class="ticket-chat-header" style="background:var(--color-primary); padding:16px 20px; display:flex; align-items:center; gap:12px; color:white; flex-shrink:0; position:relative; box-shadow:var(--shadow-md);">
+    <div class="ticket-chat-header" style="background:var(--color-primary); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:12px; color:white; flex-shrink:0; position:relative; box-shadow:var(--shadow-md);">
       <button id="ticket-chat-back-btn" style="background:none; border:none; color:white; cursor:pointer; padding:6px; display:flex; align-items:center; justify-content:center;">
         ${icon('chevronLeft', 24)}
       </button>
@@ -1238,26 +1256,42 @@ export async function openSupportTicketModal(orderId, orderNum) {
     </style>
   `;
 
-  // 3. Show modal as bottom card (respects safe areas)
+  // 3. Pantalla completa, como el chat del pedido. Antes era una tarjeta desde abajo (85 % de la
+  // pantalla) y con el teclado abierto el cuadro de texto quedaba tapado.
+  let stopKeyboardFit = () => {};
   showModal({
     title: '',
     content: contentEl,
     hideHeader: true,
-    fullscreen: false,
-    height: '85dvh',
+    fullscreen: true,
+    height: '100dvh',
+    onClose: () => stopKeyboardFit(),
     onOpen: () => {
       const messagesBox = document.getElementById('ticket-messages-container');
       const input = document.getElementById('ticket-chat-input');
       const sendBtn = document.getElementById('ticket-chat-send-btn');
       const backBtn = document.getElementById('ticket-chat-back-btn');
+      stopKeyboardFit = fitToVisibleViewport(contentEl, messagesBox);
 
       backBtn.onclick = () => {
         unsub();
         closeModal();
       };
 
-      // Realtime listener for chat messages
-      const unsub = onSnapshot(chatRef, (snap) => {
+      // Realtime listener for chat messages. Restarted after an error (a not-yet-created ticket
+      // could be refused) and after each send, so the conversation always shows up.
+      let unsub = () => {};
+      let listenerBroken = false;
+      const listen = () => {
+        unsub();
+        listenerBroken = false;
+        unsub = onSnapshot(chatRef, renderTicket, (err) => {
+          console.warn('[support] ticket listener error:', err?.code || err);
+          listenerBroken = true;
+          renderTicket({ exists: () => false }); // the ticket isn't there yet: invite to write
+        });
+      };
+      const renderTicket = (snap) => {
         if (!snap.exists()) {
           const headerNumEl = document.getElementById('ticket-chat-header-num');
           if (headerNumEl) {
@@ -1350,7 +1384,8 @@ export async function openSupportTicketModal(orderId, orderNum) {
         setTimeout(() => {
           messagesBox.scrollTop = messagesBox.scrollHeight;
         }, 100);
-      });
+      };
+      listen();
 
       // Send handler
       const sendMessage = async () => {
@@ -1362,14 +1397,14 @@ export async function openSupportTicketModal(orderId, orderNum) {
         sendBtn.disabled = true;
 
         try {
-          const docSnap = await getDoc(chatRef);
+          const exists = await ticketExists(chatRef);
           const newMessage = {
             sender: 'user',
             text: text,
             timestamp: Date.now()
           };
 
-          if (!docSnap.exists()) {
+          if (!exists) {
             // First message! Create support chat document.
             await setDoc(chatRef, {
               userId: user.uid,
@@ -1431,8 +1466,11 @@ export async function openSupportTicketModal(orderId, orderNum) {
               messages: arrayUnion(newMessage)
             });
           }
+          if (listenerBroken) listen();
         } catch (err) {
           console.error('Error sending support message:', err);
+          if (!input.value) input.value = text;
+          import('./toast.js').then(t => t.showToast('No se pudo enviar el mensaje. Probá de nuevo.', 'error'));
         } finally {
           input.disabled = false;
           input.focus();
@@ -1454,6 +1492,7 @@ export function openSupportBot() {
   if (panel) {
     panel.classList.add('show');
     panel.style.zIndex = '100005';
+    setPanelKeyboardFit(true);
   }
 }
 window.openSupportBot = openSupportBot;

@@ -4,6 +4,7 @@
 import { getState } from '../../state.js';
 import { showToast } from '../../components/toast.js';
 import { getDriverMapTheme } from '../../components/driver-navigation-map.js';
+import { fitToVisibleViewport } from '../../utils/keyboard-fit.js';
 
 export async function openDriverDirectSupportChat(user) {
   const latestUser = getState().user || user || {};
@@ -197,7 +198,11 @@ export async function openDriverDirectSupportChat(user) {
     if (card) card.style.transform = 'translateY(0)';
   });
 
+  // Con el teclado abierto el cuadro de texto queda siempre arriba (ver utils/keyboard-fit.js)
+  const stopKeyboardFit = fitToVisibleViewport(overlay, overlay.querySelector('#driver-support-chat-feed'));
+
   const closeChat = () => {
+    stopKeyboardFit();
     overlay.style.opacity = '0';
     const card = overlay.querySelector('#driver-support-chat-card');
     if (card) card.style.transform = 'translateY(100%)';
@@ -491,21 +496,45 @@ export async function openDriverDirectSupportChat(user) {
   };
 
   const chatDocRef = doc(db, 'support_chats', chatId);
-  const unsub = onSnapshot(chatDocRef, (snap) => {
-    if (snap.exists()) {
-      const data = snap.data();
-      renderMessages(data.messages || []);
-    } else {
+  // Before the first message the ticket does not exist, and older rules refused to listen to
+  // it: that listener died and the driver never saw the conversation. It is restarted after
+  // an error and after every send.
+  let unsub = () => {};
+  let listenerBroken = false;
+  const listen = () => {
+    unsub();
+    listenerBroken = false;
+    unsub = onSnapshot(chatDocRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        renderMessages(data.messages || []);
+      } else {
+        renderMessages([]);
+      }
+    }, (err) => {
+      console.warn('[driver support] listener error:', err?.code || err);
+      listenerBroken = true;
       renderMessages([]);
+    });
+  };
+  listen();
+
+  // A ticket that doesn't exist yet can come back as permission-denied with older rules.
+  const ticketExists = async () => {
+    try {
+      return (await getDoc(chatDocRef)).exists();
+    } catch (e) {
+      if (e?.code === 'permission-denied') return false;
+      throw e;
     }
-  });
+  };
 
   const sendPayload = async (messageObj) => {
     try {
-      const chatSnap = await getDoc(chatDocRef);
+      const exists = await ticketExists();
       const summaryText = messageObj.audio ? '🎙 Mensaje de voz' : (messageObj.image ? '📷 Foto' : messageObj.text);
 
-      if (!chatSnap.exists()) {
+      if (!exists) {
         await setDoc(chatDocRef, {
           userId: driverId,
           userName: driverName,
@@ -530,6 +559,8 @@ export async function openDriverDirectSupportChat(user) {
           messages: arrayUnion(messageObj)
         });
       }
+
+      if (listenerBroken) listen();
 
       // Notify all admins in real time
       try {

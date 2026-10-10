@@ -223,10 +223,14 @@ function startChatsListener(container, user) {
     orderChats = orderChats.filter(chat => {
       if (chat.deletedFor && chat.deletedFor.includes(user.uid)) return false;
       if (chat.order) {
+        // The shop owner is listed in the shop's chats (orders don't store the owner's uid).
+        const isShopOwnerHere = chat.type !== 'client-delivery' &&
+                                (user.role === 'comercio' || user.isComercio === true);
         const isActualParty = chat.order.userId === user.uid ||
                               chat.order.driverId === user.uid ||
                               chat.order.comercioId === user.uid ||
-                              chat.order.comercioOwnerId === user.uid;
+                              chat.order.comercioOwnerId === user.uid ||
+                              isShopOwnerHere;
         return isActualParty;
       }
       return true;

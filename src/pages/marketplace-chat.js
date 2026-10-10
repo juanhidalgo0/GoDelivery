@@ -3,10 +3,12 @@ import { doc, getDoc, collection, addDoc, query, orderBy, onSnapshot, updateDoc,
 import { getState } from '../state.js';
 import { icon } from '../utils/icons.js';
 import { showConfirm, showAlert } from '../components/modal.js';
+import { fitToVisibleViewport } from '../utils/keyboard-fit.js';
 
 export async function renderMarketplaceChat(chatId, content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
+  let stopKeyboardFit = () => {};
 
   const currentUser = getState().user;
   if (!currentUser) {
@@ -94,6 +96,8 @@ export async function renderMarketplaceChat(chatId, content) {
     `;
 
     const messagesList = content.querySelector('#chat-messages-list');
+    // Con el teclado abierto el cuadro de texto queda siempre arriba (ver utils/keyboard-fit.js)
+    stopKeyboardFit = fitToVisibleViewport(content.querySelector('.marketplace-chat-container'), messagesList);
     const chatInput = content.querySelector('#chat-input');
     const sendBtn = content.querySelector('#chat-send-btn');
     const attachBtn = content.querySelector(`#chat-attach-${chatId}`);
@@ -435,6 +439,7 @@ export async function renderMarketplaceChat(chatId, content) {
 
   return {
     cleanup: () => {
+      stopKeyboardFit();
       if (unsubscribeChat) unsubscribeChat();
       if (unsubscribeMessages) unsubscribeMessages();
     }
