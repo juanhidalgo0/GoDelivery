@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Pago de servicios: factura con el sello PAGADO de GO!. Exportar con node illus/export.mjs go-clipboard -->
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f1ede6"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feGaussianBlur stdDeviation="14"/></filter>
+  </defs>
+
+  <ellipse cx="256" cy="452" rx="170" ry="24" fill="#000" opacity="0.2" filter="url(#shadow)"/>
+
+  <g transform="rotate(-6 256 260)">
+    <!-- factura con borde dentado abajo -->
+    <path d="M136 56 H376 V430 l-20 -14 l-20 14 l-20 -14 l-20 14 l-20 -14 l-20 14 l-20 -14 l-20 14 l-20 -14 l-20 14 l-20 -14 l-20 14 Z"
+          fill="url(#paper)" stroke="#a8a29e" stroke-width="4" stroke-linejoin="round"/>
+    <rect x="136" y="56" width="240" height="64" fill="#0b0b0c"/>
+    <text x="164" y="98" font-family="Montserrat, Arial Black, sans-serif" font-weight="900" font-size="26" letter-spacing="1" fill="#f7f5f1">FACTURA</text>
+    <rect x="164" y="146" width="130" height="12" rx="6" fill="#d6d3d1"/>
+    <rect x="164" y="170" width="92" height="12" rx="6" fill="#e7e5e4"/>
+    <g fill="#e7e5e4">
+      <rect x="164" y="214" width="120" height="10" rx="5"/><rect x="310" y="214" width="40" height="10" rx="5"/>
+      <rect x="164" y="240" width="100" height="10" rx="5"/><rect x="310" y="240" width="40" height="10" rx="5"/>
+      <rect x="164" y="266" width="110" height="10" rx="5"/><rect x="310" y="266" width="40" height="10" rx="5"/>
+    </g>
+    <line x1="164" y1="300" x2="350" y2="300" stroke="#d6d3d1" stroke-width="3" stroke-dasharray="8 8"/>
+    <text x="164" y="342" font-family="Montserrat, Arial Black, sans-serif" font-weight="900" font-size="30" fill="#0b0b0c">TOTAL</text>
+    <text x="350" y="342" text-anchor="end" font-family="Montserrat, Arial Black, sans-serif" font-weight="900" font-size="30" fill="#0b0b0c">$</text>
+  </g>
+
+  <!-- sello PAGADO -->
+  <g transform="translate(360 356) rotate(-14)">
+    <circle r="72" fill="#fff" stroke="#e11d48" stroke-width="7"/>
+    <circle r="58" fill="none" stroke="#e11d48" stroke-width="3" stroke-dasharray="6 6"/>
+    <path d="M-26 -8 l16 16 l34 -34" fill="none" stroke="#e11d48" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="0" y="36" text-anchor="middle" font-family="Montserrat, Arial Black, sans-serif" font-weight="900" font-size="15" letter-spacing="1" fill="#e11d48">PAGADO</text>
+  </g>
+</svg>

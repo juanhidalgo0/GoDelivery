@@ -9,7 +9,7 @@ for (let t = 0; t <= m.duration; t += step) picks.push([...m.frames].reverse().f
 const W = 131, H = 266, cols = 8;
 const sheet = new Jimp({ width: W * cols, height: (H + 14) * Math.ceil(picks.length / cols), color: 0xffffffff });
 for (const [i, f] of picks.entries()) {
-  const img = await Jimp.read(`public/captures/${name.startsWith('_tmp') ? 'pedido2' : name}/${f.file}`);
+  const img = await Jimp.read(`public/captures/${name}/${f.file}`);
   img.resize({ w: W, h: H });
   sheet.composite(img, (i % cols) * W, Math.floor(i / cols) * (H + 14) + 14);
 }

@@ -14,6 +14,13 @@ const CLIENT_ONLY_CSS = `
   .nav-item[href="#/delivery"] { display: none !important; }
   /* El panel del bot vive fuera de pantalla y su sombra asoma por el borde derecho. */
   #support-bot-window-panel { box-shadow: none !important; }
+  /* Comercios sin foto de perfil (o con la foto en blanco) e inactivos: no salen en el video. */
+  a[href="#/comercio/xcGGZhmZAha71StCqGDWxfpsdCT2"],
+  a[href="#/comercio/maxikiosco_paulos"],
+  a[href="javascript:void(0)"][style*="grayscale"],
+  #category-comercios-grid a[href="javascript:void(0)"] { display: none !important; }
+  /* Pantallas limpias: sin contador de notificaciones ni avisos de primera vez. */
+  #mobile-unread-badge, .go-service-hint { display: none !important; }
 `;
 
 // Zona horaria que la app usa para "hora de Argentina". Con fakeArgTz, solo esa cuenta (horarios de
@@ -33,6 +40,9 @@ export async function launch({ headless = true, fakeArgTz = process.env.REEL_FAK
       sessionStorage.setItem('gd_temp_client_mode', 'true');
       localStorage.setItem('gd-onboarding-done', 'true');
       localStorage.setItem('welcome_beta_v1', 'true');
+      localStorage.setItem('gd-app-guide-seen-v2', 'true');
+      sessionStorage.setItem('gd_app_only_promo_shown', 'true');
+      localStorage.setItem('info_seen_gofavores_v4', 'true');
     } catch {}
     const inject = () => { const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); };
     const VP = 'width=393, initial-scale=3, maximum-scale=3, minimum-scale=3, user-scalable=no, viewport-fit=cover';
@@ -57,6 +67,17 @@ export async function launch({ headless = true, fakeArgTz = process.env.REEL_FAK
       if (m.type === 'characterData') { if (ADDR.test(m.target.nodeValue)) { ADDR.lastIndex = 0; m.target.nodeValue = m.target.nodeValue.replace(ADDR, 'Mi casa'); } ADDR.lastIndex = 0; }
       else m.addedNodes.forEach(n => n.nodeType === 3 ? scrub(n.parentNode || document.body) : n.nodeType === 1 && scrub(n));
     })).observe(document, { childList: true, subtree: true, characterData: true });
+
+    // Tarjetas de comercio y promos de los comercios que no salen en el video (sin foto o con la foto en blanco).
+    const HIDE = /ESCABIADO|Paulos/i;
+    const hideStores = () => {
+      document.querySelectorAll('.go-store-name span:first-child, #wizard-banner-card').forEach(el => {
+        if (!HIDE.test(el.textContent)) return;
+        const card = el.closest('.go-store-card, a') || el.closest('#wizard-banner-card')?.parentElement;
+        if (card && card.style.display !== 'none') card.style.display = 'none';
+      });
+    };
+    new MutationObserver(hideStores).observe(document, { childList: true, subtree: true });
   }, CLIENT_ONLY_CSS);
   if (fakeArgTz) {
     await ctx.addInitScript((tz) => {
