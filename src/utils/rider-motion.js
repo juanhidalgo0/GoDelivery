@@ -1,12 +1,15 @@
 // Movimiento de la moto en el mapa del cliente, fluido como en Uber.
 //
-// El repartidor manda su posición cada ~3,5 s. Si la moto salta (o se mueve 1 s y queda quieta
-// hasta el próximo dato) se ve a tirones. Acá:
-// - la moto se mueve SIN PARAR durante todo el intervalo entre posiciones (medido en vivo);
-// - si hay ruta, avanza por las calles de la ruta (no corta esquinas en línea recta);
-// - gira suave hacia donde va y no tiembla cuando el GPS oscila parado;
-// - la línea de la ruta muestra solo lo que falta (se "consume" detrás de la moto);
-// - un salto grande (GPS que vuelve después de un rato) la ubica directo, sin cruzar el mapa.
+// El repartidor manda su posición cada ~2 s, con la hora exacta de la lectura del GPS. La moto no
+// persigue el último dato (así se movía a tirones: frenaba cuando un dato llegaba tarde y aceleraba
+// cuando llegaban dos juntos). Reproduce el recorrido del repartidor con un atraso fijo de ~2-3 s,
+// como un video con buffer: siempre tiene el tramo siguiente, va a la velocidad real y dobla donde
+// dobló él. Además:
+// - si hay ruta, cada tramo va por las calles de la ruta (no corta esquinas en línea recta);
+// - un retroceso corto sobre la ruta es ruido del GPS: la moto no va para atrás;
+// - parada, no se mueve ni gira;
+// - un salto grande (GPS que vuelve después de un rato) la ubica directo, sin cruzar el mapa;
+// - la línea de la ruta muestra solo lo que falta (se "consume" detrás de la moto).
 // La geometría es pura (sin mapa) para poder probarla sola.
 
 const R = 6371000;
@@ -90,43 +93,74 @@ export function pointAlong(path, d) {
 
 const SNAP_M = 40;          // a esta distancia de la ruta se considera "sobre la ruta"
 const JUMP_M = 500;         // más que esto de un dato al otro: se ubica directo
-const MIN_MS = 900, MAX_MS = 6000, DEFAULT_MS = 3500;
+const STILL_M = 2;          // menos que esto entre dos datos: GPS oscilando parado, no se mueve
+const BACKTRACK_M = 20;     // retroceder menos que esto sobre la ruta: ruido, se queda donde está
+const DEFAULT_GAP_MS = 2500;
+const BUFFER_MIN_MS = 1200, BUFFER_MAX_MS = 6000;
+const LONG_GAP_MS = 6000;   // más que esto entre dos datos: estuvo parado o sin señal
+const MAX_LAG_MS = 12000;   // más atrasada que esto (pestaña dormida): se pone al día de una
 
 /**
- * Camino a recorrer entre lo que se ve y la nueva posición: por la ruta si los dos están sobre ella,
- * en orden de avance y sin rodeos raros; si no, en línea recta.
+ * Camino de un dato al siguiente: por la ruta si los dos están sobre ella, en orden de avance y
+ * sin rodeos raros; si no, en línea recta. `still`: no se mueve (ruido del GPS o retroceso corto).
+ * El camino arranca exactamente en `from`, así la moto nunca salta entre un tramo y el siguiente.
  */
-export function motionPath(from, to, routePts) {
+export function segmentPath(from, to, routePts) {
+  const straight = meters(from, to);
+  if (straight < STILL_M) return { path: [from], length: 0, still: true };
   if (routePts && routePts.length >= 2) {
     const a = projectOnRoute(from, routePts), b = projectOnRoute(to, routePts);
-    if (a && b && a.dist <= SNAP_M && b.dist <= SNAP_M && b.along >= a.along - 3) {
-      const path = routeSlice(routePts, a, b);
-      const straight = meters(from, to);
-      if (pathLength(path) <= straight * 3 + 30) return { path, onRoute: true };
+    if (a && b && a.dist <= SNAP_M && b.dist <= SNAP_M) {
+      if (b.along < a.along) {
+        if (a.along - b.along < BACKTRACK_M) return { path: [from], length: 0, still: true };
+      } else {
+        const slice = routeSlice(routePts, a, b);
+        const path = [from, ...(meters(from, slice[0]) > 0.5 ? slice : slice.slice(1))];
+        const length = pathLength(path);
+        if (length <= straight * 3 + 30) return { path, length, onRoute: true };
+      }
     }
   }
-  return { path: [from, to], onRoute: false };
+  return { path: [from, to], length: straight };
 }
+
+const quantile = (arr, q) => {
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.round(q * (s.length - 1)))];
+};
 
 /**
  * Motor de movimiento. hooks: setPosition({lat,lng}), setHeading(deg), setRemainingRoute(coords[[lng,lat]] | null)
+ * push({ lat, lng, t }): t = hora de la lectura del GPS (ms, reloj del repartidor). Sin t (datos
+ * viejos, sin esa hora) se toma la hora de llegada.
  */
-export function createRiderMotion(hooks, now = () => performance.now()) {
-  let shown = null;        // lo que se ve ahora
-  let heading = null;      // rumbo que se muestra (suavizado)
-  let target = null;
-  let anim = null;         // { path, length, start, dur }
+export function createRiderMotion(hooks, now = () => performance.now(), wallNow = () => Date.now()) {
+  let samples = [];        // [{ q, t, path, length, still }]: q = dónde queda la moto, path = cómo llega desde el anterior
+  let delays = [];         // llegada - t de los últimos datos (demora de red + diferencia de relojes)
+  let gaps = [];           // tiempo entre lecturas mientras anda
+  let renderT = null;      // en qué momento del recorrido está la moto que se ve
+  let lastFrameAt = 0;
+  let shown = null;
+  let heading = null;
   let raf = null;
-  let lastPushAt = 0;
-  let interval = DEFAULT_MS;
   let routePts = null;
   let lastRouteDraw = 0;
   let stopped = false;
 
+  const remember = (arr, v, n) => { arr.push(v); if (arr.length > n) arr.shift(); };
+  const typicalGap = () => (gaps.length ? quantile(gaps, 0.5) : DEFAULT_GAP_MS);
+  // El dato que llegó más rápido marca la demora "sin red"; los demás llegan con algo de más
+  const baseDelay = () => Math.min(...delays);
+  // Colchón: un intervalo entre datos + lo que suelen atrasarse. Así casi nunca se queda sin tramo.
+  const buffer = () => {
+    const jitter = delays.length ? quantile(delays, 0.8) - baseDelay() : 0;
+    return Math.max(BUFFER_MIN_MS, Math.min(BUFFER_MAX_MS, typicalGap() + jitter + 300));
+  };
+
   const turnTowards = (want, k) => {
     if (want == null) return;
     if (heading == null) { heading = want; return; }
-    let d = ((want - heading + 540) % 360) - 180;
+    const d = ((want - heading + 540) % 360) - 180;
     heading = (heading + d * k + 360) % 360;
   };
 
@@ -140,43 +174,105 @@ export function createRiderMotion(hooks, now = () => performance.now()) {
     else hooks.setRemainingRoute(routePts.map(q => [q.lng, q.lat])); // fuera de la ruta: se recalcula aparte
   };
 
-  const frame = () => {
+  // Tramo que se está recorriendo en el momento T (el dato al que se va llegando)
+  const segmentIndexAt = (T) => {
+    for (let i = 1; i < samples.length; i++) if (T <= samples[i].t) return i;
+    return samples.length - 1;
+  };
+
+  const positionAt = (T) => {
+    if (T <= samples[0].t || samples.length === 1) return { point: samples[0].q, heading: null };
+    const i = segmentIndexAt(T);
+    const s = samples[i], prev = samples[i - 1];
+    if (T >= s.t) return { point: s.q, heading: null };
+    if (!s.length) return { point: s.q, heading: null };
+    const k = (T - prev.t) / (s.t - prev.t);
+    return pointAlong(s.path, s.length * k); // velocidad constante en el tramo, como un vehículo
+  };
+
+  const schedule = () => {
+    if (!raf && !stopped) { lastFrameAt = 0; raf = requestAnimationFrame(frame); }
+  };
+
+  function frame() {
     raf = null;
-    if (stopped || !anim) return;
-    const t = now();
-    const k = Math.min(1, (t - anim.start) / anim.dur);
-    const at = pointAlong(anim.path, anim.length * k); // velocidad constante, como un vehículo
+    if (stopped || !samples.length) return;
+    const tl = now();
+    const dt = lastFrameAt ? Math.min(tl - lastFrameAt, 1000) : 16;
+    lastFrameAt = tl;
+    const lastT = samples[samples.length - 1].t;
+    const target = tl - baseDelay() - buffer();
+    if (renderT == null) renderT = target;
+    const behind = target - renderT;
+    if (behind > MAX_LAG_MS) {
+      renderT = target;
+    } else {
+      // Para mantener el colchón se apura o se frena de a poco (±30 %), nunca de golpe
+      renderT += dt * Math.max(0.7, Math.min(1.4, 1 + behind / 3000));
+      // Si va atrasada y está en un tramo parada, ese rato se saltea: no se nota
+      if (behind > 400) {
+        const s = samples[segmentIndexAt(renderT)];
+        if (s.still) renderT = Math.max(renderT, Math.min(target, s.t));
+      }
+    }
+    renderT = Math.max(samples[0].t, Math.min(renderT, lastT));
+
+    // Lo ya recorrido no hace falta más (se deja el dato anterior al momento actual)
+    while (samples.length > 2 && samples[1].t <= renderT) samples.shift();
+
+    const at = positionAt(renderT);
     shown = at.point;
     turnTowards(at.heading, 0.18);
     hooks.setPosition(shown);
     if (heading != null) hooks.setHeading(heading);
     drawRoute(false);
-    if (k < 1) raf = requestAnimationFrame(frame);
-    else { anim = null; drawRoute(true); }
+
+    if (renderT < lastT) raf = requestAnimationFrame(frame);
+    else drawRoute(true); // llegó al último dato: espera el siguiente
+  }
+
+  const restartAt = (p, t) => {
+    samples = [{ q: p, t, path: [p], length: 0, still: true }];
+    renderT = t;
+    shown = p;
+    hooks.setPosition(shown);
+    drawRoute(true);
   };
 
   return {
     /** Nueva posición del repartidor. */
     push(pos) {
       if (!pos || !isFinite(pos.lat) || !isFinite(pos.lng)) return;
-      const t = now();
-      if (lastPushAt) interval = Math.max(MIN_MS, Math.min(MAX_MS, interval * 0.6 + (t - lastPushAt) * 0.4));
-      lastPushAt = t;
-      target = { lat: pos.lat, lng: pos.lng };
-      if (!shown || meters(shown, target) > JUMP_M) {
+      const p = { lat: Number(pos.lat), lng: Number(pos.lng) };
+      const t = Number.isFinite(pos.t) ? pos.t : wallNow();
+      const last = samples[samples.length - 1];
+
+      if (last && t <= last.t) {
+        if (last.t - t < 5 * 60 * 1000) return; // repetido o desordenado
+        // El reloj del repartidor se corrigió para atrás: se arranca de nuevo
+        delays = []; gaps = [];
+      }
+      remember(delays, now() - t, 20);
+
+      if (!last || t <= last.t || !shown || meters(last.q, p) > JUMP_M) {
         // Primera vez o salto grande: directo
-        shown = target;
-        anim = null;
-        hooks.setPosition(shown);
-        drawRoute(true);
+        restartAt(p, t);
         return;
       }
-      const moved = meters(shown, target);
-      if (moved < 1.5) return; // oscilación del GPS parado: no se mueve ni gira
-      const { path } = motionPath(shown, target, routePts);
-      // Dura un poco más que el intervalo: llega justo cuando viene el dato siguiente (nunca frena)
-      anim = { path, length: pathLength(path), start: t, dur: interval * 1.08 };
-      if (!raf && !stopped) raf = requestAnimationFrame(frame);
+
+      const gap = t - last.t;
+      let from = last;
+      if (gap > LONG_GAP_MS) {
+        // Estuvo parado o sin señal: queda donde estaba hasta un momento antes del dato nuevo
+        const hold = { q: last.q, t: t - Math.min(gap - 1, typicalGap()), path: [last.q], length: 0, still: true };
+        samples.push(hold);
+        from = hold;
+      } else {
+        remember(gaps, gap, 10);
+      }
+      const seg = segmentPath(from.q, p, routePts);
+      samples.push({ q: seg.path[seg.path.length - 1], t, path: seg.path, length: seg.length, still: !!seg.still });
+      schedule();
     },
     /** Ruta nueva por calles ([[lng,lat],...]) o null. */
     setRoute(coords) {
@@ -195,6 +291,11 @@ export function createRiderMotion(hooks, now = () => performance.now()) {
       drawRoute(true);
     },
     current() { return shown; },
+    /** Para depurar: cuánto atrás del dato más nuevo va la moto (ms) y el colchón actual. */
+    stats() {
+      const lastT = samples.length ? samples[samples.length - 1].t : null;
+      return { behindLatestMs: lastT != null && renderT != null ? lastT - renderT : null, bufferMs: delays.length ? buffer() : null, queued: samples.length };
+    },
     stop() { stopped = true; if (raf) cancelAnimationFrame(raf); raf = null; },
   };
 }

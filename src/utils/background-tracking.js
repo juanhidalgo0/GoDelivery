@@ -2,6 +2,8 @@
 import { db } from '../firebase.js';
 import { recordDriverPosition } from './driver-dwell.js';
 import { isPlaceholderCoords } from './mandado-places.js';
+import { createGpsFilter } from './gps-filter.js';
+import { shouldWriteNatively, nativeWrite } from './native-firestore-write.js';
 import { collection, query, where, onSnapshot, doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { subscribe, getState } from '../state.js';
 import { isDelivery } from '../auth.js';
@@ -21,9 +23,37 @@ let currentActiveOrders = [];
 let wakeLock = null;
 
 // Self-healing & redundancy timers
-let lastLocationUpdateTime = 0;
+let lastLocationUpdateTime = 0; // last reading from the sensor, good or discarded (the watchdog uses it)
 let watchdogInterval = null;
-let errorRetryTimeout = null;
+let heartbeatInterval = null;
+// Every reading goes through the filter (bad-accuracy points, impossible jumps, jitter while
+// standing still). lastGoodFix is the last point it let through and when it arrived.
+const gpsFilter = createGpsFilter();
+let lastGoodFix = null;
+
+// With orders in progress the customer's map treats a position older than ~90s as "no signal".
+// The native watcher only reports on movement (distanceFilter), so a driver waiting at the
+// counter went silent and showed as offline. Every HEARTBEAT_MS we ask for a fresh fix; if the
+// GPS can't give one, the last fix is re-sent while it's recent (the driver is standing still).
+const HEARTBEAT_MS = 20000;
+const HEARTBEAT_MAX_FIX_AGE_MS = 3 * 60 * 1000;
+
+// While moving with an order, one position every ~2s: the customer's map replays the route with
+// a buffer of about one interval, so a steadier and shorter interval is a smoother, closer moto.
+const LIVE_MOVING_MS = 2000;
+const LIVE_FAR_MS = 3000;       // more than 3 km from the next stop
+const LIVE_STILL_MS = 15000;    // standing still (plus the heartbeat)
+
+// The native watcher's distanceFilter. With an order in progress it is 0: the phone keeps
+// reporting even when the driver doesn't move, which is what keeps the position fresh with the
+// screen locked (iOS suspends the JS, so the heartbeat below can't run; only the plugin's own
+// callbacks wake it). Without orders, 2 m as before, to save battery while waiting.
+const nativeDistanceFilter = () => (currentActiveOrders.length > 0 ? 0 : 2);
+let nativeWatcherFilter = null;
+
+// fixAt (GPS reading time) and accuracy need the new firestore.rules. Until they're published the
+// write is rejected; then it falls back to the old fields for the rest of the session.
+let liveExtraFields = true;
 
 export function initGlobalTracking() {
   // Clean up any existing subscription to avoid duplicate listeners
@@ -63,6 +93,8 @@ export function initGlobalTracking() {
 
 async function handleVisibilityChange() {
   if (document.visibilityState === 'visible') {
+    // Back from the background: a browser GPS watch the OS froze doesn't always wake up by itself
+    if (locationWatchId && Date.now() - lastLocationUpdateTime > 10000) restartWebWatch();
     if (currentActiveOrders.length > 0) {
       await requestWakeLock();
     }
@@ -85,7 +117,7 @@ function setupOrdersListener(user) {
         currentActiveOrders = e.detail;
         const isOnline = getState().user?.isOnline === true;
         if (currentActiveOrders.length > 0 || isOnline) {
-          startWatching();
+          startWatching().then(syncNativeWatcherFilter);
         } else {
           stopWatching();
         }
@@ -136,7 +168,7 @@ function setupOrdersListener(user) {
     
     const isOnline = getState().user?.isOnline === true;
     if (currentActiveOrders.length > 0 || isOnline) {
-      startWatching();
+      startWatching().then(syncNativeWatcherFilter);
     } else {
       stopWatching();
     }
@@ -168,27 +200,44 @@ let lastFirestoreWriteTime = 0;
 const lastOrderDocLocationWrite = new Map(); // orderId -> ms of the last driverLocation write on the order doc
 let lastFirestoreWriteCoords = null;
 
-async function handleLocationUpdate(pos) {
-  if (!pos || !pos.coords) return;
+// Every GPS reading (native watcher, browser watch, heartbeat) comes in here. Returns true if the
+// filter let it through.
+async function onRawFix(raw, opts = {}) {
+  lastLocationUpdateTime = Date.now(); // the sensor is alive, even if this point gets discarded
+  const { fix, reason } = gpsFilter.push(raw);
+  if (!fix) {
+    if (reason === 'imprecise' || reason === 'jump') console.debug(`Background Tracking: GPS point discarded (${reason})`);
+    return false;
+  }
+  lastGoodFix = { fix, at: Date.now() };
+  await handleLocationUpdate(fix, opts);
+  return true;
+}
 
-  const { latitude, longitude, heading, speed } = pos.coords;
-  lastLocationUpdateTime = Date.now();
-  
+// fix: filtered point { lat, lng, accuracy, time, speed, heading, moving } (utils/gps-filter.js).
+// opts.force: write it now whatever the thresholds say. opts.resend: the heartbeat repeating the
+// last point because the GPS gave nothing new (it keeps its reading time).
+async function handleLocationUpdate(fix, opts = {}) {
+  if (!fix) return;
+  const { lat: latitude, lng: longitude } = fix;
+  const speed = Number.isFinite(fix.speed) && fix.speed >= 0 ? fix.speed : 0;
+  const heading = Number.isFinite(fix.heading) ? fix.heading : 0;
+
   // Cache position in global window context for instant access across modals/maps
   window.lastRiderPos = { lat: latitude, lng: longitude };
-  window.lastRiderPosAt = Date.now();
-  window.lastRiderAccuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
+  if (!opts.resend) window.lastRiderPosAt = Date.now();
+  window.lastRiderAccuracy = Number.isFinite(fix.accuracy) ? fix.accuracy : null;
   recordDriverPosition(latitude, longitude, window.lastRiderAccuracy); // para detectar dónde se quedó comprando
-  
+
   const tickDetail = {
-    coords: { lat: latitude, lng: longitude, speed: (typeof speed === 'number' && speed >= 0) ? speed : 0 },
-    heading: heading || 0,
-    speed: (typeof speed === 'number' && speed >= 0) ? speed * 3.6 : 0,
-    timestamp: lastLocationUpdateTime
+    coords: { lat: latitude, lng: longitude, speed },
+    heading,
+    speed: speed * 3.6,
+    timestamp: fix.time
   };
 
   // Dispatch live in-memory events so navigation map & telemetry update with zero latency
-  window.dispatchEvent(new CustomEvent('driver-location-update', { detail: tickDetail }));
+  // (only 'driver-location-tick': the map listened to 'driver-location-update' too and redrew twice)
   window.dispatchEvent(new CustomEvent('driver-location-tick', { detail: tickDetail }));
   window.dispatchEvent(new CustomEvent('driver-speed-update', { detail: { speedKmh: Math.round(tickDetail.speed) } }));
 
@@ -251,46 +300,46 @@ async function handleLocationUpdate(pos) {
 
   // High-precision adaptive real-time tracking (Battery & Network Optimized)
   const now = Date.now();
-  const speedKmh = (typeof pos.coords.speed === 'number' && pos.coords.speed >= 0) ? pos.coords.speed * 3.6 : -1;
   const hasActiveTrips = currentActiveOrders.length > 0;
-  
+
   let distMoved = 0;
   if (lastFirestoreWriteCoords) {
     distMoved = getHaversineDistance(latitude, longitude, lastFirestoreWriteCoords.lat, lastFirestoreWriteCoords.lng);
   }
-  
-  const isMoving = speedKmh > 2.5 || distMoved > 5.0;
+
+  // The filter pins the position while standing still, so any distance here is real movement
+  const isMoving = fix.moving || distMoved >= 3;
 
   // Dynamic interval based on movement and trip urgency (Battery & Network Saver)
-  let timeThreshold = 3500; // 3.5s while in active transit
-  let distanceThreshold = 4.0; // 4 meters
+  let timeThreshold = LIVE_MOVING_MS;
+  let distanceThreshold = 2.0;
 
   if (!hasActiveTrips) {
     // Idle driver waiting for orders: aggressive battery saving
     timeThreshold = isMoving ? 10000 : 35000; // 10s if cruising, 35s if parked
     distanceThreshold = 15.0;
   } else if (!isMoving) {
-    // Stopped at traffic light or waiting inside restaurant for pickup
-    timeThreshold = 30000; // 30s heartbeat while stationary (saves ~50% battery)
-    distanceThreshold = 5.0;
+    // Stopped at a traffic light or waiting inside the shop
+    timeThreshold = LIVE_STILL_MS;
+    distanceThreshold = 0;
   } else if (minDist > 3000) {
     // Cruising far from target (>3km)
-    timeThreshold = 5000;
-    distanceThreshold = 8.0;
+    timeThreshold = LIVE_FAR_MS;
+    distanceThreshold = 4.0;
   }
 
   let shouldUpdate = false;
   const timeElapsed = now - lastFirestoreWriteTime;
 
-  if (!lastFirestoreWriteCoords || geofenceTriggeredThisTick) {
+  if (!lastFirestoreWriteCoords || geofenceTriggeredThisTick || opts.force) {
     shouldUpdate = true;
   } else {
     if (distMoved >= distanceThreshold && timeElapsed >= timeThreshold) {
       shouldUpdate = true;
-    } else if (distMoved >= 25.0) {
+    } else if (distMoved >= 25.0 && timeElapsed >= 1000) {
       // Significant position change
       shouldUpdate = true;
-    } else if (timeElapsed >= (hasActiveTrips ? (isMoving ? 12000 : 32000) : 45000)) {
+    } else if (timeElapsed >= (hasActiveTrips ? LIVE_STILL_MS : 45000)) {
       // Periodic heartbeat even when stationary
       shouldUpdate = true;
     }
@@ -300,34 +349,34 @@ async function handleLocationUpdate(pos) {
     return;
   }
 
-  console.log(`Background Tracking (Adaptive): Updating Firestore [${latitude}, ${longitude}] (speed: ${speedKmh.toFixed(1)} km/h, moved: ${distMoved.toFixed(1)}m).`);
   lastFirestoreWriteTime = now;
   lastFirestoreWriteCoords = { lat: latitude, lng: longitude };
 
   // Every tick goes to orders/{id}/live/driver, which the customer's map listens to. The order
   // doc itself only gets the position every 30s (panels and the WhatsApp page still read it):
-  // writing it every 3.5s fired the onOrderStatusChange Cloud Function on every GPS point.
-  const liveHeading = Number.isFinite(pos?.coords?.heading) ? pos.coords.heading : 0;
-  const liveSpeed = Number.isFinite(pos?.coords?.speed) ? pos.coords.speed : 0;
+  // writing it every few seconds fired the onOrderStatusChange Cloud Function on every GPS point.
+  // fixAt is when the GPS took the reading: the customer's map spaces the movement with it, not
+  // with when each write happened to arrive.
+  const livePos = { lat: latitude, lng: longitude, heading, speed, updatedAt: serverTimestamp() };
+  // App de Android fuera de pantalla: por la red nativa (ver utils/native-firestore-write.js)
+  const viaNative = shouldWriteNatively();
   const updates = currentActiveOrders.flatMap(o => {
-    const writes = [setDoc(doc(db, 'orders', o.id, 'live', 'driver'), {
-      lat: latitude,
-      lng: longitude,
-      heading: liveHeading,
-      speed: liveSpeed,
-      updatedAt: serverTimestamp()
-    }).catch(err => console.warn('Failed to write live driver location:', err))];
+    const writes = [writeLivePosition(o.id, livePos, fix, viaNative)];
 
     const lastOrderWrite = lastOrderDocLocationWrite.get(o.id) || 0;
     if (now - lastOrderWrite >= 30000 || geofenceTriggeredThisTick) {
       lastOrderDocLocationWrite.set(o.id, now);
-      writes.push(updateDoc(doc(db, 'orders', o.id), {
+      const sdkWrite = () => updateDoc(doc(db, 'orders', o.id), {
         driverLocation: {
           lat: latitude,
           lng: longitude,
           updatedAt: serverTimestamp()
         }
-      }));
+      });
+      writes.push(viaNative
+        ? nativeWrite(`orders/${o.id}`, { driverLocation: { lat: latitude, lng: longitude } }, { merge: ['driverLocation'], serverTime: ['driverLocation.updatedAt'] })
+          .catch((err) => { console.warn('Background Tracking: native order write failed, using the SDK:', err?.message || err); return sdkWrite(); })
+        : sdkWrite());
     }
     return writes;
   });
@@ -340,20 +389,54 @@ async function handleLocationUpdate(pos) {
 
   if (currentUser && currentUser.uid && (isIdle || (now - lastUserWriteTime > 60000))) {
     window._lastDriverUserLocationWriteTime = now;
-    updates.push(updateDoc(doc(db, 'users', currentUser.uid), {
+    const sdkWrite = () => updateDoc(doc(db, 'users', currentUser.uid), {
       currentLocation: {
         lat: latitude,
         lng: longitude,
         updatedAt: serverTimestamp()
       }
-    }).catch(err => console.warn('Failed to update driver user location:', err)));
+    });
+    const userWrite = viaNative
+      ? nativeWrite(`users/${currentUser.uid}`, { currentLocation: { lat: latitude, lng: longitude } }, { merge: ['currentLocation'], serverTime: ['currentLocation.updatedAt'] })
+        .catch((err) => { console.warn('Background Tracking: native user write failed, using the SDK:', err?.message || err); return sdkWrite(); })
+      : sdkWrite();
+    updates.push(userWrite.catch(err => console.warn('Failed to update driver user location:', err)));
   }
 
-  try {
-    await Promise.all(updates);
-  } catch (err) {
+  // Not awaited: offline, the writes stay queued until the connection comes back
+  Promise.all(updates).catch(err => {
     console.error('Background Tracking: Failed to update order locations in Firestore:', err);
+  });
+}
+
+function writeLivePosition(orderId, livePos, fix, viaNative = false) {
+  if (viaNative) {
+    const fields = { lat: livePos.lat, lng: livePos.lng, heading: livePos.heading, speed: livePos.speed };
+    if (Number.isFinite(fix.time)) fields.fixAt = fix.time;
+    if (Number.isFinite(fix.accuracy)) fields.accuracy = fix.accuracy;
+    return nativeWrite(`orders/${orderId}/live/driver`, fields, { serverTime: ['updatedAt'] })
+      .catch((err) => {
+        console.warn('Background Tracking: native live write failed, using the SDK:', err?.message || err);
+        return writeLivePosition(orderId, livePos, fix, false);
+      });
   }
+  const ref = doc(db, 'orders', orderId, 'live', 'driver');
+  if (!liveExtraFields) {
+    return setDoc(ref, livePos).catch(err => console.warn('Failed to write live driver location:', err));
+  }
+  return setDoc(ref, { ...livePos, fixAt: fix.time, accuracy: fix.accuracy }).catch(async (err) => {
+    if (err?.code !== 'permission-denied') {
+      console.warn('Failed to write live driver location:', err);
+      return;
+    }
+    // Rules without fixAt/accuracy yet (or the order is no longer this driver's): try the old fields
+    try {
+      await setDoc(ref, livePos);
+      liveExtraFields = false;
+    } catch (e) {
+      console.warn('Failed to write live driver location:', e);
+    }
+  });
 }
 
 // Silent Audio Keep-Alive for iOS Safari / PWA background GPS tracking
@@ -399,9 +482,52 @@ function stopSilentAudioKeepAlive() {
   }
 }
 
+// Keeps the customer's map fed while the driver stands still (see HEARTBEAT_MS).
+async function heartbeatTick() {
+  if (currentActiveOrders.length === 0) return;
+  if (Date.now() - lastFirestoreWriteTime < HEARTBEAT_MS) return;
+  try {
+    const fresh = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 });
+    // Force the write: a still driver doesn't pass the movement thresholds.
+    if (fresh?.coords && await onRawFix(fresh, { force: true })) return;
+  } catch (err) {
+    console.warn('Background Tracking Heartbeat: no fresh fix:', err?.message || err);
+  }
+  // No fresh reading: re-send the last good one while it's recent (standing still, weak GPS
+  // indoors). Its age counts from when it was read, not from the last re-send: before, every
+  // re-send made it "new" again and a phone that lost the GPS showed EN VIVO forever.
+  if (lastGoodFix && Date.now() - lastGoodFix.at < HEARTBEAT_MAX_FIX_AGE_MS) {
+    await handleLocationUpdate(lastGoodFix.fix, { force: true, resend: true });
+  }
+}
+
+function startHeartbeat() {
+  if (heartbeatInterval) return;
+  heartbeatInterval = setInterval(() => { heartbeatTick().catch(() => {}); }, HEARTBEAT_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
+let watchStarting = false;
+
 async function startWatching() {
-  if (locationWatchId || nativeWatcherId) return; // Already tracking
+  if (locationWatchId != null || nativeWatcherId || watchStarting) return; // Already tracking (or starting)
+  watchStarting = true;
+  try {
+    await startWatchingNow();
+  } finally {
+    watchStarting = false;
+  }
+}
+
+async function startWatchingNow() {
   startSilentAudioKeepAlive();
+  startHeartbeat();
 
   if (Capacitor.isNativePlatform() && BackgroundGeolocation) {
     console.log('Background Tracking: Starting NATIVE background geolocation watcher...');
@@ -412,24 +538,7 @@ async function startWatching() {
         await Geolocation.requestPermissions();
       }
 
-      nativeWatcherId = await BackgroundGeolocation.addWatcher({
-        backgroundMessage: "Rastreando ubicación para la entrega del pedido.",
-        backgroundTitle: "GO! Repartidor Activo",
-        requestPermissions: true,
-        stale: false,
-        distanceFilter: 2
-      }, async (location, error) => {
-        const pos = {
-          coords: {
-            latitude: location.latitude,
-            longitude: location.longitude,
-            heading: location.bearing || location.heading || 0,
-            speed: (typeof location.speed === 'number' && location.speed >= 0) ? location.speed : 0
-          }
-        };
-        
-        await handleLocationUpdate(pos);
-      });
+      await addNativeWatcher();
       return; // Skip web fallback
     } catch (err) {
       console.error('Failed to start native background geolocation:', err);
@@ -446,34 +555,7 @@ async function startWatching() {
   await requestWakeLock();
 
   lastLocationUpdateTime = Date.now();
-  
-  const geoOptions = {
-    enableHighAccuracy: true,
-    maximumAge: 0, // Force instant fresh GPS hardware reading
-    timeout: 10000
-  };
-
-  const onGeoSuccess = handleLocationUpdate;
-
-  const onGeoError = (err) => {
-    console.warn(`Background Tracking Watch Error (Code ${err.code}): ${err.message}`);
-    
-    // Auto-recovery: If we lose GPS signal (timeout code 3, or position unavailable code 2)
-    // program a clean retry in 5 seconds to hook back when coverage returns
-    if (err.code === 3 || err.code === 2) {
-      if (!errorRetryTimeout) {
-        console.log('Background Tracking: GPS dropout detected. Scheduling self-healing retry in 5s...');
-        errorRetryTimeout = setTimeout(() => {
-          errorRetryTimeout = null;
-          if (currentActiveOrders.length > 0) {
-            restartWatching();
-          }
-        }, 5000);
-      }
-    }
-  };
-
-  locationWatchId = navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, geoOptions);
+  startWebWatch();
 
   // 4. Watchdog Timer: Wake up the GPS sensor if background throttling froze the watchPosition callback
   if (!watchdogInterval) {
@@ -481,28 +563,92 @@ async function startWatching() {
       const elapsed = Date.now() - lastLocationUpdateTime;
       if (currentActiveOrders.length > 0 && elapsed > 25000) {
         console.warn(`Background Tracking Watchdog: GPS sensor inactive for ${Math.round(elapsed / 1000)}s with active orders! Reviving sensor...`);
-        restartWatching();
+        restartWebWatch();
       }
     }, 15000); // Check every 15 seconds
   }
 }
 
-function restartWatching() {
-  console.log('Background Tracking: Executing forced clean watchPosition restart...');
-  stopWatching();
-  if (errorRetryTimeout) {
-    clearTimeout(errorRetryTimeout);
-    errorRetryTimeout = null;
+async function addNativeWatcher() {
+  const distanceFilter = nativeDistanceFilter();
+  nativeWatcherId = await BackgroundGeolocation.addWatcher({
+    backgroundMessage: "Rastreando ubicación para la entrega del pedido.",
+    backgroundTitle: "GO! Repartidor Activo",
+    requestPermissions: true,
+    stale: false,
+    distanceFilter
+  }, (location, error) => {
+    // On error the plugin calls back with no location (it used to throw here)
+    if (error || !location) {
+      if (error) console.warn('Background Tracking: native watcher error:', error?.code || error?.message || error);
+      return;
+    }
+    // Brings accuracy and the reading time too: the filter and the customer's map use them
+    onRawFix(location).catch(err => console.warn('Background Tracking: location update failed:', err));
+  });
+  nativeWatcherFilter = distanceFilter;
+}
+
+// An order came in or the last one ended: the native watcher switches distanceFilter (see
+// nativeDistanceFilter). The plugin can't change it on a running watcher, so it is replaced.
+let filterSyncing = false;
+async function syncNativeWatcherFilter() {
+  if (!nativeWatcherId || !BackgroundGeolocation || filterSyncing) return;
+  if (nativeWatcherFilter === nativeDistanceFilter()) return;
+  filterSyncing = true;
+  const oldId = nativeWatcherId;
+  try {
+    await addNativeWatcher(); // the new one first, so there's no gap without GPS
+    await BackgroundGeolocation.removeWatcher({ id: oldId }).catch(() => {});
+  } catch (err) {
+    console.warn('Background Tracking: could not switch the native watcher:', err);
+    nativeWatcherId = oldId;
+  } finally {
+    filterSyncing = false;
   }
-  startWatching();
+}
+
+function startWebWatch() {
+  const geoOptions = {
+    enableHighAccuracy: true,
+    maximumAge: 0, // Force instant fresh GPS hardware reading
+    timeout: 20000
+  };
+  // A timeout or a moment without signal doesn't end the watch: it keeps going and the next
+  // reading arrives by itself. Restarting it on every error (as before) also tore down the silent
+  // audio that keeps the iPhone PWA alive in the background, and that's what cut the tracking.
+  const onGeoError = (err) => console.warn(`Background Tracking Watch Error (Code ${err.code}): ${err.message}`);
+  locationWatchId = navigator.geolocation.watchPosition(
+    (pos) => { onRawFix(pos).catch(err => console.warn('Background Tracking: location update failed:', err)); },
+    onGeoError,
+    geoOptions
+  );
+}
+
+// Only the browser's GPS watch: the heartbeat, the wake lock and the silent audio stay on.
+function restartWebWatch() {
+  if (locationWatchId == null || !navigator.geolocation) return;
+  console.log('Background Tracking: Restarting the browser GPS watch...');
+  navigator.geolocation.clearWatch(locationWatchId);
+  lastLocationUpdateTime = Date.now();
+  startWebWatch();
 }
 
 function stopWatching() {
   console.log('Background Tracking: Deactivating active geolocation sensors and timers...');
   stopSilentAudioKeepAlive();
-  if (locationWatchId) {
+  stopHeartbeat();
+  if (locationWatchId != null) {
     navigator.geolocation.clearWatch(locationWatchId);
     locationWatchId = null;
+  }
+  // The native watcher used to stay on after the last order (battery) and, since its id was
+  // never cleared, startWatching() could never start a new one.
+  if (nativeWatcherId && BackgroundGeolocation) {
+    const id = nativeWatcherId;
+    nativeWatcherId = null;
+    BackgroundGeolocation.removeWatcher({ id }).catch((err) => console.warn('Background Tracking: removeWatcher failed:', err));
+    nativeWatcherFilter = null;
   }
   if (wakeLock) {
     wakeLock.release().then(() => wakeLock = null).catch(() => {});
@@ -511,10 +657,9 @@ function stopWatching() {
     clearInterval(watchdogInterval);
     watchdogInterval = null;
   }
-  if (errorRetryTimeout) {
-    clearTimeout(errorRetryTimeout);
-    errorRetryTimeout = null;
-  }
+  // The next shift starts clean (a point from the last one shouldn't count as "recent")
+  gpsFilter.reset();
+  lastGoodFix = null;
 }
 
 export function stopGlobalTracking() {

@@ -1,6 +1,6 @@
 // SOLO DESARROLLO: datos de prueba para ver el seguimiento en vivo con la app completa
 // (servidor vite.preview.config.js). Carga un cliente, un repartidor y un pedido, y simula
-// al repartidor moviéndose por las calles de Magdalena (manda su posición cada 3,5 s, como la app).
+// al repartidor moviéndose por las calles de Magdalena (manda su posición cada 2 s, como la app).
 //
 //   /#/pedido/demo?caso=comercio-en-camino   (casos: ver CASES abajo)
 import { mockDb, Timestamp } from 'firebase/firestore';
@@ -14,6 +14,9 @@ const AS_DRIVER = params.get('como') === 'repartidor';
 window.__mockAuthUser = AS_DRIVER
   ? { uid: 'repartidor-demo', email: 'repartidor@demo.test', displayName: 'Martín Gómez', getIdToken: async () => 'demo', emailVerified: true, providerData: [] }
   : { ...CLIENT, getIdToken: async () => 'demo', emailVerified: true, providerData: [] };
+
+// Con dirección de entrega ya elegida: si no, la app abre "¿Dónde entregamos?" encima del seguimiento
+try { if (!localStorage.getItem('gd-address')) localStorage.setItem('gd-address', 'Belgrano 355'); } catch (e) {}
 
 const ago = (min) => Timestamp.fromMillis(Date.now() - min * 60000);
 const HOME = { lat: -35.0835, lng: -57.5230 };           // Av. Mitre 820
@@ -71,9 +74,11 @@ if (moving) {
       const coords = data.routes?.[0]?.geometry?.coordinates || [[start.lng, start.lat], [target.lng, target.lat]];
       const pts = coords.map(([lng, lat]) => ({ lat, lng }));
       const m = (a, b) => Math.hypot((a.lat - b.lat) * 111000, (a.lng - b.lng) * 111000 * Math.cos(a.lat * Math.PI / 180));
-      // ~25 km/h: 24 m cada 3,5 s
+      // ~25 km/h: 14 m cada 2 s (como la app con un pedido en curso), con la hora de lectura
+      // del GPS (fixAt) y alguna demora de red distinta en cada dato
       let seg = 0, off = 0;
-      const step = 24;
+      // ?vel=6: el chofer anda 6 veces más rápido (para grabar videos sin esperar)
+      const step = 14 * (Number(params.get('vel')) || 1);
       const tick = () => {
         let left = step;
         while (seg < pts.length - 1 && left > 0) {
@@ -85,8 +90,9 @@ if (moving) {
         const t = Math.min(1, off / L);
         const noise = () => (Math.random() - 0.5) * 0.00004; // ±2 m
         const p = { lat: a.lat + (b.lat - a.lat) * t + noise(), lng: a.lng + (b.lng - a.lng) * t + noise() };
-        mockDb.set(`orders/${ORDER_ID}/live/driver`, { ...p, heading: 0, speed: 7, updatedAt: Timestamp.now() });
-        if (seg < pts.length - 1) setTimeout(tick, 3500);
+        const fixAt = Date.now();
+        setTimeout(() => mockDb.set(`orders/${ORDER_ID}/live/driver`, { ...p, heading: 0, speed: 7, fixAt, accuracy: 6, updatedAt: Timestamp.now() }), 100 + Math.random() * 700);
+        if (seg < pts.length - 1) setTimeout(tick, 2000);
       };
       setTimeout(tick, 2500);
     })
