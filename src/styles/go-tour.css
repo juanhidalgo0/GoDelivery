@@ -1,0 +1,29 @@
+/* Guía paso a paso (src/components/spotlight-tour.js): oscurece la pantalla y deja
+   iluminada la parte que se explica, con una tarjeta al lado. Encima de todo. */
+.go-tour { position: fixed; inset: 0; z-index: 20002000; }
+.go-tour-hole {
+  position: fixed; border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(11, 11, 12, 0.68);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+.go-tour-card {
+  position: fixed; width: min(340px, calc(100vw - 24px));
+  background: var(--go-card, #fff); color: var(--go-text, #0b0b0c);
+  border-radius: 18px; padding: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  transition: top 0.3s ease, bottom 0.3s ease, left 0.3s ease;
+  font-family: var(--font-body, 'Inter', system-ui, sans-serif);
+}
+.go-tour-count { font: 800 11px/1 var(--go-font, sans-serif); letter-spacing: 0.08em; text-transform: uppercase; color: var(--go-red, #e11d48); margin-bottom: 6px; }
+.go-tour-title { font: 800 18px/1.2 var(--go-font, sans-serif); margin: 0 0 6px; color: var(--go-text, #0b0b0c); }
+.go-tour-text { font-size: 14.5px; line-height: 1.45; color: var(--go-text-2, #57534e); margin: 0 0 14px; }
+.go-tour-actions { display: flex; align-items: center; gap: 6px; }
+.go-tour-btn {
+  min-height: 40px; padding: 0 14px; border-radius: 12px;
+  border: 1.5px solid var(--go-line, #e4dfd6); background: var(--go-card, #fff); color: var(--go-text, #0b0b0c);
+  font: 700 13.5px/1 var(--font-body, 'Inter', sans-serif); cursor: pointer;
+}
+.go-tour-btn:active { transform: scale(0.97); }
+.go-tour-btn.is-ghost { border-color: transparent; background: transparent; color: var(--go-text-2, #57534e); }
+.go-tour-btn.is-primary { background: var(--go-red, #e11d48); border-color: var(--go-red, #e11d48); color: #fff; }

@@ -28,13 +28,13 @@ const MESSAGES = {
   },
   comercio: {
     eyebrow: 'Novedades para tu comercio',
-    title: 'GO! estrena imagen',
+    title: 'Tu panel es nuevo',
     body: `
-      <p>La app tiene un diseño nuevo. Tu panel y tus pedidos funcionan igual que siempre.</p>
+      <p>Lo rediseñamos para que atender sea más rápido. Al entrar te mostramos cómo se usa.</p>
       <ul class="go-bsheet-list">
-        ${row('store', 'Tu tienda luce mejor', 'Tus productos y tu marca se ven más prolijos para tus clientes.')}
-        ${row('clipboard', 'Mismo panel', 'Pedidos, productos y horarios, donde siempre.')}
-        ${row('chat', '¿Algo raro?', 'Escribinos desde Soporte y lo resolvemos.')}
+        ${row('clipboard', 'Todo en 5 pestañas', 'Pedidos, Menú, Promos, Números y Local, siempre abajo.')}
+        ${row('clock', 'Aceptás diciendo cuánto tardás', 'El cliente ve la hora en que va a estar listo.')}
+        ${row('store', 'Sin comisión', 'Por ahora usás GO! gratis: todo lo que vendés es tuyo.')}
       </ul>`,
   },
   delivery: {
