@@ -1,6 +1,7 @@
 // GoDelivery — Public Live Tracking Page for WhatsApp Clients
 import { db } from '../firebase.js';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { createRiderMotion } from '../utils/rider-motion.js';
 
 export function renderPublicWATracking(container, orderId) {
   if (!container) container = document.getElementById('app-content');
@@ -46,6 +47,10 @@ export function renderPublicWATracking(container, orderId) {
 
   let map = null;
   let driverMarker = null;
+  let motion = null;       // moves the marker smoothly between positions (utils/rider-motion.js)
+  let liveMs = 0;          // updatedAt of the last position from the live doc
+  let lastPlacedKey = '';
+  const msOf = (t) => (t?.toMillis ? t.toMillis() : (t ? new Date(t).getTime() : 0));
 
   const loadLeaflet = () => {
     if (window.L) {
@@ -103,34 +108,57 @@ export function renderPublicWATracking(container, orderId) {
         }
       }
 
-      if (data.driverLocation && data.driverLocation.lat && data.driverLocation.lng && map) {
-        placeDriver(data.driverLocation.lat, data.driverLocation.lng);
-      }
+      // The order doc's copy is up to 30s old: taking it on every change to the order (status,
+      // chat...) sent the moto back and then forward again. Only if the live doc went quiet.
+      const loc = data.driverLocation;
+      if (loc && loc.lat && loc.lng && map && msOf(loc.updatedAt) > liveMs + 20000) placeDriver(loc);
     });
 
     // Every few seconds from orders/{id}/live/driver; the order doc above only gets it every 30s.
-    onSnapshot(doc(db, 'orders', orderId, 'live', 'driver'), (liveSnap) => {
-      const live = liveSnap.exists() ? liveSnap.data() : null;
-      if (live && live.lat && live.lng && map) placeDriver(live.lat, live.lng);
-    }, () => {});
+    // Restarted after an error (a dead listener left the page on the 30-second copy).
+    let liveAttempts = 0;
+    const listenLive = () => {
+      onSnapshot(doc(db, 'orders', orderId, 'live', 'driver'), (liveSnap) => {
+        liveAttempts = 0;
+        const live = liveSnap.exists() ? liveSnap.data() : null;
+        if (live && live.lat && live.lng && map) {
+          liveMs = msOf(live.updatedAt) || Date.now();
+          placeDriver(live);
+        }
+      }, () => {
+        liveAttempts++;
+        setTimeout(listenLive, Math.min(2000 * liveAttempts, 30000));
+      });
+    };
+    listenLive();
   };
 
-  const placeDriver = (dLat, dLng) => {
-      {
+  const placeDriver = (loc) => {
+    const dLat = Number(loc.lat), dLng = Number(loc.lng);
+    const fixAt = Number.isFinite(loc.fixAt) ? loc.fixAt : undefined;
+    const key = `${fixAt ?? msOf(loc.updatedAt)}|${dLat}|${dLng}`;
+    if (key === lastPlacedKey) return;
+    lastPlacedKey = key;
 
-        if (!driverMarker) {
-          const bikeIcon = L.divIcon({
-            html: '<div style="background:#25D366; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:18px; box-shadow:0 4px 12px rgba(0,0,0,0.4); border:2px solid white;">🚴</div>',
-            className: '',
-            iconSize: [36, 36],
-            iconAnchor: [18, 18]
-          });
-          driverMarker = L.marker([dLat, dLng], { icon: bikeIcon }).addTo(map);
-        } else {
-          driverMarker.setLatLng([dLat, dLng]);
-        }
-        map.panTo([dLat, dLng]);
-      }
+    if (!driverMarker) {
+      const bikeIcon = L.divIcon({
+        html: '<div style="background:#25D366; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:18px; box-shadow:0 4px 12px rgba(0,0,0,0.4); border:2px solid white;">🚴</div>',
+        className: '',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      });
+      driverMarker = L.marker([dLat, dLng], { icon: bikeIcon }).addTo(map);
+      motion = createRiderMotion({
+        setPosition: (p) => driverMarker.setLatLng([p.lat, p.lng]),
+        setHeading: () => {},
+        setRemainingRoute: () => {},
+      });
+      map.panTo([dLat, dLng]);
+    } else if (!map.getBounds().pad(-0.15).contains([dLat, dLng])) {
+      // Follows only when the moto leaves the view: panning on every point fought the user's zoom
+      map.panTo([dLat, dLng]);
+    }
+    motion.push({ lat: dLat, lng: dLng, t: fixAt });
   };
 
   loadLeaflet();
