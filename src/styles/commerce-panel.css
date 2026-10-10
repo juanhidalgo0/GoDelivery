@@ -100,6 +100,9 @@ body.cp-open #comercio-mute-alarm-pill { display: none !important; }
   padding: 12px 14px 10px;
   margin: 0 auto;
   max-width: 760px;
+  /* El fondo sigue de borde a borde: lo que se desplaza por debajo no asoma por los costados */
+  box-shadow: 0 0 0 100vmax var(--go-paper);
+  clip-path: inset(0 -100vmax);
 }
 
 /* ---------- Barra inferior ---------- */
@@ -335,6 +338,9 @@ body.cp-open #comercio-mute-alarm-pill { display: none !important; }
 .cp-undo button { background: none; border: 0; color: #fda4af; font: 800 14px var(--go-font); cursor: pointer; padding: 8px 10px; }
 
 @media (min-width: 900px) {
+  /* La barra de arriba de Pedidos mide lo mismo que las tres columnas */
+  #cp-orders-top { max-width: 1200px; }
+  #cp-orders-top .cp-orders-seg + .cp-chips { margin-top: 0 !important; }
   .cp-orders-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
   .cp-col { display: block; }
   .cp-orders-col-title { display: flex !important; }
@@ -433,6 +439,7 @@ body.cp-open #comercio-mute-alarm-pill { display: none !important; }
   .cp-page { padding: 24px 28px 40px; max-width: 980px; }
   .cp-page.is-wide { max-width: 1400px; }
   .cp-sticky { padding: 20px 28px 12px; max-width: 980px; }
+  #cp-orders-top { max-width: 1400px; }
 
   .cp-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
   .cp-metric { padding: 16px; }
