@@ -5,13 +5,19 @@ import { AudioManager } from '../utils/audio-manager.js';
 import { showToast } from '../components/toast.js';
 import { db } from '../firebase.js';
 import { doc, getDoc, getDocs, collection, runTransaction } from 'firebase/firestore';
-import { driverTokens, orderKind, kindTag, countdownRing, RING_C, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, kmBetween, kmLabel, pickupCoordsOf, dropoffCoordsOf, goCashInfo } from './driver-ui.js';
+import { driverTokens, orderKind, kindTag, countdownRing, RING_C, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, kmBetween, kmLabel, pickupCoordsOf, dropoffCoordsOf, goCashInfo, discountRow } from './driver-ui.js';
 import { mandadoShoppingPlan, isPlaceholderCoords, categoryLabel } from '../utils/mandado-places.js';
 
 export function isOrderEncomienda(order) {
   if (!order) return false;
   const isEncoFlag = Boolean(order.isEncomienda || order.isPackage || order.packageType || order.serviceType === 'encomienda' || order.type === 'encomienda');
   const itemsText = (order.itemsText || order.details || order.description || '').toLowerCase();
+  // Un mandado de compras ("1. Comercio: …") puede pedir "un paquete de galletitas" o "una caja de
+  // leche": esas palabras no lo vuelven encomienda.
+  // La app crea las encomiendas con favorType 'mandado' (las compras son 'compra')
+  if (order.favorType === 'mandado' && !(Array.isArray(order.mandadoStops) && order.mandadoStops.length) && !/comercio:/.test(itemsText)) return true;
+  const isShoppingErrand = order.favorType === 'compra' || /comercio:/.test(itemsText) || (Array.isArray(order.mandadoStops) && order.mandadoStops.length > 0);
+  if (isShoppingErrand) return isEncoFlag;
   const hasEncoKeywords = itemsText.includes('encomienda') || itemsText.includes('paquete') || itemsText.includes('caja') || itemsText.includes('bulto');
   return isEncoFlag || hasEncoKeywords;
 }
@@ -262,24 +268,24 @@ export function showExclusiveOfferOverlay(batch, user) {
 
   if (isGoCash) {
     typeBadgeLabel = 'GO CASH';
-    typeBadgeIcon = `<img src="/go-cash.png?v=5" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Go Cash" />`;
+    typeBadgeIcon = `<img src="/go-cash.png?v=7" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Go Cash" />`;
     typeBadgeBg = isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.18)';
     typeBadgeBorder = isLight ? '#a7f3d0' : 'rgba(16, 185, 129, 0.5)';
     typeBadgeColor = isLight ? '#059669' : '#34d399';
     typeBadgeSub = orderObj.details || orderObj.description || 'Entrega de dinero en efectivo';
 
-    originIcon = `<img src="/go-cash.png?v=5" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Go Cash" />`;
+    originIcon = `<img src="/go-cash.png?v=7" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Go Cash" />`;
     originTitle = orderObj.pickupAddress || orderObj.originAddress || 'Punto de retiro de efectivo';
     originSubtitle = `Monto: ${money(goCashInfo(orderObj).amount)}`;
   } else if (isPagoServicios) {
     typeBadgeLabel = 'PAGO DE SERVICIO';
-    typeBadgeIcon = `<img src="/go-clipboard.png?v=5" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Pago de Servicios" />`;
+    typeBadgeIcon = `<img src="/go-clipboard.png?v=7" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Pago de Servicios" />`;
     typeBadgeBg = isLight ? '#eff6ff' : 'rgba(59, 130, 246, 0.18)';
     typeBadgeBorder = isLight ? '#bfdbfe' : 'rgba(59, 130, 246, 0.5)';
     typeBadgeColor = isLight ? '#2563eb' : '#60a5fa';
     typeBadgeSub = orderObj.details || orderObj.description || 'Pago de impuestos o facturas';
 
-    originIcon = `<img src="/go-clipboard.png?v=5" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Pago de Servicios" />`;
+    originIcon = `<img src="/go-clipboard.png?v=7" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Pago de Servicios" />`;
     originTitle = orderObj.pickupAddress || orderObj.originAddress || 'Punto de retiro de factura / fondos';
     originSubtitle = orderObj.serviceName || orderObj.companyName || 'Gestión de cobro y pago';
   } else if (isTrip) {
@@ -295,25 +301,25 @@ export function showExclusiveOfferOverlay(batch, user) {
     originSubtitle = `Pasajero: ${orderObj.userName || 'Pasajero'}`;
   } else if (isEncomienda) {
     typeBadgeLabel = 'ENCOMIENDA';
-    typeBadgeIcon = `<img src="/go-pickup-point.png?v=5" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Encomienda" />`;
+    typeBadgeIcon = `<img src="/go-pickup-point.png?v=7" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="Encomienda" />`;
     typeBadgeBg = isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.18)';
     typeBadgeBorder = isLight ? '#fde68a' : 'rgba(245, 158, 11, 0.5)';
     typeBadgeColor = isLight ? '#b45309' : '#fbbf24';
     typeBadgeSub = cleanMandadoText(orderObj.details || orderObj.description || orderObj.itemsText || 'Envío de paquete o encomienda');
 
-    originIcon = `<img src="/go-pickup-point.png?v=5" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Encomienda" />`;
+    originIcon = `<img src="/go-pickup-point.png?v=7" style="width:34px; height:34px; object-fit:contain; display:block;" alt="Encomienda" />`;
     originTitle = orderObj.pickupAddress || orderObj.originAddress || 'Dirección de Retiro';
     originSubtitle = cleanMandadoText(orderObj.details || orderObj.description || orderObj.itemsText || 'Paquete a retirar');
   } else if (isMandado) {
     const parsedM = parseMandadoDetails(orderObj.description || orderObj.itemsText || orderObj.notes || orderObj.details, orderObj.comercioName || orderObj.originAddress);
     typeBadgeLabel = 'MANDADO';
-    typeBadgeIcon = `<img src="/go-bag.png?v=6" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="GO! Mandado" />`;
+    typeBadgeIcon = `<img src="/go-bag.png?v=7" style="width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.18));" alt="GO! Mandado" />`;
     typeBadgeBg = isLight ? '#faf5ff' : 'rgba(168, 85, 247, 0.18)';
     typeBadgeBorder = isLight ? '#e9d5ff' : 'rgba(168, 85, 247, 0.5)';
     typeBadgeColor = isLight ? '#7e22ce' : '#c084fc';
     typeBadgeSub = parsedM.items || 'Compra en local / trámite';
 
-    originIcon = `<img src="/go-bag.png?v=6" style="width:34px; height:34px; object-fit:contain; display:block;" alt="GO! Mandado" />`;
+    originIcon = `<img src="/go-bag.png?v=7" style="width:34px; height:34px; object-fit:contain; display:block;" alt="GO! Mandado" />`;
     originTitle = parsedM.comercio || orderObj.comercioName || 'Local de compra';
     originSubtitle = parsedM.items || 'Compra solicitada por el cliente';
   } else {
@@ -323,15 +329,15 @@ export function showExclusiveOfferOverlay(batch, user) {
     const itemsList = Array.isArray(orderObj.items) ? orderObj.items : (Array.isArray(orderObj.products) ? orderObj.products : []);
 
     typeBadgeLabel = 'COMERCIO';
-    typeBadgeIcon = `<img src="${commerceLogo}" onerror="this.onerror=null; this.src='/go-bag.png?v=6';" style="width:44px; height:44px; border-radius:12px; object-fit:cover; display:block; box-shadow:0 3px 10px rgba(0,0,0,0.18);" alt="${commerceName}" />`;
+    typeBadgeIcon = `<img src="${commerceLogo}" onerror="this.onerror=null; this.src='/go-bag.png?v=7';" style="width:44px; height:44px; border-radius:12px; object-fit:cover; display:block; box-shadow:0 3px 10px rgba(0,0,0,0.18);" alt="${commerceName}" />`;
     typeBadgeBg = isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.16)';
     typeBadgeBorder = isLight ? '#fecdd3' : 'rgba(225, 29, 72, 0.45)';
     typeBadgeColor = isLight ? '#be123c' : '#fb7185';
     typeBadgeSub = `${commerceName} • Pedido en local`;
 
-    originIcon = `<img src="${commerceLogo}" onerror="this.onerror=null; this.src='/go-bag.png?v=6';" style="width:34px; height:34px; border-radius:8px; object-fit:cover; display:block;" alt="${commerceName}" />`;
+    originIcon = `<img src="${commerceLogo}" onerror="this.onerror=null; this.src='/go-bag.png?v=7';" style="width:34px; height:34px; border-radius:8px; object-fit:cover; display:block;" alt="${commerceName}" />`;
     originTitle = commerceName;
-    originSubtitle = itemsList.length > 0 ? itemsList.map(it => `${it.quantity || it.cant || 1}x ${it.name || it.title}`).join(', ') : (orderObj.comercioAddress || 'Pedido en local');
+    originSubtitle = itemsList.length > 0 ? itemsList.map(it => `${it.qty || it.quantity || it.cant || 1}x ${it.name || it.title}`).join(', ') : (orderObj.comercioAddress || 'Pedido en local');
   }
 
   const destAddress = batch.isBundle ? batch.orders.map(o => o.destinationAddress || o.address || o.deliveryAddress).join(' • ') : (orderObj.destinationAddress || orderObj.address || orderObj.deliveryAddress || 'Dirección de entrega');
@@ -432,6 +438,9 @@ export function showExclusiveOfferOverlay(batch, user) {
     } else {
       rows.push(moneyRow({ label: isTrip ? 'Cobrás al terminar' : 'Cobrás por transferencia', amount: money(orderTotal), sub: 'A tu alias, cuando recibe el pedido', tone: 'amber', icon: 'swap' }, isLight));
     }
+    // GoPoints / cupón: el total ya viene con el descuento restado
+    const discount = discountRow(batch.isBundle ? batch.orders : orderObj, isLight);
+    if (discount) rows.push(discount);
   }
   if (orderObj.isScheduled) {
     rows.push(infoRow('calendar', `Programado: ${orderObj.scheduledDate || ''} a las ${orderObj.scheduledTime || ''} hs`, isLight, 'brand'));
@@ -492,7 +501,8 @@ export function showExclusiveOfferOverlay(batch, user) {
       </div>
       ${stopsList(stops, isLight)}
       ${rows.join('')}
-      <div style="display: flex; gap: 10px;">
+      <!-- Siempre a la vista: con varias paradas la tarjeta se desplaza, los botones quedan fijos abajo -->
+      <div style="display: flex; gap: 10px; position: sticky; bottom: calc(-20px - max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); margin: 0 -20px calc(-20px - max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); padding: 12px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); background: ${t.sheet}; border-top: 1px solid ${t.line}; z-index: 2;">
         <button id="fullscreen-reject-offer-btn" style="height: 56px; padding: 0 18px; border-radius: 16px; background: ${t.card}; border: 1px solid ${t.line}; color: ${t.tx2}; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;">Rechazar</button>
         <button id="fullscreen-accept-offer-btn" style="flex: 1; height: 56px; border-radius: 16px; background: ${t.brand}; color: #FFFFFF; border: 0; font-family: var(--font-display, 'Outfit', sans-serif); font-size: 18px; font-weight: 600; cursor: pointer;">${esc(acceptLabel)}</button>
       </div>

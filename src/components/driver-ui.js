@@ -44,6 +44,7 @@ const PATHS = {
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/>',
   receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
 };
 
 export function dIcon(name, size = 20, color = 'currentColor', sw = 2) {
@@ -109,8 +110,8 @@ export function stopsList(items, isLight) {
     const body = `<span style="display:flex;gap:12px;text-align:left">
       <span style="width:26px;display:flex;flex-direction:column;align-items:center;flex-shrink:0">${badge}${line}</span>
       <span style="flex:1;min-width:0;padding:3px 0 ${i < n - 1 ? 12 : 0}px">
-        <span style="display:block;font-size:15px;font-weight:${now ? 700 : 600};color:${titleColor};${done ? 'text-decoration:line-through;' : ''}overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)}</span>
-        ${s.sub ? `<span style="display:-webkit-box;font-size:13px;color:${t.tx3};margin-top:2px;line-height:1.35;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(s.sub)}</span>` : ''}
+        <span style="display:block;font-size:15px;font-weight:${now ? 700 : 600};color:${titleColor};${done ? 'text-decoration:line-through;' : ''}line-height:1.3;overflow-wrap:anywhere">${esc(s.title)}</span>
+        ${s.sub ? `<span style="display:block;font-size:13.5px;color:${now ? t.tx2 : t.tx3};margin-top:2px;line-height:1.4;overflow-wrap:anywhere">${esc(s.sub)}</span>` : ''}
       </span>
     </span>`;
     return s.tab
@@ -145,6 +146,39 @@ export function infoRow(icon, text, isLight, tone) {
   const fg = tone === 'green' ? t.greenTx : tone === 'brand' ? t.brandTx : t.tx2;
   const bg = tone === 'green' ? t.greenBg : t.card;
   return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:${bg};color:${fg};font-size:14px;font-weight:500;line-height:1.35">${dIcon(icon, 18, fg)}<span style="min-width:0">${esc(text)}</span></div>`;
+}
+
+/**
+ * GoPoints y cupones de uno o varios pedidos. El servidor guarda los GoPoints canjeados en
+ * pesos en `discountAmount` (y la cantidad en `pointsRedeemed`) y el cupón en
+ * `couponDiscount` / `couponCode`. Los dos ya vienen restados del total.
+ */
+export function orderDiscounts(orders) {
+  const list = (Array.isArray(orders) ? orders : [orders]).filter(Boolean);
+  const points = list.reduce((s, o) => s + (Number(o.discountAmount) || 0), 0);
+  const coupon = list.reduce((s, o) => s + (Number(o.couponDiscount) || 0), 0);
+  const codes = [...new Set(list.map(o => o.couponCode).filter(Boolean))];
+  return { points, coupon, codes, total: points + coupon };
+}
+
+/** Aviso para el repartidor: el cliente usó GoPoints o un cupón y el total ya lo tiene restado. */
+export function discountRow(orders, isLight) {
+  const d = orderDiscounts(orders);
+  if (!(d.total > 0)) return '';
+  const t = driverTokens(isLight);
+  const fg = isLight ? '#6D28D9' : '#A78BFA';
+  const bg = isLight ? '#EDE9FE' : 'rgba(167,139,250,.14)';
+  const parts = [];
+  if (d.points > 0) parts.push(`GoPoints − ${money(d.points)}`);
+  if (d.coupon > 0) parts.push(`${d.codes.length ? `Cupón ${d.codes.join(', ')}` : 'Cupón'} − ${money(d.coupon)}`);
+  const sub = `Ya está restado del total: cobrá solo ese monto. GO te lo reintegra en tu cuenta.`;
+  return `<div class="driver-discount-row" style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:16px;background:${bg}">
+    <span style="width:38px;height:38px;border-radius:12px;background:${isLight ? 'rgba(255,255,255,.7)' : 'rgba(0,0,0,.25)'};color:${fg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${dIcon('tag', 19, fg)}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:700;color:${fg}">${parts.map(p => `<span style="white-space:nowrap">${esc(p)}</span>`).join(' · ')}</div>
+      <div style="font-size:12px;color:${t.tx2};margin-top:2px;line-height:1.35">${esc(sub)}</div>
+    </div>
+  </div>`;
 }
 
 export const isCashPayment = (o = {}) => {

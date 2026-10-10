@@ -66,10 +66,19 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
     }
   }
 
+  // En PC la hoja que sube desde abajo queda como ventana centrada
+  const isDesktopDialog = !isFullscreen && !slideFromRight && window.matchMedia('(min-width: 1024px)').matches;
+  if (isDesktopDialog) {
+    if (!/(vh|px)$/.test(height)) finalHeight = 'auto';
+    marginTopStyle = 'margin-top: auto; margin-bottom: auto;';
+    maxHStyle = `max-height: ${Math.round(baseHeight * 0.9)}px !important;`;
+    borderRadiusStyle = '24px';
+  }
+
   modalWrapper.innerHTML = `
     <div class="modal-overlay" id="${modalId}-overlay" style="
       position:fixed; top:0; left:0; width:100%; height:100lvh; background:rgba(11,11,12,${slideFromRight ? '0.2' : (isFullscreen ? '1' : '0.5')});
-      display:flex !important; align-items:${slideFromRight ? 'stretch' : (isFullscreen ? 'stretch' : 'flex-start')} !important; justify-content:${slideFromRight ? 'flex-end' : 'center'} !important;
+      display:flex !important; align-items:${slideFromRight ? 'stretch' : (isFullscreen ? 'stretch' : (isDesktopDialog ? 'center' : 'flex-start'))} !important; justify-content:${slideFromRight ? 'flex-end' : 'center'} !important;
       animation: fadeIn 0.25s ease-out !important;
       will-change: background;
     ">
@@ -78,7 +87,7 @@ export function showModal({ title, content, footer, onOpen, onClose, hideHeader 
         height:${finalHeight} !important; ${modalMargin.replace(';', ' !important;')} overflow:hidden !important; position:relative !important; display:flex !important; flex-direction:column !important;
         animation: ${modalAnimation} 0.35s cubic-bezier(0.16, 1, 0.3, 1) both !important;
         box-shadow: ${isFullscreen ? 'none' : '0 -12px 60px rgba(0,0,0,0.35)'} !important;
-        ${marginTopStyle.replace(';', ' !important;')}
+        ${marginTopStyle.replaceAll(';', ' !important;')}
         will-change: transform, opacity;
         transform: translateZ(0);
       ">

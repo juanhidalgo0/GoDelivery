@@ -93,8 +93,36 @@ export function getArgentinaTime() {
   }
 }
 
-export function isShopOpen(schedules, daysOpen) {
+const toMinutes = (hhmm) => {
+  const [h, m] = String(hhmm || '').split(':').map(Number);
+  return Number.isNaN(h) || Number.isNaN(m) ? null : h * 60 + m;
+};
+
+// Horario por día: { "0": [{open, close}], ..., "6": [] } (0 = domingo, lista vacía = cerrado).
+// Un turno que pasa la medianoche (vie 19:00–01:00) sigue abierto el sábado a las 00:30.
+export function isOpenByWeeklySchedule(weekly, now = getArgentinaTime()) {
+  const day = now.getDay();
+  const t = now.getHours() * 60 + now.getMinutes();
+  const slotsOf = (d) => (Array.isArray(weekly[String(d)]) ? weekly[String(d)] : []);
+  const today = slotsOf(day).some(s => {
+    const o = toMinutes(s?.open), c = toMinutes(s?.close);
+    if (o === null || c === null) return false;
+    return c < o ? t >= o : t >= o && t <= c;
+  });
+  if (today) return true;
+  return slotsOf((day + 6) % 7).some(s => {
+    const o = toMinutes(s?.open), c = toMinutes(s?.close);
+    return o !== null && c !== null && c < o && t <= c;
+  });
+}
+
+export function hasWeeklySchedule(weekly) {
+  return !!weekly && typeof weekly === 'object' && Object.keys(weekly).length > 0;
+}
+
+export function isShopOpen(schedules, daysOpen, weeklySchedule = null) {
   const now = getArgentinaTime();
+  if (hasWeeklySchedule(weeklySchedule)) return isOpenByWeeklySchedule(weeklySchedule, now);
   if (Array.isArray(daysOpen) && daysOpen.length > 0) {
     const currentDay = now.getDay();
     if (!daysOpen.includes(currentDay)) return false;

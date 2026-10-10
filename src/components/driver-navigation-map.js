@@ -13,6 +13,7 @@ let autoRecenterTimer = null;
 let driverHistoryCoords = [];
 let fullRoutePathCoords = [];
 let activeRoutePathCoords = [];
+let lastFollowRouteSliceAt = 0;
 let activeRouteManeuverSteps = [];
 let currentManeuverStepIndex = 0;
 let currentRouteVertexIndex = 0;
@@ -467,6 +468,13 @@ export function renderRouteHud() {}
 
 export async function initDriverNavigationMap(container) {
   if (!container) return null;
+  // La librería se carga antes de cerrar el mapa anterior y crear el nuevo, así eso pasa sin
+  // esperas en el medio. Antes la espera estaba en el medio: dos llamadas juntas (el panel se
+  // dibuja varias veces al abrir) cerraban "el anterior" cuando todavía no había ninguno y después
+  // cada una creaba el suyo: 3 mapas apilados en el panel, con su memoria gráfica, toda la jornada.
+  if (!maplibregl) {
+    try { maplibregl = await getMapLibre(); } catch (e) { console.error('[DriverMap] MapLibre no cargó:', e); return null; }
+  }
 
   const targetContainer = typeof container === 'string' ? document.getElementById(container) : container;
   if (!targetContainer) return null;
@@ -524,9 +532,6 @@ export async function initDriverNavigationMap(container) {
   const initialStyle = currentTheme === 'light' ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
 
   try {
-    if (!maplibregl) {
-      maplibregl = await getMapLibre();
-    }
     const MapLibreMap = maplibregl.Map || maplibregl.default?.Map || (typeof window !== 'undefined' && window.maplibregl?.Map);
     if (!MapLibreMap) {
       throw new Error('MapLibre Map constructor not found');
@@ -555,8 +560,11 @@ export async function initDriverNavigationMap(container) {
 
     // User touch / pan / zoom interaction tracking (pauses auto-follow for 7 seconds)
     const onUserInteract = (e) => {
-      // Solo cuenta si lo movió el repartidor (no los movimientos automáticos del seguimiento)
-      if (e && e.type === 'movestart' && !e.originalEvent) return;
+      // Solo cuenta si lo movió el repartidor (no los movimientos automáticos del seguimiento).
+      // Antes se filtraba solo 'movestart': el jumpTo del seguimiento cambia zoom, giro e
+      // inclinación y sus zoomstart/rotatestart/pitchstart se tomaban como "el usuario tocó el
+      // mapa", así que la cámara dejaba de seguir a la moto y solo volvía cada 7 segundos.
+      if (e && !e.originalEvent) return;
       if (e && e.originalEvent) window.dispatchEvent(new CustomEvent('driver-map-user-moved'));
       isUserInteracting = true;
       if (autoRecenterTimer) clearTimeout(autoRecenterTimer);
@@ -637,6 +645,9 @@ export async function initDriverNavigationMap(container) {
     if (!window._driverLocationTickBound) {
       window._driverLocationTickBound = true;
       const handleGpsTick = (e) => {
+        // In the admin's "vista del repartidor" the map shows the driver's phone position; the
+        // GPS of the device it's open on (an admin who is also a driver) must not move it.
+        if (window.__driverMirrorActive) return;
         if (e.detail && e.detail.coords) {
           window.lastRiderPos = e.detail.coords;
           updateDriverMapLocation(e.detail.coords, e.detail.heading || 0);
@@ -927,14 +938,25 @@ function getRemainingRouteCoords(currentLngLat, routeCoords) {
     }
   }
 
+  // Start from the closest point ON the route, not from the raw GPS point: a few metres off the
+  // street, the line used to go diagonally to the next vertex (often the corner), across the block.
+  const p1 = routeCoords[bestIndex], p2 = routeCoords[bestIndex + 1];
+  const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+  const lenSq = dx * dx + dy * dy;
+  const t = lenSq > 0 ? Math.max(0, Math.min(1, ((cLng - p1[0]) * dx + (cLat - p1[1]) * dy) / lenSq)) : 0;
+  const onRoute = [p1[0] + t * dx, p1[1] + t * dy];
   const remaining = routeCoords.slice(bestIndex + 1);
   if (remaining.length === 0) {
-    return [currentLngLat, routeCoords[routeCoords.length - 1]];
+    return [onRoute, routeCoords[routeCoords.length - 1]];
   }
-  return [currentLngLat, ...remaining];
+  return [onRoute, ...remaining];
 }
 
-export function updateDriverMapLocation(coords, heading = 0) {
+// opts.follow: the admin's "vista del repartidor", fed every frame by the smooth motion engine
+// (utils/rider-motion.js) instead of raw GPS ticks: steady zoom, no speed readout, no voice,
+// turn guidance or rerouting (the mirror reroutes by itself).
+export function updateDriverMapLocation(coords, heading = 0, opts = {}) {
+  const follow = opts.follow === true;
   if (!driverMap || !driverMap.getContainer() || !coords) return;
   const latNum = Number(coords.lat);
   const lngNum = Number(coords.lng);
@@ -943,7 +965,9 @@ export function updateDriverMapLocation(coords, heading = 0) {
 
   // Compute real speed in km/h from device sensor or delta distance/time
   let currentSpeedKmh = 0;
-  if (coords.speed !== undefined && coords.speed !== null && coords.speed >= 0) {
+  if (follow) {
+    // no speed readout in follow mode
+  } else if (coords.speed !== undefined && coords.speed !== null && coords.speed >= 0) {
     currentSpeedKmh = Math.round(coords.speed * 3.6);
   } else if (lastDriverPos) {
     const now = Date.now();
@@ -954,8 +978,10 @@ export function updateDriverMapLocation(coords, heading = 0) {
     }
     window._lastSpeedCalcTime = now;
   }
-  window.currentDriverSpeedKmh = currentSpeedKmh;
-  window.dispatchEvent(new CustomEvent('driver-speed-update', { detail: { speedKmh: currentSpeedKmh } }));
+  if (!follow) {
+    window.currentDriverSpeedKmh = currentSpeedKmh;
+    window.dispatchEvent(new CustomEvent('driver-speed-update', { detail: { speedKmh: currentSpeedKmh } }));
+  }
 
   const prevPos = lastDriverPos;
   lastDriverPos = coords;
@@ -1021,7 +1047,11 @@ export function updateDriverMapLocation(coords, heading = 0) {
   let dynamicZoom = 17.6;
   let dynamicPitch = 52;
 
-  if (currentSpeed > 35) {
+  if (follow) {
+    // Steady camera: a zoom that changes with a computed speed made it pump in and out
+    dynamicZoom = 17.0;
+    dynamicPitch = 50;
+  } else if (currentSpeed > 35) {
     dynamicZoom = 16.4;
     dynamicPitch = 54;
   } else if (currentSpeed > 15) {
@@ -1093,7 +1123,7 @@ export function updateDriverMapLocation(coords, heading = 0) {
   }
 
   // Automatic Off-Route Detection & Dynamic Rerouting
-  if (!isSimulationActive && hasActiveRoute && activeRoutePathCoords.length >= 2 && lastActiveOrderRouteParams) {
+  if (!follow && !isSimulationActive && hasActiveRoute && activeRoutePathCoords.length >= 2 && lastActiveOrderRouteParams) {
     const offRouteDist = getMinDistanceToRouteMeters(coords, activeRoutePathCoords);
     const now = Date.now();
     if (offRouteDist > 38) {
@@ -1112,15 +1142,18 @@ export function updateDriverMapLocation(coords, heading = 0) {
   }
 
   // Update dynamic step-by-step turn guidance and voice
-  if (hasActiveRoute && activeRouteManeuverSteps.length > 0) {
+  if (!follow && hasActiveRoute && activeRouteManeuverSteps.length > 0) {
     const remainingMeters = (isSimulationActive && simDensePoints.length > 0)
       ? Math.max(0, Math.round((simDensePoints.length - 1 - simCurrentIndex) * 1.0))
       : null;
     updateDynamicManeuverState(lngLat, remainingMeters, lastActiveOrderRouteParams?.targetStage || 'pickup');
   }
 
-  // Slice forward remaining route from driver's current position to destination
-  if (fullRoutePathCoords && fullRoutePathCoords.length >= 2) {
+  // Slice forward remaining route from driver's current position to destination. In follow mode
+  // this runs every frame: re-uploading the line ~7 times a second is plenty and keeps it smooth.
+  const sliceNow = Date.now();
+  if (fullRoutePathCoords && fullRoutePathCoords.length >= 2 && (!follow || sliceNow - lastFollowRouteSliceAt >= 150)) {
+    lastFollowRouteSliceAt = sliceNow;
     activeRoutePathCoords = getRemainingRouteCoords(lngLat, fullRoutePathCoords);
     updateWebGlSource(activeRoutePathCoords);
   }
@@ -1887,6 +1920,11 @@ export function renderDemandHotspots(hotspotsData = null) {
 
 export function checkAutoSolarTheme() {
   // 100% Manual Theme Control - No automatic time changes
+}
+
+/** The route drawn right now ([[lng,lat],...]), for the mirror's motion engine to follow the streets. */
+export function getDriverRouteCoords() {
+  return fullRoutePathCoords && fullRoutePathCoords.length >= 2 ? fullRoutePathCoords : null;
 }
 
 export function clearDriverRoute() {

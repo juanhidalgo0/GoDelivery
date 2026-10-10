@@ -86,6 +86,7 @@ const state = {
   driverIncentiveConfig: { enabled: false, start: '20:00', end: '23:59', type: 'fixed', value: 0 },
   serverTimeOffset: 0,
   canonAmount: 2000,
+  canonMinOrders: 1, // completed orders in a day before the daily fee is charged
   bankAlias: 'godelivery.oficial',
   bankOwner: 'GoDelivery S.R.L.',
   maxDebtLimit: 15000,
@@ -151,7 +152,6 @@ export async function initSettings() {
         updateRainStatus();
         state.useDarkBrandTheme = data.useDarkBrandTheme || false;
         state.favorPurchaseFee = data.favorPurchaseFee !== undefined ? data.favorPurchaseFee : 800;
-        state.servicePaymentErrandFee = data.servicePaymentErrandFee !== undefined ? data.servicePaymentErrandFee : 2000;
         state.maintenanceMode = data.maintenanceMode !== undefined ? data.maintenanceMode : false;
         state.maintenanceMessage = data.maintenanceMessage || 'La aplicación se encuentra en mantenimiento temporal para realizar mejoras. Volvemos en unos minutos.';
         state.maintenanceAllowedEmails = data.maintenanceAllowedEmails || [];
@@ -161,6 +161,7 @@ export async function initSettings() {
           goviaje: { type: 'percentage', value: 1.2 }
         };
         state.canonAmount = data.canonAmount !== undefined ? data.canonAmount : 2000;
+        state.canonMinOrders = Math.max(1, Math.floor(Number(data.canonMinOrders) || 1));
         state.bankAlias = data.bankAlias || 'godelivery.oficial';
         state.bankOwner = data.bankOwner || 'GoDelivery S.R.L.';
         state.maxDebtLimit = data.maxDebtLimit !== undefined ? data.maxDebtLimit : 15000;

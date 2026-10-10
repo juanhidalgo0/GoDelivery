@@ -73,6 +73,14 @@
           "destination": "/seguimiento.html"
         },
         {
+          "source": "/sorteo",
+          "destination": "/sorteo.html"
+        },
+        {
+          "source": "/sorteo.html",
+          "destination": "/sorteo.html"
+        },
+        {
           "source": "**",
           "destination": "/index.html"
         }
@@ -199,6 +207,24 @@
             {
               "key": "Expires",
               "value": "0"
+            }
+          ]
+        },
+        {
+          "source": "/sorteo",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, max-age=0"
+            }
+          ]
+        },
+        {
+          "source": "/sorteo.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, max-age=0"
             }
           ]
         },

@@ -252,7 +252,7 @@ export async function showDeliveryHistoryModal(user) {
 
                 ${itemsList.length > 0 ? `
                   <div style="font-size:11px; color:var(--driver-text-secondary); font-weight:600; background:${isLight ? '#f8fafc' : 'rgba(0,0,0,0.2)'}; padding:4px 8px; border-radius:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    ${icon('shoppingBag', 11)} ${itemsList.map(it => `${it.quantity || it.cant || 1}x ${it.name || it.title || 'Ítem'}`).join(', ')}
+                    ${icon('shoppingBag', 11)} ${itemsList.map(it => `${it.qty || it.quantity || it.cant || 1}x ${it.name || it.title || 'Ítem'}`).join(', ')}
                   </div>
                 ` : ''}
 
@@ -381,7 +381,7 @@ export async function openCompletedOrderDetailsModal(order, user) {
   } else {
     serviceLabel = icon('store', 12) + ` ${order.comercioName || 'Pedido'}`;
     if (itemsList.length > 0) {
-      detailsText = itemsList.map(it => `${it.quantity || it.cant || 1}x ${it.name || it.title || 'Ítem'}`).join(', ');
+      detailsText = itemsList.map(it => `${it.qty || it.quantity || it.cant || 1}x ${it.name || it.title || 'Ítem'}`).join(', ');
     }
   }
 

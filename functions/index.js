@@ -4,14 +4,23 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+// Modular import: same objects as admin.firestore.* in production, and they also exist under the
+// emulator (where FieldValue comes back undefined), so tests run the real code.
+const { FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
+const { applyCompletedOrder, reverseCompletedOrder, blockIfOverDebtLimit, loadDebtPolicy, isOverDebtLimit, importLegacyHistory } = require("./ledger");
+const { createReportHandler } = require("./client-errors");
+const { runVigilante, sendDailyDigest } = require("./vigilante");
 
 setGlobalOptions({ maxInstances: 20, memory: "512Mi", region: "us-central1" });
 
 admin.initializeApp();
 const db = admin.firestore();
 
-const ORDER_AUTO_CANCEL_MS = 10 * 60 * 1000;
+// Pedido sin aceptar (comercio) o sin repartidor: se cancela solo pasado este tiempo
+const ORDER_AUTO_CANCEL_MS = 20 * 60 * 1000;
+// Comisión a comercios apagada (decisión del 28-09-2026): los pedidos nuevos guardan commissionAmount 0.
+const COMMERCE_COMMISSION_ENABLED = false;
 const DRIVER_INACTIVITY_MS = 2 * 60 * 60 * 1000;
 const DRIVER_WARNING_GRACE_MS = 15 * 60 * 1000;
 
@@ -121,7 +130,7 @@ exports.mercadopagoConnect = onRequest({ cors: true }, async (req, res) => {
         mpAccessToken: data.access_token,
         mpRefreshToken: data.refresh_token,
         mpUserId: data.user_id,
-        mpConnectedAt: admin.firestore.FieldValue.serverTimestamp()
+        mpConnectedAt: FieldValue.serverTimestamp()
       });
 
       res.status(200).json({ success: true });
@@ -134,119 +143,12 @@ exports.mercadopagoConnect = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-exports.createDeliveryCanonPreference = onRequest({ cors: true }, async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") {
-    return res.status(204).send("");
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).send("Method Not Allowed");
-  }
-
-  const { driverId, dateStr } = req.body; // dateStr: YYYY-MM-DD
-  if (!driverId || !dateStr) {
-    return res.status(400).json({ error: "Faltan parámetros requeridos (driverId, dateStr)" });
-  }
-
-  try {
-    // Read global canon settings from system config or default to $2000
-    const configDoc = await db.collection("system_config").doc("canon_config").get();
-    const configData = configDoc.exists ? configDoc.data() : {};
-    const canonAmount = configData.canonAmount || 2000;
-    const mpAccessToken = configData.mpAccessToken || process.env.MP_ACCESS_TOKEN || "APP_USR-7809623696860010-051512-42171c77bb506b3a2bbbb695123d463e-242686767";
-
-    const driverDoc = await db.collection("users").doc(driverId).get();
-    const driverData = driverDoc.exists ? driverDoc.data() : {};
-    const driverName = driverData.name || driverData.displayName || "Repartidor GO";
-
-    const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
-    const preferenceInstance = new Preference(client);
-
-    const externalRef = `CANON_${driverId}_${dateStr}`;
-
-    const response = await preferenceInstance.create({
-      body: {
-        items: [{
-          title: `Canon Diario Repartidor GO! (${dateStr})`,
-          unit_price: Number(canonAmount),
-          quantity: 1,
-          currency_id: "ARS"
-        }],
-        external_reference: externalRef,
-        notification_url: `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/mercadopagoWebhook?type=delivery_canon`,
-        back_urls: {
-          success: `https://${process.env.GCLOUD_PROJECT}.web.app/#/delivery?canon_status=success`,
-          failure: `https://${process.env.GCLOUD_PROJECT}.web.app/#/delivery?canon_status=failure`,
-          pending: `https://${process.env.GCLOUD_PROJECT}.web.app/#/delivery?canon_status=pending`
-        },
-        auto_return: "approved"
-      }
-    });
-
-    res.status(200).json({
-      id: response.id,
-      init_point: response.init_point,
-      sandbox_init_point: response.sandbox_init_point
-    });
-  } catch (err) {
-    logger.error("Error generating delivery canon preference:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 exports.mercadopagoWebhook = onRequest(async (req, res) => {
   const { query, body } = req;
   const topic = query.topic || query.type || (body && body.type) || (body && body.action && body.action.split('.')[0]);
   const commerceId = query.comercioId;
-  const isCanon = query.type === "delivery_canon" || (body && body.data && body.data.id && !commerceId);
 
-  if (topic === "payment" && isCanon) {
-    const paymentId = query.id || query["data.id"] || (body && body.data && body.data.id) || (body && body.id);
-    try {
-      const configDoc = await db.collection("system_config").doc("canon_config").get();
-      const configData = configDoc.exists ? configDoc.data() : {};
-      const mpAccessToken = configData.mpAccessToken || process.env.MP_ACCESS_TOKEN || "APP_USR-7809623696860010-051512-42171c77bb506b3a2bbbb695123d463e-242686767";
-
-      const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
-      const paymentInstance = new Payment(client);
-      const payment = await paymentInstance.get({ id: paymentId });
-
-      if (payment.status === "approved" && payment.external_reference && payment.external_reference.startsWith("CANON_")) {
-        const parts = payment.external_reference.split("_");
-        const driverId = parts[1];
-        const dateStr = parts[2];
-
-        if (driverId && dateStr) {
-          const canonDocRef = db.collection("delivery_canon_payments").doc(`${driverId}_${dateStr}`);
-          await canonDocRef.set({
-            driverId: driverId,
-            dateStr: dateStr,
-            amount: payment.transaction_amount || 2000,
-            status: "approved",
-            mpPaymentId: paymentId,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
-
-          logger.info(`Webhook: Delivery Canon for driver ${driverId} on ${dateStr} marked as APPROVED.`);
-
-          // Notify driver that their day is active and ready
-          const dTokens = await getUserTokens(driverId);
-          if (dTokens.length > 0) {
-            await sendPush(dTokens, {
-              title: "✅ ¡Jornada Habilitada!",
-              body: "Se acreditó tu pago de canon diario. Ya podés ponerte ONLINE para recibir ofertas de pedidos."
-            }, { tag: `canon-approved-${dateStr}`, url: "#/delivery" });
-          }
-        }
-      }
-    } catch (err) {
-      logger.error("Error processing delivery canon webhook:", err);
-    }
-  } else if (topic === "payment" && commerceId) {
+  if (topic === "payment" && commerceId) {
     const paymentId = query.id || query["data.id"] || (body && body.data && body.data.id) || (body && body.id);
     
     try {
@@ -418,9 +320,9 @@ async function pruneDeadToken(ownerUid, token) {
     if (userSnap.exists) {
       const uData = userSnap.data();
       const updates = {};
-      if (uData.lastFcmToken === token) updates.lastFcmToken = admin.firestore.FieldValue.delete();
+      if (uData.lastFcmToken === token) updates.lastFcmToken = FieldValue.delete();
       if (Array.isArray(uData.fcmTokens) && uData.fcmTokens.includes(token)) {
-        updates.fcmTokens = admin.firestore.FieldValue.arrayRemove(token);
+        updates.fcmTokens = FieldValue.arrayRemove(token);
       }
       if (Object.keys(updates).length > 0) await userRef.update(updates);
     }
@@ -430,8 +332,50 @@ async function pruneDeadToken(ownerUid, token) {
   }
 }
 
+// Copy helpers for push texts: short title that says what happened, body with who and the detail.
+const firstName = (full) => String(full || "").trim().split(/\s+/)[0] || "";
+const storeOf = (o) => o.comercioName || o.commerceName || "";
+const money = (n) => `${Math.round(Number(n) || 0).toLocaleString("es-AR")}`;
+function kindOf(o) {
+  if (o.isTrip) return "viaje";
+  if (o.isFavor) return o.favorType === "compra" ? "mandado" : "favor";
+  return "pedido";
+}
+// "Juan · 3 productos · $12.500"
+function orderLine(o) {
+  const items = Array.isArray(o.items) ? o.items : [];
+  const count = items.reduce((n, it) => n + (Number(it.quantity || it.qty) || 1), 0);
+  return [
+    firstName(o.userName) || "Un cliente",
+    count > 0 ? `${count} ${count === 1 ? "producto" : "productos"}` : "",
+    Number(o.total) > 0 ? money(o.total) : ""
+  ].filter(Boolean).join(" · ");
+}
+function offerTitle(o, earnings) {
+  return earnings > 0 ? `Nuevo ${kindOf(o)} · ganás ${money(earnings)}` : `Nuevo ${kindOf(o)} disponible`;
+}
+
+// Android notification channels (created on the phone in src/utils/notifications.js):
+//   exclusive_offers / order_offers / admin_alerts / store_orders → loud, with the offer sound (res/raw/alert.wav)
+//   chat_alerts → chat messages; promos → broadcasts people can mute without missing their orders
+//   default ("GoDelivery") → everything else: order updates, account notices
+// A channel the phone doesn't have yet falls back to "default" (AndroidManifest).
+const LOUD_CHANNELS = new Set(["exclusive_offers", "order_offers", "admin_alerts", "store_orders"]);
+const PROMO_TYPES = new Set(["custom_global_push", "automated_push", "giveaway_reminder"]);
+
+function channelFor(data) {
+  if (data.channelId) return data.channelId;
+  if (PROMO_TYPES.has(data.type)) return "promos";
+  if (data.type === "chat_message") return "chat_alerts";
+  return "default";
+}
+
 async function sendPush(tokens, notification, data = {}, ownerUid = null) {
   if (!tokens || tokens.length === 0) return;
+  const channelId = channelFor(data);
+  const loud = LOUD_CHANNELS.has(channelId);
+  // Same tag = the new notice replaces the previous one of that order instead of piling up.
+  const collapseTag = typeof data.tag === "string" && data.tag ? data.tag.slice(0, 64) : null;
 
   // Split tokens into chunks of 500 (FCM sendEachForMulticast limit)
   const tokenChunks = [];
@@ -464,6 +408,8 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
       },
       data: sanitizeFcmData({
         ...data,
+        channelId,
+        loud: loud ? "1" : "0",
         title: displayTitle,
         body: displayBody,
         icon: "/logo-pwa.png",
@@ -477,19 +423,22 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
         notification: {
           title: displayTitle,
           body: displayBody,
-          channelId: data.channelId || "exclusive_offers",
-          priority: "max",
-          sound: "default",
-          defaultSound: true,
+          channelId,
+          priority: loud ? "max" : "high",
+          // Android 8+ takes the sound from the channel; these two only matter on older phones.
+          sound: loud ? "alert" : "default",
+          defaultSound: !loud,
           defaultVibrateTimings: true,
-          visibility: "public"
+          visibility: "public",
+          ...(collapseTag ? { tag: collapseTag } : {})
         }
       },
       apns: {
         headers: {
           "apns-priority": "10",
           "apns-push-type": "alert",
-          "apns-topic": "com.godelivery.magdalena"
+          "apns-topic": "com.godelivery.magdalena",
+          ...(collapseTag ? { "apns-collapse-id": collapseTag } : {})
         },
         payload: {
           aps: {
@@ -497,8 +446,10 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
               title: displayTitle,
               body: displayBody
             },
-            sound: "default",
-            badge: 1,
+            // alert.wav ships in the iOS app from 1.7.6 (same ping as the offer on screen);
+            // older installs don't have it and play the default sound instead.
+            sound: loud ? "alert.wav" : "default",
+            // No badge: nothing ever cleared it, so the icon stayed at 1 forever.
             "content-available": 1,
             // iOS solo muestra los botones de accion si la categoria del payload coincide con una
             // categoria registrada en el dispositivo (ver registerOrderOfferCategory en
@@ -518,9 +469,11 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
           body: displayBody,
           icon: "https://godelivery-magdalena.web.app/logo-pwa.png",
           badge: "https://godelivery-magdalena.web.app/badge-icon.png",
-          vibrate: [200, 100, 200, 100, 200],
-          requireInteraction: true,
-          tag: data.tag || undefined,
+          vibrate: loud ? [300, 120, 300, 120, 300] : [120, 60, 120],
+          // Only what needs an answer stays on screen; order updates go away on their own like any app.
+          requireInteraction: loud,
+          renotify: Boolean(collapseTag),
+          tag: collapseTag || undefined,
           data: {
             ...data,
             url: targetUrl
@@ -751,9 +704,12 @@ async function serverSideDispatch(orderId, order) {
 
     const now = Date.now();
     const rejected = order.queueRejectedDrivers || [];
+    const debtPolicy = isOwnDeliveryOrder ? { enabled: false } : await loadDebtPolicy(db);
 
     let eligible = allDrivers.filter(d => {
       if (!canTake(d.id, order.comercioId)) return false;
+      // Above the debt limit: finishes what they have, but gets nothing new until they pay.
+      if (isOverDebtLimit(d, debtPolicy)) return false;
       if (d.cooldownUntil) {
         const coolMs = d.cooldownUntil.toMillis ? d.cooldownUntil.toMillis() : new Date(d.cooldownUntil).getTime();
         if (coolMs > now) return false;
@@ -767,7 +723,8 @@ async function serverSideDispatch(orderId, order) {
         const isApproved = d.tripStatus === "approved" || d.role === "chofer";
         if (!isApproved) return false;
         const reqType = (order.tripType || "auto").toLowerCase();
-        const drvType = (d.tripVehicleType || d.vehicleType || "").toLowerCase();
+        // Sin vehículo cargado cuenta como moto: desde el 09-10-2026 los viajes son solo en moto
+        const drvType = (d.tripVehicleType || d.vehicleType || "moto").toLowerCase();
         if (reqType !== drvType) return false;
       }
       return true;
@@ -837,6 +794,8 @@ async function serverSideDispatch(orderId, order) {
           chosen = { id: directSnap.id, ...directSnap.data() };
         }
       }
+      // A driver above the debt limit can't take it anyway: offer it to the rest instead.
+      if (chosen && isOverDebtLimit(chosen, debtPolicy)) chosen = null;
     }
     if (!chosen) {
       chosen = coPickupDriver || eligible[0];
@@ -854,7 +813,7 @@ async function serverSideDispatch(orderId, order) {
       tx.update(db.collection("orders").doc(orderId), {
         queueTargetDriverId: chosen.id,
         queueTargetDriverName: chosen.displayName || chosen.name || "Repartidor",
-        queueOfferedAt: admin.firestore.FieldValue.serverTimestamp(),
+        queueOfferedAt: FieldValue.serverTimestamp(),
         // This function sends the offer push itself; onOrderStatusChange must not send a second one.
         queueOfferedBy: "server",
         queueRejectedDrivers: rejected,
@@ -868,17 +827,12 @@ async function serverSideDispatch(orderId, order) {
       
       // Notify the chosen target driver via Push Notification & In-App Notification (even if rotated back to them)
       try {
-        const orderTypeStr = order.isFavor 
-          ? (order.favorType === "compra" ? "GOMANDADO 🛒" : "GOFAVOR 📦")
-          : (order.isTrip ? "GOTAXI 🚕" : "PEDIDO 🛍️");
-
-        const originStr = order.comercioName || (order.isTrip ? "Pasajero" : (order.isFavor ? (order.favorTypeLabel || "Favor") : "Comercio"));
+        const originStr = order.comercioName || order.pickupAddress || (order.isFavor ? (order.favorTypeLabel || "Favor") : "Retiro");
         const destStr = order.destinationAddress || order.address || order.deliveryAddress || "Dirección de entrega";
         const earnings = Math.round(order.driverEarnings || order.shippingFee || order.deliveryFee || order.shippingCost || 0);
-        const earningsBadge = earnings > 0 ? `$${earnings.toLocaleString('es-AR')} Ganancia` : 'Disponible';
 
-        const pushTitle = `🚨 ¡OFERTA: ${earningsBadge}! (${orderTypeStr})`;
-        const pushBody = `📍 Retiro: ${originStr}\n🏁 Entrega: ${destStr}\n¡Tenés 60s para aceptar!`;
+        const pushTitle = offerTitle(order, earnings);
+        const pushBody = `${originStr} → ${destStr}. Tenés 60 s para aceptar.`;
 
         await db.collection("users").doc(chosen.id).collection("notifications").add({
           type: "new_exclusive_offer",
@@ -887,7 +841,7 @@ async function serverSideDispatch(orderId, order) {
           status: "unread",
           url: `#/delivery?takeOrderId=${orderId}`,
           orderId: orderId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         });
 
         const targetTokens = await getUserTokens(chosen.id);
@@ -953,21 +907,20 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
 
       if (adminTokens.length > 0) {
         await sendPush(adminTokens, {
-          title: `🚨 [SOPORTE GO] ¡Nuevo Pedido #${orderNum}!`,
-          body: `${orderTypeLabel} — Ingresó al sistema (${order.userName || 'Cliente'}). Tap para auditarlo.`
+          title: `Nuevo pedido #${orderNum}`,
+          body: `${orderTypeLabel} · ${order.userName || "Cliente"}`
         }, {
           tag: `admin-new-order-${orderId}`,
           url: `#/admin/orders`,
           type: 'admin_support_alert',
-          sound: 'alert.mp3',
           channelId: 'admin_alerts'
         });
       }
 
       for (const adminDoc of allAdminDocs) {
         await db.collection("users").doc(adminDoc.id).collection("notifications").add({
-          title: `🚨 [SOPORTE] Nuevo Pedido #${orderNum}`,
-          body: `Se ha registrado una nueva orden de tipo: ${orderTypeLabel}`,
+          title: `Nuevo pedido #${orderNum}`,
+          body: `${orderTypeLabel} · ${order.userName || "Cliente"}`,
           type: 'admin_support_alert',
           status: 'unread',
           url: `#/admin/orders`,
@@ -1009,10 +962,9 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
         if (pureOwnerTokens.length > 0) {
           logger.info(`[FCM] Sending new order push to commerce owner ${ownerId} (${pureOwnerTokens.length} tokens).`);
           await sendPush(pureOwnerTokens, {
-            title: "🔔 ¡Nuevo Pedido Recibido!",
-            body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`,
-            sound: "default"
-          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders` });
+            title: `Nuevo pedido #${orderNum}`,
+            body: `${orderLine(order)}. Confirmalo para que empiecen a prepararlo.`
+          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
         }
       }
     }
@@ -1026,7 +978,7 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
           .map(item =>
             db.collection("comercios").doc(order.comercioId)
               .collection("products").doc(item.productId)
-              .update({ salesCount: admin.firestore.FieldValue.increment(item.qty || 1) })
+              .update({ salesCount: FieldValue.increment(item.qty || 1) })
           )
       );
       results.forEach((r, idx) => {
@@ -1099,7 +1051,7 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
       const tokens = await getUserTokens(recipientId);
       if (tokens.length > 0) {
         await sendPush(tokens, {
-          title: `💬 ${senderName}`,
+          title: senderName,
           body: msgBody
         }, {
           tag: `chat-${chatId}`,
@@ -1116,12 +1068,12 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
       try {
         await db.collection("users").doc(recipientId).collection("notifications").add({
           type: "chat_message",
-          title: `💬 ${senderName}`,
+          title: senderName,
           body: msgBody,
           status: "unread",
           url: `#/mis-chats?chatId=${chatId}`,
           chatId: chatId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         });
       } catch (nErr) {
         logger.error(`Error writing chat notification doc for ${recipientId}:`, nErr);
@@ -1143,8 +1095,8 @@ exports.onNewMarketplaceChat = onDocumentCreated("marketplace_chats/{chatId}", a
     const sellerTokens = await getUserTokens(chat.sellerId);
     if (sellerTokens.length > 0) {
       await sendPush(sellerTokens, {
-        title: "💬 Interés en tu producto",
-        body: `${chat.buyerName} quiere contactarte por "${chat.productTitle}".`
+        title: `${firstName(chat.buyerName) || "Alguien"} te escribió por tu publicación`,
+        body: `Quiere consultarte por "${chat.productTitle}".`
       }, { tag: `market-chat-new-${event.params.chatId}`, url: `#/marketplace/chat/${event.params.chatId}` });
     }
   } catch (err) {
@@ -1171,7 +1123,7 @@ exports.onNewMarketplaceMessage = onDocumentCreated("marketplace_chats/{chatId}/
 
     if (recipientTokens.length > 0) {
       await sendPush(recipientTokens, {
-        title: `💬 Mensaje de ${message.senderName}`,
+        title: message.senderName || "Nuevo mensaje",
         body: message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text
       }, { tag: `market-msg-${chatId}`, url: `#/marketplace/chat/${chatId}` });
     }
@@ -1195,8 +1147,8 @@ exports.onMarketplaceProductUpdated = onDocumentUpdated("marketplace_products/{p
       const sellerTokens = await getUserTokens(after.sellerId);
       if (sellerTokens.length > 0) {
         await sendPush(sellerTokens, {
-          title: "🎉 ¡Venta Confirmada!",
-          body: `${after.buyerName} ha confirmado la compra de tu producto "${after.title}".`
+          title: "¡Vendiste! 🎉",
+          body: `${after.buyerName || "El comprador"} confirmó la compra de "${after.title}".`
         }, { tag: `market-sold-${event.params.productId}`, url: "#/profile/publications" });
       }
     } catch (err) {
@@ -1230,6 +1182,15 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   }
 
   const orderNum = after.orderId || orderId.slice(0, 6);
+
+  // Pedidos que entraron por WhatsApp: el mismo aviso le llega al cliente por ahí
+  if (after.waPhone) {
+    try {
+      await wa().notify.onOrderChange(before, after);
+    } catch (err) {
+      logger.error(`[WhatsApp] Error avisando el pedido ${orderId}:`, err);
+    }
+  }
 
   try {
     // 00. Queue rotation trigger: if the target driver is released (from exclusive to null)
@@ -1267,12 +1228,13 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             driverPhoto: dData.photoURL || '',
             driverPhone: dData.phone || '',
             driverDeliveryId: dData.deliveryId || '',
-            driverAlias: dData.transferAlias || '',
-            driverVehicleModel: dData.vehicleModel || '',
+            // Mismos respaldos que la app al aceptar a mano: los perfiles viejos guardaban el alias en otros campos
+            driverAlias: (dData.transferAlias || dData.driverAlias || dData.alias || '').trim(),
+            driverVehicleModel: dData.vehicleModel || dData.deliveryVehicleModel || '',
             driverVehicleColor: dData.vehicleColor || '',
-            driverVehiclePatent: dData.vehicleDetails || dData.patente || '',
+            driverVehiclePatent: dData.vehicleDetails || dData.patente || dData.vehiclePlate || dData.deliveryVehiclePlate || '',
             status: (after.isFavor || after.isTrip) ? 'confirmed' : after.status,
-            acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+            acceptedAt: FieldValue.serverTimestamp(),
             estimatedDeliveryTime: estTime
           });
 
@@ -1295,8 +1257,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           // Notify the driver via Push Notification
           const driverTokens = await getUserTokens(driverId);
           await sendPush(driverTokens, {
-            title: "⚡ ¡Pedido auto-aceptado!",
-            body: `Se aceptó automáticamente el pedido de ${after.userName || 'Cliente'}. ¡Toca para ver tu ruta!`,
+            title: "Pedido aceptado automáticamente",
+            body: `${storeOf(after) || after.userName || "Nuevo pedido"} → ${after.deliveryAddress || after.address || "cliente"}. Tocá para ver la ruta.`,
             image: customerPhoto
           }, { 
             tag: `auto-accept-${orderId}`, 
@@ -1310,8 +1272,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           // Create notification document in Firestore for the driver
           await db.collection("users").doc(driverId).collection("notifications").add({
             type: "auto_accept",
-            title: "⚡ ¡Pedido auto-aceptado!",
-            body: `Se aceptó automáticamente el pedido de ${after.comercioName || 'Comercio'}.`,
+            title: "Pedido aceptado automáticamente",
+            body: `${storeOf(after) || after.userName || "Nuevo pedido"} → ${after.deliveryAddress || after.address || "cliente"}.`,
             status: "unread",
             url: "#/delivery",
             createdAt: new Date()
@@ -1322,12 +1284,9 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           // Standard Exclusive Offer Push Notification (offers made by serverSideDispatch already pushed)
           try {
             const driverTokens = await getUserTokens(driverId);
-            const orderTypeStr = after.isFavor 
-              ? (after.favorType === "compra" ? "GOMANDADO 🛒" : "GOFAVOR 📦")
-              : (after.isTrip ? "GOTAXI 🚕" : "PEDIDO 🛍️");
-
-            const pushTitle = `🛵 ¡Nueva Oferta Exclusiva! (${orderTypeStr})`;
-            const pushBody = `Tenés un nuevo pedido disponible de ${after.comercioName || after.userName || 'Cliente'}. ¡Toca para aceptar!`;
+            const offerEarnings = Math.round(after.driverEarnings || after.shippingFee || after.deliveryFee || after.shippingCost || 0);
+            const pushTitle = offerTitle(after, offerEarnings);
+            const pushBody = `${storeOf(after) || after.pickupAddress || "Retiro"} → ${after.destinationAddress || after.address || after.deliveryAddress || "cliente"}. Tocá para aceptar.`;
 
             if (driverTokens.length > 0) {
               await sendPush(driverTokens, {
@@ -1375,16 +1334,16 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
            // Notify ALL admins for GoMarket
            const adminTokens = await getAdminTokens();
            await sendPush(adminTokens, {
-             title: "🛒 ¡Nuevo Pedido en GoMarket!",
-             body: `Recibiste el pedido #${orderNum} de ${after.userName || "un cliente"}.`
-           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders` });
+             title: `Nuevo pedido en GoMarket #${orderNum}`,
+             body: `${orderLine(after)}. Pagado con Mercado Pago.`
+           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
          } else {
            // Regular commerce owner notification
            const ownerTokens = await getUserTokens(ownerId);
            await sendPush(ownerTokens, {
-             title: "🔔 ¡Nuevo Pedido Recibido!",
-             body: `Tenés un nuevo pedido pendiente de confirmación. #${orderNum}`
-           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders` });
+             title: `Nuevo pedido #${orderNum}`,
+             body: `${orderLine(after)}. Pagado con Mercado Pago, confirmalo para empezar.`
+           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
          }
        }
     }
@@ -1393,12 +1352,12 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
     if (before.isAtDoor !== after.isAtDoor && after.isAtDoor === true) {
       if (after.userId) {
         const clientTokens = await getUserTokens(after.userId);
-        const codePrefix = after.verificationCode ? `[Código: ${after.verificationCode}] ` : "";
+        const rider = firstName(after.driverName) || "Tu repartidor";
         await sendPush(clientTokens, {
-          title: `${codePrefix}¡Tu repartidor está en la puerta!`,
-          body: after.isFavor 
-            ? `Código: ${after.verificationCode || '----'} - El repartidor llegó con tu favor. ¡Salí a recibirlo!` 
-            : `Código: ${after.verificationCode || '----'} - Prepárate para recibir tu pedido. ¡Ya llegó!`
+          title: "Tu repartidor llegó 📍",
+          body: after.verificationCode
+            ? `${rider} te espera en la puerta. Código de entrega: ${after.verificationCode}`
+            : `${rider} te espera en la puerta.`
         }, { 
           tag: `order-active-${orderId}`, 
           persistent: "true", 
@@ -1443,7 +1402,9 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       const title = after.isTrip ? "🚕 Chofer Asignado" : "🛵 Repartidor Asignado";
       // El código de entrega va desde el primer aviso: si se pierde el de "en camino" (app abierta,
       // notificación descartada), el cliente igual lo tiene. Los viajes y encomiendas no lo usan.
-      const isEncomiendaOrder = after.favorType === "encomienda" || after.serviceType === "encomienda";
+      // La app crea las encomiendas con favorType "mandado" (las compras son "compra")
+      const isEncomiendaOrder = after.favorType === "encomienda" || after.serviceType === "encomienda" || after.isEncomienda === true ||
+        (after.favorType === "mandado" && !(Array.isArray(after.mandadoStops) && after.mandadoStops.length));
       const codeLine = after.verificationCode && !after.isTrip && !isEncomiendaOrder
         ? ` Tu código de entrega es ${after.verificationCode}.`
         : "";
@@ -1463,6 +1424,16 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       });
     }
 
+    // A completed order that changes status again (cancelled afterwards, fixed by the admin)
+    // gives its fee back to the driver.
+    if (before.status === "completed" && after.status !== "completed") {
+      try {
+        await reverseCompletedOrder({ orderId, newStatus: after.status });
+      } catch (err) {
+        logger.error(`Error reversing order ${orderId} in the driver's account:`, err);
+      }
+    }
+
     // Status change notifications (ONLY when the order status itself changes, not just queue rotation)
     if (before.status !== after.status) {
       switch (after.status) {
@@ -1470,11 +1441,14 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           // Notify client: differentiate between normal commerce orders vs GoFavores / Mandados
           const clientTokens = await getUserTokens(after.userId);
           if (!after.isFavor && !after.isTrip) {
+            const prepMin = Number(after.preparationTimeMinutes);
             await sendPush(clientTokens, {
-              title: "✅ Pedido Confirmado",
-              body: "👨‍🍳 Preparando tu pedido. ¡Ya casi está!"
-            }, { 
-              tag: `order-active-${orderId}`, 
+              title: storeOf(after) ? `${storeOf(after)} aceptó tu pedido` : "Tu pedido fue aceptado",
+              body: prepMin > 0
+                ? `Lo están preparando. Estará listo en unos ${prepMin} min.`
+                : "Lo están preparando. Te avisamos cuando salga."
+            }, {
+              tag: `order-${orderId}`, 
               persistent: "true", 
               ongoing: true, 
               requireInteraction: true,
@@ -1498,8 +1472,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           // Notify client: "Un delivery está yendo a buscarlo"
           const clientTokens2 = await getUserTokens(after.userId);
           await sendPush(clientTokens2, {
-            title: "📦 Pedido Listo",
-            body: "🛵 Tu pedido está listo. Buscando un repartidor..."
+            title: "Tu pedido está listo",
+            body: storeOf(after) ? `${storeOf(after)} ya lo tiene. Estamos asignando un repartidor.` : "Estamos asignando un repartidor."
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
 
           // Manual Assignment only: Geohash & Distance Auto-Assignment algorithm is disabled.
@@ -1540,8 +1514,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
 
                       // Send targeted push with tag 'co-pickup-${orderId}' as requested
                       await sendPush(userTokens, {
-                        title: "🛵 ¡Co-Retiro Optimizado!",
-                        body: `Hay otro pedido listo en ${after.comercioName || 'el comercio'}. ¡Sumalo a tu ruta!`
+                        title: `Otro pedido listo en ${after.comercioName || "el comercio"}`,
+                        body: "Ya estás yendo para ahí: sumalo a tu ruta y retirá los dos juntos."
                       }, { tag: `co-pickup-${orderId}`, url: "#/delivery" });
                     }
                   }
@@ -1560,8 +1534,11 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           const clientTokens3 = await getUserTokens(after.userId);
           const delCode = after.verificationCode || "----";
           await sendPush(clientTokens3, {
-            title: `[Código: ${delCode}] 🛵 ¡Tu pedido está en camino!`,
-            body: `Código: ${delCode} - El repartidor ya lleva tu pedido.`
+            title: "Tu pedido está en camino 🛵",
+            body: [
+              `${firstName(after.driverName) || "Tu repartidor"} lo lleva${storeOf(after) ? ` desde ${storeOf(after)}` : ""}.`,
+              after.verificationCode ? `Código de entrega: ${delCode}` : ""
+            ].filter(Boolean).join(" ")
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}`, persistent: "true" });
           break;
         }
@@ -1569,55 +1546,17 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           // 1. Notify client: "Pedido entregado"
           const clientTokens4 = await getUserTokens(after.userId);
           await sendPush(clientTokens4, {
-            title: "🎉 ¡Pedido Entregado!",
-            body: "El repartidor ya entregó tu pedido. ¡Que lo disfrutes!"
-          }, { tag: `order-${orderId}-delivered`, url: `#/pedido/${orderId}`, persistent: "true" });
+            title: "Pedido entregado",
+            body: "¡Que lo disfrutes! Tocá para calificar la entrega."
+          }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}`, persistent: "true" });
 
            if (after.driverId) {
-            const appFee = after.appUsageFee || 0;
-            const couponDiscount = after.couponDiscount || 0;
-            const driverIncentiveAmount = after.driverIncentiveAmount || 0;
-            const netDebtChange = appFee - couponDiscount - driverIncentiveAmount;
-
-            const date = new Date();
-            const argOffset = -3 * 60; // Argentina offset in minutes (UTC-3)
-            const localDate = new Date(date.getTime() + (argOffset + date.getTimezoneOffset()) * 60 * 1000);
-            const todayStr = localDate.toISOString().split('T')[0];
-
-            let todayCount = 0;
+            // Driver's account: the order's net fee and, on the Nth order of the day, the daily
+            // fee (functions/ledger.js). Idempotent, so a retried trigger never charges twice.
             try {
-              const driverRef = db.collection("users").doc(after.driverId);
-              await db.runTransaction(async (transaction) => {
-                const driverSnap = await transaction.get(driverRef);
-                if (!driverSnap.exists) return;
-                const dData = driverSnap.data();
-
-                const lastDate = dData.lastDeliveryDateStr || "";
-                let tempCount = dData.completedOrdersToday || 0;
-
-                if (lastDate !== todayStr) {
-                  tempCount = 1;
-                } else {
-                  tempCount += 1;
-                }
-                todayCount = tempCount;
-
-                const driverUpdates = {
-                  lastDeliveryAt: admin.firestore.FieldValue.serverTimestamp(),
-                  lastDeliveryDateStr: todayStr,
-                  completedOrdersToday: todayCount,
-                  completedOrdersCount: admin.firestore.FieldValue.increment(1),
-                  recentCompletedTimes: admin.firestore.FieldValue.arrayUnion(Date.now())
-                };
-                if (netDebtChange !== 0) {
-                  driverUpdates.deliveryDebt = admin.firestore.FieldValue.increment(netDebtChange);
-                }
-
-                transaction.update(driverRef, driverUpdates);
-              });
-              logger.info(`Updated driver ${after.driverId} on completion: todayCount=${todayCount} (debt change: ${netDebtChange}).`);
+              await applyCompletedOrder({ orderId, order: after, eventId: event.id });
             } catch (err) {
-              logger.error(`Error updating driver ${after.driverId} on completion transaction:`, err);
+              logger.error(`Error booking order ${orderId} to driver ${after.driverId}:`, err);
             }
 
             // Immediately check for any unassigned orders that were stuck because all drivers were busy
@@ -1675,8 +1614,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                 
                 // Update customer points and completedOrdersCount
                 batch.update(customerRef, {
-                  points: admin.firestore.FieldValue.increment(pointsEarned),
-                  completedOrdersCount: admin.firestore.FieldValue.increment(1)
+                  points: FieldValue.increment(pointsEarned),
+                  completedOrdersCount: FieldValue.increment(1)
                 });
                 
                 // Update order with pointsEarned and appliedMultiplier (separate update to avoid re-triggering status notifications)
@@ -1693,7 +1632,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                     type: "purchase_points",
                     points: pointsEarned,
                     description: `Puntos ganados por tu compra en ${after.comercioName || "Comercio"}.`,
-                    createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    createdAt: FieldValue.serverTimestamp()
                   });
                 }
                 
@@ -1710,12 +1649,12 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                     
                     // Reward referrer
                     batch.update(db.collection("users").doc(referrerUid), {
-                      points: admin.firestore.FieldValue.increment(referralPoints)
+                      points: FieldValue.increment(referralPoints)
                     });
                     
                     // Reward customer
                     batch.update(customerRef, {
-                      points: admin.firestore.FieldValue.increment(referralPoints),
+                      points: FieldValue.increment(referralPoints),
                       referredRewardGranted: true
                     });
                     
@@ -1732,7 +1671,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                       type: "referral_bonus",
                       points: referralPoints,
                       description: "¡Tu amigo completó su primer pedido! Bono de referido concedido.",
-                      createdAt: admin.firestore.FieldValue.serverTimestamp()
+                      createdAt: FieldValue.serverTimestamp()
                     });
                     
                     const custTransRef = db.collection("points_transactions").doc();
@@ -1741,7 +1680,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                       type: "referred_welcome",
                       points: referralPoints,
                       description: "¡Bono de bienvenida por usar el código de referido de un amigo!",
-                      createdAt: admin.firestore.FieldValue.serverTimestamp()
+                      createdAt: FieldValue.serverTimestamp()
                     });
                   }
                 }
@@ -1806,13 +1745,13 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                     };
 
                     if (isCompleted) {
-                      updateData.completedAt = admin.firestore.FieldValue.serverTimestamp();
+                      updateData.completedAt = FieldValue.serverTimestamp();
                       
                       logger.info(`[Challenges] Challenge ${challenge.id} completed by ${after.userId}. Awarding ${challenge.pointsReward} pts.`);
 
                       // Award challenge points
                       batch.update(customerRef, {
-                        points: admin.firestore.FieldValue.increment(challenge.pointsReward)
+                        points: FieldValue.increment(challenge.pointsReward)
                       });
 
                       // Log challenge transaction
@@ -1822,7 +1761,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                         type: "challenge_completion",
                         points: challenge.pointsReward,
                         description: `Completaste el desafío semanal: ${challenge.title}`,
-                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                        createdAt: FieldValue.serverTimestamp()
                       });
                     }
 
@@ -1841,18 +1780,40 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
         case "cancelled": {
           // Notify client: "Pedido cancelado"
           const clientTokens5 = await getUserTokens(after.userId);
-          let cancelMsg = "Lamentablemente, tu pedido fue cancelado.";
+          let cancelMsg = "Si tenés dudas, escribinos desde Ayuda en la app.";
           
           if (after.cancelReason && after.cancelReason.toLowerCase().includes("repartidor")) {
-            cancelMsg = "Lamentablemente, tu pedido fue cancelado por falta de repartidores disponibles en tu zona.";
+            cancelMsg = "No había repartidores disponibles en tu zona. Probá de nuevo en un rato.";
           } else if (after.cancelReason) {
-            cancelMsg = `Lamentablemente, tu pedido fue cancelado. Motivo: ${after.cancelReason}`;
+            cancelMsg = `Motivo: ${after.cancelReason}`;
+          }
+
+          if (after.cancelledBy === "system" && after.cancelReason && after.cancelReason.toLowerCase().includes("comercio no acept")) {
+            cancelMsg = `${after.comercioName || "El comercio"} no confirmó tu pedido a tiempo, así que lo cancelamos. No se te cobra nada.`;
           }
 
           await sendPush(clientTokens5, {
-            title: "❌ Pedido Cancelado",
+            title: "Tu pedido fue cancelado",
             body: cancelMsg
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
+
+          // Al comercio también, salvo que lo haya cancelado él mismo: que sepa qué pasó y por qué
+          if (after.comercioId && !after.isFavor && !after.isTrip && after.cancelledBy !== "comercio") {
+            try {
+              const comSnap = await db.collection("comercios").doc(after.comercioId).get();
+              const ownerId = comSnap.exists ? comSnap.data().ownerId : null;
+              if (ownerId) {
+                const byWho = after.cancelledBy === "system" ? "Se canceló automáticamente" : (after.cancelledBy === "client" || after.cancelledBy === "cliente" ? "El cliente lo canceló" : "Fue cancelado");
+                const reason = after.cancelReason ? ` Motivo: ${after.cancelReason}` : "";
+                await sendPush(await getUserTokens(ownerId), {
+                  title: `Pedido #${after.orderId || ""} cancelado`,
+                  body: `${byWho}.${reason}`
+                }, { tag: `order-cancel-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders`, channelId: "store_orders" });
+              }
+            } catch (e) {
+              logger.warn(`[Cancel] No se pudo avisar al comercio del pedido ${orderId}:`, e);
+            }
+          }
 
           // Restore stock for cancelled orders
           try {
@@ -1864,7 +1825,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                   const cId = item.product.comercioId || after.comercioId || after.commerceId;
                   if (cId) {
                     const pRef = db.collection("comercios").doc(cId).collection("products").doc(item.product.id);
-                    batch.update(pRef, { stockQuantity: admin.firestore.FieldValue.increment(item.qty || 1) });
+                    batch.update(pRef, { stockQuantity: FieldValue.increment(item.qty || 1) });
                     hasStockRestoration = true;
                   }
                 }
@@ -1890,15 +1851,26 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
         const modifierName = after.isFavor ? "El repartidor" : (after.comercioName || "El comercio");
         const formatPrice = (val) => `$${Number(val).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
         await sendPush(clientTokens, {
-          title: "📝 Pedido Modificado",
-          body: `${modifierName} actualizó tu pedido #${orderNum}. Nuevo total: ${formatPrice(after.total)}`
+          title: "Actualizaron tu pedido",
+          body: `${modifierName} cambió el pedido #${orderNum}. Nuevo total: ${formatPrice(after.total)}`
         }, { 
-          tag: `order-active-${orderId}`, 
+          tag: `order-${orderId}`, 
           persistent: "true", 
           ongoing: true, 
           requireInteraction: true,
           url: `#/pedido/${orderId}` 
         });
+      }
+    }
+
+    // Sorteo: chances por pedido entregado. La app cierra los pedidos con 'completed';
+    // 'delivered' solo lo escribe la entrega sin conexión. Repetir no suma dos veces (orderIds).
+    const GIVEAWAY_DONE = ['completed', 'delivered'];
+    if (GIVEAWAY_DONE.includes(after.status) && !GIVEAWAY_DONE.includes(before.status)) {
+      try {
+        await grantGiveawayOrderChances(orderId, after, orderNum);
+      } catch (gErr) {
+        logger.error('[Giveaway] Error adding order chances:', gErr);
       }
     }
 
@@ -1922,29 +1894,102 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * Helper: Check if it is raining in Magdalena via Open-Meteo API (Node 18+ Native Fetch)
+ * Lluvia en Magdalena. Dos fuentes:
+ *  - Open-Meteo en el pueblo mismo (modelo, cada 15 min). Se usa `precipitation`
+ *    (lluvia + chaparrones): en tormenta casi todo viene como `showers`.
+ *  - METAR del aeropuerto de La Plata (SADL, ~40 km): observación real, pero a veces
+ *    pasa horas sin reportar, así que sólo cuenta si tiene menos de 90 min.
+ * checkWeatherPeriodic es el único que escribe settings/weather; los pedidos lo leen.
  */
-async function checkIfRainingInMagdalena() {
-  try {
-    const res = await fetch(
-      "https://api.open-meteo.com/v1/forecast?latitude=-35.0811&longitude=-57.5146&current=rain,weather_code"
-    );
-    if (!res.ok) {
-      logger.warn("Open-Meteo response not OK in Cloud Function");
-      return false;
-    }
-    const data = await res.json();
-    const rain = data?.current?.rain || 0;
-    const code = data?.current?.weather_code || 0;
-    // Exclude very light drizzle (51, 56) to prevent false positives
-    const rainCodes = [53, 55, 57, 61, 63, 65, 66, 67, 80, 81, 82];
-    const isRaining = rain >= 0.5 || rainCodes.includes(code);
-    logger.info(`[Backend Weather] Rain: ${rain}mm, Weather Code: ${code}. Raining: ${isRaining}`);
-    return isRaining;
-  } catch (err) {
-    logger.error("Error fetching weather in Cloud Function:", err);
-    return false;
-  }
+const MAGDALENA_COORDS = { lat: -35.0811, lng: -57.5146 };
+// Llovizna moderada/densa, lluvia, chaparrones y tormentas (95/96/99). 51 y 56 (llovizna
+// débil) quedan afuera solos: sólo cuentan si La Plata también reporta llovizna o lluvia.
+const RAIN_WEATHER_CODES = new Set([53, 55, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
+const RAIN_MIN_MM_15MIN = 0.2;
+const METAR_MAX_AGE_MIN = 90;
+// Para apagar el recargo hacen falta dos revisiones seguidas sin lluvia (20 min), así
+// no se prende y apaga en cada claro de una tormenta.
+const RAIN_OFF_AFTER_DRY_CHECKS = 2;
+// Si la revisión programada dejó de correr, los pedidos consultan en vivo.
+const RAIN_STATE_STALE_MS = 40 * 60 * 1000;
+const RAIN_PUSH_MIN_GAP_MS = 90 * 60 * 1000;
+
+async function fetchJsonWithTimeout(url, ms = 8000) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(ms) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function readOpenMeteoMagdalena() {
+  const d = await fetchJsonWithTimeout(
+    `https://api.open-meteo.com/v1/forecast?latitude=${MAGDALENA_COORDS.lat}&longitude=${MAGDALENA_COORDS.lng}&current=precipitation,rain,showers,weather_code`
+  );
+  const c = d?.current;
+  if (!c || c.weather_code === undefined) throw new Error("respuesta sin 'current'");
+  const mm = Number(c.precipitation) || 0;
+  const code = Number(c.weather_code) || 0;
+  return {
+    mm,
+    code,
+    time: c.time || null,
+    wet: mm >= RAIN_MIN_MM_15MIN || RAIN_WEATHER_CODES.has(code),
+    light: mm > 0 || code === 51 || code === 56,
+  };
+}
+
+// Códigos METAR: RA lluvia, SH chaparrón, GR/GS granizo, DZ llovizna, TS tormenta.
+// "-" = débil, "+" = fuerte, "VC..." = en las cercanías (no sobre el aeropuerto).
+function parseMetarWeather(wxString) {
+  const tokens = String(wxString || "").split(/\s+/).filter((t) => t && !t.startsWith("VC"));
+  const wet = tokens.some((t) => /RA|SH|GR|GS/.test(t) || /^\+?DZ/.test(t));
+  const light = tokens.some((t) => t.includes("DZ"));
+  return { wet, light };
+}
+
+async function readMetarLaPlata() {
+  const list = await fetchJsonWithTimeout("https://aviationweather.gov/api/data/metar?ids=SADL&format=json&hours=3");
+  const latest = (Array.isArray(list) ? list : []).sort((a, b) => b.obsTime - a.obsTime)[0];
+  if (!latest) return null;
+  const ageMin = Math.round((Date.now() / 1000 - latest.obsTime) / 60);
+  if (ageMin > METAR_MAX_AGE_MIN) return null;
+  return { wx: latest.wxString || "", ageMin, ...parseMetarWeather(latest.wxString) };
+}
+
+/**
+ * Consulta las dos fuentes y dice si llueve ahora. `unknown` = ninguna respondió;
+ * en ese caso quien llama mantiene el estado anterior (nunca apaga por un error).
+ */
+async function detectRainInMagdalena() {
+  const [om, metar] = await Promise.allSettled([readOpenMeteoMagdalena(), readMetarLaPlata()]);
+  const omData = om.status === "fulfilled" ? om.value : null;
+  const metarData = metar.status === "fulfilled" ? metar.value : null;
+  const errors = [];
+  if (om.status === "rejected") errors.push(`open-meteo: ${om.reason?.message || om.reason}`);
+  if (metar.status === "rejected") errors.push(`metar: ${metar.reason?.message || metar.reason}`);
+
+  const unknown = !omData && !metarData;
+  const wet = !unknown && Boolean(
+    omData?.wet || metarData?.wet || (omData?.light && metarData?.light)
+  );
+  const result = { wet, unknown, openMeteo: omData, metar: metarData, errors };
+  logger.info(`[Lluvia] ${unknown ? "SIN DATOS" : wet ? "LLUEVE" : "no llueve"}`, {
+    openMeteo: omData, metar: metarData, errors,
+  });
+  return result;
+}
+
+/**
+ * Lo que vale para cobrar en modo automático. Lee lo que dejó la revisión programada;
+ * si está viejo (la revisión dejó de correr), consulta en vivo sin escribir nada.
+ */
+async function resolveAutoRain(weatherData) {
+  const stamp = weatherData?.checkedAt || weatherData?.updatedAt;
+  const checkedMs = stamp?.toDate ? stamp.toDate().getTime() : 0;
+  const previous = weatherData?.isRaining === true;
+  if (Date.now() - checkedMs < RAIN_STATE_STALE_MS) return previous;
+  logger.warn("[Lluvia] settings/weather desactualizado; consulto en vivo", { checkedMs });
+  const live = await detectRainInMagdalena();
+  return live.unknown ? previous : live.wet;
 }
 
 function getArgentinaTime() {
@@ -2036,7 +2081,7 @@ function withOrderIdempotency(handler) {
 
     const ref = db.collection("orderRequests").doc(`${uid}_${requestId}`);
     try {
-      await ref.create({ uid, status: "processing", createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      await ref.create({ uid, status: "processing", createdAt: FieldValue.serverTimestamp() });
     } catch (err) {
       const snap = await ref.get();
       const data = snap.exists ? snap.data() : null;
@@ -2049,7 +2094,7 @@ function withOrderIdempotency(handler) {
         return res.status(409).json({ error: "Tu pedido ya se está procesando. Esperá unos segundos.", inProgress: true });
       }
       // A stale claim (the instance died mid-request): take it over.
-      await ref.set({ uid, status: "processing", createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      await ref.set({ uid, status: "processing", createdAt: FieldValue.serverTimestamp() });
     }
 
     let statusCode = 200;
@@ -2058,7 +2103,7 @@ function withOrderIdempotency(handler) {
     res.status = (code) => { statusCode = code; return originalStatus(code); };
     res.json = (body) => {
       const settle = statusCode >= 200 && statusCode < 300
-        ? ref.set({ status: "done", response: body, finishedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        ? ref.set({ status: "done", response: body, finishedAt: FieldValue.serverTimestamp() }, { merge: true })
         : ref.delete();
       // Awaited before answering: on Cloud Run the CPU is throttled once the response is sent.
       return settle.catch(e => logger.warn("[Idempotency] Could not settle request:", e)).then(() => originalJson(body));
@@ -2186,28 +2231,10 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
       logger.error("Error fetching active offers for checkout:", err);
     }
 
-    // Fetch current weather status outside transaction
+    // Lluvia en modo automático: lo que dejó checkWeatherPeriodic (fuera de la transacción
+    // porque puede tener que consultar en vivo).
     const weatherDocSnap = await db.collection("settings").doc("weather").get();
-    const weatherData = weatherDocSnap.exists ? weatherDocSnap.data() : {};
-    let isRainingFromApi = false;
-    let needsWeatherUpdate = false;
-    const lastUpdated = weatherData.updatedAt ? weatherData.updatedAt.toDate().getTime() : 0;
-    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
-    if (!weatherData || !weatherData.updatedAt || lastUpdated < thirtyMinutesAgo) {
-      try {
-        isRainingFromApi = await checkIfRainingInMagdalena();
-        needsWeatherUpdate = true;
-      } catch (err) {
-        logger.warn("Weather API check failed:", err);
-      }
-    }
-
-    if (needsWeatherUpdate) {
-      await db.collection("settings").doc("weather").set({
-        isRaining: isRainingFromApi,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true }).catch(() => {});
-    }
+    const autoIsRaining = await resolveAutoRain(weatherDocSnap.exists ? weatherDocSnap.data() : {});
 
     // Start transactional order creation
     const result = await db.runTransaction(async (transaction) => {
@@ -2236,11 +2263,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
       } else if (rainMode === "off") {
         isRaining = false;
       } else {
-        if (needsWeatherUpdate) {
-          isRaining = isRainingFromApi;
-        } else {
-          isRaining = weatherData.isRaining || false;
-        }
+        isRaining = autoIsRaining;
       }
 
       const baseRainSurcharge = globalSettings.deliveryRainSurcharge !== undefined ? globalSettings.deliveryRainSurcharge : 300;
@@ -2355,7 +2378,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           }
           const prodRef = db.doc(path);
           transaction.update(prodRef, {
-            stockQuantity: admin.firestore.FieldValue.increment(-reqQty)
+            stockQuantity: FieldValue.increment(-reqQty)
           });
         }
       }
@@ -2448,10 +2471,12 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           return s + finalItemTotal;
         }, 0);
 
-        const subAppUsageFee = subProductsTotal * appUsageFeeRate;
-        const commerceCommissionRate = cData.commissionRate !== undefined && cData.commissionRate !== null 
-          ? cData.commissionRate 
-          : 0.10;
+        // Mismo redondeo que muestra la app (a $10 hacia arriba), para que el total cobrado coincida
+        const subAppUsageFee = Math.ceil((subProductsTotal * appUsageFeeRate) / 10) * 10;
+        // Por ahora los comercios usan GO! gratis: ningún pedido genera comisión.
+        // Para volver a cobrar, poner COMMERCE_COMMISSION_ENABLED en true.
+        const commerceCommissionRate = !COMMERCE_COMMISSION_ENABLED ? 0
+          : (cData.commissionRate !== undefined && cData.commissionRate !== null ? cData.commissionRate : 0.10);
         const subCommission = subProductsTotal * commerceCommissionRate;
 
         // Bundle specifics
@@ -2502,7 +2527,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           const dtStr = `${scheduledDate}T${scheduledTime}:00`;
           const parsed = new Date(dtStr);
           if (!isNaN(parsed.getTime())) {
-            scheduledForObj = admin.firestore.Timestamp.fromDate(parsed);
+            scheduledForObj = Timestamp.fromDate(parsed);
           }
         }
 
@@ -2584,7 +2609,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           status: 'pending',
           paymentMethod,
           paymentStatus: 'pending',
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         };
 
         transaction.set(orderRef, orderData);
@@ -2595,8 +2620,8 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           try {
             const commerceDocRef = db.collection("comercios").doc(cId);
             transaction.update(commerceDocRef, {
-              directOrdersCount: admin.firestore.FieldValue.increment(1),
-              directSalesTotal: admin.firestore.FieldValue.increment(subTotal)
+              directOrdersCount: FieldValue.increment(1),
+              directSalesTotal: FieldValue.increment(subTotal)
             });
           } catch (statErr) {
             logger.warn("Could not increment direct stats for commerce:", statErr);
@@ -2628,21 +2653,21 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
       // Deduct redeemed points from user
       if (redeemedPoints > 0) {
         transaction.update(userRef, {
-          points: admin.firestore.FieldValue.increment(-redeemedPoints)
+          points: FieldValue.increment(-redeemedPoints)
         });
       }
 
       // Decrement coupon remaining count and record redemption (Single-Use)
       if (couponData && couponRef) {
         transaction.update(couponRef, {
-          remaining: admin.firestore.FieldValue.increment(-1),
-          usedCount: admin.firestore.FieldValue.increment(1)
+          remaining: FieldValue.increment(-1),
+          usedCount: FieldValue.increment(1)
         });
 
         const redemptionRef = couponRef.collection("redemptions").doc(uid);
         transaction.set(redemptionRef, {
           userId: uid,
-          usedAt: admin.firestore.FieldValue.serverTimestamp()
+          usedAt: FieldValue.serverTimestamp()
         });
       }
 
@@ -2655,12 +2680,12 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
       await db.collection("notifications").add({
         comercioId: order.commerceId,
         orderId: order.docId,
-        title: "¡Nuevo Pedido!",
+        title: `Nuevo pedido #${order.orderId}`,
         message: `Pedido #${order.orderId} de ${decodedToken.name || "Cliente"}`,
         type: "new_order",
         status: "unread",
         pushNotify: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        createdAt: FieldValue.serverTimestamp()
       });
     }
 
@@ -2694,6 +2719,10 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
 
   if (!pickupAddress || !deliveryAddress || !details) {
     return res.status(400).json({ error: "Faltan campos obligatorios (direcciones o detalles)" });
+  }
+  // "Pago de servicios" was retired (30-09-2026). Old app versions may still offer it.
+  if (type === "pagodeservicios") {
+    return res.status(400).json({ error: "El pago de servicios ya no está disponible. Podés pedir un Mandado." });
   }
 
   try {
@@ -2739,17 +2768,7 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
       } else if (rainMode === "off") {
         isRaining = false;
       } else {
-        const lastUpdated = weatherData.updatedAt ? weatherData.updatedAt.toDate().getTime() : 0;
-        const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
-        if (!weatherData || !weatherData.updatedAt || lastUpdated < thirtyMinutesAgo) {
-          isRaining = await checkIfRainingInMagdalena();
-          transaction.set(db.collection("settings").doc("weather"), {
-            isRaining,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
-        } else {
-          isRaining = weatherData.isRaining || false;
-        }
+        isRaining = await resolveAutoRain(weatherData);
       }
 
       const baseRainSurcharge = globalSettings.deliveryRainSurcharge !== undefined ? globalSettings.deliveryRainSurcharge : 300;
@@ -2784,6 +2803,23 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         const redemptionSnap = await transaction.get(redemptionRef);
         if (redemptionSnap.exists) {
           throw new Error("Ya has utilizado este cupón anteriormente.");
+        }
+      }
+
+      // Banner de mandados con envío bonificado (banners_mandados): el descuento lo valida acá el
+      // servidor (activo, con descuento y dentro del tope del día) y el uso se cuenta en el banner.
+      // Antes el servidor lo ignoraba: la app mostraba el descuento y se cobraba el precio entero.
+      const originBannerId = typeof req.body.originBannerId === "string" && /^[\w-]{1,64}$/.test(req.body.originBannerId) ? req.body.originBannerId : null;
+      const bannerRef = originBannerId ? db.collection("banners_mandados").doc(originBannerId) : null;
+      const bannerSnap = bannerRef ? await transaction.get(bannerRef) : null;
+      const bannerDayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(new Date());
+      let bannerEligible = 0;
+      if (bannerSnap && bannerSnap.exists) {
+        const b = bannerSnap.data();
+        const usedToday = Number((b.stats && b.stats.discountedByDay && b.stats.discountedByDay[bannerDayKey]) || 0);
+        const dayLimit = Number(b.discountLimitPerDay || 0);
+        if (b.status === "active" && b.hasDiscount && Number(b.discountAmount) > 0 && (!dayLimit || usedToday < dayLimit)) {
+          bannerEligible = Number(b.discountAmount);
         }
       }
 
@@ -2875,7 +2911,8 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         if (secureCouponDiscount > subtotalVal) secureCouponDiscount = subtotalVal;
       }
 
-      let finalCouponDiscount = Number(couponDiscount || 0);
+      // La app manda en couponDiscount el cupón más el banner: el banner se valida aparte
+      let finalCouponDiscount = Math.max(0, Number(couponDiscount || 0) - bannerEligible);
       if (couponData && Math.abs(finalCouponDiscount - secureCouponDiscount) > 10) {
         logger.warn(`GoFavor Coupon discount tampering detected! Client: ${finalCouponDiscount}, calculated: ${secureCouponDiscount}. Overwriting.`);
         finalCouponDiscount = secureCouponDiscount;
@@ -2889,7 +2926,8 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
       const extraStopUnitFee = globalSettings.deliveryExtraStopFee !== undefined ? Number(globalSettings.deliveryExtraStopFee) : 500;
       const secureExtraStopsFee = (secureStopsCount - 1) * extraStopUnitFee;
       const secureTip = sanitizeTip(tip);
-      const rawTotal = subtotalVal + finalAppUsageFee + secureExtraStopsFee + secureTip - finalCouponDiscount;
+      const bannerDiscount = Math.min(bannerEligible, Math.max(0, subtotalVal - finalCouponDiscount));
+      const rawTotal = subtotalVal + finalAppUsageFee + secureExtraStopsFee + secureTip - finalCouponDiscount - bannerDiscount;
       const finalTotal = Math.max(0, Math.ceil(rawTotal));
 
       // Extract address notes from deliveryAddress if formatted as "Address (Detalle: Notes)"
@@ -2964,27 +3002,37 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
         verificationCode,
         tip: secureTip,
         couponCode: couponCode || null,
-        couponDiscount: finalCouponDiscount,
+        // El banner lo absorbe GO como un cupón (la cuenta del cadete acredita couponDiscount)
+        couponDiscount: finalCouponDiscount + bannerDiscount,
+        ...(originBannerId ? { originBannerId, bannerDiscount } : {}),
         directDriverUid: directDriverUid && directDriverUid !== 'rotation' ? directDriverUid : null,
         queueTargetDriverId: initialTargetDriverId,
         queueTargetDriverName: initialTargetDriverName,
-        queueOfferedAt: initialTargetDriverId ? admin.firestore.FieldValue.serverTimestamp() : null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        queueOfferedAt: initialTargetDriverId ? FieldValue.serverTimestamp() : null,
+        createdAt: FieldValue.serverTimestamp()
       };
 
       transaction.set(orderRef, orderData);
+
+      if (bannerRef && bannerSnap.exists) {
+        transaction.update(bannerRef, {
+          "stats.conversions": FieldValue.increment(1),
+          [`stats.conversionsByDay.${bannerDayKey}`]: FieldValue.increment(1),
+          ...(bannerDiscount > 0 ? { [`stats.discountedByDay.${bannerDayKey}`]: FieldValue.increment(1) } : {}),
+        });
+      }
       
       // Decrement coupon remaining count and record redemption (Single-Use)
       if (couponData && couponRef) {
         transaction.update(couponRef, {
-          remaining: admin.firestore.FieldValue.increment(-1),
-          usedCount: admin.firestore.FieldValue.increment(1)
+          remaining: FieldValue.increment(-1),
+          usedCount: FieldValue.increment(1)
         });
 
         const redemptionRef = couponRef.collection("redemptions").doc(uid);
         transaction.set(redemptionRef, {
           userId: uid,
-          usedAt: admin.firestore.FieldValue.serverTimestamp()
+          usedAt: FieldValue.serverTimestamp()
         });
       }
 
@@ -2994,11 +3042,11 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
 
     // Notify available drivers via notifications collection
     await db.collection("notifications").add({
-      title: "¡Nuevo Favor Disponible!",
+      title: "Nuevo favor disponible",
       message: `Hay un nuevo ${type} disponible`,
       type: "new_favor",
       status: "unread",
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
 
     res.status(200).json({ success: true, orderId: result.docId, orderNum: result.orderId });
@@ -3066,10 +3114,10 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
         url: url || "/#/",
         targetAudience: targetAudience,
         status: "scheduled",
-        scheduledAt: admin.firestore.Timestamp.fromDate(scheduledDate),
+        scheduledAt: Timestamp.fromDate(scheduledDate),
         sentCount: 0,
         clicks: 0,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        createdAt: FieldValue.serverTimestamp()
       });
 
       return res.status(200).json({ success: true, scheduled: true, broadcastId: broadcastRef.id });
@@ -3124,7 +3172,7 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
       status: "sent",
       sentCount: sentCount || 0,
       clicks: 0,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
 
     // 4. Send to devices directly using the robust sendPush multicast utility (instant arrival!)
@@ -3159,7 +3207,7 @@ exports.trackBroadcastClick = onRequest({ cors: true }, async (req, res) => {
 
   try {
     await db.collection("broadcasts").doc(broadcastId).update({
-      clicks: admin.firestore.FieldValue.increment(1)
+      clicks: FieldValue.increment(1)
     });
     res.status(200).json({ success: true });
   } catch (err) {
@@ -3199,6 +3247,12 @@ exports.onFCMTokenRegistered = onDocumentCreated("users/{userId}/fcmTokens/{toke
     }
   } catch (err) {
     logger.error("Error in onFCMTokenRegistered trigger:", err);
+  }
+
+  try {
+    await grantGiveawayAppChances(userId);
+  } catch (err) {
+    logger.error("[Giveaway] Error granting app chances:", err);
   }
 });
 
@@ -3248,6 +3302,45 @@ exports.onNotificationCreated = onDocumentCreated("users/{userId}/notifications/
  * accepted it and when/where it was registered, so an admin can tell whether the
  * token belongs to the phone the person is holding right now.
  */
+// Detector de errores: la app manda acá los errores que ve (src/utils/error-reporter.js);
+// se agrupan en client_errors y avisan a los admins (ver functions/client-errors.js).
+exports.reportClientError = onRequest({ cors: true, maxInstances: 5, memory: "256Mi" },
+  createReportHandler({ admin, getAdminTokens, sendPush }));
+
+// Vigilante: audita los datos y lee los errores del servidor cada 15 minutos; a la mañana hace
+// además la revisión pesada y manda el resumen del día (ver functions/vigilante.js).
+exports.vigilante = onSchedule({ schedule: "every 15 minutes", timeoutSeconds: 300, maxInstances: 1 }, async () => {
+  await runVigilante({ getAdminTokens, sendPush });
+});
+
+exports.vigilanteDiario = onSchedule({ schedule: "0 9 * * *", timeZone: "America/Argentina/Buenos_Aires", timeoutSeconds: 540, maxInstances: 1 }, async () => {
+  await runVigilante({ getAdminTokens, sendPush }, { daily: true });
+  await sendDailyDigest({ getAdminTokens, sendPush });
+});
+
+// "Revisar ahora" desde Admin → Errores (sólo admins).
+exports.runVigilanteNow = onRequest({ cors: true, timeoutSeconds: 300, maxInstances: 2 }, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(String(req.body?.idToken || ""));
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+  const callerSnap = await db.collection("users").doc(decoded.uid).get();
+  const caller = callerSnap.exists ? callerSnap.data() : {};
+  const isAdminUser = decoded.email === "kioscopaulos7@gmail.com" || caller.role === "admin" || caller.isAdmin === true;
+  if (!isAdminUser) return res.status(403).json({ error: "Sólo para administradores" });
+  try {
+    const out = await runVigilante({ getAdminTokens, sendPush }, { daily: req.body?.full === true });
+    const problems = Object.values(out.checks).filter((c) => c.ok === false).length;
+    return res.json({ ok: true, problems, logs: out.logs });
+  } catch (err) {
+    logger.error("[Vigilante] revisión manual falló:", err);
+    return res.status(500).json({ error: "La revisión falló" });
+  }
+});
+
 exports.adminTestPush = onRequest({ cors: true }, async (req, res) => {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
@@ -3358,7 +3451,8 @@ exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
     // 2. Auxiliary/transactional collections cleared always
     const collectionsToClear = [
       'orders', 'chats', 'support_chats', 'notifications', 'commissions',
-      'settlements', 'delivery_transactions', 'deliverySessions',
+      'settlements', 'delivery_transactions', 'deliverySessions', 'driver_ledger',
+      'delivery_debt_settlements', 'delivery_canon_payments', 'delivery_settlement_proofs',
       'visits', 'broadcasts', 'reviews'
     ];
 
@@ -3378,7 +3472,7 @@ exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
     // 3. Clear global reset counters/settings
     await db.collection('settings').doc('global').set({
       lastOrderId: 0,
-      lastResetAt: admin.firestore.FieldValue.serverTimestamp()
+      lastResetAt: FieldValue.serverTimestamp()
     }, { merge: true });
 
     // 4. Update all users: blanquear saldos, deudas, ratings
@@ -3389,6 +3483,10 @@ exports.adminHardReset = onRequest({ cors: true }, async (req, res) => {
       chunk.forEach(uDoc => {
         const updateData = {
           deliveryDebt: 0,
+          // Accounts start over too (driver_ledger is cleared above): next entry opens at $0.
+          ledgerOpened: false,
+          ledgerSeq: 0,
+          ledgerLastEntryId: null,
           commerceBalance: 0,
           completedOrdersCount: 0,
           ratings: [] // Clear driver ratings list
@@ -3520,13 +3618,13 @@ exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
           currentSessionId: null,
           inactivityWarningSentAt: null,
           disconnectedReason: "inactivity",
-          autoDisconnectedAt: admin.firestore.FieldValue.serverTimestamp()
+          autoDisconnectedAt: FieldValue.serverTimestamp()
         });
 
         if (data.currentSessionId) {
           try {
             await db.collection("deliverySessions").doc(data.currentSessionId).update({
-              endTime: admin.firestore.FieldValue.serverTimestamp()
+              endTime: FieldValue.serverTimestamp()
             });
           } catch (sessErr) {
             logger.warn(`[autoDisconnectDrivers] Could not close session ${data.currentSessionId}:`, sessErr.message);
@@ -3539,7 +3637,7 @@ exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
 
       // Mark first so a failed push doesn't make every 5-minute run retry it.
       await docSnap.ref.update({
-        inactivityWarningSentAt: admin.firestore.FieldValue.serverTimestamp()
+        inactivityWarningSentAt: FieldValue.serverTimestamp()
       });
 
       const title = "⏰ ¿Seguís conectado?";
@@ -3567,7 +3665,7 @@ exports.autoDisconnectDrivers = onSchedule("*/5 * * * *", async () => {
           body,
           url,
           status: "unread",
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         });
       } catch (notifErr) {
         logger.warn(`[autoDisconnectDrivers] In-app notification failed for ${docSnap.id}:`, notifErr.message);
@@ -3606,13 +3704,13 @@ exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
 
       if (isService) {
         referenceMs = createdMs;
-        cancelReason = "Ningún repartidor tomó el pedido en 10 minutos.";
+        cancelReason = "Ningún repartidor tomó el pedido en 20 minutos.";
       } else if (o.status === "pending") {
         referenceMs = createdMs;
-        cancelReason = "El comercio no aceptó el pedido en 10 minutos.";
+        cancelReason = "El comercio no aceptó el pedido en 20 minutos.";
       } else if (o.status === "ready" && !isTakeaway) {
         referenceMs = tsToMs(o.readyAt) || tsToMs(o.updatedAt) || createdMs;
-        cancelReason = "Ningún repartidor tomó el pedido en 10 minutos.";
+        cancelReason = "Ningún repartidor tomó el pedido en 20 minutos.";
       } else {
         continue;
       }
@@ -3630,7 +3728,7 @@ exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
 
           tx.update(orderRef, {
             status: "cancelled",
-            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            cancelledAt: FieldValue.serverTimestamp(),
             cancelledBy: "system",
             cancelReason,
             queueTargetDriverId: null,
@@ -3639,7 +3737,7 @@ exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
 
           if (fresh.pointsRedeemed > 0 && fresh.userId) {
             tx.update(db.collection("users").doc(fresh.userId), {
-              points: admin.firestore.FieldValue.increment(fresh.pointsRedeemed)
+              points: FieldValue.increment(fresh.pointsRedeemed)
             });
           }
           return true;
@@ -3657,45 +3755,73 @@ exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
   }
 });
 
-exports.checkWeatherPeriodic = onSchedule("*/15 * * * *", async (event) => {
+// settings/weather.isRaining es siempre lo que detecta el modo automático (también con el
+// modo manual puesto, así al volver a "Automático" ya está al día). El modo manual se
+// aplica al leer, en el cliente (state.js) y al crear pedidos.
+exports.checkWeatherPeriodic = onSchedule("*/10 * * * *", async (event) => {
   try {
     const settingsSnap = await db.collection("settings").doc("global").get();
     const globalSettings = settingsSnap.exists ? settingsSnap.data() : {};
     const rainMode = globalSettings.rainMode || "auto";
 
-    let isRaining = false;
-    if (rainMode === "on") {
-      isRaining = true;
-    } else if (rainMode === "off") {
-      isRaining = false;
-    } else {
-      isRaining = await checkIfRainingInMagdalena();
-    }
-
     const weatherRef = db.collection("settings").doc("weather");
     const weatherSnap = await weatherRef.get();
-    const wasRaining = weatherSnap.exists ? weatherSnap.data().isRaining : false;
+    const prev = weatherSnap.exists ? weatherSnap.data() : {};
+    const wasRaining = prev.isRaining === true;
+
+    const detection = await detectRainInMagdalena();
+    let isRaining = wasRaining;
+    let dryChecks = Number(prev.dryChecks) || 0;
+    if (!detection.unknown) {
+      if (detection.wet) {
+        isRaining = true;
+        dryChecks = 0;
+      } else {
+        dryChecks += 1;
+        isRaining = wasRaining && dryChecks < RAIN_OFF_AFTER_DRY_CHECKS;
+      }
+    }
+
+    const update = {
+      isRaining,
+      dryChecks,
+      checkedAt: FieldValue.serverTimestamp(),
+      sources: { openMeteo: detection.openMeteo, metarLaPlata: detection.metar },
+      lastError: detection.errors.length ? detection.errors.join(" | ") : null,
+    };
+    if (isRaining !== wasRaining) update.updatedAt = FieldValue.serverTimestamp();
+
+    const charging = rainMode === "on" ? true : rainMode === "off" ? false : isRaining;
+    // Docs de antes de este cambio no tienen chargingRain: se toma isRaining para no
+    // repetir el aviso a los cadetes en la primera corrida.
+    const wasCharging = prev.chargingRain === undefined ? wasRaining : prev.chargingRain === true;
+    update.chargingRain = charging;
+    const lastPushMs = prev.lastRainPushAt?.toDate ? prev.lastRainPushAt.toDate().getTime() : 0;
+    const shouldPush = charging && !wasCharging && Date.now() - lastPushMs > RAIN_PUSH_MIN_GAP_MS;
+    if (shouldPush) update.lastRainPushAt = FieldValue.serverTimestamp();
+
+    await weatherRef.set(update, { merge: true });
 
     if (isRaining !== wasRaining) {
-      await weatherRef.set({ isRaining, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      
-      if (isRaining) {
-        const msgs = globalSettings.pushMessages || {};
-        const title = msgs?.rain?.title || "🌧 ¡Empezó a llover!";
-        const body = msgs?.rain?.body || "El recargo por lluvia está activo. ¡Conducí con cuidado!";
-        
-        // Notify all deliveries
-        const driverDocs = await getAllDeliveryDrivers();
-        let allDriverTokens = [];
-        for (const doc of driverDocs) {
-           const t = await getUserTokens(doc.id);
-           allDriverTokens = allDriverTokens.concat(t);
-        }
-        allDriverTokens = [...new Set(allDriverTokens)];
+      logger.info(`[Lluvia] cambio de estado automático: ${wasRaining} -> ${isRaining}`);
+    }
 
-        if (allDriverTokens.length > 0) {
-          await sendPush(allDriverTokens, { title, body }, { tag: "rain-surcharge", url: "#/delivery" });
-        }
+    if (shouldPush) {
+      const msgs = globalSettings.pushMessages || {};
+      const title = msgs?.rain?.title || "🌧 ¡Empezó a llover!";
+      const body = msgs?.rain?.body || "El recargo por lluvia está activo. ¡Conducí con cuidado!";
+
+      // Notify all deliveries
+      const driverDocs = await getAllDeliveryDrivers();
+      let allDriverTokens = [];
+      for (const doc of driverDocs) {
+        const t = await getUserTokens(doc.id);
+        allDriverTokens = allDriverTokens.concat(t);
+      }
+      allDriverTokens = [...new Set(allDriverTokens)];
+
+      if (allDriverTokens.length > 0) {
+        await sendPush(allDriverTokens, { title, body }, { tag: "rain-surcharge", url: "#/delivery" });
       }
     }
   } catch (e) {
@@ -3713,7 +3839,7 @@ exports.checkNightSurchargeSchedule = onSchedule("*/5 * * * *", async (event) =>
     if (!config || !config.enabled) {
       await db.collection("settings").doc("night_surcharge_state").set({
         isActive: false,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
       return;
     }
@@ -3731,7 +3857,7 @@ exports.checkNightSurchargeSchedule = onSchedule("*/5 * * * *", async (event) =>
       // Night Surcharge START window reached!
       await stateRef.set({
         isActive: true,
-        lastNotifiedStart: admin.firestore.FieldValue.serverTimestamp()
+        lastNotifiedStart: FieldValue.serverTimestamp()
       }, { merge: true });
 
       const title = msgs.night?.title || "🌙 ¡Comenzó el Recargo Nocturno!";
@@ -3753,7 +3879,7 @@ exports.checkNightSurchargeSchedule = onSchedule("*/5 * * * *", async (event) =>
       // Night Surcharge END window reached!
       await stateRef.set({
         isActive: false,
-        lastNotifiedEnd: admin.firestore.FieldValue.serverTimestamp()
+        lastNotifiedEnd: FieldValue.serverTimestamp()
       }, { merge: true });
 
       const title = "☀️ ¡Finalizó el Recargo Nocturno!";
@@ -3839,14 +3965,14 @@ exports.checkScheduledTrips = onSchedule({
   memory: "256Mi"
 }, async (event) => {
   try {
-    const now = admin.firestore.Timestamp.now();
+    const now = Timestamp.now();
     const nowMs = now.toMillis();
     
     // Window: trips scheduled between now and 2h10m from now (to catch within each 10-min cycle)
-    const twoHoursFromNow = new admin.firestore.Timestamp(
+    const twoHoursFromNow = new Timestamp(
       Math.floor((nowMs + 2 * 60 * 60 * 1000) / 1000), 0
     );
-    const twoHoursTenFromNow = new admin.firestore.Timestamp(
+    const twoHoursTenFromNow = new Timestamp(
       Math.floor((nowMs + 2 * 60 * 60 * 1000 + 10 * 60 * 1000) / 1000), 0
     );
 
@@ -3869,9 +3995,9 @@ exports.checkScheduledTrips = onSchedule({
         const timeStr = scheduledTime.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
         
         await sendPush(tokens, {
-          title: "⏰ Recordatorio: Viaje en 2 horas",
-          body: `Tenés un viaje programado a las ${timeStr}. Destino: ${trip.deliveryAddress || "sin dirección"}.`
-        }, { tag: "scheduled-trip-reminder", url: "#/delivery" });
+          title: `Viaje programado a las ${timeStr}`,
+          body: `Faltan 2 horas. Destino: ${trip.deliveryAddress || "sin dirección"}.`
+        }, { tag: `scheduled-trip-reminder-${doc.id}`, url: "#/delivery" });
       }
 
       // Also notify the passenger
@@ -3879,9 +4005,9 @@ exports.checkScheduledTrips = onSchedule({
         const userTokens = await getUserTokens(trip.userId);
         if (userTokens.length > 0) {
           await sendPush(userTokens, {
-            title: "🚗 Tu viaje programado es en 2 horas",
-            body: `Preparate: tu viaje hacia ${trip.deliveryAddress || "tu destino"} comienza pronto.`
-          }, { tag: "scheduled-trip-passenger-reminder", url: `#/pedido/${doc.id}` });
+            title: "Tu viaje es en 2 horas",
+            body: `Te vamos a buscar para ir a ${trip.deliveryAddress || "tu destino"}.`
+          }, { tag: `scheduled-trip-passenger-reminder-${doc.id}`, url: `#/pedido/${doc.id}` });
         }
       }
 
@@ -3907,9 +4033,9 @@ exports.checkScheduledTrips = onSchedule({
         const tokens = await getUserTokens(trip.driverId);
         if (tokens.length > 0) {
           await sendPush(tokens, {
-            title: "🚗 ¡Tu viaje programado comienza AHORA!",
-            body: `Dirigite a buscar al pasajero en: ${trip.pickupAddress || "la dirección indicada"}.`
-          }, { tag: "scheduled-trip-start", url: "#/delivery" });
+            title: "Es hora de tu viaje programado",
+            body: `Buscá al pasajero en ${trip.pickupAddress || "la dirección indicada"}.`
+          }, { tag: `scheduled-trip-start-${doc.id}`, url: "#/delivery" });
         }
         logger.info(`Activated scheduled trip ${doc.id} (has driver ${trip.driverId})`);
       } else {
@@ -3919,9 +4045,9 @@ exports.checkScheduledTrips = onSchedule({
           const userTokens = await getUserTokens(trip.userId);
           if (userTokens.length > 0) {
             await sendPush(userTokens, {
-              title: "🚗 Recordatorio de viaje programado",
-              body: "Tu viaje programado está activo y buscando chofer."
-            }, { tag: "scheduled-trip-reminder", url: "#/viajes" });
+              title: "Estamos buscando tu chofer",
+              body: "Tu viaje programado ya está activo. Te avisamos apenas lo tome alguien."
+            }, { tag: `scheduled-trip-reminder-${doc.id}`, url: "#/viajes" });
           }
         }
       }
@@ -3942,11 +4068,11 @@ exports.checkScheduledCommerceOrders = onSchedule({
   memory: "256Mi"
 }, async (event) => {
   try {
-    const now = admin.firestore.Timestamp.now();
+    const now = Timestamp.now();
     const nowMs = now.toMillis();
     
     // Queremos activar pedidos que esten en 'preparing' y cuyo scheduledFor sea <= dentro de 5 minutos
-    const fiveMinsFromNow = new admin.firestore.Timestamp(
+    const fiveMinsFromNow = new Timestamp(
       Math.floor((nowMs + 5 * 60 * 1000) / 1000), 0
     );
 
@@ -3964,7 +4090,7 @@ exports.checkScheduledCommerceOrders = onSchedule({
     for (const doc of scheduledOrdersSnap.docs) {
       batch.update(doc.ref, { 
         status: "ready", 
-        updatedAt: admin.firestore.FieldValue.serverTimestamp() 
+        updatedAt: FieldValue.serverTimestamp() 
       });
       activatedCount++;
     }
@@ -3992,8 +4118,8 @@ exports.onMarketplaceProductCreated = onDocumentCreated("marketplace_products/{p
       const adminTokens = await getAdminTokens();
       if (adminTokens.length > 0) {
         await sendPush(adminTokens, {
-          title: "🏷️ Nueva publicación pendiente",
-          body: `El producto "${product.title}" requiere aprobación de moderación.`
+          title: "Publicación para revisar",
+          body: `"${product.title}" espera tu aprobación.`
         }, { tag: `moderation-product-${event.params.productId}`, url: "#/admin/marketplace" });
       }
       logger.info(`Admin notification push sent for pending product ${event.params.productId}`);
@@ -4007,7 +4133,7 @@ exports.onMarketplaceProductCreated = onDocumentCreated("marketplace_products/{p
  * Scheduled task: Check for scheduled push broadcasts and deliver them (runs every 1 minute)
  */
 exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => {
-  const now = admin.firestore.Timestamp.now();
+  const now = Timestamp.now();
   try {
     const snap = await db.collection("broadcasts")
       .where("status", "==", "scheduled")
@@ -4086,7 +4212,7 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
       await db.collection("broadcasts").doc(campaignId).update({
         status: "sent",
         sentCount: sentCount || 0,
-        sentAt: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: FieldValue.serverTimestamp()
       });
     }
 
@@ -4116,7 +4242,7 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
             // Mark lastSentDate immediately to prevent duplicate runs
             await db.collection("automated_broadcasts").doc(autoId).update({
               lastSentDate: todayDateStr,
-              lastSentAt: admin.firestore.FieldValue.serverTimestamp()
+              lastSentAt: FieldValue.serverTimestamp()
             });
 
             // 1. Fetch target tokens
@@ -4181,8 +4307,8 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
               isAutomated: true,
               automationId: autoId,
               automationName: auto.name || "Automatización",
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
-              sentAt: admin.firestore.FieldValue.serverTimestamp()
+              createdAt: FieldValue.serverTimestamp(),
+              sentAt: FieldValue.serverTimestamp()
             });
           }
         }
@@ -4204,6 +4330,15 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
   const previousData = event.data.before ? event.data.before.data() : null;
 
   if (!data) return;
+
+  // Charlas de WhatsApp: lo que responde el equipo se le manda al cliente por ahí
+  if (data.source === "whatsapp_bot" || data.isWhatsAppBot === true) {
+    try {
+      await wa().notify.onSupportChat(event.params.userId, previousData, data);
+    } catch (err) {
+      logger.error(`[WhatsApp] Error reenviando soporte a ${event.params.userId}:`, err);
+    }
+  }
 
   const ticketId = data.ticketId || data.orderId || event.params.userId;
   const userName = data.userName || data.clientName || "Usuario";
@@ -4252,7 +4387,7 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
           ticketId: String(ticketId || ""),
           userId: event.params.userId,
           status: "unread",
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         }).catch(e => logger.warn(`Could not add in-app notif for admin ${adminDoc.id}:`, e));
       });
       await Promise.all(notifPromises);
@@ -4292,7 +4427,7 @@ exports.onSupportChatWritten = onDocumentWritten("support_chats/{userId}", async
         type: "support_message",
         url: url,
         status: "unread",
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        createdAt: FieldValue.serverTimestamp()
       }).catch(e => logger.warn(`Could not add in-app notif for user ${targetUserId}:`, e));
     } catch (err) {
       logger.error(`Error sending push response to user ${event.params.userId}:`, err);
@@ -4438,31 +4573,36 @@ exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event)
     if (!wasOnline || !nowOffline) return null;
 
     const byInactivity = after.disconnectedReason === "inactivity";
+    const byDebtLimit = after.disconnectedReason === "debt_limit";
     const driverName = after.displayName || after.name || "Repartidor";
     logger.info(`[DriverDisconnect] ${driverName} (${userId}) went offline (reason=${after.disconnectedReason || "unknown"}). Sending push notification.`);
 
-    const notifBody = byInactivity
-      ? "Te desconectamos porque no respondiste el aviso de inactividad. Volvé a conectarte desde el Panel de Repartidor cuando quieras."
-      : "Tu sesión de repartidor fue cerrada. Volvé a conectarte desde el Panel de Repartidor.";
+    const notifBody = byDebtLimit
+      ? "No pudiste conectarte porque tu saldo supera el tope de deuda. Pagá desde Mi cuenta → Pagar y volvé a conectarte."
+      : byInactivity
+        ? "Te desconectamos porque no respondiste el aviso de inactividad. Volvé a conectarte desde el Panel de Repartidor cuando quieras."
+        : "Tu sesión de repartidor fue cerrada. Volvé a conectarte desde el Panel de Repartidor.";
 
     // 1. Write in-app notification so it appears in the drawer
     await db.collection("users").doc(userId).collection("notifications").add({
-      title: "🔴 Sesión finalizada",
+      title: byDebtLimit ? "⛔ Tope de deuda superado" : "🔴 Sesión finalizada",
       body: notifBody,
       type: "driver_disconnected",
       url: "#/delivery-panel",
       status: "unread",
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
 
     // 2. Send push notification to the driver's FCM tokens
     const tokens = await getUserTokens(userId);
     if (tokens.length > 0) {
       await sendPush(tokens, {
-        title: "🔴 Sesión finalizada",
-        body: byInactivity
-          ? "Te desconectamos por 2 horas sin actividad. Tocá para volver a conectarte."
-          : "Tu sesión de repartidor fue cerrada. Tocá para volver a conectarte."
+        title: byDebtLimit ? "⛔ Tope de deuda superado" : "🔴 Sesión finalizada",
+        body: byDebtLimit
+          ? "Tu saldo supera el tope de deuda. Pagá desde Mi cuenta para volver a conectarte."
+          : byInactivity
+            ? "Te desconectamos por 2 horas sin actividad. Tocá para volver a conectarte."
+            : "Tu sesión de repartidor fue cerrada. Tocá para volver a conectarte."
       }, {
         type: "driver_disconnected",
         url: "#/delivery-panel",
@@ -4499,7 +4639,7 @@ async function recomputeDriverAvailability() {
 
   await db.collection("settings").doc("driverAvailability").set({
     onlineCount,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    updatedAt: FieldValue.serverTimestamp()
   }, { merge: true });
 
   return onlineCount;
@@ -4524,93 +4664,63 @@ exports.onDriverOnlineStatusChanged = onDocumentWritten("users/{userId}", async 
   }
 });
 
-// ═══════════════════════════════════════════════════
-// CUOTA DIARIA AUTOMÁTICA
-// La primera vez en el día (hora argentina) que un cadete pasa a online, se le
-// suma la cuota diaria a la deuda. Vive acá y no en la app para que nadie la
-// pueda saltear ni cobrar dos veces: el trigger puede dispararse más de una vez
-// y dos teléfonos pueden conectarse a la vez, pero la transacción revisa
-// lastCanonChargeDate antes de cobrar.
-// ═══════════════════════════════════════════════════
-function argentinaDateStr(date = new Date()) {
-  // en-CA formatea como YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(date);
-}
+// La cuota diaria ya no se cobra al conectarse: se suma al completar el pedido N° del día
+// (settings/global.canonMinOrders), en functions/ledger.js.
 
-// Modular import: admin.firestore.FieldValue is undefined under the emulator.
-const { FieldValue } = require("firebase-admin/firestore");
+// HISTORIA ANTERIOR: el admin crea system_jobs/{id} con type "import_driver_history" (botón en
+// Repartidores → Configuración) y acá se trae al estado de cuenta de cada cadete lo que el sistema
+// anterior registró. Es idempotente: un cadete ya importado se saltea.
+exports.onSystemJob = onDocumentCreated({ document: "system_jobs/{jobId}", timeoutSeconds: 540, memory: "1GiB" }, async (event) => {
+  const job = event.data.data();
+  if (!job || job.type !== "import_driver_history") return null;
+  const jobRef = event.data.ref;
+  await jobRef.update({ status: "running", startedAt: FieldValue.serverTimestamp() });
+  try {
+    let ids = job.driverId ? [job.driverId] : [];
+    if (!job.driverId) {
+      const [byFlag, byRole] = await Promise.all([
+        db.collection("users").where("isDelivery", "==", true).get(),
+        db.collection("users").where("role", "in", ["delivery", "chofer", "driver", "repartidor"]).get()
+      ]);
+      ids = [...new Set([...byFlag.docs, ...byRole.docs].map((d) => d.id))];
+    }
+    const results = [];
+    for (const id of ids) {
+      try {
+        results.push(await importLegacyHistory(id));
+      } catch (err) {
+        logger.error(`[HistoryImport] ${id} failed:`, err);
+        results.push({ driverId: id, status: "error", error: err.message });
+      }
+    }
+    const imported = results.filter((r) => r.status === "imported");
+    await jobRef.update({
+      status: "done",
+      finishedAt: FieldValue.serverTimestamp(),
+      drivers: ids.length,
+      imported: imported.length,
+      lines: imported.reduce((s, r) => s + (r.lines || 0), 0),
+      errors: results.filter((r) => r.status === "error").map((r) => `${r.driverId}: ${r.error}`).slice(0, 20)
+    });
+    logger.info(`[HistoryImport] ${imported.length}/${ids.length} drivers imported`);
+  } catch (err) {
+    logger.error("[HistoryImport] job failed:", err);
+    await jobRef.update({ status: "error", error: err.message, finishedAt: FieldValue.serverTimestamp() });
+  }
+  return null;
+});
 
-function isCanonPaid(canon) {
-  return !!canon && (canon.settled === true || ["approved", "paid", "settled"].includes(canon.status));
-}
-
-exports.chargeDailyCanonOnConnect = onDocumentUpdated("users/{userId}", async (event) => {
+// TOPE DE DEUDA: un cadete que se conecta con el saldo por encima del tope vuelve a quedar
+// desconectado (disconnectedReason "debt_limit"). Vive acá y no sólo en la app para que no se
+// pueda saltear con una versión vieja o conectándolo desde otro lado.
+exports.enforceDebtLimitOnConnect = onDocumentUpdated("users/{userId}", async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
   if (before.isOnline === true || after.isOnline !== true || !isDeliveryDoc(after)) return null;
-
-  const userId = event.params.userId;
-  const today = argentinaDateStr();
-  if (after.lastCanonChargeDate === today) return null;
-
   try {
-    const settingsSnap = await db.collection("settings").doc("global").get();
-    const configured = Number(settingsSnap.exists ? settingsSnap.data().canonAmount : NaN);
-    const amount = configured > 0 ? configured : 2000;
-
-    const userRef = db.collection("users").doc(userId);
-    const canonRef = db.collection("delivery_canon_payments").doc(`${userId}_${today}`);
-
-    const outcome = await db.runTransaction(async (tx) => {
-      const [userSnap, canonSnap] = await Promise.all([tx.get(userRef), tx.get(canonRef)]);
-      if (!userSnap.exists) return "missing";
-      const u = userSnap.data();
-      if (u.isCanonExempt === true || u.role === "admin" || u.isAdmin === true) return "exempt";
-      if (u.lastCanonChargeDate === today) return "already";
-
-      // Prepaid today (cash to the admin or Mercado Pago): nothing to add to the debt.
-      if (isCanonPaid(canonSnap.exists ? canonSnap.data() : null)) {
-        tx.update(userRef, { lastCanonChargeDate: today });
-        return "prepaid";
-      }
-
-      tx.set(canonRef, {
-        driverId: userId,
-        driverName: u.displayName || u.name || "Repartidor",
-        dateStr: today,
-        amount,
-        status: "pending",
-        settled: false,
-        chargedToDebt: true,
-        createdAt: FieldValue.serverTimestamp()
-      }, { merge: true });
-      tx.update(userRef, {
-        deliveryDebt: FieldValue.increment(amount),
-        lastCanonChargeDate: today
-      });
-      tx.set(db.collection("delivery_transactions").doc(), {
-        driverId: userId,
-        type: "canon_charge",
-        amount,
-        description: `Cuota diaria (${today})`,
-        createdAt: FieldValue.serverTimestamp()
-      });
-      return "charged";
-    });
-
-    logger.info(`[DailyCanon] ${userId} ${today}: ${outcome}`);
-    if (outcome === "charged") {
-      await userRef.collection("notifications").add({
-        title: "🛵 Cuota diaria registrada",
-        body: `Se sumaron $${amount.toLocaleString("es-AR")} de la cuota de hoy a tu saldo. Si te desconectás y volvés a conectar hoy, no se cobra de nuevo.`,
-        type: "canon_charge",
-        url: "#/delivery-panel",
-        status: "unread",
-        createdAt: FieldValue.serverTimestamp()
-      });
-    }
+    await blockIfOverDebtLimit(event.params.userId);
   } catch (err) {
-    logger.error(`[DailyCanon] Error charging ${userId}:`, err);
+    logger.error(`[DebtLimit] Error checking ${event.params.userId}:`, err);
   }
   return null;
 });
@@ -4627,4 +4737,637 @@ exports.recomputeDriverAvailabilityPeriodic = onSchedule("*/5 * * * *", async ()
   }
 });
 
+// --- GIVEAWAY FUNCTIONS ---
+//
+// Ciclo de vida de un sorteo (giveaways/{id}):
+//   status: draft -> active -> ended -> drawing -> drawn
+//   active: true/false = visible en /sorteo (lo prende y apaga el admin)
+// Las chances solo las escribe el servidor: la regla de Firestore no deja
+// que un cliente cree ni toque su entry.
+
+const crypto = require("crypto");
+
+const GIVEAWAY_ADMIN_EMAILS = ['kioscopaulos7@gmail.com'];
+const GIVEAWAY_DEFAULT_RULES = { registration: 1, appInstalled: 2, referral: 2, order: 5 };
+const GIVEAWAY_URL = '#/sorteo';
+// Si un sorteo quedó en 'drawing' más de esto (la función murió a mitad), se puede volver a tomar.
+const GIVEAWAY_DRAW_STALE_MS = 5 * 60 * 1000;
+
+class GiveawayError extends Error {
+  constructor(status, code, message) {
+    super(message || code);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function giveawayRules(g) {
+  const rules = { ...GIVEAWAY_DEFAULT_RULES };
+  for (const [k, v] of Object.entries(g.chanceRules || {})) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) rules[k] = Math.floor(n);
+  }
+  return rules;
+}
+
+function isGiveawayOpen(g, now = Date.now()) {
+  if (g.active !== true || g.status !== 'active') return false;
+  const endsMs = tsToMs(g.endsAt);
+  return !endsMs || endsMs > now;
+}
+
+// Mismo criterio que isDelivery() de la app: hay repartidores con role 'client'
+// que solo se distinguen por la marca de repartidor aprobado.
+function isGiveawayDriver(r, userData = {}) {
+  return ['driver', 'delivery', 'chofer', 'repartidor'].includes(r)
+    || userData.isDelivery === true || userData.isDelivery === 'true'
+    || userData.deliveryStatus === 'approved' || userData.tripStatus === 'approved';
+}
+
+// El equipo nunca participa: un sorteo público que gana alguien de adentro se ve mal.
+function isGiveawayStaff(r, userData = {}) {
+  const email = String(userData.email || '').toLowerCase().trim();
+  return ['admin', 'superadmin'].includes(r) || userData.isAdmin === true
+    || GIVEAWAY_ADMIN_EMAILS.includes(email) || email === 'juanhidalgobass@gmail.com';
+}
+
+function giveawayAudienceAllows(audience, role, userData = {}) {
+  const r = (role || '').toString().toLowerCase();
+  if (isGiveawayStaff(r, userData)) return false;
+  if (!audience || audience === 'all') return true;
+  if (audience === 'clients') return (!r || ['user', 'client'].includes(r)) && !isGiveawayDriver(r, userData);
+  if (audience === 'drivers') return isGiveawayDriver(r, userData);
+  if (audience === 'stores') return ['comercio', 'commerce'].includes(r);
+  return true;
+}
+
+// Nombre que se muestra en el ranking público: nombre + inicial del apellido.
+// Nunca el email (el ranking lo puede leer cualquiera).
+function giveawayPublicName(authUser, userData = {}) {
+  const raw = String(userData.displayName || userData.name || authUser?.displayName || '').trim();
+  if (!raw || raw.includes('@')) return 'Vecino/a';
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const name = parts.length > 1 ? `${parts[0]} ${parts[1][0].toUpperCase()}.` : parts[0];
+  return name.slice(0, 32);
+}
+
+function newReferralCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = 'GO-';
+  for (let i = 0; i < 6; i++) code += alphabet[crypto.randomInt(alphabet.length)];
+  return code;
+}
+
+async function isGiveawayAdmin(decodedToken) {
+  if (GIVEAWAY_ADMIN_EMAILS.includes(decodedToken.email || '')) return true;
+  const snap = await db.collection('users').doc(decodedToken.uid).get();
+  const u = snap.exists ? snap.data() : {};
+  return ['admin', 'superadmin'].includes(u.role) || u.isAdmin === true;
+}
+
+async function verifyBearer(req) {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) throw new GiveawayError(401, 'unauthorized');
+  try {
+    return await admin.auth().verifyIdToken(authHeader.slice(7));
+  } catch (e) {
+    throw new GiveawayError(401, 'unauthorized');
+  }
+}
+
+/**
+ * Anota a un usuario en el sorteo. Idempotente: si ya estaba, devuelve su entry.
+ * El referido se acredita en la misma transacción que crea la entry, así un
+ * doble click o dos pestañas no le suman dos veces al que invitó.
+ */
+async function createGiveawayEntry(giveawayRef, giveaway, uid, { referredBy = '' } = {}) {
+  const entryRef = giveawayRef.collection('entries').doc(uid);
+  const existing = await entryRef.get();
+  if (existing.exists) return { created: false, entry: existing.data() };
+
+  const [authUser, userDoc, fcmTokens] = await Promise.all([
+    admin.auth().getUser(uid).catch(() => null),
+    db.collection('users').doc(uid).get(),
+    db.collection('users').doc(uid).collection('fcmTokens').limit(1).get()
+  ]);
+  const userData = userDoc.exists ? userDoc.data() : {};
+  if (!giveawayAudienceAllows(giveaway.targetAudience, userData.role, { email: authUser?.email, ...userData })) {
+    throw new GiveawayError(403, 'not_eligible');
+  }
+
+  const rules = giveawayRules(giveaway);
+  const nowIso = new Date().toISOString();
+  const breakdown = [];
+  let chances = 0;
+  if (rules.registration > 0) {
+    chances += rules.registration;
+    breakdown.push({ type: 'registration', label: 'Te anotaste', detail: 'Por sumarte al sorteo', amount: rules.registration, createdAt: nowIso });
+  }
+  const hasApp = !fcmTokens.empty || !!userData.lastFcmToken;
+  if (hasApp && rules.appInstalled > 0) {
+    chances += rules.appInstalled;
+    breakdown.push({ type: 'app_installed', label: 'Notificaciones activas', detail: 'Por tener la app con avisos', amount: rules.appInstalled, createdAt: nowIso });
+  }
+
+  let referrerRef = null;
+  const code = String(referredBy || '').trim().toUpperCase().slice(0, 20);
+  if (code && rules.referral > 0) {
+    const q = await giveawayRef.collection('entries').where('referralCode', '==', code).limit(1).get();
+    if (!q.empty && q.docs[0].id !== uid) referrerRef = q.docs[0].ref;
+  }
+
+  const publicName = giveawayPublicName(authUser, userData);
+  const entry = {
+    userId: uid,
+    userName: publicName,
+    photoURL: authUser?.photoURL || '',
+    chances,
+    referralCode: newReferralCode(),
+    referredBy: referrerRef ? code : '',
+    referrals: 0,
+    appBonus: hasApp && rules.appInstalled > 0,
+    orderIds: [],
+    breakdown,
+    joinedAt: FieldValue.serverTimestamp()
+  };
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(entryRef);
+    if (snap.exists) return { created: false, entry: snap.data() };
+    let totalDelta = chances;
+    tx.set(entryRef, entry);
+    if (referrerRef) {
+      tx.update(referrerRef, {
+        chances: FieldValue.increment(rules.referral),
+        referrals: FieldValue.increment(1),
+        breakdown: FieldValue.arrayUnion({
+          type: 'referral', label: 'Invitaste a un vecino', detail: publicName,
+          amount: rules.referral, createdAt: nowIso, refUid: uid
+        })
+      });
+      totalDelta += rules.referral;
+    }
+    tx.update(giveawayRef, {
+      totalParticipants: FieldValue.increment(1),
+      totalChances: FieldValue.increment(totalDelta)
+    });
+    return { created: true, entry };
+  });
+
+  if (result.created && referrerRef) {
+    await notifyGiveawayChances(referrerRef.id, giveawayRef.id,
+      `🎟️ ¡Sumaste ${rules.referral} ${rules.referral === 1 ? 'chance' : 'chances'} en el sorteo!`,
+      `${publicName} se anotó con tu código. ¡Seguí invitando vecinos!`);
+  }
+  return result;
+}
+
+/**
+ * Avisa (campanita + push) que el usuario sumó chances. Nunca tira error:
+ * un aviso que falla no puede deshacer ni frenar las chances ya acreditadas.
+ */
+async function notifyGiveawayChances(uid, giveawayId, title, body) {
+  try {
+    await db.collection('users').doc(uid).collection('notifications').add({
+      title, body, type: 'giveaway_chances', status: 'unread', url: GIVEAWAY_URL,
+      createdAt: FieldValue.serverTimestamp()
+    });
+    const tokens = await getUserTokens(uid);
+    if (tokens.length) {
+      await sendPush(tokens, { title, body }, { url: GIVEAWAY_URL, type: 'giveaway_chances', giveawayId }, uid);
+    }
+  } catch (e) {
+    logger.warn(`[Giveaway] Could not notify chances to ${uid}:`, e);
+  }
+}
+
+/** Suma chances por un pedido entregado. Anota solo al cliente si todavía no estaba. */
+async function grantGiveawayOrderChances(orderId, order, orderNum) {
+  const uid = order.userId;
+  if (!uid) return;
+  const snap = await db.collection('giveaways').where('status', '==', 'active').get();
+  for (const gDoc of snap.docs) {
+    const giveaway = gDoc.data();
+    if (!isGiveawayOpen(giveaway)) continue;
+    const rules = giveawayRules(giveaway);
+    if (rules.order <= 0) continue;
+    let joined;
+    try {
+      joined = await createGiveawayEntry(gDoc.ref, giveaway, uid);
+    } catch (e) {
+      if (e instanceof GiveawayError && e.code === 'not_eligible') continue;
+      throw e;
+    }
+    const entryRef = gDoc.ref.collection('entries').doc(uid);
+    const added = await db.runTransaction(async (tx) => {
+      const s = await tx.get(entryRef);
+      if (!s.exists || (s.data().orderIds || []).includes(orderId)) return false;
+      tx.update(entryRef, {
+        chances: FieldValue.increment(rules.order),
+        orderIds: FieldValue.arrayUnion(orderId),
+        // Sin detalle de productos ni comercio: las entries son de lectura pública.
+        breakdown: FieldValue.arrayUnion({
+          type: 'order', label: `Pedido #${orderNum || orderId.slice(0, 6)}`, detail: 'Pedido entregado',
+          amount: rules.order, createdAt: new Date().toISOString(), orderId
+        })
+      });
+      tx.update(gDoc.ref, { totalChances: FieldValue.increment(rules.order) });
+      return true;
+    });
+    if (added) {
+      logger.info(`[Giveaway] +${rules.order} chances to ${uid} for order ${orderId} (${gDoc.id})`);
+      // Si el pedido lo anotó recién, se cuentan también las chances de anotarse.
+      const total = rules.order + (joined?.created ? Number(joined.entry?.chances) || 0 : 0);
+      await notifyGiveawayChances(uid, gDoc.id,
+        `🎟️ ¡Sumaste ${total} ${total === 1 ? 'chance' : 'chances'} en el sorteo!`,
+        joined?.created
+          ? `Tu pedido #${orderNum || orderId.slice(0, 6)} te anotó en el sorteo. ¡Cada pedido suma más!`
+          : `Por tu pedido #${orderNum || orderId.slice(0, 6)}. ¡Cada pedido suma más!`);
+    }
+  }
+}
+
+/** Suma las chances de "notificaciones activas" a quien ya estaba anotado y recién activa la app. */
+async function grantGiveawayAppChances(uid) {
+  const snap = await db.collection('giveaways').where('status', '==', 'active').get();
+  for (const gDoc of snap.docs) {
+    const giveaway = gDoc.data();
+    if (!isGiveawayOpen(giveaway)) continue;
+    const rules = giveawayRules(giveaway);
+    if (rules.appInstalled <= 0) continue;
+    const entryRef = gDoc.ref.collection('entries').doc(uid);
+    const added = await db.runTransaction(async (tx) => {
+      const s = await tx.get(entryRef);
+      if (!s.exists || s.data().appBonus) return false;
+      tx.update(entryRef, {
+        chances: FieldValue.increment(rules.appInstalled),
+        appBonus: true,
+        breakdown: FieldValue.arrayUnion({
+          type: 'app_installed', label: 'Notificaciones activas', detail: 'Por tener la app con avisos',
+          amount: rules.appInstalled, createdAt: new Date().toISOString()
+        })
+      });
+      tx.update(gDoc.ref, { totalChances: FieldValue.increment(rules.appInstalled) });
+      return true;
+    });
+    if (added) {
+      await notifyGiveawayChances(uid, gDoc.id,
+        `🎟️ ¡Sumaste ${rules.appInstalled} ${rules.appInstalled === 1 ? 'chance' : 'chances'} en el sorteo!`,
+        'Por activar las notificaciones de la app.');
+    }
+  }
+}
+
+/** Elige ganadores ponderando por chances, sin repetir persona. */
+function pickGiveawayWinners(entries, prizes) {
+  let pool = entries
+    .map(e => ({ ...e, weight: Math.max(0, Math.floor(Number(e.chances) || 0)) }))
+    .filter(e => e.userId && e.weight > 0);
+  const sortedPrizes = [...prizes].sort((a, b) => (a.position || 0) - (b.position || 0));
+  const winners = [];
+  for (const prize of sortedPrizes) {
+    if (!pool.length) break;
+    const total = pool.reduce((s, e) => s + e.weight, 0);
+    let ticket = crypto.randomInt(total);
+    let idx = 0;
+    while (ticket >= pool[idx].weight) { ticket -= pool[idx].weight; idx++; }
+    const w = pool[idx];
+    pool = pool.filter((_, i) => i !== idx);
+    winners.push({
+      position: prize.position,
+      userId: w.userId,
+      userName: w.userName || 'Vecino/a',
+      photoURL: w.photoURL || '',
+      chances: w.weight,
+      prizeAmount: prize.amount || '',
+      prizeDescription: prize.description || '',
+      prizePoints: Math.max(0, Math.floor(Number(prize.points) || 0)),
+      prizePesos: Math.max(0, Math.floor(Number(prize.pesosValue) || 0))
+    });
+  }
+  return winners;
+}
+
+/**
+ * Realiza el sorteo. El paso a 'drawing' va en una transacción para que el
+ * cron (sorteo automático) y el botón del admin nunca sorteen dos veces.
+ */
+async function performGiveawayDraw(giveawayId, { redraw = false, by = 'system' } = {}) {
+  const ref = db.collection('giveaways').doc(giveawayId);
+  const before = await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new GiveawayError(404, 'not_found');
+    const d = s.data();
+    const drawingStale = d.status === 'drawing' && Date.now() - tsToMs(d.drawStartedAt) > GIVEAWAY_DRAW_STALE_MS;
+    if (d.status === 'drawing' && !drawingStale) throw new GiveawayError(409, 'draw_in_progress', 'El sorteo ya se está realizando');
+    if (d.status === 'drawn' && !redraw) throw new GiveawayError(409, 'already_drawn', 'Este sorteo ya se realizó');
+    tx.update(ref, { status: 'drawing', drawStartedAt: FieldValue.serverTimestamp(), drawError: FieldValue.delete() });
+    return d;
+  });
+  const previousStatus = before.status === 'drawing' ? 'ended' : before.status;
+
+  let winners;
+  let entriesCount = 0;
+  let totalChances = 0;
+  try {
+    const entriesSnap = await ref.collection('entries').get();
+    let entries = entriesSnap.docs.map(d => ({ ...d.data(), userId: d.data().userId || d.id }));
+    // El público se vuelve a mirar al sortear: quien se anotó antes de que el
+    // admin lo restringiera (o se volvió repartidor después) no puede ganar,
+    // y el equipo (admins) queda afuera siempre.
+    if (entries.length) {
+      const userRefs = entries.map(e => db.collection('users').doc(e.userId));
+      const users = new Map();
+      for (let i = 0; i < userRefs.length; i += 300) {
+        const snaps = await db.getAll(...userRefs.slice(i, i + 300));
+        snaps.forEach(u => users.set(u.id, u.exists ? u.data() : {}));
+      }
+      const eligible = entries.filter(e => {
+        const u = users.get(e.userId) || {};
+        return giveawayAudienceAllows(before.targetAudience, u.role, u);
+      });
+      if (eligible.length !== entries.length) {
+        logger.info(`[Giveaway] ${giveawayId}: ${entries.length - eligible.length} entries out of audience '${before.targetAudience}' left out of the draw`);
+      }
+      entries = eligible;
+    }
+    entriesCount = entries.length;
+    totalChances = entries.reduce((s, e) => s + Math.max(0, Number(e.chances) || 0), 0);
+    if (!(before.prizes || []).length) throw new GiveawayError(400, 'no_prizes', 'El sorteo no tiene premios cargados');
+    if (!entriesCount || !totalChances) throw new GiveawayError(400, 'no_entries', 'No hay participantes');
+    winners = pickGiveawayWinners(entries, before.prizes);
+    await ref.update({
+      status: 'drawn',
+      drawnAt: FieldValue.serverTimestamp(),
+      drawnBy: by,
+      winners,
+      participantsAtDraw: entriesCount,
+      chancesAtDraw: totalChances,
+      // El contador real, por si algún increment se perdió.
+      totalParticipants: entriesCount,
+      totalChances
+    });
+  } catch (err) {
+    await ref.update({
+      status: previousStatus === 'drawn' ? 'drawn' : 'ended',
+      drawError: err.code || 'error'
+    }).catch(() => {});
+    throw err;
+  }
+
+  logger.info(`[Giveaway] ${giveawayId} drawn by ${by}: ${winners.map(w => w.userId).join(', ')}`);
+
+  // Premios en Puntos GO: se acreditan solos. Si el premio vino solo en pesos
+  // (sorteos viejos), se convierte con el valor del punto de settings/global.
+  let dollarPerPoint = 1;
+  try {
+    const g = await db.collection('settings').doc('global').get();
+    const v = Number(g.data()?.dollarPerPoint);
+    if (Number.isFinite(v) && v > 0) dollarPerPoint = v;
+  } catch (e) {
+    logger.warn('[Giveaway] Could not read dollarPerPoint, using 1:', e);
+  }
+
+  for (const w of winners) {
+    let credited = 0;
+    const points = w.prizePoints || (w.prizePesos ? Math.round(w.prizePesos / dollarPerPoint) : 0);
+    if (points > 0) {
+      try {
+        credited = await creditGiveawayPrize(giveawayId, before.title, w, points);
+      } catch (e) {
+        logger.error(`[Giveaway] Could not credit ${points} pts to winner ${w.userId}:`, e);
+      }
+    }
+    try {
+      const title = '🎉 ¡Ganaste el sorteo de GoDelivery!';
+      const pesos = Math.round(points * dollarPerPoint);
+      const body = credited
+        ? `Te llevaste el ${w.position}° premio: te acreditamos ${credited.toLocaleString('es-AR')} Puntos GO ($${pesos.toLocaleString('es-AR')}). Ya los podés usar en tu próximo pedido.`
+        : `Te llevaste el ${w.position}° premio: ${w.prizeAmount}. Te vamos a contactar para acreditarlo.`;
+      await db.collection('users').doc(w.userId).collection('notifications').add({
+        title, body, type: 'giveaway_winner', status: 'unread', url: GIVEAWAY_URL,
+        createdAt: FieldValue.serverTimestamp()
+      });
+      const tokens = await getUserTokens(w.userId);
+      if (tokens.length) {
+        await sendPush(tokens, { title, body }, { url: GIVEAWAY_URL, type: 'giveaway_winner', giveawayId }, w.userId);
+      }
+    } catch (e) {
+      logger.warn(`[Giveaway] Could not notify winner ${w.userId}:`, e);
+    }
+  }
+  return winners;
+}
+
+/**
+ * Acredita los Puntos GO de un premio. El id del movimiento es fijo por
+ * sorteo + ganador, así un reintento o un "volver a sortear" que repite
+ * ganador nunca le paga dos veces. Devuelve los puntos que tiene acreditados
+ * por este sorteo (los de antes, si ya se le habían pagado).
+ */
+async function creditGiveawayPrize(giveawayId, giveawayTitle, winner, points) {
+  const userRef = db.collection('users').doc(winner.userId);
+  const txRef = db.collection('points_transactions').doc(`giveaway_${giveawayId}_${winner.userId}`);
+  const done = await db.runTransaction(async (tx) => {
+    const [prev, user] = await Promise.all([tx.get(txRef), tx.get(userRef)]);
+    if (prev.exists) return { points: Number(prev.data().points) || 0, isNew: false };
+    if (!user.exists) return { points: 0, isNew: false };
+    tx.update(userRef, { points: FieldValue.increment(points) });
+    tx.set(txRef, {
+      userId: winner.userId,
+      type: 'giveaway_prize',
+      points,
+      description: `${winner.position}° premio del sorteo ${giveawayTitle || 'GoDelivery'}`,
+      giveawayId,
+      createdAt: FieldValue.serverTimestamp()
+    });
+    return { points, isNew: true };
+  });
+  if (done.isNew) {
+    await db.collection('giveaways').doc(giveawayId).update({
+      [`credited.${winner.userId}`]: points
+    }).catch(() => {});
+    logger.info(`[Giveaway] Credited ${points} pts to ${winner.userId} (${giveawayId})`);
+  }
+  return done.points;
+}
+
+async function collectGiveawayAudienceTokens(audience) {
+  const tokensSnap = await db.collectionGroup('fcmTokens').get();
+  let docs = tokensSnap.docs;
+  if (audience && audience !== 'all') {
+    const roles = audience === 'clients' ? ['client', 'user', 'admin']
+      : audience === 'drivers' ? ['driver', 'delivery', 'repartidor', 'chofer']
+      : ['commerce', 'comercio'];
+    const usersSnap = await db.collection('users').where('role', 'in', roles).get();
+    const allowed = new Set(usersSnap.docs
+      .filter(d => giveawayAudienceAllows(audience, d.data().role, d.data()))
+      .map(d => d.id));
+    docs = docs.filter(d => allowed.has(d.ref.parent.parent?.id));
+  }
+  return [...new Set(docs.map(d => d.data().token || d.id).filter(t => typeof t === 'string' && t.length > 20))];
+}
+
+async function sendGiveawayReminder(giveawayId, giveaway, title, body) {
+  const tokens = await collectGiveawayAudienceTokens(giveaway.targetAudience);
+  if (!tokens.length) return 0;
+  await sendPush(tokens, { title, body }, {
+    url: GIVEAWAY_URL, type: 'giveaway_reminder', giveawayId, tag: `giveaway-${giveawayId}`
+  });
+  return tokens.length;
+}
+
+// Reclama un aviso marcándolo antes de mandarlo: si el envío falla a medias
+// es preferible perder un aviso que repetirlo a toda la base cada minuto.
+async function claimGiveawayReminder(ref, key, endsMs) {
+  return db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    const d = s.data() || {};
+    if (d.status !== 'active' || tsToMs(d.endsAt) !== endsMs) return false;
+    if ((d.notifications || {})[key] === endsMs) return false;
+    tx.update(ref, { [`notifications.${key}`]: endsMs });
+    return true;
+  });
+}
+
+async function tickGiveaway(doc, now) {
+  const g = doc.data();
+  const endsMs = tsToMs(g.endsAt);
+
+  if (g.status === 'active') {
+    if (!endsMs) return;
+    const remainingMin = (endsMs - now) / 60000;
+
+    if (remainingMin <= 0) {
+      await doc.ref.update({ status: 'ended', endedAt: FieldValue.serverTimestamp() });
+      logger.info(`[Giveaway] ${doc.id} ended`);
+      if (g.autoDraw === true) await performGiveawayDraw(doc.id, { by: 'auto' });
+      return;
+    }
+    if (g.active !== true) return; // oculto: no se avisa
+
+    // Las marcas guardan el endsAt para el que se mandó cada aviso:
+    // si el admin mueve la fecha, los avisos vuelven a salir para la nueva.
+    const sent = g.notifications || {};
+    if (remainingMin <= 10 && sent.tenMinutesFor !== endsMs) {
+      if (await claimGiveawayReminder(doc.ref, 'tenMinutesFor', endsMs)) {
+        const mins = Math.max(1, Math.round(remainingMin));
+        const count = await sendGiveawayReminder(doc.id, g,
+          `🔥 ¡${mins === 1 ? 'Falta 1 minuto' : `Faltan ${mins} minutos`} para el sorteo!`,
+          'Entrá ahora y miralo en vivo. ¡Puede ser tu día!');
+        logger.info(`[Giveaway] 10m reminder for ${doc.id} sent to ${count} devices`);
+      }
+    } else if (remainingMin <= 60 && remainingMin > 15 && sent.oneHourFor !== endsMs) {
+      if (await claimGiveawayReminder(doc.ref, 'oneHourFor', endsMs)) {
+        const mins = Math.round(remainingMin);
+        const count = await sendGiveawayReminder(doc.id, g,
+          mins >= 55 ? '⏰ ¡Falta 1 hora para el sorteo!' : `⏰ ¡Faltan ${mins} minutos para el sorteo!`,
+          'Todavía podés sumar chances: hacé un pedido o invitá a un vecino.');
+        logger.info(`[Giveaway] 1h reminder for ${doc.id} sent to ${count} devices`);
+      }
+    }
+    return;
+  }
+
+  if (g.status === 'ended' && g.autoDraw === true && !g.drawError) {
+    await performGiveawayDraw(doc.id, { by: 'auto' });
+    return;
+  }
+
+  // Un sorteo que quedó colgado en 'drawing' (la función murió a mitad).
+  if (g.status === 'drawing' && now - tsToMs(g.drawStartedAt) > GIVEAWAY_DRAW_STALE_MS) {
+    await doc.ref.update({ status: 'ended', drawError: 'stale' });
+  }
+}
+
+function sendGiveawayError(res, err, fallbackLog) {
+  if (err instanceof GiveawayError) {
+    return res.status(err.status).send({ error: err.code, message: err.message });
+  }
+  logger.error(fallbackLog, err);
+  return res.status(500).send({ error: 'internal', message: 'Error interno' });
+}
+
+exports.joinGiveaway = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  try {
+    const decoded = await verifyBearer(req);
+    const { giveawayId, referredBy } = req.body || {};
+    if (!giveawayId || typeof giveawayId !== 'string') throw new GiveawayError(400, 'missing_giveaway');
+
+    const giveawayRef = db.collection('giveaways').doc(giveawayId);
+    const giveawayDoc = await giveawayRef.get();
+    if (!giveawayDoc.exists) throw new GiveawayError(404, 'not_found');
+    const giveaway = giveawayDoc.data();
+
+    const existing = await giveawayRef.collection('entries').doc(decoded.uid).get();
+    if (existing.exists) return res.status(200).send({ success: true, created: false });
+    if (!isGiveawayOpen(giveaway)) throw new GiveawayError(400, 'closed', 'El sorteo ya no recibe participantes');
+
+    const result = await createGiveawayEntry(giveawayRef, giveaway, decoded.uid, { referredBy });
+    res.status(200).send({ success: true, created: result.created });
+  } catch (err) {
+    sendGiveawayError(res, err, 'Error joining giveaway:');
+  }
+});
+
+exports.manualGiveawayDraw = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  try {
+    const decoded = await verifyBearer(req);
+    if (!(await isGiveawayAdmin(decoded))) throw new GiveawayError(403, 'forbidden', 'Solo un administrador puede sortear');
+    const { giveawayId, redraw } = req.body || {};
+    if (!giveawayId || typeof giveawayId !== 'string') throw new GiveawayError(400, 'missing_giveaway');
+    const winners = await performGiveawayDraw(giveawayId, { redraw: redraw === true, by: decoded.uid });
+    res.status(200).send({ success: true, winners });
+  } catch (err) {
+    sendGiveawayError(res, err, 'Error drawing giveaway:');
+  }
+});
+
+exports.checkGiveawayNotifications = onSchedule("*/1 * * * *", async () => {
+  const now = Date.now();
+  const snap = await db.collection('giveaways').where('status', 'in', ['active', 'ended', 'drawing']).get();
+  for (const doc of snap.docs) {
+    try {
+      await tickGiveaway(doc, now);
+    } catch (err) {
+      logger.error(`[Giveaway] Error processing ${doc.id}:`, err);
+    }
+  }
+});
+
 // Las funciones de Mango POS viven en su propio codebase: functions-mango/
+
+// ═══════════════════════════════════════════════════
+// BOT DE WHATSAPP (API oficial de Meta) — functions/whatsapp/
+// ═══════════════════════════════════════════════════
+let whatsappBot = null;
+function wa() {
+  if (!whatsappBot) {
+    whatsappBot = require("./whatsapp").createWhatsApp({
+      db,
+      helpers: { computeDeliveryFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled: COMMERCE_COMMISSION_ENABLED },
+      push: { getUserTokens, sendPush },
+    });
+  }
+  return whatsappBot;
+}
+
+// URL que se carga en Meta como webhook. Atiende la verificación (GET) y los mensajes (POST).
+exports.whatsappWebhook = onRequest({ maxInstances: 10, timeoutSeconds: 60 }, (req, res) => wa().webhook(req, res));
+
+// Pedido escrito a un comercio: aviso al comercio, precio o rechazo al cliente.
+exports.onWhatsAppQuoteWritten = onDocumentWritten("wa_quotes/{quoteId}", async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  try {
+    await wa().notify.onQuoteWritten(event.params.quoteId, before, after);
+  } catch (err) {
+    logger.error(`[WhatsApp] Error con la consulta ${event.params.quoteId}:`, err);
+  }
+});
+
+exports.expireWhatsAppQuotes = onSchedule("every 2 minutes", async () => {
+  await wa().notify.expireQuotes();
+});

@@ -1,6 +1,7 @@
 
 import { db } from '../firebase.js';
-import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, getDocs, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { registerUnsubscribe } from '../utils/cleanup.js';
 import { getState, setState } from '../state.js';
 import { formatPrice, calculateScheduleSurcharge } from '../utils/format.js';
 import { showToast } from '../components/toast.js';
@@ -9,7 +10,7 @@ import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn, isAdmin } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { getDistance, calculateDynamicFee } from '../utils/geo.js';
-import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel } from '../utils/mandado-places.js';
+import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel, mandadoStoresOf, getPlaces, normalizePlaceName } from '../utils/mandado-places.js';
 import { loadMandadoPlaces } from '../utils/mandado-places-store.js';
 import { goServiceHeader, goServiceHint, bindServiceHint, goServiceEmpty, closeServiceScreen, showGoInfoSheet } from '../components/service-screen.js';
 import { functionUrl } from '../utils/functions-url.js';
@@ -55,6 +56,14 @@ let cachedLimitExceeded = false;
   document.head.appendChild(s);
 })();
 
+// Usos con descuento de hoy (día argentino). Los cuenta el servidor en el banner al crear el
+// mandado (createFavorOrder). Antes se contaban leyendo los pedidos, que la app no puede leer:
+// la consulta fallaba con permission-denied y el banner no se mostraba nunca.
+function bannerUsesToday(banner) {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+  return Number(banner?.stats?.discountedByDay?.[day] || 0);
+}
+
 export async function prefetchActiveBanner() {
   try {
     const bannerSnap = await getDocs(query(collection(db, 'banners_mandados'), where('status', '==', 'active')));
@@ -70,24 +79,7 @@ export async function prefetchActiveBanner() {
       return;
     }
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const ordersSnap = await getDocs(query(
-      collection(db, 'orders'),
-      where('originBannerId', '==', activeBanner.id)
-    ));
-
-    let todayConversions = 0;
-    ordersSnap.forEach(d => {
-      const oData = d.data();
-      if (oData.createdAt) {
-        const oDate = oData.createdAt.toDate ? oData.createdAt.toDate() : new Date(oData.createdAt);
-        if (oDate >= todayStart && oData.status !== 'cancelled') {
-          todayConversions++;
-        }
-      }
-    });
+    const todayConversions = bannerUsesToday(activeBanner);
 
     cachedActiveBanner = activeBanner;
     cachedLimitExceeded = activeBanner.hasDiscount && todayConversions >= activeBanner.discountLimitPerDay;
@@ -114,18 +106,73 @@ export async function prefetchActiveBanner() {
 // Start prefetching immediately to refresh the stored cache
 setTimeout(() => prefetchActiveBanner(), 300);
 
+// El Mandado es lo más pedido: va arriba y directo. Encomienda y Go Cash quedan al lado, más chicos.
 const MANDADO_OPTIONS = [
-  { type: 'encomienda', img: '/go-pickup-point.png?v=5', title: 'Encomienda', text: 'Buscamos algo y lo llevamos a donde nos digas.', chip: 'Costo normal de envío' },
-  { type: 'mandado', img: '/go-bag.png?v=6', title: 'Mandado', text: 'Compramos lo que necesites en cualquier negocio.', chip: 'Tarifa de gestión' },
-  { type: 'gocash', img: '/go-cash.png?v=5', title: 'Go Cash', text: 'Cambiá efectivo por transferencia, o al revés.', chip: 'Efectivo o transferencia' },
-  { type: 'pagodeservicios', img: '/go-clipboard.png?v=5', title: 'Pago de servicios', text: 'Pagamos tus facturas: ABSA, Canal 4, Cyber y más.', chip: 'Facturas y trámites' },
+  { type: 'mandado', img: '/go-bag.png?v=7', title: 'Mandado' },
+  { type: 'encomienda', img: '/go-pickup-point.png?v=7', title: 'Encomienda', short: 'Buscamos algo y lo llevamos' },
+  { type: 'gocash', img: '/go-cash.png?v=7', title: 'Go Cash', short: 'Efectivo ↔ transferencia' },
 ];
+
+// Rubros para "Lo que más se pide" cuando todavía no hay lugares aprendidos
+const DEFAULT_POPULAR = ['farmacia', 'kiosco', 'verduleria', 'supermercado', 'carniceria'];
+const POPULAR_ICONS = { farmacia: 'pharmacy', kiosco: 'candy', verduleria: 'vegetable', supermercado: 'supermarket', carniceria: 'meat', polleria: 'poultry', almacen: 'grocery', panaderia: 'bread', fiambreria: 'cheese', libreria: 'book', ferreteria: 'hardware', veterinaria: 'vet', heladeria: 'iceCream', bebidas: 'drink', rotiseria: 'restaurant' };
+
+const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+const escText = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+const POPULAR_MIN_VISITS = 3; // con menos compras en un rubro no alcanza para decir "lo que más se pide"
+
+/**
+ * Rubros más pedidos: solo cuentan las compras reales de mandados (visitas que registran los
+ * repartidores en los lugares aprendidos). Los comercios adheridos no cuentan: dicen cuántos
+ * negocios hay de un rubro, no qué pide la gente (así salían Heladería y Vinoteca). Mientras no
+ * haya datos suficientes, se completa con los rubros típicos de un mandado.
+ */
+function popularCategories(max = 5) {
+  const visits = new Map();
+  getPlaces().forEach(p => {
+    if (p.source !== 'aprendido') return;
+    const cat = p.category || placeCategory(p.name);
+    if (!cat || cat === 'pagos') return;
+    visits.set(cat, (visits.get(cat) || 0) + (Number(p.visits) || 0));
+  });
+  const ranked = [...visits.entries()].filter(([, n]) => n >= POPULAR_MIN_VISITS).sort((a, b) => b[1] - a[1]).map(([cat]) => cat);
+  DEFAULT_POPULAR.forEach(cat => { if (!ranked.includes(cat)) ranked.push(cat); });
+  return ranked.slice(0, max);
+}
+
+/**
+ * Últimos mandados distintos del cliente (para repetirlos con un toque).
+ * Devuelve [{ stops: [{ store, items, nearest }] }].
+ */
+async function recentMandados(uid, max = 3) {
+  const snap = await getDocs(query(collection(db, 'orders'), where('userId', '==', uid), orderBy('createdAt', 'desc'), limit(30)));
+  const seen = new Set();
+  const out = [];
+  for (const d of snap.docs) {
+    const o = d.data();
+    if (!o.isFavor || o.favorType !== 'compra' || /cancel/.test(String(o.status || ''))) continue;
+    const stops = mandadoStoresOf(o).map(s => ({ store: s.store, items: s.items || '', nearest: s.nearest || null }));
+    if (!stops.length) continue;
+    const key = stops.map(s => `${normalizePlaceName(s.store)}:${normalizePlaceName(s.items)}`).join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ stops });
+    if (out.length >= max) break;
+  }
+  return out;
+}
 
 // Mandados: a service page. The list of options and the chosen form sit side by side; the
 // form comes in from the right and back (header arrow or Android back) returns to the list.
 export async function renderGoFavores(content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
+  // El router a veces dibuja la pantalla dos veces seguidas (al terminar de cargar la sesión). Si
+  // este dibujo llega cuando su contenedor ya no está en pantalla, no hace nada: antes enganchaba
+  // sus botones a los del otro dibujo y el "Cómo funciona" (y todo lo demás) se abría dos veces.
+  // Por lo mismo, todo se busca dentro de `content` y no en el documento.
+  if (!content.isConnected) return;
   const meta = { eyebrow: 'Te lo buscamos y te lo llevamos', title: 'Mandados', infoLabel: '¿Cómo funcionan los Mandados?' };
 
   const user = getState().user;
@@ -135,7 +182,7 @@ export async function renderGoFavores(content) {
         ${goServiceHeader({ ...meta, infoId: 'mandados-info-btn' })}
         ${goServiceEmpty({ iconName: 'user', title: 'Iniciá sesión', text: 'Para pedir un mandado necesitamos saber a quién llevárselo.', ctaLabel: 'Iniciar sesión', ctaHref: '#/profile' })}
       </div>`;
-    document.getElementById('mandados-info-btn')?.addEventListener('click', () => showGoFavoresGeneralModal());
+    content.querySelector('#mandados-info-btn')?.addEventListener('click', () => showGoFavoresGeneralModal());
     return;
   }
 
@@ -147,17 +194,40 @@ export async function renderGoFavores(content) {
           <section class="mandados-pane go-service-scroll" id="mandados-list-pane">
             ${goServiceHint({ id: 'mandados-hint', storageKey: 'info_seen_gofavores_v4' })}
             <div class="go-option-list">
-              ${MANDADO_OPTIONS.map(o => `
-                <button type="button" class="go-option" data-mandado="${o.type}">
-                  <span class="go-option-art"><img src="${o.img}" alt="" /></span>
+              <div class="go-drivers-closed" id="mandados-drivers" role="status" hidden>
+                <span class="go-drivers-closed-icon">${icon('clock', 20)}</span>
+                <span class="go-drivers-closed-body">
+                  <strong>No hay repartidores conectados</strong>
+                  <small>Por ahora no podemos tomar mandados. Probá de nuevo en un rato.</small>
+                </span>
+              </div>
+              <button type="button" class="go-mandado-hero" data-mandado="mandado">
+                <span class="go-mandado-hero-top">
+                  <span class="go-option-art"><img src="/go-bag.png?v=7" alt="" /></span>
                   <span class="go-option-body">
-                    <span class="go-option-title">${o.title}</span>
-                    <span class="go-option-text">${o.text}</span>
-                    <span class="go-option-chip">${o.chip}</span>
+                    <span class="go-option-title">¿Qué te compramos?</span>
+                    <span class="go-option-text">En cualquier negocio del pueblo, hasta 5 paradas.</span>
                   </span>
-                  <span class="go-option-chev">${icon('chevronRight', 16)}</span>
-                </button>`).join('')}
+                </span>
+                <span class="go-mandado-hero-field">${icon('search', 16)} Escribí qué necesitás y dónde</span>
+              </button>
+              <div class="go-option-pair">
+                ${MANDADO_OPTIONS.filter(o => o.type !== 'mandado').map(o => `
+                  <button type="button" class="go-option go-option-mini" data-mandado="${o.type}">
+                    <span class="go-option-art"><img src="${o.img}" alt="" /></span>
+                    <span class="go-option-title">${o.title}</span>
+                    <span class="go-option-text">${o.short}</span>
+                  </button>`).join('')}
+              </div>
             </div>
+            <section class="go-mandados-section" id="mandados-recent" hidden>
+              <h3 class="go-mandados-section-title">Volvé a pedir</h3>
+              <div class="go-recent-list" id="mandados-recent-list"></div>
+            </section>
+            <section class="go-mandados-section" id="mandados-popular">
+              <h3 class="go-mandados-section-title">Lo que más se pide</h3>
+              <div class="go-chip-row" id="mandados-popular-list"></div>
+            </section>
             <div id="wizard-banner-container" class="mandados-banner" style="display:none;"></div>
           </section>
           <section class="mandados-pane" id="mandados-form-pane" aria-hidden="true">
@@ -167,14 +237,20 @@ export async function renderGoFavores(content) {
       </div>
     </div>`;
 
-  const track = document.getElementById('mandados-track');
-  const formPane = document.getElementById('mandados-form-pane');
-  const target = document.getElementById('wizard-form-target');
-  const leftBtn = document.getElementById('mandados-left-btn');
+  const track = content.querySelector('#mandados-track');
+  // Al enfocar un campo, el formulario lo trae a la vista (scrollIntoView) y eso corría de costado
+  // este contenedor: el formulario quedaba fuera de la pantalla. En iPhone viejos (sin overflow: clip)
+  // se vuelve a poner en su lugar.
+  const trackWrap = content.querySelector('.mandados-track-wrap');
+  trackWrap?.addEventListener('scroll', () => { if (trackWrap.scrollLeft) trackWrap.scrollLeft = 0; });
+  const formPane = content.querySelector('#mandados-form-pane');
+  const target = content.querySelector('#wizard-form-target');
+  const leftBtn = content.querySelector('#mandados-left-btn');
   const titleEl = content.querySelector('.go-service-title');
   const eyebrowEl = content.querySelector('.go-service-eyebrow');
-  const formRenderers = { encomienda: showMandadoForm, mandado: showCompraForm, gocash: showGoCashForm, pagodeservicios: showPagoServiciosForm };
+  const formRenderers = { encomienda: showMandadoForm, mandado: showCompraForm, gocash: showGoCashForm };
   let currentType = null;
+  let noDriversOnline = false; // lo actualiza el aviso de repartidores conectados (más abajo)
 
   const setHeader = (type) => {
     const option = MANDADO_OPTIONS.find(o => o.type === type);
@@ -206,6 +282,11 @@ export async function renderGoFavores(content) {
   };
 
   const openWithPhone = (type) => {
+    if (noDriversOnline) {
+      window._prefilledMandadoStops = null;
+      showToast('No hay repartidores conectados. Probá de nuevo en un rato.', 'warning');
+      return;
+    }
     const u = getState().user || {};
     if (!u.phone || u.phone.trim() === '') {
       showConfirm({
@@ -218,6 +299,7 @@ export async function renderGoFavores(content) {
           location.hash = '#/profile';
         }
       });
+      window._prefilledMandadoStops = null;
       return;
     }
     slideToForm(type);
@@ -226,10 +308,74 @@ export async function renderGoFavores(content) {
   content.querySelectorAll('[data-mandado]').forEach(btn => {
     btn.addEventListener('click', () => openWithPhone(btn.dataset.mandado));
   });
+
+  // Mandado ya armado (repetir uno anterior o un rubro): el formulario abre con los comercios cargados
+  const openMandadoWith = (stops) => {
+    window._prefilledMandadoStops = stops;
+    openWithPhone('mandado');
+  };
+
+  // Sin repartidores conectados no se puede pedir nada: se avisa y se bloquean las opciones. Antes
+  // el cliente se enteraba recién al confirmar, con todo el formulario completo. No se muestra
+  // cuántos hay. El contador lo mantiene el servidor (settings/driverAvailability,
+  // función onDriverOnlineStatusChanged); si nunca se calculó, no se bloquea.
+  const driversEl = content.querySelector('#mandados-drivers');
+  const pageEl = content.querySelector('.mandados-page');
+  try {
+    const unsubDrivers = onSnapshot(doc(db, 'settings', 'driverAvailability'), (snap) => {
+      if (!document.body.contains(driversEl)) { unsubDrivers(); return; }
+      noDriversOnline = snap.exists() && !(Number(snap.data().onlineCount) > 0);
+      driversEl.hidden = !noDriversOnline;
+      pageEl?.classList.toggle('is-closed', noDriversOnline);
+    }, () => { /* sin lectura: se deja pedir; al confirmar se vuelve a verificar */ });
+    registerUnsubscribe(unsubDrivers);
+  } catch (e) { /* sin conexión a la base: al confirmar se vuelve a verificar */ }
+
+  const popularEl = content.querySelector('#mandados-popular-list');
+  const renderPopular = () => {
+    if (!popularEl || !document.body.contains(popularEl)) return;
+    popularEl.innerHTML = popularCategories().map(cat => `
+      <button type="button" class="go-chip" data-cat="${cat}">${icon(POPULAR_ICONS[cat] || 'store', 15)} ${escText(capitalize(categoryLabel(cat)))}</button>`).join('');
+    popularEl.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => {
+      const cat = b.dataset.cat;
+      openMandadoWith([{ store: nearestLabel(cat), items: '', nearest: cat }]);
+    }));
+  };
+  renderPopular();
+  loadMandadoPlaces().then(renderPopular).catch(() => {});
+
+  const recentSec = content.querySelector('#mandados-recent');
+  const recentEl = content.querySelector('#mandados-recent-list');
+  const recentKey = `go_mandados_recent_${user.uid}`;
+  const renderRecent = (list) => {
+    if (!recentSec || !recentEl) return;
+    if (!Array.isArray(list) || !list.length) { recentSec.hidden = true; return; }
+    recentSec.hidden = false;
+    recentEl.innerHTML = list.map((r, i) => {
+      const title = r.stops.map(s => s.store).join(' + ');
+      const sub = r.stops.map(s => s.items).filter(Boolean).join(' · ') || 'Sin lista cargada';
+      return `
+        <button type="button" class="go-recent" data-i="${i}">
+          <span class="go-recent-icon">${icon('refresh', 16)}</span>
+          <span class="go-recent-body">
+            <span class="go-recent-title">${escText(title)}</span>
+            <span class="go-recent-sub">${escText(sub)}</span>
+          </span>
+          <span class="go-recent-cta">Repetir</span>
+        </button>`;
+    }).join('');
+    recentEl.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => openMandadoWith(list[Number(b.dataset.i)].stops)));
+  };
+  // Lo último conocido al instante; después se actualiza con la base
+  try { renderRecent(JSON.parse(localStorage.getItem(recentKey) || 'null')); } catch (e) { /* sin almacenamiento */ }
+  recentMandados(user.uid).then(list => {
+    try { localStorage.setItem(recentKey, JSON.stringify(list)); } catch (e) { /* sin almacenamiento */ }
+    if (document.body.contains(recentEl)) renderRecent(list);
+  }).catch(err => console.warn('[Mandados] No se pudieron leer los mandados anteriores:', err?.code || err));
   leftBtn.addEventListener('click', () => {
     if (!slideToList()) closeServiceScreen();
   });
-  document.getElementById('mandados-info-btn')?.addEventListener('click', () => {
+  content.querySelector('#mandados-info-btn')?.addEventListener('click', () => {
     if (currentType) showServiceInfoModal(currentType);
     else showGoFavoresGeneralModal();
   });
@@ -270,15 +416,6 @@ const SERVICE_INFO = {
     notes: [
       { title: 'Hasta $70.000', text: 'por operación, por seguridad tuya y del repartidor.' },
       { title: 'Transferencia en el momento:', text: 'tiene que acreditarse frente al repartidor antes de entregar el efectivo.' },
-    ],
-  },
-  pagodeservicios: {
-    title: 'Pago de servicios',
-    intro: 'Un repartidor paga tus facturas e impuestos (Cyber, ABSA, Canal 4, Rapipago o Pago Fácil) por vos.',
-    notesTitle: 'Comprobante',
-    notes: [
-      { title: 'Foto por chat:', text: 'te mandamos una foto nítida de la factura pagada. Solo pagás la tarifa del trámite.' },
-      { title: 'En papel:', text: 'el repartidor vuelve a tu casa con el ticket. Suma el costo del viaje de regreso.' },
     ],
   },
 };
@@ -340,7 +477,7 @@ export async function showMandadoForm(targetContainer = null) {
           <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
             <label style="font-size: 10.5px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Destino: ¿Dónde entregamos?</label>
             <button id="delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:28px; height:28px; border-radius:8px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
+               <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
                <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
                ${icon('chevronUp', 16)}
             </button>
@@ -383,18 +520,18 @@ export async function showMandadoForm(targetContainer = null) {
               <span id="dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
             </div>
             <div id="mandado-rain-row" style="display:none; justify-content:space-between; align-items:center;">
-              <span style="font-weight: 600; color: #009EE3; font-size: 12px; display:flex; align-items:center; gap:4px;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px; display:flex; align-items:center; gap:4px;">
                 ${icon('cloudRain', 14)} Recargo por Lluvia
               </span>
-              <span id="mandado-rain-cost" style="font-size: 13px; font-weight: 700; color: #009EE3;">$ 0</span>
+              <span id="mandado-rain-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-secondary);">$ 0</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa servicio</span>
               <span id="service-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-              <span style="font-weight: 900; color: #059669; font-size: 15px;">Total Servicio</span>
-              <span id="estimated-cost" style="font-size: 20px; font-weight: 950; color: #059669;">$ 0</span>
+              <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Servicio</span>
+              <span id="estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
             </div>
             <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center;">
               * Este es el costo por el servicio de envío.
@@ -402,7 +539,7 @@ export async function showMandadoForm(targetContainer = null) {
           </div>
         </div>
 
-        <button id="confirm-favor-btn" style="width: 100%; height: 56px; border-radius: 18px; background: #059669; color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(5,150,105, 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0;">
+        <button id="confirm-favor-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0;">
           ${icon('check', 20)} Solicitar Encomienda
         </button>
       </div>
@@ -510,9 +647,9 @@ export async function showMandadoForm(targetContainer = null) {
 
   payEfectivoBtn.onclick = () => {
     selectedPaymentMethod = 'efectivo';
-    payEfectivoBtn.style.background = '#059669';
+    payEfectivoBtn.style.background = 'var(--color-primary)';
     payEfectivoBtn.style.color = '#ffffff';
-    payEfectivoBtn.style.boxShadow = '0 4px 12px rgba(5, 150, 105, 0.2)';
+    payEfectivoBtn.style.boxShadow = 'none';
     payTransferBtn.style.background = 'transparent';
     payTransferBtn.style.color = 'var(--color-text-secondary)';
     payTransferBtn.style.boxShadow = 'none';
@@ -520,9 +657,9 @@ export async function showMandadoForm(targetContainer = null) {
 
   payTransferBtn.onclick = () => {
     selectedPaymentMethod = 'mercadopago';
-    payTransferBtn.style.background = '#2563EB';
+    payTransferBtn.style.background = 'var(--color-primary)';
     payTransferBtn.style.color = '#ffffff';
-    payTransferBtn.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
+    payTransferBtn.style.boxShadow = 'none';
     payEfectivoBtn.style.background = 'transparent';
     payEfectivoBtn.style.color = 'var(--color-text-secondary)';
     payEfectivoBtn.style.boxShadow = 'none';
@@ -575,7 +712,7 @@ export async function showMandadoForm(targetContainer = null) {
           if (!couponRow) {
             couponRow = document.createElement('div');
             couponRow.className = 'coupon-preview-row';
-            couponRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#a855f7; font-weight:700;';
+            couponRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:var(--go-green); font-weight:700;';
             previewBox.insertBefore(couponRow, estimatedFeeRow);
           }
           couponRow.innerHTML = `<span>Descuento cupón (${appliedCoupon.code})</span><span>-${formatPrice(couponDiscount)}</span>`;
@@ -589,7 +726,7 @@ export async function showMandadoForm(targetContainer = null) {
           if (!tipRow) {
             tipRow = document.createElement('div');
             tipRow.className = 'tip-preview-row';
-            tipRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#10b981; font-weight:700;';
+            tipRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:var(--color-text-primary); font-weight:700;';
             previewBox.insertBefore(tipRow, estimatedFeeRow);
           }
           tipRow.innerHTML = `<span>Propina</span><span>+ ${formatPrice(selectedTip)}</span>`;
@@ -944,34 +1081,32 @@ export async function showCompraForm(targetContainer = null) {
         <!-- ── Paso 1: Comercios, Productos y Destino de Entrega ──────────────── -->
         <div id="compra-step-1-container" style="display:flex; flex-direction:column; height:100%; width:50%; box-sizing:border-box; overflow-y:auto; -webkit-overflow-scrolling:touch; gap:10px; flex-shrink:0; padding:2px 2px 20px 2px; scrollbar-width:none;">
           <!-- Preset Banner Premium Maxikiosco Paulos -->
-          <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #6b21a8 100%); border: 1.5px solid rgba(192, 132, 252, 0.35); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: 0 10px 28px rgba(76, 29, 149, 0.4); position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
-            <div style="position: absolute; top: -30%; right: -15%; width: 140px; height: 140px; background: radial-gradient(circle, rgba(236, 72, 153, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
-            <div style="position: absolute; bottom: -30%; left: -10%; width: 120px; height: 120px; background: radial-gradient(circle, rgba(168, 85, 247, 0.25) 0%, transparent 70%); pointer-events: none;"></div>
+          <div id="kiosk-24h-compra-card" style="${paulosConfig.enabled === false ? 'display: none;' : 'display: flex;'} background: var(--go-ink); border: 1px solid var(--go-ink-line); border-radius: 20px; padding: 14px 16px; flex-direction: column; gap: 12px; margin-top: 4px; margin-bottom: 6px; box-shadow: none; position: relative; overflow: hidden; cursor: pointer; transition: all 0.3s ease;">
 
             <!-- Header row: Logo + Title (single line) + Badge (top right) -->
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; z-index: 1; width: 100%;">
               <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
-                <div style="width: 44px; height: 44px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.3); background: #5b1a82;">
+                <div style="width: 44px; height: 44px; border-radius: 50%; overflow: hidden; border: 2px solid var(--go-ink-line); flex-shrink: 0; box-shadow: none; background: var(--go-ink-2);">
                   <img src="/paulos-logo-real.jpg?v=9" alt="Maxikiosco Paulos" style="width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%;" />
                 </div>
 
                 <div style="display: flex; flex-direction: column; min-width: 0; flex: 1;">
-                  <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: #ffffff; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; text-shadow: 0 1px 3px rgba(0,0,0,0.4);">
+                  <h3 style="font-family: var(--font-display); font-size: 14.5px; font-weight: 950; color: var(--go-on-ink); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em;">
                     Maxikiosco Paulos
                   </h3>
-                  <span style="font-size: 11px; font-weight: 700; color: rgba(233, 213, 255, 0.9); margin-top: 1px;">
-                    📍 Chacabuco 451
+                  <span style="font-size: 11px; font-weight: 700; color: var(--go-on-ink-2); margin-top: 1px;">
+                    Chacabuco 451
                   </span>
                 </div>
               </div>
 
-              <span style="z-index: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-size: 9px; font-weight: 950; padding: 4px 8px; border-radius: 7px; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 6px rgba(16,185,129,0.35); border: 1px solid rgba(255,255,255,0.2); white-space: nowrap; flex-shrink: 0;">
-                🌙 Abierto 24hs
+              <span style="z-index: 1; display: inline-flex; align-items: center; gap: 6px; background: var(--go-ink-3); color: var(--go-on-ink); font-size: 9px; font-weight: 950; padding: 5px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.08em; border: 1px solid var(--go-ink-line); white-space: nowrap; flex-shrink: 0;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span> Abierto 24 hs
               </span>
             </div>
 
             <!-- Bottom Center Button -->
-            <button type="button" style="z-index: 1; width: 100%; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; border: none; font-size: 12.5px; font-weight: 950; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4); text-transform: uppercase; letter-spacing: 0.05em;">
+            <button type="button" style="z-index: 1; width: 100%; height: 42px; border-radius: 12px; background: var(--go-on-ink); color: var(--go-ink); border: none; font-size: 12.5px; font-weight: 950; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em;">
               COMPRAR EN PAULOS
             </button>
           </div>
@@ -996,7 +1131,7 @@ export async function showCompraForm(targetContainer = null) {
           <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0; margin-top:2px;">
             <label style="font-size:10.5px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.5px;">¿Dónde entregamos?</label>
             <button id="delivery-addr-btn" type="button" style="width:100%; height:44px; border-radius:14px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow:var(--shadow-sm);">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(34,197,94,0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home',16)}</div>
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home',16)}</div>
               <span id="delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress||'Elegir destino...'}</span>
               ${icon('chevronUp', 16)}
             </button>
@@ -1030,11 +1165,11 @@ export async function showCompraForm(targetContainer = null) {
               </span>
               <span id="compra-summary-total" style="font-weight:900;">$ ---</span>
             </div>
-            <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:#009EE3;">
+            <div id="compra-rain-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:var(--color-text-secondary);">
               <span style="display:flex; align-items:center; gap:6px;">${icon('cloudRain',15)} Recargo por Lluvia</span>
               <span id="compra-rain-cost" style="font-weight:900;">$ 0</span>
             </div>
-            <div id="compra-banner-discount-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:#10B981;">
+            <div id="compra-banner-discount-row" style="display:none; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:800; color:var(--go-green);">
               <span style="display:flex; align-items:center; gap:6px;">${icon('tag',15)} Envío Bonificado</span>
               <span id="compra-banner-discount-cost" style="font-weight:900;">-$ 0</span>
             </div>
@@ -1104,8 +1239,8 @@ export async function showCompraForm(targetContainer = null) {
   const mainBtn = modalEl.querySelector('#compra-main-btn');
 
   const STEP_CONFIG = {
-    1: { label: `Siguiente ${icon('chevronRight', 16)}`, bg: 'var(--color-primary)', shadow: '0 6px 16px rgba(var(--color-primary-rgb),0.22)' },
-    2: { label: `${icon('check', 18)} Solicitar Compra`, bg: '#E11D48', shadow: '0 6px 16px rgba(225,29,72,0.22)' }
+    1: { label: `Siguiente ${icon('chevronRight', 16)}`, bg: 'var(--color-primary)', shadow: 'none' },
+    2: { label: `${icon('check', 18)} Solicitar Compra`, bg: 'var(--color-primary)', shadow: 'none' }
   };
 
   const updateFooter = (stepNum) => {
@@ -1210,18 +1345,18 @@ export async function showCompraForm(targetContainer = null) {
           ${getState().isRaining ? `
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
               <div style="display:flex; align-items:center; gap:10px;">
-                <div style="width:28px; height:28px; border-radius:8px; background:rgba(0,158,227,0.08); color:#009EE3; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                   ${icon('cloudRain', 14)}
                 </div>
                 <span style="color:var(--color-text-secondary); font-weight:600;">Recargo por Lluvia</span>
               </div>
-              <span style="font-weight:800; color:#009EE3;">+ ${formatPrice(getState().deliveryRainSurcharge || 300)}</span>
+              <span style="font-weight:800; color:var(--color-text-secondary);">+ ${formatPrice(getState().deliveryRainSurcharge || 300)}</span>
             </div>
           ` : ''}
 
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(34,197,94,0.08); color:#22C55E; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('shoppingBag', 14)}
               </div>
               <span style="color:var(--color-text-secondary); font-weight:600;">Gestión Especial</span>
@@ -1231,7 +1366,7 @@ export async function showCompraForm(targetContainer = null) {
 
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(168,85,247,0.08); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('info', 14)}
               </div>
               <span style="color:var(--color-text-secondary); font-weight:600;">Servicio App</span>
@@ -1245,7 +1380,7 @@ export async function showCompraForm(targetContainer = null) {
         breakdownHtml += `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(59,130,246,0.08); color:#3b82f6; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('route', 14)}
               </div>
               <span style="color:var(--color-text-secondary); font-weight:600;">Paradas extra (×${stopsCount - 1})</span>
@@ -1259,12 +1394,12 @@ export async function showCompraForm(targetContainer = null) {
         breakdownHtml += `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(168,85,247,0.08); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('tag', 14)}
               </div>
               <span style="color:var(--color-text-secondary); font-weight:600;">Descuento cupón (${appliedCoupon.code})</span>
             </div>
-            <span style="font-weight:800; color:#a855f7;">-${formatPrice(couponDiscount)}</span>
+            <span style="font-weight:800; color:var(--go-green);">-${formatPrice(couponDiscount)}</span>
           </div>
         `;
       }
@@ -1281,12 +1416,12 @@ export async function showCompraForm(targetContainer = null) {
         breakdownHtml += `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10B981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('tag', 14)}
               </div>
               <span style="color:var(--color-text-secondary); font-weight:600;">Envío Bonificado (Publicidad)</span>
             </div>
-            <span style="font-weight:800; color:#10B981;">-${formatPrice(bannerDiscount)}</span>
+            <span style="font-weight:800; color:var(--go-green);">-${formatPrice(bannerDiscount)}</span>
           </div>
         `;
       }
@@ -1295,12 +1430,12 @@ export async function showCompraForm(targetContainer = null) {
         breakdownHtml += `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
             <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:28px; height:28px; border-radius:8px; background:rgba(16,185,129,0.08); color:#10b981; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                 ${icon('heart', 14)}
               </div>
               <span style="color:var(--color-text-secondary); font-weight:600;">Propina al Repartidor</span>
             </div>
-            <span style="font-weight:800; color:#10b981;">+ ${formatPrice(selectedTip)}</span>
+            <span style="font-weight:800; color:var(--color-text-primary);">+ ${formatPrice(selectedTip)}</span>
           </div>
         `;
       }
@@ -1422,7 +1557,7 @@ export async function showCompraForm(targetContainer = null) {
         </div>
         <input type="text" class="store-name-input" value="${prevName.replace(/"/g, '&quot;')}" placeholder="${pl.name}" autocomplete="off" style="height:40px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-bg-secondary); font-size:13px; font-weight:700; outline:none; color:var(--color-text-primary); transition:all 0.2s;" required />
         <div class="store-suggest-list" style="display:none; flex-direction:column; border-radius:12px; border:1.5px solid var(--color-border-light); background:var(--color-surface); overflow:hidden;"></div>
-        <div class="store-place-hint" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:#0d9488; padding:0 2px;"></div>
+        <div class="store-place-hint" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--go-red); padding:0 2px;"></div>
         <textarea class="store-detail-textarea" placeholder="${pl.details}" style="width:100%; height:60px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:8px 12px; background:var(--color-bg-secondary); font-size:12.5px; font-weight:600; resize:none; outline:none; color:var(--color-text-primary); font-family:inherit; transition:all 0.2s;" required>${prevDetails}</textarea>
       `;
       subformsContainer.appendChild(stopDiv);
@@ -1482,7 +1617,7 @@ export async function showCompraForm(targetContainer = null) {
       if (!opts.length) { hide(); return; }
       list.innerHTML = opts.map((o, k) => `
         <button type="button" data-k="${k}" style="display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; background:transparent; border:none; ${k ? 'border-top:1px solid var(--color-border-light);' : ''} text-align:left; cursor:pointer; font-family:inherit; color:var(--color-text-primary);">
-          <span style="width:28px; height:28px; border-radius:9px; background:${o.nearest ? 'rgba(13,148,136,0.1)' : 'var(--color-bg-secondary)'}; color:${o.nearest ? '#0d9488' : 'var(--color-text-secondary)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon(o.nearest ? 'navigationArrow' : 'mapPin', 14)}</span>
+          <span style="width:28px; height:28px; border-radius:9px; background:${o.nearest ? 'rgba(225,29,72,0.08)' : 'var(--color-bg-secondary)'}; color:${o.nearest ? 'var(--go-red)' : 'var(--color-text-secondary)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon(o.nearest ? 'navigationArrow' : 'mapPin', 14)}</span>
           <span style="min-width:0; display:flex; flex-direction:column; gap:1px;">
             <span style="font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(o.name)}</span>
             <span style="font-size:11px; font-weight:600; color:var(--color-text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(o.sub)}</span>
@@ -1512,12 +1647,38 @@ export async function showCompraForm(targetContainer = null) {
 
   renderSubforms();
 
-  if (window._prefilledMerchantName) {
+  // Repetir un mandado o elegir un rubro desde la pantalla de Mandados: paradas ya cargadas.
+  // Se aplica al final de esta función, cuando los botones de cantidad de comercios ya funcionan.
+  const prefilledStops = Array.isArray(window._prefilledMandadoStops) ? window._prefilledMandadoStops.slice(0, 5) : null;
+  window._prefilledMandadoStops = null;
+  const applyPrefilledStops = () => {
+    if (prefilledStops.length > 1) modalEl.querySelector(`.stop-count-btn[data-stops="${prefilledStops.length}"]`)?.click();
+    const names = [...subformsContainer.querySelectorAll('.store-name-input')];
+    const details = [...subformsContainer.querySelectorAll('.store-detail-textarea')];
+    prefilledStops.forEach((s, i) => {
+      if (!names[i]) return;
+      names[i].value = s.store || '';
+      if (details[i]) details[i].value = s.items || '';
+      if (s.nearest) {
+        clearPick(names[i]);
+        names[i].dataset.nearest = s.nearest;
+        names[i].dataset.pick = '1';
+        showPickHint(names[i].parentElement, names[i]);
+      }
+    });
+    loadMandadoPlaces().then(() => names.forEach((input, i) => { if (prefilledStops[i] && !prefilledStops[i].nearest) pickKnownPlace(input); }));
+    // Con la lista ya escrita (repetir) no hace falta escribir; con un rubro, se escribe qué comprar
+    // Recién cuando terminó de entrar el formulario (0,4 s) y sin que el foco corra la pantalla:
+    // durante el deslizamiento el navegador desplazaba el carril y el formulario quedaba corrido
+    const firstEmpty = details.find(d => !d.value.trim());
+    if (firstEmpty) setTimeout(() => firstEmpty.focus({ preventScroll: true }), 480);
+  };
+  if (!(prefilledStops && prefilledStops.length) && window._prefilledMerchantName) {
     const nameInput = subformsContainer.querySelector('.store-name-input');
     const detailTextarea = subformsContainer.querySelector('.store-detail-textarea');
     if (nameInput) { nameInput.value = window._prefilledMerchantName; loadMandadoPlaces().then(() => pickKnownPlace(nameInput)); }
     if (detailTextarea) {
-      setTimeout(() => detailTextarea.focus(), 150);
+      setTimeout(() => detailTextarea.focus({ preventScroll: true }), 480);
     }
     window._prefilledMerchantName = null;
   }
@@ -1737,6 +1898,8 @@ export async function showCompraForm(targetContainer = null) {
       }
     });
   };
+
+  if (prefilledStops && prefilledStops.length) applyPrefilledStops();
 }
 
 export async function showGoCashForm(targetContainer = null) {
@@ -1777,7 +1940,7 @@ export async function showGoCashForm(targetContainer = null) {
           <div style="display:flex; flex-direction:column; gap:8px;">
             <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">¿Dónde nos encontramos?</label>
             <button id="gocash-delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:28px; height:28px; border-radius:8px; background:rgba(34, 197, 94, 0.1); color:#22c55e; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
+               <div style="width:28px; height:28px; border-radius:8px; background:var(--go-paper-2); color:var(--go-text); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
                <span id="gocash-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
                ${icon('chevronUp', 16)}
             </button>
@@ -1807,18 +1970,18 @@ export async function showGoCashForm(targetContainer = null) {
               <span id="gocash-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
             </div>
             <div id="gocash-rain-row" style="display:none; justify-content:space-between; align-items:center;">
-              <span style="font-weight: 600; color: #009EE3; font-size: 12px; display:flex; align-items:center; gap:4px;">
+              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px; display:flex; align-items:center; gap:4px;">
                 ${icon('cloudRain', 14)} Recargo por Lluvia
               </span>
-              <span id="gocash-rain-cost" style="font-size: 13px; font-weight: 700; color: #009EE3;">$ 0</span>
+              <span id="gocash-rain-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-secondary);">$ 0</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
               <span id="gocash-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-              <span style="font-weight: 900; color: #4F46E5; font-size: 15px;">Total Envío Estimado</span>
-              <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: #4F46E5;">$ 0</span>
+              <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Envío Estimado</span>
+              <span id="gocash-estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
             </div>
             <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
               * Se cobra únicamente el envío. El costo final se recalculará en base a la ubicación real del repartidor al aceptar.
@@ -1826,7 +1989,7 @@ export async function showGoCashForm(targetContainer = null) {
           </div>
         </div>
 
-        <button id="confirm-gocash-btn" style="width: 100%; height: 56px; border-radius: 18px; background: #4F46E5; color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: 0 8px 20px rgba(79,70,229, 0.25); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0;">
+        <button id="confirm-gocash-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; flex-shrink: 0;">
           ${icon('check', 20)} Solicitar Go Cash
         </button>
       </div>
@@ -1956,7 +2119,7 @@ export async function showGoCashForm(targetContainer = null) {
           if (!couponRow) {
             couponRow = document.createElement('div');
             couponRow.className = 'coupon-preview-row';
-            couponRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#a855f7; font-weight:700;';
+            couponRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:var(--go-green); font-weight:700;';
             previewBox.insertBefore(couponRow, finalFeeRow);
           }
           couponRow.innerHTML = `<span>Descuento cupón (${appliedCoupon.code})</span><span>-${formatPrice(couponDiscount)}</span>`;
@@ -1970,7 +2133,7 @@ export async function showGoCashForm(targetContainer = null) {
           if (!tipRow) {
             tipRow = document.createElement('div');
             tipRow.className = 'tip-preview-row';
-            tipRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:#10b981; font-weight:700;';
+            tipRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; color:var(--color-text-primary); font-weight:700;';
             previewBox.insertBefore(tipRow, finalFeeRow);
           }
           tipRow.innerHTML = `<span>Propina</span><span>+ ${formatPrice(selectedTip)}</span>`;
@@ -2107,9 +2270,9 @@ export async function showGoCashForm(targetContainer = null) {
 function showGoFavoresGeneralModal() {
   showGoInfoSheet({
     title: 'Mandados',
-    intro: 'Un repartidor hace por vos lo que necesites en el pueblo: buscar, llevar, comprar o pagar.',
+    intro: 'Un repartidor hace por vos lo que necesites en el pueblo: buscar, llevar o comprar.',
     steps: [
-      { title: 'Elegí qué necesitás', text: 'Encomienda, Mandado, Go Cash o Pago de servicios.' },
+      { title: 'Elegí qué necesitás', text: 'Encomienda, Mandado o Go Cash.' },
       { title: 'Marcá los puntos en el mapa', text: 'Dónde retiramos o compramos, y dónde te lo entregamos.' },
       { title: 'Seguilo y chateá en vivo', text: 'Ves al repartidor en el mapa y coordinás los detalles por chat.' },
     ],
@@ -2124,9 +2287,9 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
         <!-- Tip Pill -->
-        <button type="button" id="favor-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? '#10b981' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+        <button type="button" id="favor-open-tip-btn" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--color-bg-card); border:1.5px solid ${selectedTip > 0 ? 'var(--color-primary)' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
           <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-            <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'var(--color-surface-hover)'}; color:${selectedTip > 0 ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <div style="width:36px; height:36px; background:${selectedTip > 0 ? 'var(--go-ink)' : 'var(--color-surface-hover)'}; color:${selectedTip > 0 ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
               ${icon('dollarSign', 18)}
             </div>
             <div style="min-width:0;">
@@ -2137,14 +2300,14 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
             </div>
           </div>
           <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
-            ${selectedTip > 0 ? icon('checkCircle', 16, '', '#10b981') : icon('chevronRight', 16)}
+            ${selectedTip > 0 ? icon('checkCircle', 16, '', 'var(--go-text)') : icon('chevronRight', 16)}
           </div>
         </button>
 
         <!-- Coupon Pill -->
-        <button type="button" id="favor-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? '#a855f7' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
+        <button type="button" id="favor-open-coupon-btn" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--color-bg-card); border:1.5px solid ${appliedCoupon ? 'var(--color-primary)' : 'var(--color-border-light)'}; border-radius:18px; cursor:pointer; transition:all 0.2s; outline:none; text-align:left; width:100%; box-sizing:border-box; box-shadow: var(--shadow-sm);">
           <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-            <div style="width:36px; height:36px; background:${appliedCoupon ? 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)' : 'var(--color-surface-hover)'}; color:${appliedCoupon ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <div style="width:36px; height:36px; background:${appliedCoupon ? 'var(--go-ink)' : 'var(--color-surface-hover)'}; color:${appliedCoupon ? 'white' : 'var(--color-text-secondary)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
               ${icon('tag', 18)}
             </div>
             <div style="min-width:0;">
@@ -2155,7 +2318,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
             </div>
           </div>
           <div style="font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; flex-shrink:0; margin-left:4px;">
-            ${appliedCoupon ? icon('checkCircle', 16, '', '#a855f7') : icon('chevronRight', 16)}
+            ${appliedCoupon ? icon('checkCircle', 16, '', 'var(--go-text)') : icon('chevronRight', 16)}
           </div>
         </button>
       </div>
@@ -2181,7 +2344,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
       <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
       
       <div style="text-align: center;">
-        <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25);">
+        <div style="width: 56px; height: 56px; background: var(--go-ink); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: none;">
           ${icon('dollarSign', 28)}
         </div>
         <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
@@ -2317,7 +2480,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
       <div style="width: 40px; height: 5px; background: var(--color-border-light); border-radius: 10px; margin: 0 auto 8px; flex-shrink: 0;"></div>
       
       <div style="text-align: center;">
-        <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(168, 85, 247, 0.35);">
+        <div style="width: 56px; height: 56px; background: var(--go-ink); color: white; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: none;">
           ${icon('tag', 26)}
         </div>
         <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; color: var(--color-text-primary); margin: 0 0 4px 0;">
@@ -2329,14 +2492,14 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
       </div>
 
       ${appliedCoupon ? `
-        <div style="background: rgba(168, 85, 247, 0.05); border: 1.5px solid rgba(168, 85, 247, 0.2); border-radius: 16px; padding: 14px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="background: var(--go-card); border: 1.5px solid var(--go-line); border-radius: 16px; padding: 14px; display: flex; align-items: center; justify-content: space-between;">
           <div>
-            <div style="font-size: 11px; font-weight: 900; color: #a855f7; text-transform: uppercase; letter-spacing: 0.5px;">CUPÓN ACTIVO</div>
+            <div style="font-size: 11px; font-weight: 900; color: var(--go-green); text-transform: uppercase; letter-spacing: 0.5px;">CUPÓN ACTIVO</div>
             <div style="font-size: 14px; font-weight: 800; color: var(--color-text-primary); margin-top: 2px;">
               ${appliedCoupon.code} <span style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary); opacity: 0.85;">(${appliedCoupon.type === 'free_delivery' ? 'Envío Gratis' : `${appliedCoupon.value}% OFF`})</span>
             </div>
           </div>
-          <div style="width: 24px; height: 24px; color: #a855f7; display: flex; align-items: center; justify-content: center;">
+          <div style="width: 24px; height: 24px; color: var(--go-green); display: flex; align-items: center; justify-content: center;">
             ${icon('checkCircle', 18)}
           </div>
         </div>
@@ -2359,7 +2522,7 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
             ${icon('trash', 16)} Quitar
           </button>
         ` : ''}
-        <button type="button" id="coupon-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; box-shadow: 0 8px 20px rgba(168, 85, 247, 0.25);">
+        <button type="button" id="coupon-modal-confirm-btn" class="btn btn-primary" style="height: 52px; flex: 2; border-radius: 14px; font-weight: 900; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--go-ink); border: none; box-shadow: none;">
           ${icon('check', 16)} APLICAR CUPÓN
         </button>
       </div>
@@ -2398,10 +2561,6 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
       if (input) input.disabled = true;
 
       try {
-        if (valStr === 'BIENVENIDA') {
-          throw new Error('Este cupón es exclusivo para tu primer pedido a un comercio (no aplica en mandados).');
-        }
-
         const couponRef = doc(db, 'coupons', valStr);
         const couponSnap = await getDoc(couponRef);
 
@@ -2463,520 +2622,6 @@ export function renderBenefitsSection(container, onUpdate, getDeliveryCost) {
   }
 
   render();
-}
-
-export async function showPagoServiciosForm(targetContainer = null) {
-  const { getDistance, calculateDynamicFee } = await import('../utils/geo.js');
-  const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'padding: 20px 24px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 16px))); background: var(--color-bg); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; flex: 1; min-height: 0; overflow: hidden;';
-
-  let currentAddress = '';
-  let deliveryData = null;
-  let selectedService = null; 
-  let receiptDeliveryType = 'digital'; 
-  let calculatedDistFee = 0;
-  let baseFee = getState().servicePaymentErrandFee !== undefined ? getState().servicePaymentErrandFee : 2000;
-  let appFee = 0;
-  let selectedTip = 0;
-  let appliedCoupon = null;
-
-  modalEl.innerHTML = `
-    <style>
-      .ps-service-grid-premium {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 12px;
-      }
-      .ps-service-btn-premium {
-        height: 58px;
-        border-radius: 16px;
-        border: 1.5px solid var(--color-border-light);
-        background: var(--color-surface);
-        font-size: 13.5px;
-        font-weight: 800;
-        color: var(--color-text-primary);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: var(--shadow-sm);
-      }
-      .ps-service-btn-premium:hover {
-        transform: translateY(-1.5px);
-        box-shadow: var(--shadow-md);
-        border-color: rgba(217, 119, 6, 0.35);
-      }
-      .ps-service-btn-premium:active {
-        transform: translateY(0) scale(0.97);
-      }
-      .ps-service-btn-premium.active {
-        background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important;
-        border-color: transparent !important;
-        color: white !important;
-        box-shadow: 0 6px 20px rgba(217, 119, 6, 0.38) !important;
-        transform: scale(1.02) translateY(-1px);
-      }
-      .ps-textarea-premium {
-        width:100%;
-        height:94px;
-        border-radius:16px;
-        border:1.5px solid var(--color-border-light);
-        padding:14px;
-        background:var(--color-surface);
-        color:var(--color-text-primary);
-        font-size:13.5px;
-        font-weight:600;
-        outline:none;
-        font-family:inherit;
-        resize:none;
-        transition:all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: inset 0 2px 4px rgba(0,0,0,0.015);
-      }
-      .ps-textarea-premium:focus {
-        border-color: #D97706 !important;
-        box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18), inset 0 2px 4px rgba(0,0,0,0.015) !important;
-      }
-      .ps-del-btn-premium {
-        flex: 1;
-        height: 44px;
-        border-radius: 12px;
-        border: none;
-        font-size: 13.5px;
-        font-weight: 900;
-        cursor: pointer;
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        background: transparent;
-        color: var(--color-text-tertiary);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-      }
-      .ps-del-btn-premium.active-digital {
-        background: #10B981 !important;
-        color: white !important;
-        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3) !important;
-      }
-      .ps-del-btn-premium.active-physical {
-        background: var(--color-primary) !important;
-        color: white !important;
-        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb), 0.3) !important;
-      }
-      .ps-cost-card-premium {
-        background: var(--color-bg-secondary);
-        padding: 18px;
-        border-radius: 24px;
-        display: none;
-        flex-direction: column;
-        gap: 10px;
-        border: 1.5px solid var(--color-border-light);
-        margin-top: auto;
-        box-shadow: var(--shadow-sm);
-      }
-    </style>
-
-    <div style="display: flex; flex-direction: column; height: 100%; flex: 1;">
-      <!-- STEP 1 CONTAINER -->
-      <div id="ps-step-1-container" style="display: flex; flex-direction: column; flex: 1; height: 100%; justify-content: space-between; gap: 16px;">
-        <div style="display: flex; flex-direction: column; gap: 16px; flex: 1; overflow-y: auto; scrollbar-width: none; padding-bottom: 4px;">
-          
-          <!-- Service Chooser List -->
-          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Selecciona el Servicio a Pagar</label>
-            <div class="ps-service-grid-premium" id="ps-service-grid">
-              <button class="ps-service-btn-premium" data-service="Cyber">
-                ${icon('monitor', 20)} Cyber
-              </button>
-              <button class="ps-service-btn-premium" data-service="ABSA">
-                ${icon('droplet', 20)} ABSA
-              </button>
-              <button class="ps-service-btn-premium" data-service="Canal 4">
-                ${icon('tv', 20)} Canal 4
-              </button>
-              <button class="ps-service-btn-premium" data-service="Rapipago">
-                ${icon('creditCard', 20)} Rapipago
-              </button>
-              <button class="ps-service-btn-premium" data-service="PagoFácil">
-                ${icon('zap', 20)} PagoFácil
-              </button>
-              <button class="ps-service-btn-premium" data-service="Otro">
-                ${icon('plus', 20)} Otro
-              </button>
-            </div>
-          </div>
-
-          <!-- Detail Input -->
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Servicios y Detalles a Pagar</label>
-            <textarea id="ps-details-input" class="ps-textarea-premium" placeholder="Ej: Pagar factura de internet, código de barras: 1234567890 o detalles particulares del delivery"></textarea>
-          </div>
-
-          <!-- Receipt Delivery Selector -->
-          <div style="display:flex; flex-direction:column; gap:10px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Forma de Recibir el Comprobante</label>
-            <div style="display: flex; background: var(--color-bg-secondary); padding: 4px; border-radius: 16px; border: 1.5px solid var(--color-border-light);">
-              <button type="button" id="ps-delivery-digital" class="ps-del-btn-premium active-digital">
-                ${icon('image', 18)} Foto Digital
-              </button>
-              <button type="button" id="ps-delivery-physical" class="ps-del-btn-premium">
-                ${icon('mapPin', 18)} Físico
-              </button>
-            </div>
-            <!-- Helper subtexts -->
-            <div id="ps-del-subtext-digital" style="font-size: 11px; color: var(--color-success); font-weight: 800; text-align: center; margin-top: 2px; display: block; line-height: 1.4;">
-              🟢 Sin costo adicional (Recibís foto del ticket por chat)
-            </div>
-            <div id="ps-del-subtext-physical" style="font-size: 11px; color: var(--color-primary); font-weight: 800; text-align: center; margin-top: 2px; display: none; line-height: 1.4;">
-              🚚 Envío a Domicilio (+ Envío por Distancia del Viaje)
-            </div>
-          </div>
-
-          <!-- Physical Delivery Address Details -->
-          <div id="ps-address-section" style="display:none; flex-direction:column; gap:8px;">
-            <label style="font-size: 11px; font-weight: 900; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.5px;">Tu Dirección de Entrega</label>
-            <button id="ps-delivery-addr-btn" style="width: 100%; height: 44px; border-radius: 14px; border: 1.5px solid var(--color-border-light); padding: 0 12px; background: var(--color-surface); font-size: 13px; font-weight: 700; display:flex; align-items:center; gap:8px; text-align:left; color:var(--color-text-primary); cursor:pointer; transition:all 0.2s; box-shadow: var(--shadow-sm);">
-               <div style="width:28px; height:28px; border-radius:8px; background:rgba(245, 158, 11, 0.1); color:#D97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('home', 16)}</div>
-               <span id="ps-delivery-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentAddress || 'Elegir destino...'}</span>
-               ${icon('chevronUp', 16)}
-            </button>
-            <input type="text" id="ps-delivery-details" value="${currentAddress ? (getState().addressNotes || '') : ''}" placeholder="Detalle: Nro, depto, timbre, local o ref (Obligatorio)" style="height:38px; border-radius:12px; border:1.5px solid var(--color-border-light); padding:0 12px; background:var(--color-surface); color:var(--color-text-primary); font-size:12.5px; font-weight:600; outline:none; transition:all 0.2s;" />
-          </div>
-        </div>
-
-        <button type="button" id="ps-step-1-next-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; box-shadow: none;">
-          Siguiente ${icon('chevronRight', 16)}
-        </button>
-      </div>
-
-      <!-- STEP 2 CONTAINER -->
-      <div id="ps-step-2-container" style="display: none; flex-direction: column; flex: 1; height: 100%; justify-content: space-between; gap: 16px;">
-        <div style="display: flex; flex-direction: column; gap: 16px; flex: 1; overflow-y: auto; scrollbar-width: none; padding-bottom: 4px;">
-          <button type="button" id="ps-step-2-back-btn" style="background:transparent; border:none; color:var(--color-primary); font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; padding:8px 0; font-size:13px; outline:none; text-align:left; width:fit-content; margin-bottom: 10px;">
-            ${icon('chevronLeft', 16)} Volver a Paso 1
-          </button>
-
-          <!-- Benefits Container -->
-          <div id="ps-benefits-container"></div>
-
-          <!-- Cost Preview -->
-          <div id="ps-cost-preview" class="ps-cost-card-premium">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Base Trámite Pago de Servicios</span>
-              <span id="ps-base-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-            </div>
-            <div id="ps-dist-row" style="display:none; justify-content:space-between; align-items:center;">
-              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Envío de Comprobante (Regreso)</span>
-              <span id="ps-dist-cost" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-            </div>
-            <div id="ps-rain-row" style="display:none; justify-content:space-between; align-items:center;">
-              <span style="font-weight: 600; color: #009EE3; font-size: 12px; display:flex; align-items:center; gap:4px;">
-                ${icon('cloudRain', 14)} Recargo por Lluvia
-              </span>
-              <span id="ps-rain-cost" style="font-size: 13px; font-weight: 700; color: #009EE3;">$ 0</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-weight: 600; color: var(--color-text-secondary); font-size: 12px;">Tarifa de Servicio (App)</span>
-              <span id="ps-app-fee" style="font-size: 13px; font-weight: 700; color: var(--color-text-primary);">$ 0</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px dashed var(--color-border-light);">
-              <span style="font-weight: 900; color: var(--color-primary); font-size: 15px;">Total Trámite Estimado</span>
-              <span id="ps-estimated-cost" style="font-size: 20px; font-weight: 950; color: var(--color-primary);">$ 0</span>
-            </div>
-            <p style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 8px; font-weight: 600; text-align: center; line-height:1.4;">
-              * El dinero de la factura a pagar se coordina y se abona al repartidor al momento de iniciar la gestión o por transferencia.
-            </p>
-          </div>
-        </div>
-
-        <button id="confirm-ps-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0;">
-          ${icon('check', 20)} Solicitar Pago de Servicios
-        </button>
-      </div>
-    </div>
-  `;
-
-  if (targetContainer) {
-    targetContainer.innerHTML = '';
-    targetContainer.appendChild(modalEl);
-  } else {
-    showModal({
-      title: 'Solicitar Pago de Servicios',
-      content: modalEl,
-      fullscreen: false,
-      height: '88vh',
-      hideHeader: false,
-      headerBackground: 'var(--go-ink)',
-      headerTextColor: '#ffffff'
-    });
-  }
-
-  const serviceGrid = modalEl.querySelector('#ps-service-grid');
-  const detailsInput = modalEl.querySelector('#ps-details-input');
-  const btnDigital = modalEl.querySelector('#ps-delivery-digital');
-  const btnPhysical = modalEl.querySelector('#ps-delivery-physical');
-  const subtextDigital = modalEl.querySelector('#ps-del-subtext-digital');
-  const subtextPhysical = modalEl.querySelector('#ps-del-subtext-physical');
-  const addressSection = modalEl.querySelector('#ps-address-section');
-  const deliveryBtn = modalEl.querySelector('#ps-delivery-addr-btn');
-  const deliveryText = modalEl.querySelector('#ps-delivery-text');
-  const deliveryDetailsInput = modalEl.querySelector('#ps-delivery-details');
-
-  const setupScrollFocus = (el) => {
-    if (!el) return;
-    el.addEventListener('focus', () => {
-      setTimeout(() => {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 250);
-    });
-  };
-  setupScrollFocus(detailsInput);
-  setupScrollFocus(deliveryDetailsInput);
-
-  const previewBox = modalEl.querySelector('#ps-cost-preview');
-  const distRow = modalEl.querySelector('#ps-dist-row');
-  const baseCostEl = modalEl.querySelector('#ps-base-cost');
-  const distCostEl = modalEl.querySelector('#ps-dist-cost');
-  const appFeeEl = modalEl.querySelector('#ps-app-fee');
-  const totalCostEl = modalEl.querySelector('#ps-estimated-cost');
-
-  // Handle service button selection
-  serviceGrid.querySelectorAll('.ps-service-btn-premium').forEach(btn => {
-    btn.onclick = () => {
-      serviceGrid.querySelectorAll('.ps-service-btn-premium').forEach(b => {
-        b.classList.remove('active');
-      });
-      btn.classList.add('active');
-      selectedService = btn.dataset.service;
-    };
-  });
-
-  // Toggle receipt delivery methods
-  btnDigital.onclick = () => {
-    receiptDeliveryType = 'digital';
-    btnDigital.className = 'ps-del-btn-premium active-digital';
-    btnPhysical.className = 'ps-del-btn-premium';
-    subtextDigital.style.display = 'block';
-    subtextPhysical.style.display = 'none';
-    addressSection.style.display = 'none';
-    
-    updateCost();
-  };
-
-  btnPhysical.onclick = () => {
-    receiptDeliveryType = 'physical';
-    btnPhysical.className = 'ps-del-btn-premium active-physical';
-    btnDigital.className = 'ps-del-btn-premium';
-    subtextDigital.style.display = 'none';
-    subtextPhysical.style.display = 'block';
-    addressSection.style.display = 'flex';
-    
-    updateCost();
-  };
-
-  const updateCost = async () => {
-    try {
-      baseCostEl.textContent = formatPrice(baseFee);
-
-      let logisticsCost = baseFee;
-
-      if (receiptDeliveryType === 'physical' && deliveryData) {
-        const centerCoords = { lat: -35.0811, lng: -57.5146 };
-        const dist = await getDistance(centerCoords.lat, centerCoords.lng, deliveryData.coords.lat, deliveryData.coords.lng);
-        calculatedDistFee = calculateDynamicFee(dist);
-        distRow.style.display = 'flex';
-        distCostEl.textContent = formatPrice(calculatedDistFee);
-        logisticsCost += calculatedDistFee;
-      } else {
-        distRow.style.display = 'none';
-        calculatedDistFee = 0;
-      }
-
-      // App fee configuration (calculates on shipping logistics value)
-      const config = getState().servicesAppFeeConfig?.gofavor || { type: 'percentage', value: 1.2 };
-      if (config.type === 'fixed') {
-        appFee = config.value;
-      } else {
-        appFee = Math.ceil((logisticsCost * (config.value / 100)) / 10) * 10;
-      }
-
-      let couponDiscount = 0;
-      if (appliedCoupon) {
-        if (appliedCoupon.type === 'free_delivery') {
-          couponDiscount = calculatedDistFee;
-        } else if (appliedCoupon.discountType === 'percentage') {
-          couponDiscount = Math.floor(calculatedDistFee * (Number(appliedCoupon.value || 0) / 100));
-        } else {
-          couponDiscount = Number(appliedCoupon.value || 0);
-        }
-      }
-
-      const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-      const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, logisticsCost);
-      const total = Math.max(logisticsCost + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
-
-      const rainRow = modalEl.querySelector('#ps-rain-row');
-      const rainCostEl = modalEl.querySelector('#ps-rain-cost');
-      if (rainSurcharge > 0) {
-        if (rainRow) rainRow.style.display = 'flex';
-        if (rainCostEl) rainCostEl.textContent = `+ ${formatPrice(rainSurcharge)}`;
-      } else {
-        if (rainRow) rainRow.style.display = 'none';
-      }
-
-      appFeeEl.textContent = formatPrice(appFee);
-      totalCostEl.textContent = formatPrice(total);
-      previewBox.style.display = 'flex';
-    } catch (err) {
-      console.error('Error updating cost in Pago de Servicios:', err);
-    }
-  };
-
-  // Address picking trigger
-  deliveryBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      deliveryData = { address: addr, coords };
-      deliveryText.textContent = addr;
-      if (deliveryDetailsInput) {
-        deliveryDetailsInput.value = notes || '';
-      }
-      updateCost();
-    }, { mode: 'pick' });
-  };
-
-  const benefitsContainer = modalEl.querySelector('#ps-benefits-container');
-  renderBenefitsSection(benefitsContainer, (tip, coupon) => {
-    selectedTip = tip;
-    appliedCoupon = coupon;
-    updateCost();
-  }, () => calculatedDistFee);
-
-  // Next step click trigger
-  modalEl.querySelector('#ps-step-1-next-btn').onclick = () => {
-    if (!selectedService) {
-      showToast('Por favor selecciona el servicio que deseas pagar.', 'warning');
-      return;
-    }
-    const detailsText = detailsInput.value.trim();
-    if (!detailsText) {
-      showToast('Por favor describe los detalles de la factura a pagar.', 'warning');
-      return;
-    }
-
-    if (receiptDeliveryType === 'physical') {
-      if (!deliveryData) {
-        showToast('Por favor selecciona una dirección de entrega.', 'warning');
-        return;
-      }
-      const detailsVal = deliveryDetailsInput.value.trim();
-      if (!detailsVal) {
-        showToast('El detalle de dirección es obligatorio.', 'warning');
-        return;
-      }
-    }
-
-    const proceedToStep2 = () => {
-      modalEl.querySelector('#ps-step-1-container').style.display = 'none';
-      modalEl.querySelector('#ps-step-2-container').style.display = 'flex';
-      updateCost();
-    };
-
-    if (receiptDeliveryType === 'digital') {
-      showConfirm({
-        title: '⚠️ Advertencia Importante',
-        message: 'Al seleccionar <strong>Foto Digital</strong>, el pago debe ser realizado <strong>sí o sí mediante transferencia bancaria</strong>.<br><br>Se te solicitará enviar una foto del comprobante de transferencia por el chat del pedido antes de que el repartidor realice el pago de tu servicio.',
-        confirmText: 'Aceptar',
-        cancelText: 'Cancelar',
-        onConfirm: () => {
-          proceedToStep2();
-        }
-      });
-    } else {
-      proceedToStep2();
-    }
-  };
-
-  modalEl.querySelector('#ps-step-2-back-btn').onclick = () => {
-    modalEl.querySelector('#ps-step-1-container').style.display = 'flex';
-    modalEl.querySelector('#ps-step-2-container').style.display = 'none';
-  };
-
-  modalEl.querySelector('#confirm-ps-btn').onclick = async () => {
-    const detailsText = detailsInput.value.trim();
-    const deliveryDetails = deliveryDetailsInput ? deliveryDetailsInput.value.trim() : '';
-
-    if (receiptDeliveryType === 'physical' && !deliveryData) {
-      showToast('Por favor selecciona una dirección de entrega.', 'warning');
-      return;
-    }
-
-    let couponDiscount = 0;
-    if (appliedCoupon) {
-      if (appliedCoupon.type === 'free_delivery') {
-        couponDiscount = calculatedDistFee;
-      } else if (appliedCoupon.discountType === 'percentage') {
-        couponDiscount = Math.floor(calculatedDistFee * (Number(appliedCoupon.value || 0) / 100));
-      } else {
-        couponDiscount = Number(appliedCoupon.value || 0);
-      }
-    }
-
-    const rainSurcharge = getState().isRaining ? (getState().deliveryRainSurcharge || 300) : 0;
-    const logisticsCost = baseFee + calculatedDistFee;
-    // Same as the total shown on screen: the night surcharge was missing at confirm time.
-    const nightSurcharge = calculateScheduleSurcharge(getState().nightSurchargeConfig, logisticsCost);
-    const total = Math.max(logisticsCost + rainSurcharge + nightSurcharge + appFee - couponDiscount + selectedTip, 0);
-
-    const deliveryTypeLabel = receiptDeliveryType === 'physical' ? 'Comprobante Físico a Domicilio' : 'Foto Digital por Chat';
-    const detailPayload = `🏢 **Servicio:** ${selectedService}\n📄 **Facturas & Código:** ${detailsText}\n📩 **Entrega Comprobante:** ${deliveryTypeLabel}`;
-
-    const pickupAddressVal = `Pago Fácil Centro (Trámite de Pago)`;
-    const deliveryAddressVal = receiptDeliveryType === 'physical'
-      ? `${deliveryData.address} (Detalle: ${deliveryDetails})`
-      : 'Envío Digital (Sin Dirección)';
-
-    const deliveryCoordsVal = receiptDeliveryType === 'physical'
-      ? deliveryData.coords
-      : { lat: -35.0811, lng: -57.5146 };
-
-    verifyDriversAndConfirm({
-      title: '¿Confirmar Trámite?',
-      message: `Se enviará un repartidor a pagar tu factura de <strong>${selectedService}</strong>.<br><br>Costo del servicio: <strong>${formatPrice(total)}</strong>`,
-      onConfirm: async () => {
-        try {
-          const orderId = await createFavorOrder({
-            type: 'pagodeservicios',
-            pickupAddress: pickupAddressVal,
-            pickupCoords: { lat: -35.0811, lng: -57.5146 },
-            deliveryAddress: deliveryAddressVal,
-            deliveryCoords: deliveryCoordsVal,
-            details: detailPayload,
-            deliveryCost: calculatedDistFee,
-            rainSurcharge: rainSurcharge,
-            purchaseFee: baseFee,
-            appUsageFee: appFee,
-            tip: selectedTip,
-            couponCode: appliedCoupon ? appliedCoupon.code : null,
-            couponDiscount: couponDiscount,
-            total: total,
-            paymentMethod: 'efectivo',
-            isPagoServicios: true,
-            receiptDeliveryType: receiptDeliveryType
-          });
-          closeModal();
-          setTimeout(() => {
-            location.hash = `#/pedido/${orderId}`;
-          }, 150);
-        } catch (e) {
-          console.error('Error creating Pago de Servicios order:', e);
-          showToast('Error al crear el trámite de pago: ' + e.message, 'error');
-        }
-      }
-    });
-  };
-
-  updateCost();
 }
 
 // Mandados is a page now (#/mandados). Kept for callers that open it with a preselected form.
@@ -3063,10 +2708,12 @@ async function loadMandadosBanner(slideToForm) {
             window._activeMandadoBannerId = banner.id;
             window._activeMandadoMerchantName = banner.merchantName;
 
-            const { doc, updateDoc, increment } = await import('firebase/firestore');
-            await updateDoc(doc(db, 'banners_mandados', banner.id), {
-              'stats.clicks': increment(1)
-            });
+            // Contador de clics: sólo con sesión (las reglas lo piden) y sin frenar el banner si falla
+            if (isLoggedIn()) {
+              import('firebase/firestore').then(({ doc, updateDoc, increment }) =>
+                updateDoc(doc(db, 'banners_mandados', banner.id), { 'stats.clicks': increment(1) })
+              ).catch(() => {});
+            }
 
             slideToForm('mandado');
           };
@@ -3100,24 +2747,7 @@ async function loadMandadosBanner(slideToForm) {
         return;
       }
 
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      const ordersSnap = await getDocs(query(
-        collection(db, 'orders'),
-        where('originBannerId', '==', activeBanner.id)
-      ));
-
-      let todayConversions = 0;
-      ordersSnap.forEach(d => {
-        const oData = d.data();
-        if (oData.createdAt) {
-          const oDate = oData.createdAt.toDate ? oData.createdAt.toDate() : new Date(oData.createdAt);
-          if (oDate >= todayStart && oData.status !== 'cancelled') {
-            todayConversions++;
-          }
-        }
-      });
+      const todayConversions = bannerUsesToday(activeBanner);
 
       const limitExceeded = activeBanner.hasDiscount && todayConversions >= activeBanner.discountLimitPerDay;
       
@@ -3130,10 +2760,10 @@ async function loadMandadosBanner(slideToForm) {
         bannerContainer.style.display = 'flex';
         bindBannerEvents(activeBanner, limitExceeded);
         
-        // Increment impression count
-        await updateDoc(doc(db, 'banners_mandados', activeBanner.id), {
-          'stats.impressions': increment(1)
-        });
+        // Contador de vistas: sólo con sesión (las reglas lo piden); si falla no es un error del banner
+        if (isLoggedIn()) {
+          updateDoc(doc(db, 'banners_mandados', activeBanner.id), { 'stats.impressions': increment(1) }).catch(() => {});
+        }
       }
     } catch (err) {
       console.error('Error loading active banner:', err);

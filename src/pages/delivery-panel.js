@@ -8,6 +8,7 @@ import { ensureSheetStyles, openDriverSheet } from './delivery-panel/driver-shee
 import { db, storage } from '../firebase.js';
 import { App } from '@capacitor/app';
 import { AudioManager } from '../utils/audio-manager.js';
+import { tripVehicleOptions } from '../utils/trip-vehicles.js';
 import { 
   showExclusiveOfferOverlay, 
   hideExclusiveOfferOverlay, 
@@ -43,7 +44,8 @@ export function getOrderDriverEarnings(o) {
 }
 import { initDriverNavigationMap, updateDriverMapLocation, drawDriverRoute, clearDriverRoute, setMap3DPerspective, recenterOnDriver, zoomInDriverMap, zoomOutDriverMap, getDriverMapTheme, setDriverMapTheme, getDriverThemeMode, setDriverThemeMode, renderDemandHotspots, checkAutoSolarTheme, startGpsRouteSimulation, stopGpsRouteSimulation, isGpsSimulationRunning, renderMultiStopRoute, clearMultiStopMarkers } from '../components/driver-navigation-map.js';
 import { NavigationVoice } from '../utils/navigation-voice.js';
-import { driverTokens, orderKind, kindTag, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, pickupCoordsOf, dropoffCoordsOf, goCashInfo } from '../components/driver-ui.js';
+import { recoverIfFirestoreBroken } from '../utils/firestore-recovery.js';
+import { driverTokens, orderKind, kindTag, stopsList, moneyRow, infoRow, dIcon, esc, money, isCashPayment, pickupCoordsOf, dropoffCoordsOf, goCashInfo, discountRow } from '../components/driver-ui.js';
 import { mandadoShoppingPlan, placeSearchQuery, categoryLabel, onPlacesChange, placeKm } from '../utils/mandado-places.js';
 import { loadMandadoPlaces, learnMandadoPlace, getVisitedStores, markStoreVisited, lastStoreStepAt } from '../utils/mandado-places-store.js';
 import { isPlaceholderCoords, toLatLng } from '../utils/mandado-places.js';
@@ -191,6 +193,10 @@ export function isOrderEncomienda(order) {
   if (!order) return false;
   if (order.comercioId) return false;
   if (order.favorType === 'compra' || order.type === 'compra') return false;
+  // Ojo con los nombres: la app crea las encomiendas con favorType 'mandado' (gofavores.js) y los
+  // mandados de compras con 'compra'. Sin esto, toda encomienda pedía el código de entrega.
+  if (order.favorType === 'encomienda' || order.isEncomienda === true) return true;
+  if (order.favorType === 'mandado' && !(Array.isArray(order.mandadoStops) && order.mandadoStops.length)) return true;
 
   const desc = (order.description || order.itemsText || order.details || order.notes || '').toLowerCase();
   const pickAddr = (order.pickupAddress || order.originAddress || '').toLowerCase();
@@ -490,6 +496,16 @@ function shoppingSource(o) {
 /** Plan de compra del mandado: comercios, cuál toca ahora y cuántos faltan. */
 export function shoppingPlanOf(o, driverPos = window.lastRiderPos || null) {
   return mandadoShoppingPlan(shoppingSource(o), driverPos, getVisitedStores(o.id));
+}
+
+/**
+ * Un mandado con varios comercios cuenta cada comercio como parada ("parada 3 de 6", no "1 de 2").
+ * Devuelve cuántas paradas suma y cuántas ya hizo, para el pedido que se está mostrando.
+ */
+export function shoppingStepsOf(o) {
+  if (!o?.isFavor || o.status === 'delivering' || o.pickedUpAt) return { extra: 0, done: 0 };
+  const plan = shoppingPlanOf(o);
+  return plan.total > 1 ? { extra: plan.total - 1, done: plan.doneCount } : { extra: 0, done: 0 };
 }
 
 const tsMillis = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : (t && t.seconds ? t.seconds * 1000 : (t ? new Date(t).getTime() || 0 : 0)));
@@ -835,7 +851,16 @@ export function initDemandRadarListener() {
 }
 
 // --- LIFECYCLE AWARE ONSNAPSHOT WRAPPER FOR BATTERY & DATA OPTIMIZATION ---
+// Listeners used to be stopped on every trip to the background (WhatsApp, the camera, the screen
+// turning off) and all restarted on return. Dropping and re-adding the same queries while orders
+// change on the server trips a Firestore SDK bug (INTERNAL ASSERTION ca9) that freezes every
+// listener until the app restarts: the driver marked "retirado", typed the amount and nothing
+// happened. Now they're only paused after a long stretch in the background with no order in
+// progress (see utils/firestore-recovery.js for the safety net if it still happens).
+const LISTENER_PAUSE_AFTER_MS = 5 * 60 * 1000;
 let isAppActive = true;
+let listenersPaused = false;
+let listenerPauseTimer = null;
 let activeListeners = [];
 
 function onSnapshot(q, callback, errCallback) {
@@ -861,7 +886,7 @@ function onSnapshot(q, callback, errCallback) {
   };
 
   activeListeners.push(listener);
-  if (isAppActive) {
+  if (!listenersPaused) {
     listener.start();
   }
 
@@ -876,15 +901,25 @@ function onSnapshot(q, callback, errCallback) {
 // Track application background/foreground state changes
 try {
   App.addListener('appStateChange', (state) => {
-    console.log('Delivery Panel Lifecycle: App state changed. isActive =', state.isActive);
     isAppActive = state.isActive;
+    clearTimeout(listenerPauseTimer);
+    listenerPauseTimer = null;
     if (isAppActive) {
-      console.log(`Delivery Panel Lifecycle: Resuming ${activeListeners.length} active Firestore listeners...`);
-      activeListeners.forEach(l => l.start());
-    } else {
-      console.log(`Delivery Panel Lifecycle: Pausing ${activeListeners.length} active Firestore listeners to save battery & data...`);
-      activeListeners.forEach(l => l.stop());
+      if (listenersPaused) {
+        listenersPaused = false;
+        console.log(`Delivery Panel Lifecycle: Resuming ${activeListeners.length} paused Firestore listeners...`);
+        activeListeners.forEach(l => l.start());
+      }
+      return;
     }
+    listenerPauseTimer = setTimeout(() => {
+      listenerPauseTimer = null;
+      // With an order in progress the driver needs every change (cancellations, "ready"...)
+      if (isAppActive || (activeOrdersList && activeOrdersList.length > 0)) return;
+      listenersPaused = true;
+      console.log(`Delivery Panel Lifecycle: Pausing ${activeListeners.length} Firestore listeners after a long time in the background...`);
+      activeListeners.forEach(l => l.stop());
+    }, LISTENER_PAUSE_AFTER_MS);
   });
 } catch (e) {
   console.warn('Capacitor App state tracking not available in this environment:', e);
@@ -1108,6 +1143,8 @@ export async function renderDeliveryPanel(containerArg) {
 
   // Apply dark mode styling & zero-scroll lock to document for Driver Mode
   document.documentElement.classList.add('is-delivery-mode');
+  // Primera vez de un cadete en su panel: la guía (espera a que el panel esté dibujado)
+  import('../components/driver-tour.js').then(m => m.maybeStartDriverTour()).catch(() => {});
   document.body.classList.add('is-delivery-mode');
 
   // Enforce Dark Mode by default on fresh session
@@ -1616,7 +1653,7 @@ export async function renderDeliveryPanel(containerArg) {
           <span class="go-eyebrow go-offline-eyebrow">Repartidor ${user.deliveryId || ''} · Magdalena</span>
           <h3 class="go-title go-offline-title">Estás desconectado</h3>
           <span class="go-bar" style="margin: 14px auto 0;"></span>
-          <p class="go-offline-text">Conectate para empezar a recibir pedidos en tu zona. La cuota del día se cobra una sola vez.</p>
+          <p class="go-offline-text">Conectate para empezar a recibir pedidos en tu zona. La cuota del día se cobra una sola vez, cuando completás tus pedidos.</p>
           <button id="main-connect-hero-btn" class="go-offline-connect">${icon('power', 20)} Conectarme</button>
           <button type="button" id="main-client-mode-hero-btn" data-go-client-mode class="go-offline-client">${icon('shoppingBag', 18)} Ir a modo cliente</button>
         </div>
@@ -1778,6 +1815,7 @@ export async function renderDeliveryPanel(containerArg) {
       ${drawerItem({ id: 'delivery-drawer-config', href: '#/delivery/config', iconName: 'settings', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Configuración de perfil', subtitle: 'Datos, vehículo y preferencias' })}
       <div class="dsheet-label">Ayuda</div>
       ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
+      ${drawerItem({ id: 'delivery-drawer-tour-btn', iconName: 'sparkles', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Ver la guía del panel', subtitle: 'Un recorrido de un minuto' })}
       ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
       <div class="dsheet-label">Jornada</div>
       <button type="button" id="delivery-drawer-session-btn" class="dsheet-row go-drawer-session${user?.isOnline ? ' is-online' : ''}">
@@ -1893,6 +1931,11 @@ export async function renderDeliveryPanel(containerArg) {
   }
 
   // The info sheet is wired regardless of the old header slot (it no longer exists).
+  document.getElementById('delivery-drawer-tour-btn')?.addEventListener('click', () => {
+    closeDeliveryDrawer();
+    import('../components/driver-tour.js').then(m => m.startDriverTour());
+  });
+
   // Wire info button inside drawer
   document.getElementById('delivery-drawer-info-btn')?.addEventListener('click', () => {
     closeDeliveryDrawer();
@@ -2082,13 +2125,20 @@ export async function renderDeliveryPanel(containerArg) {
           stopHeartbeat();
           hideExclusiveOfferOverlay();
           stopExclusiveOfferAlert();
+          const byDebtLimit = serverData.disconnectedReason === 'debt_limit';
           showToast(
-            serverData.disconnectedReason === 'inactivity'
-              ? 'Te desconectamos porque no respondiste el aviso de inactividad. Volvé a conectarte cuando quieras.'
-              : 'Tu sesión fue cerrada.',
-            'info'
+            byDebtLimit
+              ? 'Tu saldo supera el tope de deuda: pagá desde Mi cuenta para volver a conectarte.'
+              : serverData.disconnectedReason === 'inactivity'
+                ? 'Te desconectamos porque no respondiste el aviso de inactividad. Volvé a conectarte cuando quieras.'
+                : 'Tu sesión fue cerrada.',
+            byDebtLimit ? 'warning' : 'info',
+            byDebtLimit ? 7000 : undefined
           );
           renderDeliveryPanel();
+          if (byDebtLimit) {
+            import('./delivery-panel/earnings.js').then(({ showBalanceManagementModal }) => showBalanceManagementModal({ ...(getState().user || user), ...serverData, uid: user.uid }));
+          }
         }
         return;
       }
@@ -2152,7 +2202,7 @@ export async function renderDeliveryPanel(containerArg) {
           const isApproved = user?.tripStatus === 'approved' || user?.role === 'chofer';
           if (!isApproved) return;
            const requestedTripType = (o.tripType || 'auto').toLowerCase();
-           const driverVehicleType = (user?.tripVehicleType || user?.vehicleType || '').toLowerCase();
+           const driverVehicleType = (user?.tripVehicleType || user?.vehicleType || 'moto').toLowerCase();
            if (requestedTripType !== driverVehicleType) return;
            batches.add(o.id);
         }
@@ -2512,7 +2562,7 @@ function loadTabContent(tab, container, user) {
             const isApproved = user.tripStatus === 'approved' || user.role === 'chofer' || isTargetedToMe;
             if (!isApproved) return;
             const requestedTripType = (o.tripType || 'auto').toLowerCase();
-            const driverVehicleType = (user.tripVehicleType || user.vehicleType || '').toLowerCase();
+            const driverVehicleType = (user.tripVehicleType || user.vehicleType || 'moto').toLowerCase();
             if (!isTargetedToMe && requestedTripType !== driverVehicleType) return;
             trips.push(o);
           } else if (o.isFavor) {
@@ -3181,7 +3231,8 @@ function loadTabContent(tab, container, user) {
               .filter(o => {
                 if (o.driverId && o.driverId !== user.uid) return false;
                 const reqType = (o.tripType || 'auto').toLowerCase();
-                const driverType = (user.tripVehicleType || user.vehicleType || 'auto').toLowerCase();
+                // Chofer sin vehículo cargado: moto, que es lo único que se ofrece (utils/trip-vehicles.js)
+                const driverType = (user.tripVehicleType || user.vehicleType || 'moto').toLowerCase();
                 return reqType === driverType;
               });
 
@@ -3779,9 +3830,9 @@ function loadTabContent(tab, container, user) {
                           if (o.isFavor) {
                             if (o.favorType === 'gocash') return icon('dollarSign', 14) + ' GO CASH';
                             if (o.favorType === 'pagodeservicios') return icon('creditCard', 14) + ' PAGO DE SERVICIO';
-                            if (o.favorType === 'mandado') return `<img src="/go-pickup-point.png" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> ENCOMIENDA`;
-                            if (o.favorType === 'compra') return `<img src="/go-bag.png" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> MANDADO`;
-                            return `<img src="/go-bag.png" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> MANDADO`;
+                            if (o.favorType === 'mandado') return `<img src="/go-pickup-point.png?v=7" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> ENCOMIENDA`;
+                            if (o.favorType === 'compra') return `<img src="/go-bag.png?v=7" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> MANDADO`;
+                            return `<img src="/go-bag.png?v=7" style="width:20px; height:20px; object-fit:contain; display:inline-block; vertical-align:middle; margin-right:6px;" /> MANDADO`;
                           }
                           return icon('shoppingCart', 14) + ' COMERCIO';
                         })()}
@@ -4617,7 +4668,7 @@ function loadTabContent(tab, container, user) {
               return;
             }
 
-            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.source === 'whatsapp_bot' || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda') || o.serviceType === 'encomienda' || o.isCommerceCadeteria === true || o.orderType === 'cadeteria' || o.favorType === 'cadeteria');
+            const noCodeRequired = orders.filter(o => ids.includes(o.id)).some(o => o.isManual === true || o.noCodeRequired === true || o.source === 'whatsapp_bot' || o.favorType === 'encomienda' || (o.isFavor && o.favorType === 'encomienda') || o.serviceType === 'encomienda' || o.isEncomienda === true || isOrderEncomienda(o) || o.isCommerceCadeteria === true || o.orderType === 'cadeteria' || o.favorType === 'cadeteria');
             openSlideToConfirmModal({
               isTrip,
               noCodeRequired,
@@ -5016,45 +5067,38 @@ function loadTabContent(tab, container, user) {
               <!-- Resumen de Billetera -->
               <div style="background:var(--driver-bg-elevated); border:1.5px solid var(--driver-border); border-radius:24px; padding:20px; box-shadow:0 8px 24px rgba(0,0,0,0.06); display:flex; flex-direction:column; gap:12px;">
                 <h4 style="margin:0; font-size:13px; font-weight:900; color:var(--driver-text-primary); display:flex; align-items:center; gap:6px;">
-                  ${icon('wallet', 16)} Resumen de Billetera
+                  ${icon('wallet', 16)} Tus ganancias · últimos 30 días
                 </h4>
                 <div style="display:flex; flex-direction:column; gap:8px; font-size:12.5px; font-weight:600; color:var(--driver-text-label);">
                   <div style="display:flex; justify-content:space-between;">
-                    <span>Ganancias por Transferencia (Digital)</span>
+                    <span>El cliente pagó por transferencia</span>
                     <span id="wallet-digital-earnings" style="color:#10b981; font-weight:700;">$ 0</span>
                   </div>
                   <div style="display:flex; justify-content:space-between;">
-                    <span>Cobros en Efectivo (Bolsillo)</span>
+                    <span>El cliente pagó en efectivo</span>
                     <span id="wallet-cash-earnings" style="color:#f59e0b; font-weight:700;">$ 0</span>
                   </div>
-                  <div style="display:flex; justify-content:space-between; border-top:1px dashed var(--driver-border); padding-top:8px; font-weight:700;">
-                    <span>Total Facturado (Ambos)</span>
-                    <span id="wallet-total-combined" style="color:var(--driver-text-primary); font-weight:800;">$ 0</span>
-                  </div>
-                  <div style="display:flex; justify-content:space-between; color:#ef4444;">
-                    <span>Tarifa App (A Liquidar)</span>
-                    <span id="wallet-app-fee" style="font-weight:700;">-$ 0</span>
-                  </div>
-                  <div style="display:flex; flex-direction:column; gap:4px; border-top:1.5px solid var(--driver-border); padding-top:10px; margin-top:4px;">
-                    <div style="display:flex; justify-content:space-between; font-weight:900; font-size:14px;">
-                      <span style="color:var(--driver-text-primary);">Balance Neto</span>
-                      <span id="wallet-net-balance" style="font-size:16px;">$ 0</span>
-                    </div>
-                    <div style="font-size:10px; color:var(--driver-text-secondary); text-align:center; font-weight:700; opacity:0.8; margin-top:2px;">
-                      Fórmula: Digital + Efectivo - Tarifa App
-                    </div>
+                  <div style="display:flex; justify-content:space-between; border-top:1px dashed var(--driver-border); padding-top:8px; font-weight:800;">
+                    <span style="color:var(--driver-text-primary);">Total</span>
+                    <span id="wallet-total-combined" style="color:var(--driver-text-primary); font-weight:900;">$ 0</span>
                   </div>
                 </div>
               </div>
 
-              <!-- Gestor de Balance -->
-              <button id="open-balance-mgmt-btn" style="width:100%; height:48px; border-radius:16px; background:var(--driver-bg-elevated); border:1.5px solid ${debt > 0 ? 'rgba(239,68,68,0.2)' : 'var(--driver-border)'}; color:var(--driver-text-primary); font-weight:900; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; padding:0 16px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.02); flex-shrink:0;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <div style="color:${debt > 0 ? '#ef4444' : '#10b981'}; opacity:0.8; display:flex; align-items:center;">${icon('bank', 16)}</div>
-                  Gestión de Balance
+              <!-- Mi cuenta con GO! (saldo con signo: + debe, − a favor) -->
+              <button id="open-balance-mgmt-btn" style="width:100%; min-height:64px; border-radius:18px; background:var(--driver-bg-elevated); border:1.5px solid ${debt > 0 ? 'rgba(239,68,68,0.25)' : debt < 0 ? 'rgba(16,185,129,0.3)' : 'var(--driver-border)'}; color:var(--driver-text-primary); font-weight:900; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; padding:10px 16px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.02); flex-shrink:0; text-align:left;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:36px; height:36px; border-radius:11px; background:${debt > 0 ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)'}; color:${debt > 0 ? '#ef4444' : '#10b981'}; display:flex; align-items:center; justify-content:center;">${icon('bank', 17)}</div>
+                  <div>
+                    <div>Mi cuenta con GO!</div>
+                    <div style="font-size:11px; font-weight:700; color:var(--driver-text-secondary); margin-top:2px;">Estado de cuenta y pagos</div>
+                  </div>
                 </div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span style="font-size:14.5px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#10b981'}; letter-spacing:-0.02em;">${formatPrice(debt)}</span>
+                <div style="display:flex; align-items:center; gap:6px; text-align:right;">
+                  <div>
+                    <div style="font-size:10px; font-weight:800; color:var(--driver-text-secondary); text-transform:uppercase;">${debt > 0 ? 'Debés' : debt < 0 ? 'A favor' : 'Al día'}</div>
+                    <div style="font-size:15px; font-weight:950; color:${debt > 0 ? '#ef4444' : '#10b981'}; letter-spacing:-0.02em;">${formatPrice(Math.abs(debt))}</div>
+                  </div>
                   ${icon('chevronRight', 14, 'opacity:0.3')}
                 </div>
               </button>
@@ -5198,7 +5242,7 @@ function loadTabContent(tab, container, user) {
       const defaultTripModel = user.tripVehicleModel || user.tripApplication?.vehicleModel || user.vehicleModel || '';
       const defaultTripColor = user.tripVehicleColor || user.tripApplication?.vehicleColor || user.vehicleColor || '';
       const defaultTripPatent = user.tripVehiclePatent || user.tripApplication?.vehicleDetails || user.vehicleDetails || user.patente || '';
-      const defaultTripVehicleType = user.tripVehicleType || user.tripApplication?.vehicleType || user.vehicleType || 'Auto';
+      const defaultTripVehicleType = user.tripVehicleType || user.tripApplication?.vehicleType || user.vehicleType || 'Moto';
 
       // Default values for Delivery Vehicle
       const defaultDelivType = user.deliveryVehicleType || 'Moto';
@@ -5293,8 +5337,7 @@ function loadTabContent(tab, container, user) {
               <label style="font-size:9.5px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Tipo de Vehículo (Obligatorio) *</label>
               <select id="config-vehicle-type-select" style="width:100%; height:42px; border-radius:10px; border:1.5px solid var(--color-border-light); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:700; padding:0 12px; outline:none; font-family:inherit;">
                 <option value="" disabled ${!defaultTripVehicleType ? 'selected' : ''}>-- Seleccioná tipo --</option>
-                <option value="Moto" ${defaultTripVehicleType.toLowerCase() === 'moto' ? 'selected' : ''}>🏍️ Moto</option>
-                <option value="Auto" ${defaultTripVehicleType.toLowerCase() === 'auto' ? 'selected' : ''}>🚗 Auto</option>
+                ${tripVehicleOptions(defaultTripVehicleType, { capitalized: true })}
               </select>
             </div>
             
@@ -5456,8 +5499,7 @@ async function showTripApplicationModal(user) {
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <label style="font-size: 11px; font-weight: 900; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Vehículo *</label>
         <select id="tapp-vehicle" required style="width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--color-border-light); padding: 0 14px; background: var(--color-bg-card); font-size: 13.5px; font-weight: 600; outline: none; transition: border-color 0.2s; color: var(--color-text-primary); font-family: inherit;">
-          <option value="Auto" selected>Auto</option>
-          <option value="Moto">Moto</option>
+          ${tripVehicleOptions('moto', { capitalized: true })}
         </select>
       </div>
 
@@ -6385,7 +6427,7 @@ function renderStatusBar(user) {
     const isTrip = (o.isTrip || o.type === 'trip' || o.type === 'viaje' || o.favorType === 'viaje');
     const isMandado = (o.favorType === 'compra' || o.favorType === 'mandado' || (!isGoCash && !isPagoServicios && !isEncomienda && !isTrip && isFavor));
 
-    let directiveLogo = '/go-bag.png?v=6';
+    let directiveLogo = '/go-bag.png?v=7';
     if (isPickupStage) {
       if (isTrip) {
         // Antes caía en "Retirá el pedido en Local": un viaje no es un favor
@@ -6393,14 +6435,14 @@ function renderStatusBar(user) {
         destTitle = `Buscá a ${clientFullName} en ${o.originAddress || o.pickupAddress || 'el punto de inicio'}`;
       } else if (isFavor && !o.comercioId) {
         if (isEncomienda) {
-          directiveLogo = '/go-pickup-point.png?v=5';
+          directiveLogo = '/go-pickup-point.png?v=7';
           const pickupAddr = o.pickupAddress || o.originAddress || 'Dirección de Retiro';
           destTitle = `Retirá el paquete en ${pickupAddr}`;
         } else if (isGoCash) {
-          directiveLogo = '/go-cash.png?v=5';
+          directiveLogo = '/go-cash.png?v=7';
           destTitle = goCashInfo(o).driverBringsCash ? `Llevá el efectivo a ${clientFullName}` : `Andá a cambiar el efectivo de ${clientFullName}`;
         } else {
-          directiveLogo = isPagoServicios ? '/go-clipboard.png?v=5' : '/go-bag.png?v=6';
+          directiveLogo = isPagoServicios ? '/go-clipboard.png?v=7' : '/go-bag.png?v=7';
           shoppingStop = shoppingPlanOf(o).current;
           const where = shoppingStop ? (shoppingStop.placeName || shoppingStop.store) : (o.comercioName || 'el comercio indicado');
           destTitle = isPagoServicios ? `Pagá los servicios en ${where}` : `Comprá en ${where}`;
@@ -6408,11 +6450,11 @@ function renderStatusBar(user) {
       } else {
         const allComercios = getState().comercios || [];
         const foundCom = o.comercioId ? allComercios.find(c => c.id === o.comercioId) : null;
-        directiveLogo = o.comercioRealLogo || o.comercioLogo || foundCom?.logo || '/go-bag.png?v=6';
+        directiveLogo = o.comercioRealLogo || o.comercioLogo || foundCom?.logo || '/go-bag.png?v=7';
         destTitle = `Retirá el pedido en ${o.comercioName || 'Local'}`;
       }
     } else {
-      directiveLogo = clientPhoto || '/go-bag.png?v=6';
+      directiveLogo = clientPhoto || '/go-bag.png?v=7';
       const cleanDestAddr = o.deliveryAddress || o.address || o.destinationAddress || clientFullName || 'el domicilio';
       destTitle = isTrip ? `Llevá a ${clientFullName} a ${cleanDestAddr}` : (isGoCash ? `${goCashInfo(o).driverBringsCash ? 'Entregá el efectivo' : 'Cambiá el efectivo'} en ${cleanDestAddr}` : (isEncomienda ? `Entregá la encomienda en ${cleanDestAddr}` : `Entregá el pedido en ${cleanDestAddr}`));
     }
@@ -6475,9 +6517,10 @@ function renderStatusBar(user) {
     // Un solo cartel arriba: qué hacer, dónde, la próxima indicación y la llegada
     const tk = driverTokens(isLight);
     const doneSteps = doneStepsOf(activeOrdersList);
-    const stepTotal = doneSteps + optimalSequence.length;
+    const shop = shoppingStepsOf(o);
+    const stepTotal = doneSteps + optimalSequence.length + shop.extra;
     const orderCode = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
-    const stepLabel = stepTotal > 1 ? `Parada ${doneSteps + 1} de ${stepTotal} · Pedido ${orderCode}` : `Pedido ${orderCode}`;
+    const stepLabel = stepTotal > 1 ? `Parada ${doneSteps + shop.done + 1} de ${stepTotal} · Pedido ${orderCode}` : `Pedido ${orderCode}`;
     // Mandado sin ubicación del comercio: no hay ruta, se indica cómo encontrarlo
     const noGpsMandado = isFavor && !o.comercioId && isPickupStage && !isEncomienda && !isTrip && !isGoCash && !(shoppingStop && shoppingStop.coords);
     const m = window.lastDriverManeuver || {};
@@ -6664,13 +6707,15 @@ function dockMoneyRow(o, isPickup, isLight) {
     const edit = `<button class="edit-mandado-purchase-btn" data-order-id="${esc(o.id)}" style="height:36px;padding:0 12px;border-radius:10px;background:${t.brand};border:0;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:inherit">Cargar monto</button>`;
     return moneyRow({ label: isPago ? 'Valor de las facturas' : 'Valor de la compra', amount: buy > 0 ? money(buy) : '', sub: 'Lo adelantás y te lo devuelve el cliente', tone: 'amber', icon: 'bag', action: edit }, isLight);
   }
+  // GoPoints / cupón: el total ya viene con el descuento restado, y el repartidor tiene que saberlo
+  const discount = discountRow(o, isLight);
   if (isCashPayment(o)) {
-    if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'En efectivo', tone: 'amber', action: breakdownBtn }, isLight);
-    return moneyRow({ label: isPickup ? 'Al entregar cobrás en efectivo' : 'Cobrá en efectivo', amount: money(total), sub: o.cashChangeFor ? `Tené cambio: paga con ${money(o.cashChangeFor)}` : '', tone: 'amber', action: breakdownBtn }, isLight);
+    if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'En efectivo', tone: 'amber', action: breakdownBtn }, isLight) + discount;
+    return moneyRow({ label: isPickup ? 'Al entregar cobrás en efectivo' : 'Cobrá en efectivo', amount: money(total), sub: o.cashChangeFor ? `Tené cambio: paga con ${money(o.cashChangeFor)}` : '', tone: 'amber', action: breakdownBtn }, isLight) + discount;
   }
   // Transferencia: el cliente le transfiere al alias del repartidor al recibir (nunca se paga antes)
-  if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'Por transferencia a tu alias', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight);
-  return moneyRow({ label: isPickup ? 'Al entregar cobrás por transferencia' : 'Cobrá por transferencia', amount: money(total), sub: 'A tu alias, cuando recibe el pedido', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight);
+  if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'Por transferencia a tu alias', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight) + discount;
+  return moneyRow({ label: isPickup ? 'Al entregar cobrás por transferencia' : 'Cobrá por transferencia', amount: money(total), sub: 'A tu alias, cuando recibe el pedido', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight) + discount;
 }
 
 function renderDockActionRow(order, orderIsPickup, isLight) {
@@ -6704,7 +6749,8 @@ function dockContactRow(o, isPickup, isLight, withNav = true) {
   const t = driverTokens(isLight);
   const nav = dockNavUrl(o, isPickup);
   const wa = dockWhatsAppUrl(o);
-  const phone = String(isPickup && !o.isTrip ? (o.comercioPhone || '') : (o.userPhone || o.clientPhone || o.phone || '')).replace(/[^\d+]/g, '');
+  // The call button always rings the customer, at every stop and in every kind of order.
+  const phone = String(o.userPhone || o.clientPhone || o.phone || '').replace(/[^\d+]/g, '');
   const sq = `${withNav ? 'width:48px;' : 'flex:1;'}height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;cursor:pointer;padding:0`;
   return `<div style="display:flex;gap:10px">
     ${nav && withNav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer" style="flex:1;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">${dIcon('nav', 18, t.brandTx)}Navegar</a>` : (withNav ? '<span style="flex:1"></span>' : '')}
@@ -6819,7 +6865,8 @@ export function renderBottomDockContent(user, activeOrders = []) {
   const txt = dockStopText(o, currentIsPickup);
   const code = '#' + (o.orderId || (o.id ? o.id.slice(-4) : ''));
   const doneSteps = doneStepsOf(activeOrders);
-  const meta = doneSteps + totalStops > 1 && stopIndex >= 0 ? `${code} · parada ${doneSteps + stopIndex + 1} de ${doneSteps + totalStops}` : code;
+  const shop = currentIsPickup ? shoppingStepsOf(o) : { extra: 0, done: 0 };
+  const meta = doneSteps + totalStops + shop.extra > 1 && stopIndex >= 0 ? `${code} · parada ${doneSteps + stopIndex + shop.done + 1} de ${doneSteps + totalStops + shop.extra}` : code;
 
   const expandBtn = `<button id="dock-expand-toggle-btn" aria-label="${isExpanded ? 'Ver menos' : 'Ver el detalle y el recorrido'}" title="${isExpanded ? 'Menos' : 'Detalle'}" style="height:36px;padding:0 10px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">${dIcon(isExpanded ? 'chevDown' : 'chevUp', 16)}${isExpanded ? 'Menos' : 'Detalle'}</button>`;
   const sosBtn = `<button id="driver-quick-sos-btn" aria-label="Centro de seguridad SOS" title="SOS" style="width:36px;height:36px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">${dIcon('shield', 17, t.brandTx)}</button>`;
@@ -6842,7 +6889,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
         ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:${isExpanded ? 2 : 1};-webkit-box-orient:vertical;overflow:hidden">${esc(txt.sub)}</div>` : ''}
       </div>
       ${navUrl ? `<a href="${esc(navUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Navegar con Google Maps" title="Navegar" style="width:52px;height:52px;border-radius:26px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none">${dIcon('nav', 22, t.brandTx)}</a>` : ''}
-    </div>${shopList}`;
+    </div>${isExpanded ? '' : shopList}`;
 
   // Lo que viene después (con varios pedidos)
   let nextChips = '';
@@ -6865,12 +6912,30 @@ export function renderBottomDockContent(user, activeOrders = []) {
   let expanded = '';
   if (isExpanded) {
     const doneStops = activeOrders.filter(x => !dockOrderStage(x) && !isGoCashOrder(x)).map(x => ({ kind: dockStopKind(x, true), title: `${x.isTrip ? 'Buscaste a' : 'Retiraste en'} ${dockStopText(x, true).title}`, sub: '', state: 'done', orderId: x.id }));
-    const list = route.map((s, i) => {
+    const list = route.flatMap((s, i) => {
       const so = s.order || activeOrders.find(x => x.id === s.orderId) || {};
       const st = dockStopText(so, s.type === 'pickup');
       // Go Cash no tiene parada de retiro: mientras no salió, la parada de ahora es el cliente
       const isNow = so.id === o.id && ((s.type === 'pickup') === currentIsPickup || (isGoCashOrder(so) && s.type === 'delivery'));
-      return { kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : `Cobrá ${money(so.totalAmount || so.total)} ${isCashPayment(so) ? 'en efectivo' : 'por transferencia'}`, state: isNow ? 'now' : 'next', orderId: so.id };
+      // Mandado con varios comercios (hasta 5): cada uno es una parada, con su lista completa
+      if (s.type === 'pickup' && so.isFavor) {
+        const plan = shoppingPlanOf(so);
+        if (plan.total > 1) {
+          const pendingNames = new Set(plan.pending.map(p => p.store));
+          return plan.stores.map((store, k) => {
+            const done = !pendingNames.has(store.store);
+            const current = isNow && !done && plan.pending[0]?.store === store.store;
+            return {
+              kind: 'store',
+              title: `${done ? 'Compraste en' : 'Comprar en'} ${store.placeName || store.store}`,
+              sub: [`Comercio ${k + 1} de ${plan.total}`, store.items].filter(Boolean).join(' · '),
+              state: done ? 'done' : (current ? 'now' : 'next'),
+              orderId: so.id,
+            };
+          });
+        }
+      }
+      return [{ kind: dockStopKind(so, s.type === 'pickup'), title: `${st.verb} ${st.title}`, sub: s.type === 'pickup' ? st.sub : `Cobrá ${money(so.totalAmount || so.total)} ${isCashPayment(so) ? 'en efectivo' : 'por transferencia'}`, state: isNow ? 'now' : 'next', orderId: so.id }];
     });
     // Las paradas pendientes llevan el mismo número que en el mapa; con varios pedidos se pueden tocar
     const all = [...doneStops, ...list.map((s, i) => ({ ...s, num: doneStops.length + i + 1, tab: activeOrders.length > 1 ? { index: activeOrders.findIndex(x => x.id === s.orderId), orderId: s.orderId } : null }))];
@@ -6878,16 +6943,17 @@ export function renderBottomDockContent(user, activeOrders = []) {
     const items = Array.isArray(o.items) ? o.items : (Array.isArray(o.products) ? o.products : []);
     const itemsHtml = items.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;color:${t.tx2}">
-          <span>${esc(it.quantity || it.cant || 1)}× ${esc(it.name || it.title || 'Producto')}</span>
-          ${it.price ? `<span style="color:${t.tx};font-weight:600;white-space:nowrap">${money(it.price * (it.quantity || 1))}</span>` : ''}
+          <span>${esc(it.qty || it.quantity || it.cant || 1)}× ${esc(it.name || it.title || 'Producto')}</span>
+          ${it.price ? `<span style="color:${t.tx};font-weight:600;white-space:nowrap">${money(it.price * (it.qty || it.quantity || 1))}</span>` : ''}
         </div>`).join('')}</div>` : '';
     const notes = o.addressNotes || o.notes || o.clientNotes;
     expanded = `
-      <div id="dock-expanded-selected-order-body" style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;max-height:min(40vh,300px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:${t.handle} transparent;-webkit-overflow-scrolling:touch;animation:dockContentFadeIn .3s cubic-bezier(.16,1,.3,1)">
+      <div id="dock-expanded-selected-order-body" data-scrollable="true" style="display:flex;flex-direction:column;gap:12px;flex:1 1 auto;min-height:72px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:${t.handle} transparent;-webkit-overflow-scrolling:touch;animation:dockContentFadeIn .3s cubic-bezier(.16,1,.3,1)">
+        ${shopList ? shopList.replace('margin-top:10px;', '') : ''}
         ${tabs}
         ${itemsHtml}
         ${notes ? infoRow('note', `“${notes}”`, isLight) : ''}
-        ${!currentIsPickup && o.verificationCode ? infoRow('key', 'Pedile al cliente el código de entrega', isLight) : ''}
+        ${!currentIsPickup && o.verificationCode && !isOrderEncomienda(o) && !o.isEncomienda ? infoRow('key', 'Pedile al cliente el código de entrega', isLight) : ''}
       </div>`;
   }
 
@@ -6900,16 +6966,21 @@ export function renderBottomDockContent(user, activeOrders = []) {
       </button>`;
   }
 
+  // Open, a long errand (several shops, a long list) is taller than the card: only the middle
+  // scrolls, and the money row, the contact buttons (call, WhatsApp, chat), the slider and the
+  // quick row stay pinned at the bottom. Before, they were pushed out of the card and cut off.
+  const pinned = (html) => isExpanded ? `<div style="display:flex;flex-direction:column;gap:14px;flex-shrink:0">${html}</div>` : html;
+  const top = (html) => isExpanded ? `<div style="display:flex;flex-direction:column;gap:14px;flex-shrink:0">${html}</div>` : html;
   return `${sheetOpen}
-      ${header}
+      ${top(`${header}
       ${stopBlock}
       ${storeStepRow}
-      ${nextChips}
+      ${nextChips}`)}
       ${expanded}
-      ${dockMoneyRow(o, currentIsPickup, isLight)}
+      ${pinned(`${dockMoneyRow(o, currentIsPickup, isLight)}
       ${isExpanded ? dockContactRow(o, currentIsPickup, isLight, false) : ''}
       ${renderDockActionRow(o, currentIsPickup, isLight)}
-      ${isExpanded ? dockQuickRow(user, isLight, true, false) : ''}
+      ${isExpanded ? dockQuickRow(user, isLight, true, false) : ''}`)}
     </div>`;
 }
 
@@ -7446,8 +7517,9 @@ export function attachBottomDockListeners(user, activeOrders = []) {
               o.source === 'whatsapp_bot' ||
               o.favorType === 'encomienda' ||
               (o.isFavor && o.favorType === 'encomienda') ||
-              o.serviceType === 'encomienda'
-            );
+              o.serviceType === 'encomienda' ||
+              o.isEncomienda === true || isOrderEncomienda(o) // las encomiendas se crean como favorType 'mandado'
+            ) || targetOrders.every(o => !o.verificationCode); // sin código cargado no hay qué pedir
 
             openSlideToConfirmModal({
               isTrip: isTripOrder,
@@ -7633,8 +7705,9 @@ export function attachBottomDockListeners(user, activeOrders = []) {
           o.source === 'whatsapp_bot' || 
           o.favorType === 'encomienda' || 
           (o.isFavor && o.favorType === 'encomienda') || 
-          o.serviceType === 'encomienda'
-        );
+          o.serviceType === 'encomienda' ||
+          o.isEncomienda === true || isOrderEncomienda(o) // las encomiendas se crean como favorType 'mandado'
+        ) || targetOrders.every(o => !o.verificationCode); // sin código cargado no hay qué pedir (ni maestro que lo destrabe)
 
         openSlideToConfirmModal({
           isTrip: isTripOrder,
@@ -7685,25 +7758,33 @@ export async function ensureDriverPermissions() {
     }
   }
 
-  let locationGranted = false;
+  // Inside the native app's WebView neither call below is guaranteed to answer:
+  // permissions.query can stay pending, and getCurrentPosition's own timeout does not
+  // run while the permission is being resolved. Awaiting them bare left the "Iniciar
+  // Jornada" confirm stuck on PROCESANDO... forever, so every wait here has a hard cap.
+  const NO_ANSWER = Symbol('no-answer');
+  const capped = (promise, ms) => Promise.race([promise, new Promise(r => setTimeout(() => r(NO_ANSWER), ms))]);
+
   // Already allowed: no need to wait for a GPS fix (that was the slow part of connecting).
   try {
-    const st = await navigator.permissions?.query({ name: 'geolocation' });
-    if (st?.state === 'granted') return { locationGranted: true };
+    const st = await capped(navigator.permissions?.query({ name: 'geolocation' }), 1500);
+    if (st !== NO_ANSWER && st?.state === 'granted') return { locationGranted: true };
   } catch (e) {}
-  if ('geolocation' in navigator) {
-    try {
-      await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000, maximumAge: Infinity, enableHighAccuracy: false });
-      });
-      locationGranted = true;
-    } catch (err) {
-      console.warn('Geolocation check:', err);
-      locationGranted = false;
-    }
-  }
 
-  return { locationGranted };
+  if (!('geolocation' in navigator)) return { locationGranted: false };
+
+  const result = await capped(new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      () => resolve('ok'),
+      (err) => { console.warn('Geolocation check:', err); resolve(err?.code === 1 ? 'denied' : 'no-fix'); },
+      { timeout: 6000, maximumAge: Infinity, enableHighAccuracy: false }
+    );
+  }), 9000);
+
+  // Only an explicit denial blocks going online. No fix yet (indoors, GPS warming up) or no
+  // answer at all means the permission itself was not refused; the live tracker keeps asking.
+  if (result === NO_ANSWER) console.warn('Geolocation check: no answer, letting the driver connect');
+  return { locationGranted: result !== 'denied' };
 }
 
 function showGoConnecting() {
@@ -8048,7 +8129,7 @@ function renderPerfilTabHTML(user) {
               <line x1="1" y1="10" x2="23" y2="10"></line>
             </svg>
           </div>
-          <span>Deuda de Tarifas (${formatPrice(latestUser.deliveryDebt || 0)})</span>
+          <span>Mi cuenta · ${(latestUser.deliveryDebt || 0) > 0 ? `Debés ${formatPrice(latestUser.deliveryDebt)}` : (latestUser.deliveryDebt || 0) < 0 ? `A favor ${formatPrice(-latestUser.deliveryDebt)}` : 'Al día'}</span>
         </button>
 
         <!-- 5. Delivery History -->
@@ -8340,7 +8421,7 @@ export async function promptEndSession(user) {
 
   showConfirm({
     title: '¿Desconectarte de la jornada?',
-    message: 'Dejarás de recibir notificaciones de nuevos pedidos en tu zona.<br><br>💡 <b>Aviso:</b> Si volvés a conectarte más tarde en el día de hoy, <b>NO se te volverá a cobrar la cuota diaria</b>.',
+    message: 'Dejarás de recibir notificaciones de nuevos pedidos en tu zona.<br><br>💡 <b>Aviso:</b> la cuota diaria se cobra una sola vez por día, así que volver a conectarte más tarde <b>no genera cargos</b>.',
     confirmText: 'Sí, desconectar',
     onConfirm: () => {
       closeModal();
@@ -8374,26 +8455,25 @@ export async function promptStartSession(user) {
     return;
   }
 
-  // 2. Debt Limit Guard
-  const debtLimitEnabled = getState().debtLimitEnabled === true;
+  // 2. Debt Limit Guard (the server enforces the same rule if this is skipped)
   const maxDebtLimit = getState().maxDebtLimit !== undefined ? getState().maxDebtLimit : 15000;
   const debt = currentUser.deliveryDebt || 0;
-  
-  if (debtLimitEnabled && debt > maxDebtLimit) {
+
+  if (isOverDebtLimit(currentUser)) {
     showModal({
-      title: '🚨 Cuenta Suspendida por Deuda',
+      title: 'Tope de deuda',
       content: `
         <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; background: var(--color-bg);">
           <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center;">
             ${icon('shieldAlert', 28)}
           </div>
-          <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Límite de Deuda Excedido</h3>
+          <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Superaste el tope de deuda</h3>
           <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
-            Tu deuda acumulada es de <strong style="color:#ef4444;">${formatPrice(debt)}</strong>, lo cual supera el límite permitido de <strong>${formatPrice(maxDebtLimit)}</strong>.<br><br>
-            Para poder conectarte y seguir recibiendo pedidos, debés transferir y subir tu comprobante de pago en el Gestor de Balance.
+            Tu saldo es de <strong style="color:#ef4444;">${formatPrice(debt)}</strong> y el tope es de <strong>${formatPrice(maxDebtLimit)}</strong>.<br><br>
+            Para conectarte y recibir pedidos, pagá desde <b>Mi cuenta → Pagar</b> (podés pagar una parte, lo justo para quedar por debajo del tope).
           </p>
           <button id="modal-suspend-pay-btn" style="width:100%; height:48px; border-radius:14px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:13px; cursor:pointer; text-transform:uppercase; margin-top:8px; box-shadow:0 6px 16px rgba(var(--color-primary-rgb),0.25);">
-            Regularizar Ahora
+            Ir a Mi cuenta
           </button>
         </div>
       `,
@@ -8411,18 +8491,22 @@ export async function promptStartSession(user) {
   }
 
   // 3. Canon Daily Fee check
-  // The charge itself happens on the server (chargeDailyCanonOnConnect) when isOnline flips to
-  // true; this only decides what the confirmation says. Same Argentina day as the server.
+  // The charge happens on the server (functions/ledger.js) when the driver completes their Nth
+  // order of the day; this only decides what the confirmation says. Same Argentina day as the server.
   const { argentinaDateStr } = await import('../utils/canon.js');
   const todayStr = argentinaDateStr();
 
   const isExempt = currentUser.isCanonExempt === true || currentUser.role === 'admin' || currentUser.isAdmin === true;
-  const isFirstConnectionToday = !isExempt && currentUser.lastCanonChargeDate !== todayStr;
+  const chargedToday = currentUser.lastCanonChargeDate === todayStr;
   const configuredCanonAmount = getState().canonAmount || 2000;
+  const minOrders = getState().canonMinOrders || 1;
+  const ordersNeeded = minOrders === 1 ? 'tu primer pedido' : `tu pedido N° ${minOrders}`;
 
-  const modalMessage = isFirstConnectionToday
-    ? `Comenzarás a recibir pedidos en tu zona.<br><br>🛵 <b>Canon diario:</b> Al ser tu primera conexión de hoy, se registrarán <b>$${configuredCanonAmount.toLocaleString('es-AR')}</b> de canon diario en tu saldo de comisiones.<br><br>💡 Si te desconectás y volvés a conectar más tarde en el día, <b>NO se te volverá a cobrar</b>.`
-    : `Comenzarás a recibir pedidos en tu zona.<br><br>✅ <b>Cuota del día ya registrada:</b> la cuota de hoy ya está en tu saldo, así que <b>NO se generará ningún cargo extra</b> al conectarte.`;
+  const modalMessage = isExempt
+    ? `Comenzarás a recibir pedidos en tu zona.`
+    : chargedToday
+      ? `Comenzarás a recibir pedidos en tu zona.<br><br>✅ <b>Cuota del día ya registrada:</b> la cuota de hoy ya está en tu saldo, así que <b>NO se generará ningún cargo extra</b>.`
+      : `Comenzarás a recibir pedidos en tu zona.<br><br>🛵 <b>Cuota diaria:</b> se suman <b>$${configuredCanonAmount.toLocaleString('es-AR')}</b> a tu saldo cuando completes ${ordersNeeded} del día. Si no llegás, hoy no pagás cuota.<br><br>💡 Conectarte y desconectarte no genera cargos.`;
 
   showConfirm({
     title: '¿Iniciar Jornada de Trabajo?',
@@ -8610,7 +8694,23 @@ function getDistanceSync(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Same rule the server applies to connecting and to dispatch: strictly above the limit.
+function isOverDebtLimit(u) {
+  const s = getState();
+  const limit = Number(s.maxDebtLimit) || 0;
+  if (s.debtLimitEnabled !== true || limit <= 0 || !u) return false;
+  if (u.role === 'admin' || u.isAdmin === true) return false;
+  return (Number(u.deliveryDebt) || 0) > limit;
+}
+
 export async function takeBatch(batchId, user, batchData = null, btn = null) {
+  // The server stops offering orders above the debt limit; this covers the open order list.
+  const current = getState().user || user;
+  if (isOverDebtLimit(current)) {
+    showToast(`Superaste el tope de deuda (${formatPrice(getState().maxDebtLimit)}): pagá desde Mi cuenta para tomar pedidos nuevos.`, 'warning', 6000);
+    import('./delivery-panel/earnings.js').then(({ showBalanceManagementModal }) => showBalanceManagementModal(current));
+    return;
+  }
   if (isCurrentlyTakingBatch) {
     console.log('[takeBatch] A order claim is already in progress, ignoring double-click.');
     return;
@@ -8903,8 +9003,9 @@ export const takeOrder = takeBatch;
 export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
   const ids = Array.isArray(orderIdOrIds) ? orderIdOrIds : orderIdOrIds.split(',');
 
-  // Check if simulated demo order
-  if (ids.includes('sim_demo_order') || window.mockSimulatedOrder) {
+  // Simulated demo order. Only when it's the demo one: a simulation left open used to swallow the
+  // real orders too (nothing was saved and the dock stayed on "retirar").
+  if (ids.includes('sim_demo_order')) {
     if (window.mockSimulatedOrder) {
       window.mockSimulatedOrder.status = 'delivering';
     }
@@ -8968,6 +9069,9 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
       }
       if (extraData.total !== undefined) {
         updates.total = extraData.total;
+        // An order whose price was edited before has totalAmount too, and the dock shows that one
+        const current = (activeOrdersList || []).find(o => ids.includes(o.id));
+        if (current && current.totalAmount !== undefined) updates.totalAmount = extraData.total;
       }
       if (typeof extraData.pickupDistanceM === 'number') {
         updates.pickupDistanceM = extraData.pickupDistanceM;
@@ -9001,6 +9105,7 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
           }
           if (extraData.stopsPurchases) o.stopsPurchases = extraData.stopsPurchases;
           if (extraData.total !== undefined) o.total = extraData.total;
+          if (updates.totalAmount !== undefined) o.totalAmount = updates.totalAmount;
         }
       });
       window.activeOrdersList = activeOrdersList;
@@ -9059,6 +9164,8 @@ export async function markAsPickedUp(orderIdOrIds, extraData = {}) {
       return true;
     } catch (err) {
       console.error('Async pickup sync error:', err);
+      // Firestore broke internally: nothing will save until the app reloads, so reload now
+      if (recoverIfFirestoreBroken(err)) return false;
       showToast('⚠️ No se pudo marcar como retirado. Deslizá de nuevo.', 'error', 6000);
       refreshBottomDock(document.getElementById('driver-footer-dock-container'), getState().user, activeOrdersList);
       return false;
@@ -9208,8 +9315,8 @@ export function openSlideToConfirmModal({ isTrip, noCodeRequired, codes, ids, or
     if (isProcessing) return;
     const typedCode = currentDigits.join('').trim();
     const validCodes = (codes || []).map(c => String(c).trim());
-    const isMaster = typedCode === '9999' || typedCode === '0000';
-    const isCorrect = validCodes.includes(typedCode) || isMaster;
+    // Sin códigos maestros: sólo el código del cliente cierra la entrega
+    const isCorrect = validCodes.length > 0 && validCodes.includes(typedCode);
 
     if (isCorrect) {
       isProcessing = true;
@@ -9412,8 +9519,8 @@ export async function markAsDelivered(orderIdOrIds) {
   const ids = Array.isArray(orderIdOrIds) ? orderIdOrIds : orderIdOrIds.split(',');
   const user = getState().user;
 
-  // Check if simulated demo order
-  if (ids.includes('sim_demo_order') || window.mockSimulatedOrder) {
+  // Simulated demo order (only that one: see markAsPickedUp)
+  if (ids.includes('sim_demo_order')) {
     stopGpsRouteSimulation();
     window.mockSimulatedOrder = null;
     activeOrdersList = [];
@@ -9513,10 +9620,11 @@ export async function markAsDelivered(orderIdOrIds) {
       orders = ids.map(id => ({ id, status: 'completed' }));
     }
 
-    const totalAppFee = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
-    if (totalAppFee > 0) {
+    // Same net change the server books (fee − coupon − GoPoints − incentive); the live user doc corrects it.
+    const netChange = orders.reduce((sum, o) => sum + (o.appUsageFee || 0) - (o.couponDiscount || 0) - (o.discountAmount || 0) - (o.driverIncentiveAmount || 0), 0);
+    if (netChange !== 0) {
       const currentLocalUser = getState().user || {};
-      const newDebt = (currentLocalUser.deliveryDebt || 0) + totalAppFee;
+      const newDebt = (currentLocalUser.deliveryDebt || 0) + netChange;
       setState('user', { ...currentLocalUser, deliveryDebt: newDebt });
     }
 
@@ -9556,6 +9664,9 @@ export async function markAsDelivered(orderIdOrIds) {
     });
   } catch (err) {
     console.error('markAsDelivered error:', err);
+    // Firestore broke internally: the order was taken off the screen but nothing was saved.
+    // Reloading brings it back as it really is.
+    if (recoverIfFirestoreBroken(err)) return;
     showToast('Error al procesar la entrega', 'error');
   }
 }
@@ -10232,7 +10343,7 @@ function showStopDetailsBottomSheet(stop) {
   const headerBg = isEncomienda 
     ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
     : 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)';
-  const headerIconSrc = isEncomienda ? '/go-pickup-point.png' : '/go-bag.png';
+  const headerIconSrc = isEncomienda ? '/go-pickup-point.png?v=7' : '/go-bag.png?v=7';
   const headerShadow = isEncomienda 
     ? '0 4px 15px rgba(5, 150, 105, 0.15)' 
     : '0 4px 15px rgba(190, 18, 60, 0.15)';

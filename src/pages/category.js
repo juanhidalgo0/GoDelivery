@@ -100,10 +100,11 @@ export async function renderCategoryPage(categoryName, content) {
 
     let comercios = [];
     if (isSpecialProductsView || isSpecialRecommendedView || categoryName === 'Todos') {
-      const snap = await getDocsOptimized(query(collection(db, 'comercios')), 'comercios_all_category_views', 900000);
+      // 2 min (antes 15): un comercio que el admin oculta tiene que dejar de verse enseguida
+      const snap = await getDocsOptimized(query(collection(db, 'comercios')), 'comercios_all_category_views', 120000);
       comercios = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
     } else {
-      const snap = await getDocsOptimized(query(collection(db, 'comercios'), where('category', '==', categoryName)), `category_comercios_${categoryName}_all`, 900000);
+      const snap = await getDocsOptimized(query(collection(db, 'comercios'), where('category', '==', categoryName)), `category_comercios_${categoryName}_all`, 120000);
       comercios = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
     }
 
@@ -194,7 +195,7 @@ export async function renderCategoryPage(categoryName, content) {
         resolvedComs = resolvedComs.filter(({ comercio: c }) => {
           let isOpen = true;
           try {
-            isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
+            isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule);
           } catch (e) {}
           return isOpen && c.isPaused !== true && c.isActive !== false;
         });
@@ -204,7 +205,7 @@ export async function renderCategoryPage(categoryName, content) {
           if (!ownerComer) return false;
           let isOpen = true;
           try {
-            isOpen = isShopOpen(ownerComer.schedules || (ownerComer.schedule ? [ownerComer.schedule] : []), ownerComer.daysOpen);
+            isOpen = isShopOpen(ownerComer.schedules || (ownerComer.schedule ? [ownerComer.schedule] : []), ownerComer.daysOpen, ownerComer.weeklySchedule);
           } catch (e) {}
           return isOpen && ownerComer.isPaused !== true && ownerComer.isActive !== false;
         });
@@ -249,7 +250,7 @@ export async function renderCategoryPage(categoryName, content) {
         grid.innerHTML = resolvedComs.map(({ comercio: c, distanceKm, deliveryFee }, i) => {
           let isOpen = true;
           try {
-            isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
+            isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule);
           } catch (e) {}
           
           const isInactive = c.isActive === false;
@@ -283,7 +284,7 @@ export async function renderCategoryPage(categoryName, content) {
           html += resolvedComs.map(({ comercio: c, distanceKm, deliveryFee }, i) => {
             let isOpen = true;
             try {
-              isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
+              isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule);
             } catch (e) {}
             
             const isPaused = c.isPaused === true;

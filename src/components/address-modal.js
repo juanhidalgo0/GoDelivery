@@ -10,6 +10,9 @@ import { loadGoogleMaps } from '../utils/geo.js';
 
 export function showAddressPrompt(onSuccess, config = {}) {
   const isGeneric = config.mode === 'pick' || config.skipDetails === true;
+  // Encabezado: por defecto es la entrega de un pedido; Viajes pasa el suyo
+  const HEAD_EYEBROW = config.eyebrow || 'Entrega';
+  const HEAD_TITLE = config.title || '¿Dónde entregamos?';
   const modalContent = document.createElement('div');
   modalContent.className = 'delivery-map-modal-v4';
   modalContent.style.cssText = 'display:flex; flex-direction:column; height:100%; width:100%; background:var(--color-bg); overflow:hidden;';
@@ -109,7 +112,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
     const closeBtn = document.getElementById('address-modal-close-btn');
     const slidesContainer = document.getElementById('address-slides-container');
 
-    if (titleEl) titleEl.textContent = '¿Dónde entregamos?';
+    if (titleEl) titleEl.textContent = HEAD_TITLE;
     if (backBtn) backBtn.style.visibility = 'hidden';
     if (closeBtn) closeBtn.style.visibility = 'visible';
 
@@ -123,8 +126,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
       <div id="address-modal-header" class="go-sheet-header">
         <button type="button" id="address-modal-back-btn" class="go-icon-btn" aria-label="Volver a buscar" style="visibility:hidden;">${icon('chevronLeft', 20)}</button>
         <div class="go-sheet-titles">
-          <span class="go-eyebrow">Entrega</span>
-          <h3 id="address-modal-title" class="go-title">¿Dónde entregamos?</h3>
+          <span class="go-eyebrow">${HEAD_EYEBROW}</span>
+          <h3 id="address-modal-title" class="go-title">${HEAD_TITLE}</h3>
         </div>
         <button type="button" id="address-modal-close-btn" class="go-icon-btn" aria-label="Cerrar">${icon('close', 18)}</button>
       </div>

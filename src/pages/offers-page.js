@@ -14,6 +14,8 @@ let searchQuery = '';
 
 export async function renderOffersPage(container) {
   if (!container) container = document.getElementById('app-content');
+  // Dibujo que llegó tarde (el router dibujó la pantalla dos veces): no tocar el que está en pantalla
+  if (!container || !container.isConnected) return;
 
   // Load from cache first for instant layout rendering
   try {
@@ -151,7 +153,7 @@ async function loadPageData(silent = false) {
                 comercioName: parentCom.name || 'Comercio',
                 comercioLogo: parentCom.logo || '',
                 comercioCategory: parentCom.category || '',
-                comercioOpen: isShopOpen(parentCom.schedules || (parentCom.schedule ? [parentCom.schedule] : []), parentCom.daysOpen),
+                comercioOpen: isShopOpen(parentCom.schedules || (parentCom.schedule ? [parentCom.schedule] : []), parentCom.daysOpen, parentCom.weeklySchedule),
                 product: product
               });
             }
@@ -169,7 +171,7 @@ async function loadPageData(silent = false) {
             comercioName: parentCom.name || 'Comercio',
             comercioLogo: parentCom.logo || '',
             comercioCategory: parentCom.category || '',
-            comercioOpen: isShopOpen(parentCom.schedules || (parentCom.schedule ? [parentCom.schedule] : []), parentCom.daysOpen),
+            comercioOpen: isShopOpen(parentCom.schedules || (parentCom.schedule ? [parentCom.schedule] : []), parentCom.daysOpen, parentCom.weeklySchedule),
             product: { id: o.targetProductId || 'unknown', ...o.product }
           });
         }

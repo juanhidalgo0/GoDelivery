@@ -9,6 +9,7 @@ import { showToast } from '../../components/toast.js';
 import { showConfirm, showModal } from '../../components/modal.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
+import { CAR_TRIPS_ENABLED } from '../../utils/trip-vehicles.js';
 
 let comerciosMap = {};
 
@@ -51,12 +52,6 @@ export async function renderAdminUsers() {
           <button class="tab-pill" data-filter="delivery">Repartidores</button>
           <button class="tab-pill" data-filter="chofer">Choferes</button>
           <button class="tab-pill" data-filter="comercio">Comercios</button>
-        </div>
-
-        <div id="driver-actions-bar" style="display:none; flex-shrink:0; width:100%; margin-top:-4px;">
-          <button id="reset-all-drivers-debt-btn" style="width:100%; height:46px; border-radius:16px; background:linear-gradient(135deg, #ef4444, #dc2626); color:white; border:none; font-weight:800; font-size:13.5px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; box-shadow:0 6px 16px rgba(239,68,68,0.3); transition:all 0.2s;">
-            ${icon('refresh', 16)} Resetear Deuda de Todos los Repartidores ($0)
-          </button>
         </div>
 
         <!-- Advanced Filters & Sorting -->
@@ -229,15 +224,6 @@ export async function renderAdminUsers() {
       }
     }
 
-    const driverActionsBar = document.getElementById('driver-actions-bar');
-    if (driverActionsBar) {
-      if (currentFilter === 'delivery' || currentFilter === 'chofer') {
-        driverActionsBar.style.display = 'block';
-      } else {
-        driverActionsBar.style.display = 'none';
-      }
-    }
-
     renderUsersList(users, searchVal, currentUser, canChangeRoles, currentFilter, getSortVal(), getStarsVal(), getOsVal(), getConnVal(), deliveryLiquidationsMap);
   }
 
@@ -328,37 +314,6 @@ export async function renderAdminUsers() {
   document.getElementById('users-stars')?.addEventListener('change', updateList);
   document.getElementById('users-os')?.addEventListener('change', updateList);
   document.getElementById('users-connection')?.addEventListener('change', updateList);
-
-  document.getElementById('reset-all-drivers-debt-btn')?.addEventListener('click', () => {
-    showConfirm({
-      title: '⚠️ RESETEAR DEUDA DE REPARTIDORES',
-      message: '¿Estás seguro de que deseas poner en <b>$0</b> la deuda de TODOS los repartidores de la plataforma?',
-      danger: true,
-      confirmText: 'Sí, resetear todo a $0',
-      onConfirm: async () => {
-        try {
-          const { writeBatch, collection: fCollection, getDocs: fGetDocs } = await import('firebase/firestore');
-          const snap = await fGetDocs(fCollection(db, 'users'));
-          const batch = writeBatch(db);
-          let count = 0;
-          snap.docs.forEach(docSnap => {
-            const uData = docSnap.data();
-            if (uData.isDelivery || uData.tripStatus === 'approved' || uData.role === 'delivery' || uData.role === 'chofer' || uData.role === 'driver') {
-              batch.update(docSnap.ref, { deliveryDebt: 0 });
-              uData.deliveryDebt = 0;
-              count++;
-            }
-          });
-          await batch.commit();
-          showToast(`¡Se reseteó a $0 la deuda de ${count} repartidores!`, 'success');
-          updateList();
-        } catch (err) {
-          console.error('Error resetting driver debts:', err);
-          showToast('Error al resetear deudas', 'error');
-        }
-      }
-    });
-  });
 
   document.querySelectorAll('.tab-pill').forEach(btn => {
     btn.onclick = () => {
@@ -1513,8 +1468,8 @@ async function showTripApplicationDetailsModal(u, users) {
             tripStatus: 'approved',
             isDelivery: true,
             deliveryMode: 'both',
-            tripVehicleType: (app.vehicleType || 'Auto').toLowerCase(),
-            vehicleType: (app.vehicleType || 'Auto').toLowerCase(),
+            tripVehicleType: (app.vehicleType || 'Moto').toLowerCase(),
+            vehicleType: (app.vehicleType || 'Moto').toLowerCase(),
             vehicleModel: app.vehicleModel,
             vehicleColor: app.vehicleColor,
             vehicleDetails: app.vehicleDetails,
@@ -1707,7 +1662,7 @@ function showEditVehicleModal(u, onSuccess) {
       <select id="edit-veh-type" style="width: 100%; height: 42px; border-radius: 10px; border: 1.5px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-primary); font-size: 13px; font-weight: 700; padding: 0 12px; outline: none; font-family: inherit;">
         <option value="" ${!u.vehicleType ? 'selected' : ''}>Ninguno (No configurado)</option>
         <option value="Moto" ${(u.vehicleType || '').toLowerCase() === 'moto' ? 'selected' : ''}>🏍️ Moto</option>
-        <option value="Auto" ${(u.vehicleType || '').toLowerCase() === 'auto' ? 'selected' : ''}>🚗 Auto</option>
+        ${CAR_TRIPS_ENABLED || (u.vehicleType || '').toLowerCase() === 'auto' ? `<option value="Auto" ${(u.vehicleType || '').toLowerCase() === 'auto' ? 'selected' : ''}>🚗 Auto</option>` : ''}
       </select>
     </div>
 

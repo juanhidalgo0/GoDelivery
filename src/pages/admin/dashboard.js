@@ -1,210 +1,126 @@
 import { db } from '../../firebase.js';
-import { doc, getDoc, setDoc, collection, getDocs, getCountFromServer, query, where } from 'firebase/firestore';
-import { isAdmin, isSuperAdmin } from '../../auth.js';
+import { collection, getDocs, getCountFromServer, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
+import { isAdmin } from '../../auth.js';
 import { icon } from '../../utils/icons.js';
 import { formatPrice } from '../../utils/format.js';
-import { getState, setState } from '../../state.js';
-import { showToast } from '../../components/toast.js';
+
+const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'on_way'];
+const DONE_ORDER_STATUSES = ['delivered', 'completed'];
+
+const tile = (href, ic, title, desc) => `
+  <a href="${href}" class="go-admin-tile">
+    <span class="go-admin-tile-icon">${icon(ic, 20)}</span>
+    <strong>${title}</strong>
+    <small>${desc}</small>
+  </a>`;
+
+const row = (href, ic, title, desc, badge = '') => `
+  <a href="${href}" class="go-admin-row">
+    <span class="go-admin-row-icon">${icon(ic, 18)}</span>
+    <span class="go-admin-row-text"><strong>${title}</strong><small>${desc}</small></span>
+    ${badge}
+    <span class="go-admin-row-chev">${icon('chevronRight', 16)}</span>
+  </a>`;
 
 export async function renderAdminDashboard() {
   const content = document.getElementById('app-content');
 
   // We use a fixed container to ensure it covers everything and has no scroll leakage
   content.innerHTML = `
-    <div class="panel-page" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; background:var(--color-bg); overflow:hidden;">
-      
-      <!-- Premium Header (Integrated) -->
-      <div  class="go-page-header" style="background: var(--go-ink); padding:calc(16px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 20px 16px; display:flex; align-items:center; gap:16px; flex-shrink:0; position:relative; overflow:hidden; box-shadow:0 4px 12px rgba(var(--color-primary-rgb),0.2); z-index:100;">
-        
-        <a href="#/profile" style="width:40px; height:40px; border-radius:12px; background:rgba(255,255,255,0.15); border:none; display:flex; align-items:center; justify-content:center; color:white; text-decoration:none; transition:all 0.2s; position:relative; z-index:2;">
-          ${icon('chevronLeft', 24)}
-        </a>
-        <div style="flex:1; position:relative; z-index:2;">
-          <h1 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:white; margin:0; letter-spacing:-0.03em;">Administración</h1>
-          <p style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:0.1em; margin:2px 0 0;">Panel de Control Global</p>
-        </div>
-        <div style="width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.15); display:flex; align-items:center; justify-content:center; color:white; position:relative; z-index:2;">
-          ${icon('shieldCheck', 20)}
+    <div class="panel-page go-admin" style="display:flex; flex-direction:column; height:100dvh; width:100%; position:fixed; top:0; left:0; z-index:1000; background:var(--color-bg); overflow:hidden;">
+
+      <div class="go-page-header go-admin-header">
+        <a href="#/profile" class="go-admin-back" aria-label="Volver">${icon('chevronLeft', 24)}</a>
+        <div style="flex:1; min-width:0;">
+          <h1>Administración</h1>
+          <p>GO! Magdalena</p>
         </div>
       </div>
 
-      <!-- Main Body — Fills space symmetrically -->
-      <div style="flex:1; display:flex; flex-direction:column; padding:20px 20px calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); gap:20px; overflow-y:auto; -webkit-overflow-scrolling:touch;">
-        
-        <div id="pending-requests-alert"></div>
+      <div class="go-admin-body">
+        <div class="go-admin-inner">
 
-        <!-- Navigation Section -->
-        <div style="flex:1; display:flex; flex-direction:column; gap:12px; justify-content:center; padding-bottom:20px;">
-          <h3 style="font-size:11px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px; padding-left:4px;">Gestión del Ecosistema</h3>
-          
-          <div id="admin-menu" style="display:flex; flex-direction:column; gap:10px;">
-            <a href="#/admin/orders" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(225,29,72,0.05), rgba(190,18,60,0.03)); border:1.5px solid rgba(225,29,72,0.2); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:14px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 14px rgba(225,29,72,0.05);">
-              <div style="width:44px; height:44px; border-radius:14px; background:linear-gradient(135deg,#e11d48,#be123c); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: 0 4px 12px rgba(225,29,72,0.25);">${icon('shoppingBag', 22)}</div>
-              <div style="flex:1; min-width:0;">
-                <div style="font-weight:900; font-size:16px; color:var(--color-text-primary); letter-spacing:-0.01em;">Registro de Ventas</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Monitoreo en vivo de pedidos App y WhatsApp</div>
-              </div>
-              <div style="color:var(--color-primary); flex-shrink:0;">${icon('chevronRight', 20)}</div>
-            </a>
+          <div class="go-admin-now">
+            <span class="go-eyebrow"><i class="go-admin-live"></i>Ahora</span>
+            <div class="go-admin-now-grid">
+              <a href="#/admin/orders"><strong id="admin-now-orders">–</strong><span>Pedidos en curso</span></a>
+              <a href="#/admin/deliveries"><strong id="admin-now-drivers">–</strong><span>Cadetes conectados</span></a>
+              <a href="#/admin/metrics"><strong id="admin-now-sales">–</strong><span id="admin-now-sales-label">Ventas de hoy</span></a>
+            </div>
+          </div>
 
-            <a href="#/admin/whatsapp-bot" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(37,211,102,0.08), rgba(18,140,126,0.08)); border:1.5px solid rgba(37,211,102,0.3); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:14px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 14px rgba(37,211,102,0.08);">
-              <div style="width:44px; height:44px; border-radius:14px; background:linear-gradient(135deg,#25D366,#128C7E); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: 0 4px 12px rgba(37,211,102,0.25);">${icon('whatsapp', 22, '', '#FFF')}</div>
-              <div style="flex:1; min-width:0;">
-                <div style="font-weight:900; font-size:16px; color:#128C7E; letter-spacing:-0.01em; display:flex; align-items:center; gap:8px;">
-                  <span>Bot de WhatsApp 24/7</span>
-                  <span style="font-size:9.5px; font-weight:900; color:#128C7E; background:rgba(37,211,102,0.15); padding:2px 8px; border-radius:100px;">AUTO</span>
-                </div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Mandados, pedidos y atención humana</div>
-              </div>
-              <div style="color:#25D366; flex-shrink:0;">${icon('chevronRight', 20)}</div>
-            </a>
+          <div id="admin-pending" hidden>
+            <h3 class="go-admin-heading">Para revisar</h3>
+            <div class="go-admin-list" id="admin-pending-list"></div>
+          </div>
 
-            <a href="#/admin/metrics" class="admin-nav-card" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(126, 34, 206, 0.08)); border:1px solid rgba(168, 85, 247, 0.3); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.05); position: relative; overflow: hidden;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#c084fc,#a855f7); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px; box-shadow: 0 4px 10px rgba(168, 85, 247, 0.3); animation: pulse-purple 2s infinite;">${icon('trendingUp', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:900; font-size:16px; color:var(--color-primary);">Métricas y Analíticas</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:700;">Rendimiento, Ventas y DAU en vivo</div>
-              </div>
-              <div style="color:var(--color-primary-light);">${icon('chevronRight', 20)}</div>
-            </a>
+          <h3 class="go-admin-heading">Operación</h3>
+          <div class="go-admin-tiles">
+            ${tile('#/admin/orders', 'shoppingBag', 'Ventas', 'Pedidos de la app y de WhatsApp')}
+            ${tile('#/admin/deliveries', 'bike', 'Repartidores', 'Deudas, cuota diaria y liquidaciones')}
+            ${tile('#/admin/comercios', 'store', 'Comercios', 'Locales, dueños y liquidaciones')}
+            ${tile('#/admin/whatsapp-bot', 'whatsapp', 'Bot de WhatsApp', 'Mandados, pedidos y atención')}
+          </div>
 
-            <a href="#/admin/expenses" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fee2e2,#fca5a5); color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">💸</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Gastos y Contabilidad</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Registro de egresos y facturas</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
+          <h3 class="go-admin-heading">Números</h3>
+          <div class="go-admin-list">
+            ${row('#/admin/metrics', 'trendingUp', 'Métricas', 'Rendimiento, ventas y usuarios activos')}
+            ${row('#/admin/expenses', 'wallet', 'Gastos y contabilidad', 'Egresos y facturas')}
+          </div>
 
-            <a href="#/admin/users" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#dbeafe,#bfdbfe); color:#2563eb; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('users', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text); display:flex; align-items:center; gap:8px;">
-                  <span>Usuarios</span>
-                  <span id="admin-users-count-badge" style="display:none; font-size:10px; font-weight:900; color:#2563eb; background:rgba(37,99,235,0.1); padding:2px 8px; border-radius:100px;">0</span>
-                </div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;" id="admin-users-card-desc">Roles y verificación</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/deliveries" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fee2e2,#fca5a5); color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('bike', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Repartidores</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Control total, deudas, cuota diaria y liquidaciones</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/comercios" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fef3c7,#fde68a); color:#d97706; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('store', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Comercios</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Control total, deudas y liquidaciones</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/reviews" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fef3c7,#f59e0b); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('star', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Reseñas y Puntuaciones</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Monitorear opiniones y valoraciones de usuarios</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/marketplace" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fff1f2,#f87171); color:#b91c1c; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('shield', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Moderar Marketplace</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Revisar anuncios de compra y venta</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/categories" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#f3f4f6,#d1d5db); color:#4b5563; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('folder', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Categorías</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Rubros de la plataforma</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/ads" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fff1f2,#fecdd3); color:#e11d48; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('megaphone', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Anuncios y Slider Home</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Gestión de banners, destaques y slider principal</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/offers" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#fce7f3,#fbcfe8); color:#db2777; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('percent', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Ofertas</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Promociones y descuentos</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/coupons" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#ede9fe,#c084fc); color:#a855f7; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('tag', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Cupones</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Generar y gestionar cupones</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
-            <a href="#/admin/lugares" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-              <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#ccfbf1,#5eead4); color:#0f766e; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('mapPin', 24)}</div>
-              <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:var(--color-text);">Lugares de mandados</div>
-                <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Dónde queda cada comercio que piden los clientes</div>
-              </div>
-              <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-            </a>
-
+          <h3 class="go-admin-heading">Promos y contenido</h3>
+          <div class="go-admin-list">
+            ${row('#/admin/ads', 'image', 'Anuncios y slider', 'Banners y destacados del inicio')}
+            ${row('#/admin/offers', 'percent', 'Ofertas', 'Promociones y descuentos')}
+            ${row('#/admin/coupons', 'tag', 'Cupones', 'Crear y gestionar cupones')}
             ${isAdmin() ? `
-              <a href="#/admin/broadcasts" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-                <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#c084fc,#a855f7); color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('bell', 24)}</div>
-                <div style="flex:1;">
-                  <div style="font-weight:800; font-size:16px; color:var(--color-text);">Campañas Push</div>
-                  <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Notificaciones globales y analíticas</div>
-                </div>
-                <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-              </a>
-
-              <a href="#/admin/settings" class="admin-nav-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:22px; padding:18px; display:flex; align-items:center; gap:16px; text-decoration:none; transition:all 0.2s;">
-                <div style="width:48px; height:48px; border-radius:16px; background:linear-gradient(135deg,#f3f4f6,#d1d5db); color:#4b5563; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:24px;">${icon('settings', 24)}</div>
-                <div style="flex:1;">
-                  <div style="font-weight:800; font-size:16px; color:var(--color-text);">Ajustes del Sistema</div>
-                  <div style="font-size:12px; color:var(--color-text-tertiary); font-weight:600;">Tarifas y configuración global</div>
-                </div>
-                <div style="color:var(--color-border);">${icon('chevronRight', 20)}</div>
-              </a>
+              ${row('#/admin/sorteos', 'gift', 'Sorteos', 'Crear y gestionar sorteos de premios')}
+              ${row('#/admin/broadcasts', 'bell', 'Campañas push', 'Notificaciones a todos los usuarios')}
             ` : ''}
           </div>
-        </div>
 
-        <!-- Professional Footer -->
-        <div style="margin-top:auto; padding-top:20px; border-top:1px solid var(--color-border); text-align:center;">
-          <p style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.1em; opacity:0.6;">GoDelivery Enterprise v2.4</p>
+          <h3 class="go-admin-heading">Configuración</h3>
+          <div class="go-admin-list">
+            ${row('#/admin/users', 'users', 'Usuarios', 'Roles y verificación', '<span class="go-admin-badge" id="admin-users-count-badge" hidden></span>')}
+            ${row('#/admin/categories', 'folder', 'Categorías', 'Rubros de la plataforma')}
+            ${row('#/admin/lugares', 'mapPin', 'Lugares de mandados', 'Dónde queda cada comercio que piden')}
+            ${row('#/admin/reviews', 'star', 'Reseñas', 'Opiniones y puntuaciones')}
+            ${row('#/admin/marketplace', 'shield', 'Marketplace', 'Revisar anuncios de compra y venta')}
+            ${row('#/admin/errores', 'alertCircle', 'Errores y auditoría', 'Lo que falló en la app, el servidor y los datos', '<span class="go-admin-badge" id="admin-errors-count-badge" hidden></span>')}
+            ${row('#/admin/reinicios', 'alertTriangle', 'Reinicios de la app', 'Cuándo y por qué la app se recargó sola')}
+            ${isAdmin() ? row('#/admin/settings', 'settings', 'Ajustes del sistema', 'Tarifas y configuración global') : ''}
+          </div>
+
         </div>
       </div>
     </div>
-
-    <style>
-      .admin-nav-card:active { transform: scale(0.97); background: var(--color-bg-secondary); }
-      .stat-card-premium { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 24px; padding: 16px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-xs); transition: all 0.2s; }
-      .stat-card-premium:hover { border-color: var(--color-primary-light); box-shadow: var(--shadow-sm); }
-    </style>
   `;
+
+  const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const unsubs = [];
+
+  // Ahora: pedidos en curso y cadetes conectados, en vivo
+  unsubs.push(onSnapshot(
+    query(collection(db, 'orders'), where('status', 'in', ACTIVE_ORDER_STATUSES)),
+    (snap) => setText('admin-now-orders', String(snap.size)),
+    (err) => console.error('Error in admin orders listener:', err)
+  ));
+  unsubs.push(onSnapshot(
+    query(collection(db, 'users'), where('role', '==', 'delivery'), where('isOnline', '==', true)),
+    (snap) => setText('admin-now-drivers', String(snap.size)),
+    (err) => console.error('Error in admin drivers listener:', err)
+  ));
+
+  // Ventas de hoy: pedidos entregados desde las 00:00
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  getDocs(query(collection(db, 'orders'), where('createdAt', '>=', Timestamp.fromDate(dayStart))))
+    .then((snap) => {
+      const done = snap.docs.map(d => d.data()).filter(o => DONE_ORDER_STATUSES.includes(o.status));
+      setText('admin-now-sales', formatPrice(done.reduce((sum, o) => sum + (Number(o.total) || 0), 0)));
+      setText('admin-now-sales-label', `Ventas de hoy · ${done.length} ${done.length === 1 ? 'entregado' : 'entregados'}`);
+    })
+    .catch((err) => console.error('Error loading today sales:', err));
 
   // Instant lightweight parallel load of stats & alerts
   try {
@@ -212,78 +128,47 @@ export async function renderAdminDashboard() {
       usersCountSnap,
       pendingDeliverySnap,
       pendingComerciosSnap,
-      pendingJobsSnap
+      pendingJobsSnap,
+      openErrorsSnap
     ] = await Promise.all([
       getCountFromServer(collection(db, 'users')).catch(() => ({ data: () => ({ count: 0 }) })),
       getDocs(query(collection(db, 'users'), where('deliveryStatus', '==', 'pending'))).catch(() => ({ docs: [] })),
       getDocs(query(collection(db, 'comercios'), where('approvedByAdmin', '==', false))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'job_applications'), where('status', '==', 'pending'))).catch(() => ({ docs: [] }))
+      getDocs(query(collection(db, 'job_applications'), where('status', '==', 'pending'))).catch(() => ({ docs: [] })),
+      getCountFromServer(query(collection(db, 'client_errors'), where('status', '==', 'open'), where('network', '==', false))).catch(() => ({ data: () => ({ count: 0 }) }))
     ]);
+
+    const openErrors = openErrorsSnap.data().count;
+    const errorsBadge = document.getElementById('admin-errors-count-badge');
+    if (errorsBadge && openErrors > 0) {
+      errorsBadge.textContent = `${openErrors}`;
+      errorsBadge.hidden = false;
+    }
 
     const usersCount = usersCountSnap.data().count;
     const countBadge = document.getElementById('admin-users-count-badge');
-    const usersDesc = document.getElementById('admin-users-card-desc');
-    
     if (countBadge && usersCount > 0) {
       countBadge.textContent = `${usersCount}`;
-      countBadge.style.display = 'inline-block';
-    }
-    if (usersDesc && usersCount > 0) {
-      usersDesc.textContent = `Roles, verificación y ${usersCount} registrados`;
+      countBadge.hidden = false;
     }
 
-    const pendingRequests = pendingDeliverySnap.docs || [];
-    const pendingComCount = (pendingComerciosSnap.docs || []).length;
-    const pendingJobCount = (pendingJobsSnap.docs || []).length;
+    const pending = [
+      ['#/admin/users', 'bike', 'Solicitudes de repartidor', 'Usuarios esperando aprobación', (pendingDeliverySnap.docs || []).length],
+      ['#/admin/solicitudes-empleo', 'briefcase', 'Postulaciones de empleo', 'Choferes y repartidores que se postularon', (pendingJobsSnap.docs || []).length],
+      ['#/admin/solicitudes-comercios', 'store', 'Solicitudes de comercio', 'Comercios esperando aprobación', (pendingComerciosSnap.docs || []).length],
+    ].filter(p => p[4] > 0);
 
-    const alertArea = document.getElementById('pending-requests-alert');
-    if (alertArea) {
-      let alertsHtml = '';
-      if (pendingRequests.length > 0) {
-        alertsHtml += `
-          <a href="#/admin/users" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg,var(--color-warning), #d97706); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(245,158,11,0.25); margin-bottom:8px;">
-            <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-              ${icon('bike', 24)}
-            </div>
-            <div style="flex:1;">
-              <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Solicitudes de Repartidor (Perfil)</div>
-              <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingRequests.length} usuarios esperando aprobación</div>
-            </div>
-            ${icon('chevronRight', 20)}
-          </a>
-        `;
-      }
-      if (pendingJobCount > 0) {
-        alertsHtml += `
-          <a href="#/admin/solicitudes-empleo" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg, #0284c7, #0369a1); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(2,132,199,0.25); margin-bottom:8px;">
-            <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-              ${icon('bike', 24)}
-            </div>
-            <div style="flex:1;">
-              <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Postulaciones de Empleo</div>
-              <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingJobCount} postulaciones de chofer/repartidor esperando aprobación</div>
-            </div>
-            ${icon('chevronRight', 20)}
-          </a>
-        `;
-      }
-      if (pendingComCount > 0) {
-        alertsHtml += `
-          <a href="#/admin/solicitudes-comercios" style="display:flex; align-items:center; gap:14px; background:linear-gradient(135deg, #10b981, #059669); padding:16px; border-radius:20px; text-decoration:none; color:white; box-shadow:0 10px 20px rgba(16,185,129,0.25); margin-bottom:8px;">
-            <div style="width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-              ${icon('store', 24)}
-            </div>
-            <div style="flex:1;">
-              <div style="font-weight:900; font-size:15px; letter-spacing:-0.01em;">Solicitudes de Comercio</div>
-              <div style="font-size:12px; opacity:0.9; font-weight:600;">Hay ${pendingComCount} comercios esperando aprobación</div>
-            </div>
-            ${icon('chevronRight', 20)}
-          </a>
-        `;
-      }
-      alertArea.innerHTML = alertsHtml;
+    const pendingBox = document.getElementById('admin-pending');
+    const pendingList = document.getElementById('admin-pending-list');
+    if (pendingBox && pendingList && pending.length > 0) {
+      pendingList.innerHTML = pending
+        .map(([href, ic, title, desc, count]) => row(href, ic, title, desc, `<span class="go-admin-badge is-alert">${count}</span>`))
+        .join('');
+      pendingBox.hidden = false;
     }
   } catch (err) {
     console.error('Error loading admin stats:', err);
   }
+
+  return { cleanup: () => unsubs.forEach(u => { try { u(); } catch (e) {} }) };
 }

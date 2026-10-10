@@ -71,9 +71,12 @@ function comercioCategory(c) {
   return placeCategory(cats);
 }
 
+// Rubros en masculino ("cualquier kiosco, el más cercano"); el resto es femenino (farmacia, verdulería...)
+const MASCULINE_CATEGORIES = new Set(['supermercado', 'kiosco', 'almacen', 'pagos']);
+
 /** Texto que se guarda cuando el cliente elige "cualquiera, el más cercano". */
 export function nearestLabel(cat) {
-  return `Cualquier ${categoryLabel(cat)} (la más cercana)`;
+  return `Cualquier ${categoryLabel(cat)} (${MASCULINE_CATEGORIES.has(cat) ? 'el más cercano' : 'la más cercana'})`;
 }
 
 /**

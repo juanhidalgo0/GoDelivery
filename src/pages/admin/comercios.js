@@ -54,6 +54,54 @@ export async function renderAdminComercios() {
 
   let allComercios = [];
   let allOrders = [];
+
+  // Pendientes de una sola vez: comisiones que ya no se cobran y el cupón de bienvenida
+  let fixes = null;
+  const renderFixesCard = () => {
+    if (!fixes || (fixes.orders === 0 && !fixes.welcomeCouponExists && !fixes.ownersWithoutRole && !fixes.ownerMatches.length && !fixes.ownerlessUnmatched.length)) return '';
+    const clean = (v) => String(v || '').replace(/[<>&"]/g, '');
+    const actionable = fixes.orders > 0 || fixes.welcomeCouponExists || fixes.ownersWithoutRole > 0 || fixes.ownerMatches.length > 0;
+    return `
+      <div style="background:var(--color-surface); border:2px solid #d97706; border-radius:20px; padding:16px; margin-bottom:16px;">
+        <div style="font-weight:900; font-size:15px; margin-bottom:6px;">Falta aplicar: comercios sin comisión</div>
+        <div style="font-size:13px; color:var(--color-text-secondary); line-height:1.5;">
+          ${fixes.orders ? `Hay <b>${formatPrice(fixes.total)}</b> de comisión pendiente en <b>${fixes.orders}</b> pedidos de <b>${fixes.comercios}</b> comercios. Se ponen en 0 (cada pedido guarda el monto anterior).<br>` : ''}
+          ${fixes.welcomeCouponExists ? 'El cupón <b>BIENVENIDA</b> ($3.000) todavía existe en la base: se borra.<br>' : ''}
+          ${fixes.ownersWithoutRole ? `<b>${fixes.ownersWithoutRole}</b> dueño(s) de comercios aprobados no tienen el rol de comercio (${fixes.ownerNames.map(clean).join(', ')}): se les da.<br>` : ''}
+          ${fixes.ownerMatches.map(c => `<b>${clean(c.name)}</b> no tiene dueño: se le asigna <b>${clean(c.match.name || c.match.email)}</b> (${clean(c.match.email)}), que pidió el alta como "${clean(c.match.applicationName)}".<br>`).join('')}
+          ${fixes.ownerlessUnmatched.length ? `Sin dueño y sin un candidato claro: <b>${fixes.ownerlessUnmatched.map(clean).join(', ')}</b>. Asignalo desde Editar Perfil → Dueño, con el mail de la persona.` : ''}
+        </div>
+        ${actionable ? `<button id="apply-commerce-fixes" style="margin-top:12px; width:100%; height:46px; border-radius:14px; border:none; background:#0b0b0c; color:white; font-weight:900; font-size:14px; cursor:pointer;">Aplicar ahora</button>` : ''}
+      </div>`;
+  };
+  const bindFixesCard = () => {
+    document.getElementById('apply-commerce-fixes')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Aplicando…';
+      try {
+        const m = await import('./commerce-fixes.js');
+        let done = 0;
+        if (fixes.orders) done = await m.waiveAllCommerceCommissions();
+        if (fixes.welcomeCouponExists) await m.deleteWelcomeCoupon();
+        if (fixes.ownersWithoutRole) await m.grantMissingOwnerRoles();
+        if (fixes.ownerMatches.length) await m.assignMatchedOwners();
+        fixes = await m.scanCommerceFixes();
+        showToast(`Listo: ${done} pedidos en 0${fixes.welcomeCouponExists ? '' : ' y cupón borrado'}`, 'success');
+        refreshData();
+      } catch (err) {
+        console.error('Arreglos de comercios:', err);
+        showToast('No se pudo aplicar. Probá de nuevo.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Aplicar ahora';
+      }
+    });
+  };
+  import('./commerce-fixes.js').then(m => m.scanCommerceFixes()).then(r => {
+    fixes = r;
+    const card = document.getElementById('commerce-fixes-card');
+    if (card) { card.innerHTML = renderFixesCard(); bindFixesCard(); }
+  }).catch(err => console.warn('No se pudieron revisar los arreglos pendientes:', err));
   let searchQuery = '';
   let filterStatus = 'all';
 
@@ -86,7 +134,8 @@ export async function renderAdminComercios() {
       comercioStatsMap[cId].ordersCount++;
       comercioStatsMap[cId].totalSales += Number(o.total || 0);
 
-      if (!o.isSettled) {
+      // Pagada (desde Comisiones) o condonada (comercios gratis) ya no es deuda
+      if (!o.isSettled && !['paid', 'waived'].includes(o.commissionStatus)) {
         const commAmt = Number(o.commissionAmount || 0);
         comercioStatsMap[cId].unsettledCommission += commAmt;
         comercioStatsMap[cId].unsettledOrders.push(o);
@@ -127,6 +176,7 @@ export async function renderAdminComercios() {
     });
 
     body.innerHTML = `
+      <div id="commerce-fixes-card">${renderFixesCard()}</div>
       <!-- KPI Summary Header Card (identical to Repartidores) -->
       <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); color: white;">
         <div style="font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 1px;">Comisiones Pendientes por Cobrar (Comercios)</div>
@@ -188,7 +238,13 @@ export async function renderAdminComercios() {
                 </div>
 
                 <!-- Badges -->
-                <div style="flex-shrink:0;">
+                <div style="flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                  ${!c.ownerId ? `
+                    <span style="background:rgba(225,29,72,0.1); color:#e11d48; font-size:10.5px; font-weight:900; padding:5px 10px; border-radius:10px; border:1px solid rgba(225,29,72,0.25);">Sin dueño</span>
+                  ` : ''}
+                  ${c.isActive === false ? `
+                    <span style="background:rgba(11,11,12,0.08); color:var(--color-text-secondary); font-size:10.5px; font-weight:900; padding:5px 10px; border-radius:10px; border:1px solid var(--color-border);">🙈 Oculto</span>
+                  ` : ''}
                   ${isPendingApproval ? `
                     <span style="background:rgba(245,158,11,0.1); color:#f59e0b; font-size:10.5px; font-weight:900; padding:5px 10px; border-radius:10px; border:1px solid rgba(245,158,11,0.2);">⏳ Pendiente</span>
                   ` : isClean ? `
@@ -285,6 +341,7 @@ Por favor, enviá el comprobante de transferencia por este medio una vez realiza
       };
     });
 
+    bindFixesCard();
     body.querySelectorAll('.admin-edit-com-btn').forEach(btn => {
       btn.onclick = () => openComercioEditor(allComercios.find(c => c.id === btn.dataset.id), () => refreshData());
     });
@@ -421,6 +478,11 @@ async function openComercioEditor(comercio, onSaved) {
     
     <div style="display:flex; flex-direction:column; gap:20px;">
       <div class="form-group">
+        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Dueño (quién entra al panel)</label>
+        <div id="edit-com-owner" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:16px; padding:14px; font-size:14px;">Cargando…</div>
+      </div>
+
+      <div class="form-group">
         <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Nombre Público *</label>
         <input type="text" id="edit-com-name" value="${comercio.name || ''}" style="width:100%; height:54px; border-radius:16px; border:1px solid var(--color-border); padding:0 16px; font-weight:600; font-size:15px; outline:none;" />
       </div>
@@ -508,6 +570,54 @@ async function openComercioEditor(comercio, onSaved) {
   `;
 
   showModal({ title: '', hideHeader: true, height: '90dvh', content: modalContent });
+
+  // --- Dueño: ver quién es y asignarlo (candidatos por el nombre de la solicitud, o por mail)
+  const ownerBox = modalContent.querySelector('#edit-com-owner');
+  const escOwner = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const paintOwner = async () => {
+    const om = await import('../../utils/commerce-owner.js');
+    const owner = await om.getUserSummary(comercio.ownerId).catch(() => null);
+    ownerBox.innerHTML = `
+      ${owner
+        ? `<div style="font-weight:800;">${escOwner(owner.name || 'Sin nombre')}</div><div style="font-size:12.5px; color:var(--color-text-secondary);">${escOwner(owner.email)}${owner.phone ? ` · ${escOwner(owner.phone)}` : ''} · rol: ${escOwner(owner.role)}</div>`
+        : `<div style="font-weight:800; color:#e11d48;">Sin dueño</div><div style="font-size:12.5px; color:var(--color-text-secondary);">Nadie puede entrar al panel de este comercio.</div>`}
+      <div id="owner-candidates" style="margin-top:10px; display:flex; flex-direction:column; gap:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <input type="email" id="owner-email" placeholder="mail del dueño" style="flex:1; min-width:0; height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:14px; background:var(--color-bg); color:var(--color-text);" />
+        <button type="button" id="owner-assign-email" style="height:44px; padding:0 14px; border-radius:12px; border:none; background:#0b0b0c; color:white; font-weight:800; cursor:pointer;">Asignar</button>
+      </div>`;
+    const assign = async (uid) => {
+      try {
+        await om.assignCommerceOwner(comercio.id, uid, comercio.name);
+        comercio.ownerId = uid;
+        showToast('Dueño asignado: ya puede entrar a su panel', 'success');
+        paintOwner();
+        onSaved();
+      } catch (err) {
+        console.error('Asignar dueño:', err);
+        showToast('No se pudo asignar el dueño', 'error');
+      }
+    };
+    ownerBox.querySelector('#owner-assign-email').onclick = async () => {
+      const email = ownerBox.querySelector('#owner-email').value.trim();
+      if (!email) { showToast('Escribí el mail con el que entra a la app', 'warning'); return; }
+      const u = await om.findUserByEmail(email).catch(() => null);
+      if (!u) { showToast('No hay ningún usuario con ese mail. Tiene que entrar a la app al menos una vez.', 'warning'); return; }
+      assign(u.uid);
+    };
+    const candidates = await om.findOwnerCandidates(comercio.name).catch(() => []);
+    const list = ownerBox.querySelector('#owner-candidates');
+    const others = candidates.filter(c => c.uid !== comercio.ownerId);
+    if (others.length) {
+      list.innerHTML = `<div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary);">Pidieron el alta con un nombre parecido:</div>` + others.map(c => `
+        <button type="button" data-owner-uid="${c.uid}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; text-align:left; padding:10px 12px; border-radius:12px; border:1px solid var(--color-border); background:var(--color-bg); color:var(--color-text); cursor:pointer;">
+          <span><b>${escOwner(c.name || c.email)}</b><br><span style="font-size:12px; color:var(--color-text-secondary);">${escOwner(c.email)} · pidió "${escOwner(c.applicationName)}"</span></span>
+          <span style="font-weight:900; color:#0e9f6e; flex-shrink:0;">Asignar</span>
+        </button>`).join('');
+      list.querySelectorAll('[data-owner-uid]').forEach(b => { b.onclick = () => assign(b.dataset.ownerUid); });
+    }
+  };
+  paintOwner();
 
   const addressInput = modalContent.querySelector('#edit-com-address');
   const suggestionsDropdown = modalContent.querySelector('#edit-com-address-suggestions');
@@ -782,11 +892,8 @@ async function openComercioEditor(comercio, onSaved) {
       
       if (updateData.approvedByAdmin && comercio.ownerId) {
         try {
-          await updateDoc(doc(db, 'users', comercio.ownerId), {
-            role: 'comercio',
-            isComercio: true,
-            commerceStatus: 'approved'
-          });
+          const { grantCommerceRole } = await import('../../utils/commerce-owner.js');
+          await grantCommerceRole(comercio.ownerId, updateData.name);
         } catch (userErr) {
           console.error('Error updating user role on commerce approval:', userErr);
         }

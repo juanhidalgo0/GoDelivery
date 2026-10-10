@@ -1,5 +1,5 @@
 import { getState, setState, subscribe, getUserLevel } from '../state.js';
-import { signInWithGoogle, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from '../auth.js';
+import { signInWithGoogle, signInWithApple, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from '../auth.js';
 import { db, auth } from '../firebase.js';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
@@ -209,13 +209,19 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
       `;
     }
 
+    const roleLinks = [
+      isAdmin() && ['#/admin', 'shield', 'Administración', 'Ventas, repartidores, comercios y ajustes'],
+      isComercio() && ['#/mi-comercio', 'store', 'Mi comercio', 'Pedidos, menú y números de tu local'],
+      isDelivery() && ['#/delivery', 'bike', 'Modo repartidor', 'Tus pedidos y tu cuenta'],
+    ].filter(Boolean);
+
     const isNative = !!window.Capacitor;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
     const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     const topPadding = isNative ? 'var(--status-bar-height, 24px)' : ((isIosDevice && isStandalone) ? 'calc(34px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)))' : 'max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))');
 
     content.innerHTML = `
-      <div class="profile-page" style="background:var(--color-bg); padding: 0 0 90px 0; width: 100%; min-height: 100%; box-sizing: border-box;">
+      <div class="profile-page" style="background:var(--color-bg); padding: 0 0 calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 0; width: 100%; box-sizing: border-box;">
         <!-- Header estilo Mis Chats (Sticky) -->
         <div class="go-page-header" style="background: var(--go-ink); padding: ${topPadding} 0 0 0; width: 100%; position: sticky; top: 0; overflow: hidden; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 32px rgba(225, 29, 72, 0.2); z-index: 100; flex-shrink: 0; box-sizing: border-box; -webkit-backface-visibility: hidden; backface-visibility: hidden; will-change: transform;">
 
@@ -294,6 +300,32 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
             <div class="go-club-cta"><span>Ver beneficios del Club</span>${icon('chevronRight', 16)}</div>
           </div>
 
+          <!-- Lo de todos los días -->
+          <div class="go-profile-quick">
+            <a href="#/profile/orders" class="go-profile-row">
+              <span class="go-profile-row-icon">${icon('shoppingBag', 20)}</span>
+              <span class="go-profile-row-text"><strong>Mis pedidos</strong><small>Historial</small></span>
+            </a>
+            <div class="go-profile-row" id="edit-address-btn" role="button" tabindex="0">
+              <span class="go-profile-row-icon">${icon('mapPin', 20)}</span>
+              <span class="go-profile-row-text"><strong>Direcciones</strong><small>${escapeHtml(deliveryAddress || 'Agregar una')}</small></span>
+            </div>
+          </div>
+
+          ${roleLinks.length ? `
+            <div class="go-profile-stack">
+              <span class="go-profile-heading">Tus accesos</span>
+              <div class="go-profile-access">
+                ${roleLinks.map(([href, ic, title, desc]) => `
+                  <a href="${href}" class="go-profile-row">
+                    <span class="go-profile-row-icon is-ink">${icon(ic, 20)}</span>
+                    <span class="go-profile-row-text"><strong>${title}</strong><small>${desc}</small></span>
+                    <span class="go-profile-row-chev">${icon('chevronRight', 16)}</span>
+                  </a>`).join('')}
+              </div>
+            </div>
+          ` : ''}
+
           <!-- Delivery Application Section -->
             ${!isDelivery() && (user.deliveryStatus === 'pending' || user.deliveryStatus === 'rejected') ? `
             <div id="delivery-apply-card" style="margin: 10px 20px; background: var(--color-surface); border-radius: 16px; padding: 16px; border: 1.5px solid var(--color-border-light); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
@@ -329,22 +361,6 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                   Volver a Postularse
                 </button>
               `}
-            </div>
-          ` : isDelivery() ? `
-            <!-- Panel Repartidor Acceso Directo si ya está aprobado -->
-            <div style="margin: 10px 20px; background: rgba(34, 197, 94, 0.05); border-radius: 16px; padding: 14px 16px; border: 1.5px solid rgba(34, 197, 94, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-              <div style="display:flex; align-items:center; gap:12px;">
-                <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center;">
-                  ${icon('bike', 20)}
-                </div>
-                <div>
-                  <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); margin-top:1px;">¡Sos Repartidor Activo!</div>
-                  <div style="font-size:11px; color:var(--color-text-secondary); margin-top:1px;">Accedé a tus herramientas y pedidos.</div>
-                </div>
-              </div>
-              <a href="#/delivery" class="btn btn-success" style="height: 32px; font-size: 11px; font-weight: 900; border-radius: 8px; display:flex; align-items:center; gap:4px; text-transform:uppercase; padding:0 12px; background:#22c55e; border:none; color:white; text-decoration:none;">
-                Entrar ${icon('chevronRight', 10)}
-              </a>
             </div>
           ` : ''}
  
@@ -384,22 +400,6 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
                 </button>
               `}
             </div>
-          ` : isComercio() ? `
-            <!-- Panel Comercio Acceso Directo si ya está aprobado -->
-            <div style="margin: 10px 20px; background: rgba(34, 197, 94, 0.05); border-radius: 16px; padding: 14px 16px; border: 1.5px solid rgba(34, 197, 94, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-              <div style="display:flex; align-items:center; gap:12px;">
-                <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(34, 197, 94, 0.1); color: #22c55e; display: flex; align-items: center; justify-content: center;">
-                  ${icon('store', 20)}
-                </div>
-                <div>
-                  <div style="font-size:13px; font-weight:800; color:var(--color-text-primary); margin-top:1px;">¡Comercio Activo!</div>
-                  <div style="font-size:11px; color:var(--color-text-secondary); margin-top:1px;">Gestioná tus productos y ventas directas.</div>
-                </div>
-              </div>
-              <a href="#/comercio-panel" class="btn btn-success" style="height: 32px; font-size: 11px; font-weight: 900; border-radius: 8px; display:flex; align-items:center; gap:4px; text-transform:uppercase; padding:0 12px; background:#22c55e; border:none; color:white; text-decoration:none;">
-                Panel ${icon('chevronRight', 10)}
-              </a>
-            </div>
           ` : ''}
           <!-- Referidos, desafíos y regalar puntos -->
           <div class="go-profile-stack">
@@ -435,17 +435,9 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
           </div>
 
         <!-- Settings Menu List -->
-        <div style="margin-top:6px; padding:0 20px;">
+        <div style="margin-top:10px; padding:0 16px;">
           <div class="settings-list" style="background:var(--color-surface); border-radius:16px; border:1px solid var(--color-border-light); overflow:hidden; box-shadow:var(--shadow-sm);">
             
-            <a href="#/profile/orders" class="settings-row">
-              <div class="settings-icon-box" style="background:rgba(245, 158, 11, 0.1); color:#f59e0b;">
-                ${icon('shoppingBag', 20)}
-              </div>
-              <span class="settings-label">Mis pedidos</span>
-              ${icon('chevronRight', 16, 'settings-chevron')}
-            </a>
-
             <a href="#/profile/publications" class="settings-row">
               <div class="settings-icon-box" style="background:rgba(16, 185, 129, 0.1); color:#10b981;">
                 ${icon('shop', 20) || icon('tag', 20) || '🏷️'}
@@ -461,17 +453,6 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               <div style="flex:1;">
                 <span class="settings-label">Nombre visible</span>
                 <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.displayName || 'Establecer nombre'}</p>
-              </div>
-              ${icon('edit', 16, 'settings-chevron')}
-            </div>
-
-            <div class="settings-row" id="edit-address-btn" style="cursor:pointer;">
-              <div class="settings-icon-box" style="background:rgba(34, 197, 94, 0.1); color:#10b981;">
-                ${icon('mapPin', 20)}
-              </div>
-              <div style="flex:1;">
-                <span class="settings-label">Tus direcciones</span>
-                <p style="font-size:11px; color:var(--color-text-tertiary); margin:2px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${deliveryAddress || 'No establecida'}</p>
               </div>
               ${icon('edit', 16, 'settings-chevron')}
             </div>
@@ -505,24 +486,6 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               ${icon('chevronRight', 16, 'settings-chevron')}
             </div>
 
-            ${isAdmin() ? `
-              <a href="#/admin" class="settings-row">
-                <div class="settings-icon-box" style="background:rgba(139, 92, 246, 0.1); color:#8b5cf6;">
-                  ${icon('shield', 20)}
-                </div>
-                <span class="settings-label">Panel Administrativo</span>
-                ${icon('chevronRight', 16, 'settings-chevron')}
-              </a>
-            ` : ''}
-
-            <div class="settings-row" id="delete-account-row">
-              <div class="settings-icon-box" style="background:rgba(239, 68, 68, 0.1); color:var(--color-danger);">
-                ${icon('trash', 20)}
-              </div>
-              <span class="settings-label" style="color:var(--color-danger);">Eliminar cuenta</span>
-              ${icon('chevronRight', 16, 'settings-chevron')}
-            </div>
-
             <div class="settings-row" id="install-app-row" style="display:none;">
               <div class="settings-icon-box" style="background:rgba(236, 72, 153, 0.1); color:#ec4899;">
                 ${icon('plus', 20)}
@@ -542,10 +505,12 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
             </button>
           </div>
 
-          <p id="profile-app-version-footer" style="text-align:center; margin-top:14px; font-size:11px; color:var(--color-text-tertiary); font-weight:700; cursor:pointer;" title="Tocar para forzar actualización">
+          <button type="button" id="delete-account-row" class="go-profile-delete">Eliminar mi cuenta</button>
+
+          <p style="text-align:center; margin:10px 0 0; font-size:11px; color:var(--color-text-tertiary); font-weight:700;">
             GoDelivery v1.6.1 (Build: ${localStorage.getItem('gd_app_version') || '1.6.1'})
-            <br/><span style="font-size:10px; color:var(--color-primary); font-weight:800;">Tocá acá si no ves los últimos cambios</span>
           </p>
+        </div>
       </div>
     `;
 
@@ -589,7 +554,6 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
     };
 
     document.getElementById('force-reload-btn')?.addEventListener('click', triggerForceReload);
-    document.getElementById('profile-app-version-footer')?.addEventListener('click', triggerForceReload);
 
     document.getElementById('delete-account-row')?.addEventListener('click', () => {
       AudioManager.hapticLight();

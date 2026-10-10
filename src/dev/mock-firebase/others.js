@@ -1,6 +1,7 @@
 // SOLO DESARROLLO: reemplazos mínimos de firebase/app, auth, storage y messaging para las vistas previas.
 
 export const initializeApp = () => ({ name: 'mock-app' });
+export const onLog = () => {};
 
 // ── auth ──
 const mockUser = () => window.__mockAuthUser || null;

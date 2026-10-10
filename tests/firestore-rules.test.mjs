@@ -4,7 +4,7 @@ import {
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where, getDocs, addDoc,
+  doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, collectionGroup, query, where, getDocs, addDoc, writeBatch,
 } from 'firebase/firestore';
 import fs from 'fs';
 import path from 'path';
@@ -51,7 +51,7 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'settings/global'), { deliveryCost: 1500 });
   await setDoc(doc(db, 'company_expenses/e1'), { amount: 50000, concept: 'nafta' });
   await setDoc(doc(db, 'settlements/s1'), { amount: 120000 });
-  await setDoc(doc(db, 'coupons/BIENVENIDA'), { active: true, value: 10, usedCount: 3 });
+  await setDoc(doc(db, 'coupons/PROMO10'), { active: true, value: 10, usedCount: 3 });
   await setDoc(doc(db, 'support_chats/cliente2'), { userId: 'cliente2', messages: [] });
   await setDoc(doc(db, 'offers/of1'), { title: 'Promo', active: true });
   await setDoc(doc(db, 'platformCategories/cat1'), { name: 'Comida' });
@@ -138,7 +138,7 @@ await check('usuario NO puede leer la documentacion (DNI) de otro postulante',
 await check('usuario NO puede crear cupones',
   assertFails(setDoc(doc(cliente1, 'coupons/GRATIS100'), { active: true, value: 100 })));
 await check('usuario NO puede borrar cupones',
-  assertFails(deleteDoc(doc(cliente1, 'coupons/BIENVENIDA'))));
+  assertFails(deleteDoc(doc(cliente1, 'coupons/PROMO10'))));
 await check('usuario NO puede editar el catalogo de un comercio',
   assertFails(setDoc(doc(cliente1, 'comercios/pizza/products/p1'), { price: 1 })));
 await check('usuario NO puede crearse como comercio ajeno',
@@ -205,9 +205,9 @@ await check('usuario guarda su token de notificaciones',
 await check('usuario lee sus notificaciones',
   assertSucceeds(getDocs(collection(cliente1, 'users/cliente1/notifications'))));
 await check('usuario canjea un cupon',
-  assertSucceeds(setDoc(doc(cliente1, 'coupons/BIENVENIDA/redemptions/cliente1'), { usedAt: 'hoy' })));
+  assertSucceeds(setDoc(doc(cliente1, 'coupons/PROMO10/redemptions/cliente1'), { usedAt: 'hoy' })));
 await check('usuario lee un cupon para validarlo',
-  assertSucceeds(getDoc(doc(cliente1, 'coupons/BIENVENIDA'))));
+  assertSucceeds(getDoc(doc(cliente1, 'coupons/PROMO10'))));
 await check('usuario abre el contador de clientes al registrarse',
   assertSucceeds(getDoc(doc(cliente1, 'counters/users'))));
 await check('usuario escribe en el chat de su pedido',
@@ -286,7 +286,7 @@ await check('usuario NO puede leer los pagos de canon de los cadetes',
 await check('anonimo NO puede leer los chats',
   assertFails(getDocs(collection(anon, 'chats'))));
 await check('anonimo NO puede leer cupones',
-  assertFails(getDoc(doc(anon, 'coupons/BIENVENIDA'))));
+  assertFails(getDoc(doc(anon, 'coupons/PROMO10'))));
 
 console.log('');
 console.log('=========== BUSQUEDAS GLOBALES (collection group) ===========');
@@ -372,6 +372,10 @@ await check('cadete NO escribe ubicacion en un pedido que no es suyo',
   assertFails(setDoc(doc(cadete1, 'orders/o5/live/driver'), livePos())));
 await check('cliente NO puede falsear la ubicacion del cadete',
   assertFails(setDoc(doc(cliente1, 'orders/o4/live/driver'), livePos())));
+await check('cadete manda la hora de la lectura del GPS y la precision',
+  assertSucceeds(setDoc(doc(cadete1, 'orders/o4/live/driver'), { ...livePos(), fixAt: Date.now(), accuracy: 6.5 })));
+await check('cadete NO manda una hora de lectura que no es un numero',
+  assertFails(setDoc(doc(cadete1, 'orders/o4/live/driver'), { ...livePos(), fixAt: 'ayer' })));
 await check('cadete NO mete campos extra en la ubicacion',
   assertFails(setDoc(doc(cadete1, 'orders/o4/live/driver'), { ...livePos(), status: 'completed' })));
 await check('cadete NO escribe otro doc que no sea "driver"',
@@ -420,8 +424,62 @@ await check('cadete NO se borra la deuda',
   assertFails(updateDoc(doc(cadete1, 'users/cadete1'), { deliveryDebt: 0 })));
 await check('cadete NO se baja la deuda',
   assertFails(updateDoc(doc(cadete1, 'users/cadete1'), { deliveryDebt: 6999 })));
-await check('admin baja la deuda al liquidar',
-  assertSucceeds(updateDoc(doc(jefe, 'users/cadete1'), { deliveryDebt: 0 })));
+
+console.log('=========== CUENTA CORRIENTE (driver_ledger) ===========');
+// cadete1 debe 5000 y todavía no tiene libro: el primer movimiento abre su saldo inicial.
+const opening = { driverId: 'cadete1', type: 'opening', amount: 5000, balanceAfter: 5000 };
+const pay = (amount, balanceAfter, extra = {}) => ({ driverId: 'cadete1', type: 'payment', amount, balanceAfter, ...extra });
+const moveBatch = (db, entryId, entry, userFields, withOpening = true) => {
+  const b = writeBatch(db);
+  if (withOpening) b.set(doc(db, 'driver_ledger/open_cadete1'), opening);
+  b.set(doc(db, `driver_ledger/${entryId}`), entry);
+  b.update(doc(db, 'users/cadete1'), { ledgerOpened: true, ledgerLastEntryId: entryId, ...userFields });
+  return b.commit();
+};
+await check('admin NO pone la deuda en $0 sin dejar renglon',
+  assertFails(updateDoc(doc(jefe, 'users/cadete1'), { deliveryDebt: 0 })));
+await check('admin NO cobra con un saldo que no cierra',
+  assertFails(moveBatch(jefe, 'pay_mal', pay(-2000, 2500), { deliveryDebt: 2500 })));
+await check('admin NO registra un pago con signo al reves',
+  assertFails(moveBatch(jefe, 'pay_signo', pay(2000, 7000), { deliveryDebt: 7000 })));
+await check('admin NO abre un saldo inicial inventado',
+  assertFails((() => {
+    const b = writeBatch(jefe);
+    b.set(doc(jefe, 'driver_ledger/open_cadete1'), { ...opening, amount: 1000, balanceAfter: 1000 });
+    b.set(doc(jefe, 'driver_ledger/pay_x'), pay(-1000, 4000));
+    b.update(doc(jefe, 'users/cadete1'), { ledgerOpened: true, ledgerLastEntryId: 'pay_x', deliveryDebt: 4000 });
+    return b.commit();
+  })()));
+await check('admin cobra: renglon + saldo inicial + saldo nuevo en una operacion',
+  assertSucceeds(moveBatch(jefe, 'pay_ok', pay(-2000, 3000), { deliveryDebt: 3000 })));
+await check('un cobro de mas deja saldo a favor (negativo)',
+  assertSucceeds(moveBatch(jefe, 'pay_extra', pay(-4000, -1000), { deliveryDebt: -1000 }, false)));
+await check('admin NO reutiliza el id de un renglon',
+  assertFails(moveBatch(jefe, 'pay_ok', pay(-500, -1500), { deliveryDebt: -1500 }, false)));
+await check('admin le paga al cadete lo que tiene a favor',
+  assertSucceeds(moveBatch(jefe, 'payout_1', { driverId: 'cadete1', type: 'payout', amount: 1000, balanceAfter: 0 }, { deliveryDebt: 0 }, false)));
+await check('admin NO escribe renglones de pedido o cuota (son del servidor)',
+  assertFails(moveBatch(jefe, 'canon_trampa', { driverId: 'cadete1', type: 'daily_fee', amount: 2000, balanceAfter: 2000 }, { deliveryDebt: 2000 }, false)));
+await check('cadete lee sus renglones',
+  assertSucceeds(getDocs(query(collection(cadete1, 'driver_ledger'), where('driverId', '==', 'cadete1')))));
+await check('cliente NO lee renglones de un cadete',
+  assertFails(getDoc(doc(cliente1, 'driver_ledger/pay_ok'))));
+await check('cadete NO se escribe un renglon',
+  assertFails(setDoc(doc(cadete1, 'driver_ledger/trampa'), pay(-9999, 0))));
+await check('nadie borra un renglon, ni el admin',
+  assertFails(deleteDoc(doc(jefe, 'driver_ledger/pay_ok'))));
+await check('admin NO edita el monto de un renglon',
+  assertFails(updateDoc(doc(jefe, 'driver_ledger/pay_ok'), { amount: -1 })));
+await check('admin anula un cobro con su renglon inverso',
+  assertSucceeds((() => {
+    const b = writeBatch(jefe);
+    b.set(doc(jefe, 'driver_ledger/rev_pay_ok'), { driverId: 'cadete1', type: 'reversal', amount: 2000, balanceAfter: 2000, reversesId: 'pay_ok' });
+    b.update(doc(jefe, 'driver_ledger/pay_ok'), { reversedById: 'rev_pay_ok' });
+    b.update(doc(jefe, 'users/cadete1'), { ledgerLastEntryId: 'rev_pay_ok', deliveryDebt: 2000 });
+    return b.commit();
+  })()));
+await check('admin sigue editando otros datos del cadete',
+  assertSucceeds(updateDoc(doc(jefe, 'users/cadete1'), { displayName: 'Cadete Uno' })));
 
 console.log('');
 console.log('=========== LUGARES DE MANDADOS ===========');
@@ -456,6 +514,78 @@ await check('cadete suma visita a un lugar confirmado sin moverlo',
   assertSucceeds(setDoc(doc(cadete1, 'mandadoPlaces/farmacia-pasteur'), lugar({ verified: true, lat: -35.0801, visits: 3 }))));
 await check('admin borra un lugar',
   assertSucceeds(deleteDoc(doc(jefe, 'mandadoPlaces/farmacia-pasteur'))));
+
+console.log('');
+console.log('=========== PANEL DE COMERCIO: COMISION, DESTAQUE Y PIN ===========');
+
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, 'comercios/pizzaPin'), { name: 'Pizza con PIN', ownerId: 'duenoPizza', pin: '1234', commissionRate: 0.12 });
+  await setDoc(doc(db, 'comercios/pizzaPin/private/access'), { pin: '4321' });
+  await setDoc(doc(db, 'orders/o9'), { userId: 'cliente1', comercioId: 'pizza', status: 'pending', total: 8000, commissionAmount: 800, commissionStatus: 'pending' });
+});
+
+await check('comercio NO puede bajarse la comision',
+  assertFails(updateDoc(doc(duenoPizza, 'comercios/pizza'), { commissionRate: 0 })));
+await check('comercio NO puede auto-destacarse gratis',
+  assertFails(updateDoc(doc(duenoPizza, 'comercios/pizza'), { promotion: { active: true, isPriority: true } })));
+await check('comercio NO puede inflarse la calificacion',
+  assertFails(updateDoc(doc(duenoPizza, 'comercios/pizza'), { ratingAverage: 5, ratingCount: 999 })));
+await check('comercio NO puede regalarle su local a otro',
+  assertFails(updateDoc(doc(duenoPizza, 'comercios/pizza'), { ownerId: 'cliente1' })));
+await check('comercio NO puede volver a poner el PIN en el doc publico',
+  assertFails(updateDoc(doc(duenoPizza, 'comercios/pizza'), { pin: '1111' })));
+await check('usuario NO puede crearse un comercio con comision propia',
+  assertFails(setDoc(doc(nuevo, 'comercios/trucho'), { name: 'Trucho', ownerId: 'nuevoUsuario', commissionRate: 0 })));
+// Formulario "Sumá tu comercio" (src/pages/home.js): el comercio nace pendiente y apagado.
+const solicitud = { name: 'Rotiseria Nueva', ownerId: 'nuevoUsuario', category: 'Comida', isActive: false, approvedByAdmin: false };
+await check('usuario se postula con su comercio (pendiente y apagado)',
+  assertSucceeds(setDoc(doc(nuevo, 'comercios/solicitud1'), solicitud)));
+await check('usuario NO puede crearse un comercio ya aprobado',
+  assertFails(setDoc(doc(nuevo, 'comercios/solicitud2'), { ...solicitud, approvedByAdmin: true })));
+await check('usuario NO puede crearse un comercio visible sin aprobar',
+  assertFails(setDoc(doc(nuevo, 'comercios/solicitud3'), { ...solicitud, isActive: true })));
+await check('el postulante edita su solicitud',
+  assertSucceeds(updateDoc(doc(nuevo, 'comercios/solicitud1'), { description: 'La mejor' })));
+await check('el postulante NO puede ponerse visible antes de que lo aprueben',
+  assertFails(updateDoc(doc(nuevo, 'comercios/solicitud1'), { isActive: true })));
+await check('el postulante NO puede aprobarse solo',
+  assertFails(updateDoc(doc(nuevo, 'comercios/solicitud1'), { approvedByAdmin: true })));
+await check('admin aprueba y activa la solicitud',
+  assertSucceeds(updateDoc(doc(jefe, 'comercios/solicitud1'), { approvedByAdmin: true, isActive: true })));
+await check('comercio NO puede marcar pagada la comision de su pedido',
+  assertFails(updateDoc(doc(duenoPizza, 'orders/o9'), { commissionStatus: 'paid' })));
+await check('comercio NO puede bajar la comision de su pedido',
+  assertFails(updateDoc(doc(duenoPizza, 'orders/o9'), { commissionAmount: 0 })));
+await check('comercio NO puede borrar sus pedidos (y con ellos la comision)',
+  assertFails(deleteDoc(doc(duenoPizza, 'orders/o9'))));
+await check('cliente marca que ya vio la guia de la app',
+  assertSucceeds(updateDoc(doc(cliente1, 'users/cliente1'), { clientTourDone: true })));
+await check('cadete marca que ya vio su guia',
+  assertSucceeds(updateDoc(doc(cadete1, 'users/cadete1'), { driverTourDone: true })));
+await check('comercio marca que ya vio la guia del panel',
+  assertSucceeds(updateDoc(doc(duenoPizza, 'users/duenoPizza'), { commercePanelTourDone: true })));
+await check('otro comercio NO puede leer el PIN ajeno',
+  assertFails(getDoc(doc(cliente1, 'comercios/pizzaPin/private/access'))));
+await check('anonimo NO puede leer el PIN',
+  assertFails(getDoc(doc(anon, 'comercios/pizzaPin/private/access'))));
+
+await check('comercio pausa su local aunque todavia tenga el PIN viejo',
+  assertSucceeds(updateDoc(doc(duenoPizza, 'comercios/pizzaPin'), { isPaused: true })));
+await check('comercio lee su PIN privado',
+  assertSucceeds(getDoc(doc(duenoPizza, 'comercios/pizzaPin/private/access'))));
+await check('comercio cambia su PIN privado',
+  assertSucceeds(setDoc(doc(duenoPizza, 'comercios/pizzaPin/private/access'), { pin: '5555' })));
+await check('comercio saca el PIN viejo del doc publico',
+  assertSucceeds(updateDoc(doc(duenoPizza, 'comercios/pizzaPin'), { pin: deleteField() })));
+await check('comercio acepta con tiempo de preparacion',
+  assertSucceeds(updateDoc(doc(duenoPizza, 'orders/o9'), { status: 'confirmed', preparationTimeMinutes: 20 })));
+await check('comercio modifica los productos de su pedido',
+  assertSucceeds(updateDoc(doc(duenoPizza, 'orders/o9'), { items: [], subtotal: 7000, total: 7000 })));
+await check('admin ajusta la comision de un comercio',
+  assertSucceeds(updateDoc(doc(jefe, 'comercios/pizza'), { commissionRate: 0.08 })));
+await check('admin marca pagada la comision',
+  assertSucceeds(updateDoc(doc(jefe, 'orders/o9'), { commissionStatus: 'paid' })));
 
 console.log('');
 console.log('================================================');

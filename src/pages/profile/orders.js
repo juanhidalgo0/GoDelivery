@@ -171,10 +171,10 @@ function renderOrders(orders) {
       orderTypeTitle = meta.title;
 
       // Assign compressed icons from /public
-      if (o.favorType === 'gocash') logoSrc = '/go-cash.png';
+      if (o.favorType === 'gocash') logoSrc = '/go-cash.png?v=7';
       else if (o.favorType === 'encomienda') logoSrc = '/go-delivery-moto.png';
-      else if (o.favorType === 'pagodeservicios') logoSrc = '/go-clipboard.png';
-      else logoSrc = '/go-bag.png'; // mandado / compra
+      else if (o.favorType === 'pagodeservicios') logoSrc = '/go-clipboard.png?v=7';
+      else logoSrc = '/go-bag.png?v=7'; // mandado / compra
     } else {
       // Fallback for Paulos logo if named Paulos and logo is missing
       if (!logoSrc && orderTypeTitle.toLowerCase().includes('paulos')) {

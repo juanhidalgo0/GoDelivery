@@ -7,6 +7,9 @@ import { goServiceHeader, goServiceHint, bindServiceHint, showGoInfoSheet } from
 export async function renderMarketplace(content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
+  // Dibujo que llegó tarde (el router dibujó la pantalla dos veces): no enganchar sus botones a los
+  // del dibujo que está en pantalla, o todo se abre dos veces. Ver renderGoFavores.
+  if (!content.isConnected) return;
 
   // Render template layout
   content.innerHTML = `

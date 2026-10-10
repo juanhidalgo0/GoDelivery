@@ -11,7 +11,6 @@ import { escapeHtml } from '../utils/escape.js';
 import { db, auth } from '../firebase.js';
 import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
-import { isRainingInMagdalena } from '../utils/weather.js';
 import { AudioManager } from '../utils/audio-manager.js';
 import { ConfettiCelebrator } from '../utils/confetti.js';
 import { functionUrl } from '../utils/functions-url.js';
@@ -103,55 +102,6 @@ export async function renderCart(content, isDirectMode = false) {
     }
   }
 
-  // Auto-apply welcome coupon for new users (first order)
-  if (auth.currentUser && !isPreview && sessionStorage.getItem('welcome-coupon-cleared') !== 'true') {
-    const userObj = getState().user;
-    const currentApplied = getState().appliedCoupon;
-    
-    let isWelcomeUsed = false;
-    try {
-      const usedKey = `gd_used_coupons_${auth.currentUser.uid}`;
-      const used = JSON.parse(localStorage.getItem(usedKey) || '[]');
-      isWelcomeUsed = used.includes('BIENVENIDA');
-    } catch (e) {}
-
-    if (userObj && (userObj.completedOrdersCount || 0) === 0 && !currentApplied && !isWelcomeUsed) {
-      try {
-        const welcomeRef = doc(db, 'coupons', 'BIENVENIDA');
-        const welcomeSnap = await getDoc(welcomeRef);
-        let wData;
-        if (!welcomeSnap.exists()) {
-          // Auto-create welcome coupon if missing in Firestore
-          wData = {
-            active: true,
-            ownerId: 'admin',
-            comercioIds: [],
-            scope: 'products',
-            discountType: 'fixed',
-            absorbedBy: 'platform',
-            type: 'fixed',
-            value: 3000,
-            usageLimit: 999999,
-            remaining: 999999,
-            usedCount: 0,
-            createdAt: new Date(),
-            description: 'Cupón automático de bienvenida para tu primer pedido'
-          };
-          const { setDoc } = await import('firebase/firestore');
-          await setDoc(welcomeRef, wData);
-          console.log('[Cart] Welcome coupon BIENVENIDA initialized.');
-        } else {
-          wData = welcomeSnap.data();
-        }
-
-        if (wData.active === true) {
-          setState('appliedCoupon', { id: 'BIENVENIDA', code: 'BIENVENIDA', ...wData });
-        }
-      } catch (err) {
-        console.warn('Welcome coupon check failed:', err);
-      }
-    }
-  }
 
   function updateCartDOMInPlace(content) {
     const state = getState();
@@ -159,7 +109,9 @@ export async function renderCart(content, isDirectMode = false) {
     const activeOffers = state.activeOffers || [];
     
     cart.forEach(item => {
-      const itemEl = content.querySelector(`[data-cart-item-id="${item.cartItemId}"]`);
+      // El id de un producto con sabores lleva el JSON de las opciones (comillas incluidas):
+      // sin escapar, el selector era inválido y el carrito dejaba de actualizarse.
+      const itemEl = content.querySelector(`[data-cart-item-id="${CSS.escape(String(item.cartItemId))}"]`);
       if (!itemEl) return;
       
       const qtyValEl = itemEl.querySelector('.qty-value');
@@ -244,7 +196,7 @@ export async function renderCart(content, isDirectMode = false) {
       totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
     }
     
-    const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
+    const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate ?? 0.05)) / 10) * 10;
     const discount = state.appliedDiscount || 0;
     let couponDiscount = 0;
     if (state.appliedCoupon && allFeesReady) {
@@ -615,7 +567,7 @@ function renderCartContent(content) {
             ${isDirectStoreCart ? 'Aún no agregaste productos de este comercio. Explorá el menú y hacé tu pedido.' : 'Parece que aún no has agregado nada. ¡Explora los mejores comercios de tu zona y haz tu pedido!'}
           </p>
           
-          <button onclick="${isDirectStoreCart ? 'window.safeGoBack()' : "location.hash='#/'"}" class="btn btn-primary" style="height:56px; padding:0 32px; border-radius:18px; font-weight:900; font-size:14px; text-transform:uppercase; letter-spacing:0.05em; display:inline-flex; align-items:center; justify-content:center; gap:12px; box-shadow:0 12px 25px rgba(var(--color-primary-rgb), 0.3); transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1); width:100%; border:none; cursor:pointer;">
+          <button onclick="${isDirectStoreCart ? 'window.safeGoBack()' : "location.hash='#/'"}" class="btn btn-primary" style="height:56px; padding:0 32px; border-radius:18px; font-weight:900; font-size:14px; text-transform:uppercase; letter-spacing:0.05em; display:inline-flex; align-items:center; justify-content:center; gap:12px; box-shadow:0 12px 25px rgba(var(--color-primary-rgb), 0.3); transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1); width:100%; max-width:420px; border:none; cursor:pointer;">
             ${isDirectStoreCart ? `${icon('arrowLeft', 18)} VOLVER AL CATÁLOGO` : `${icon('search', 18)} EXPLORAR COMERCIOS`}
           </button>
         </div>
@@ -928,7 +880,7 @@ function renderCartContent(content) {
             totalDelivery = baseDeliveryFeeCalc + nightSurcharge + selectedTip;
           }
 
-          const appUsageFee = Math.ceil((totalProducts * (getState().appUsageFeeRate || 0.05)) / 10) * 10;
+          const appUsageFee = Math.ceil((totalProducts * (getState().appUsageFeeRate ?? 0.05)) / 10) * 10;
           const discount = getState().appliedDiscount || 0;
           
           const appliedCoupon = getState().appliedCoupon;
@@ -1406,7 +1358,7 @@ function showFeeDetails() {
   }
 
   const totalProducts = getCartTotal();
-  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
+  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate ?? 0.05)) / 10) * 10;
   if (appUsageFee > 0) {
     html += `
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:13px; padding-top:12px; border-top:1px dashed var(--color-border-light);">
@@ -1619,7 +1571,7 @@ function openGoPointsModal() {
     nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
     totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
   }
-  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
+  const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate ?? 0.05)) / 10) * 10;
 
   const preDiscountTotal = totalProducts + totalDelivery + appUsageFee;
   const maxPointsToRedeem = Math.min(userPoints, Math.floor(preDiscountTotal / dollarPerPoint));
@@ -2040,7 +1992,6 @@ function openCouponModal() {
   if (clearBtn) {
     clearBtn.onclick = () => {
       setState('appliedCoupon', null);
-      sessionStorage.setItem('welcome-coupon-cleared', 'true');
       showToast('Cupón removido.', 'info');
       close();
     };
@@ -2164,7 +2115,7 @@ async function openCheckoutConfirmationModal() {
     nightSurcharge = calculateScheduleSurcharge(state.nightSurchargeConfig, baseDeliveryFee);
     driverIncentive = calculateScheduleSurcharge(state.driverIncentiveConfig, baseDeliveryFee);
     totalDelivery = baseDeliveryFee + nightSurcharge + selectedTip;
-    appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate || 0.05)) / 10) * 10;
+    appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate ?? 0.05)) / 10) * 10;
   }
 
   const discount = state.appliedDiscount || 0;

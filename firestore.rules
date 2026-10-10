@@ -98,9 +98,28 @@ service cloud.firestore {
           'role', 'isAdmin', 'isComercio', 'isDelivery', 'isCanonExempt',
           'commissionRate', 'saldo', 'balance', 'settled',
           'blocked', 'isBlocked', 'suspended', 'ratings',
-          // Deuda y cuota diaria: las maneja el servidor (cobro al conectarse) y el admin.
-          'deliveryDebt', 'lastCanonChargeDate', 'lastCanonDate', 'lastLiquidationAt'
+          // Cuenta corriente y cuota diaria: las maneja el servidor y el admin.
+          'deliveryDebt', 'lastCanonChargeDate', 'lastCanonDate', 'lastLiquidationAt',
+          'ledgerLastEntryId', 'ledgerOpened', 'ledgerUpdatedAt', 'ledgerSeq'
         ];
+      }
+
+      // El saldo del cadete (deliveryDebt) sólo cambia junto con el renglón de la cuenta
+      // corriente que lo explica, escrito en la misma operación: ledgerLastEntryId apunta a un
+      // renglón nuevo de este cadete cuyo balanceAfter es exactamente el saldo nuevo.
+      // Así ningún botón puede poner deudas en $0 (o en cualquier número) sin dejar rastro.
+      function ledgerFieldsUntouched() {
+        return !changed().hasAny(['deliveryDebt', 'ledgerLastEntryId', 'ledgerOpened', 'ledgerSeq']);
+      }
+      function ledgerMoveIsValid() {
+        let newId = request.resource.data.get('ledgerLastEntryId', '');
+        let entryPath = /databases/$(database)/documents/driver_ledger/$(newId);
+        return newId is string && newId != '' &&
+          newId != resource.data.get('ledgerLastEntryId', '') &&
+          request.resource.data.get('ledgerOpened', false) == true &&
+          !exists(entryPath) && existsAfter(entryPath) &&
+          getAfter(entryPath).data.driverId == userId &&
+          getAfter(entryPath).data.balanceAfter == request.resource.data.get('deliveryDebt', 0);
       }
 
       // Identificadores que la app completa al iniciar sesión en cuentas viejas
@@ -142,8 +161,8 @@ service cloud.firestore {
         )
       );
 
-      allow update: if isAdmin()
-        || (isSelf() && isReviewTestAccount())
+      allow update: if (isAdmin() && (ledgerFieldsUntouched() || ledgerMoveIsValid()))
+        || (isSelf() && isReviewTestAccount() && ledgerFieldsUntouched())
         || (isSelf() && !changed().hasAny(protectedKeys()) && statusChangesAreApplications() && backfillIsValid())
         // Calificaciones y puntos cruzados (cliente ↔ cadete, referidos).
         || (isSignedIn() && !isSelf() && onlyFields(['ratings', 'points']));
@@ -180,10 +199,49 @@ service cloud.firestore {
     // Catálogo público: se navega sin login.
 
     match /comercios/{comercioId} {
+      // Plata, dueño, aprobación, destaque pago y calificación: sólo el admin
+      // (o el servidor). La comisión la lee la function al crear cada pedido.
+      function adminOnlyKeys() {
+        return [
+          'ownerId', 'commissionRate', 'approvedByAdmin', 'isGoMarket',
+          'promotion', 'isSponsored', 'sponsoredUntil',
+          'ratingAverage', 'ratingCount'
+        ];
+      }
+
+      // Quien se postula (formulario "Sumá tu comercio") crea el comercio pendiente y apagado:
+      // approvedByAdmin == false es lo que lo pone en la lista de solicitudes del admin.
+      function isPendingApplication() {
+        return request.resource.data.get('approvedByAdmin', false) == false &&
+          request.resource.data.get('isActive', false) == false;
+      }
+      // Lo que sólo pone el admin, menos approvedByAdmin (va en false) y ownerId (es él mismo).
+      function applicantForbiddenKeys() {
+        return ['commissionRate', 'isGoMarket', 'promotion', 'isSponsored',
+          'sponsoredUntil', 'ratingAverage', 'ratingCount'];
+      }
+
       allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.get('ownerId', '') == uid();
-      allow update: if isAdmin() || ownsComercio(comercioId);
+      allow create: if isAdmin() || (
+        isSignedIn() && request.resource.data.get('ownerId', '') == uid() &&
+        !request.resource.data.keys().hasAny(applicantForbiddenKeys()) &&
+        isPendingApplication() &&
+        !('pin' in request.resource.data)
+      );
+      // El PIN vive en private/access; el doc público sólo puede perderlo.
+      // Mientras el admin no lo aprueba, el dueño no puede ponerlo visible en el catálogo.
+      allow update: if isAdmin() || (
+        ownsComercio(comercioId) &&
+        !changed().hasAny(adminOnlyKeys()) &&
+        (!changed().hasAny(['pin']) || !('pin' in request.resource.data)) &&
+        !(resource.data.get('approvedByAdmin', true) == false && request.resource.data.get('isActive', false) == true)
+      );
       allow delete: if isAdmin();
+
+      // PIN del panel y demás datos que no deben ser públicos.
+      match /private/{docId} {
+        allow read, write: if isAdmin() || ownsComercio(comercioId);
+      }
 
       match /products/{productId} {
         allow read: if true;
@@ -215,9 +273,16 @@ service cloud.firestore {
         request.resource.data.get('userId', '') == uid() || isStaff()
       );
 
-      allow update: if isAdmin() || isDriver() || isCustomer() || isTheShop();
+      // La comisión la fija el servidor al crear el pedido y la cobra el admin.
+      function shopLockedKeys() {
+        return ['commissionAmount', 'commissionRate', 'commissionStatus', 'commissionPaidAt', 'comercioId', 'userId'];
+      }
 
-      allow delete: if isAdmin() || isTheShop();
+      allow update: if isAdmin() || isDriver() || isCustomer() ||
+        (isTheShop() && !changed().hasAny(shopLockedKeys()));
+
+      // Borrar un pedido borra también su comisión: sólo el admin.
+      allow delete: if isAdmin();
 
       match /messages/{messageId} {
         allow read, create: if isAdmin() || isDriver() || isCustomer() || isTheShop();
@@ -227,6 +292,8 @@ service cloud.firestore {
       // Ubicación en vivo del cadete (cada pocos segundos). Vive fuera del doc del
       // pedido para no disparar onOrderStatusChange en cada punto de GPS. La lee
       // quien puede leer el pedido; la escribe sólo el cadete asignado.
+      // fixAt: hora de la lectura del GPS (ms); accuracy: precisión en metros. Con fixAt el
+      // mapa del cliente mueve la moto al ritmo real y no al que llegan los datos.
       match /live/{liveId} {
         function parentOrder() {
           return get(/databases/$(database)/documents/orders/$(orderId)).data;
@@ -238,8 +305,10 @@ service cloud.firestore {
         ));
         allow write: if isSignedIn() && liveId == 'driver' &&
           parentOrder().get('driverId', '') == uid() &&
-          request.resource.data.keys().hasOnly(['lat', 'lng', 'heading', 'speed', 'updatedAt']) &&
-          request.resource.data.lat is number && request.resource.data.lng is number;
+          request.resource.data.keys().hasOnly(['lat', 'lng', 'heading', 'speed', 'updatedAt', 'fixAt', 'accuracy']) &&
+          request.resource.data.lat is number && request.resource.data.lng is number &&
+          request.resource.data.get('fixAt', 0) is number &&
+          request.resource.data.get('accuracy', 0) is number;
       }
     }
 
@@ -268,12 +337,19 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/chats/$(chatId)).data;
     }
 
+    // El id del chat es `${orderId}_${tipo}`. La app empieza a escuchar los mensajes antes de
+    // que exista el doc del chat (lo crea en segundo plano); sin esto la primera escucha era
+    // rechazada y quedaba muerta: el que abría el chat no veía ni lo que mandaba.
+    function orderOfChatId(chatId) {
+      return chatId.split('_')[0];
+    }
+
     function canUseChat(chatId) {
       return isAdmin() || (
-        exists(/databases/$(database)/documents/chats/$(chatId)) && (
-          uid() in chatOf(chatId).get('participants', []) ||
-          isPartyOfOrder(chatOf(chatId).get('orderId', ''))
-        )
+        exists(/databases/$(database)/documents/chats/$(chatId))
+          ? (uid() in chatOf(chatId).get('participants', []) ||
+             isPartyOfOrder(chatOf(chatId).get('orderId', '')))
+          : isPartyOfOrder(orderOfChatId(chatId))
       );
     }
 
@@ -285,7 +361,9 @@ service cloud.firestore {
         );
       }
 
-      allow read:   if isAdmin() || isParticipant();
+      // Un chat que todavía no existe no tiene nada que mostrar: se puede consultar.
+      allow get:    if isAdmin() || resource == null || isParticipant();
+      allow list:   if isAdmin() || isParticipant();
       allow create: if isSignedIn() && (
         uid() in request.resource.data.get('participants', []) ||
         isPartyOfOrder(request.resource.data.get('orderId', ''))
@@ -310,7 +388,10 @@ service cloud.firestore {
         );
       }
 
-      allow read:   if isAdmin() || isMine();
+      // Los tickets se abren con el id del pedido, del comercio o `driver_<uid>`, y la app mira
+      // si ya existen antes del primer mensaje. Un ticket inexistente no tiene nada que leer.
+      allow get:    if isAdmin() || resource == null || isMine();
+      allow list:   if isAdmin() || isMine();
       allow create: if isSignedIn();
       allow update: if isAdmin() || isMine();
       allow delete: if isAdmin();
@@ -322,6 +403,31 @@ service cloud.firestore {
         allow delete: if isAdmin();
       }
     }
+
+    // ------------------------------------------------------------ bot de WhatsApp
+    // Pedidos escritos por WhatsApp que el comercio cotiza (functions/whatsapp/). Los crea el
+    // servidor; el comercio responde una sola vez: precio o "no lo tengo". Teléfono y dirección
+    // del cliente los ve solo ese comercio.
+    match /wa_quotes/{quoteId} {
+      function isTheShop() { return ownsComercio(resource.data.get('comercioId', '')); }
+
+      allow read: if isAdmin() || isTheShop();
+      allow update: if (isAdmin() || isTheShop()) &&
+        resource.data.status == 'waiting' &&
+        onlyFields(['status', 'price', 'prepMinutes', 'commerceNote', 'rejectReason', 'answeredAt', 'answeredBy']) &&
+        (
+          (request.resource.data.status == 'quoted' &&
+            request.resource.data.price is number &&
+            request.resource.data.price > 0 && request.resource.data.price <= 5000000 &&
+            request.resource.data.get('prepMinutes', 20) is number) ||
+          request.resource.data.status == 'rejected'
+        );
+    }
+
+    // Estado de cada charla, mensajes ya atendidos y mensajes de prueba: solo el servidor.
+    match /wa_sessions/{waId} { allow read: if isAdmin(); }
+    match /wa_inbound/{messageId} { allow read: if isAdmin(); }
+    match /wa_outbox/{messageId} { allow read: if isAdmin(); }
 
     // ------------------------------------------------------------ marketplace
 
@@ -462,9 +568,62 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Movimientos y cuotas: los escriben el servidor (cobro de la cuota al
-    // conectarse, tarifas al completar) y el admin. El cadete sólo los lee:
-    // si pudiera marcar su cuota como pagada, el servidor no se la cobraría.
+    // Cuenta corriente del cadete: un renglón por cada peso que mueve su saldo.
+    // Pedidos y cuota diaria los escribe el servidor; cobros, pagos al cadete, ajustes y
+    // anulaciones, el admin. Nunca se borran: anular es agregar el renglón inverso.
+    // Ver src/utils/driver-ledger.js.
+    match /driver_ledger/{entryId} {
+      function near(a, b) {
+        return math.abs(a - b) < 0.01;
+      }
+      function driverBefore() {
+        return get(/databases/$(database)/documents/users/$(request.resource.data.driverId)).data;
+      }
+      function driverAfter() {
+        return getAfter(/databases/$(database)/documents/users/$(request.resource.data.driverId)).data;
+      }
+      function signIsValid(d) {
+        return (d.type == 'payment' && d.amount < 0) ||
+               (d.type == 'payout' && d.amount > 0) ||
+               (d.type in ['adjustment', 'reversal'] && d.amount != 0);
+      }
+      // Saldo inicial: lo que decía deliveryDebt antes del primer renglón.
+      function isOpening(d) {
+        return d.type == 'opening' && entryId == 'open_' + d.driverId &&
+          driverBefore().get('ledgerOpened', false) != true &&
+          near(d.amount, driverBefore().get('deliveryDebt', 0)) && d.balanceAfter == d.amount;
+      }
+      // Movimiento del admin: saldo anterior + monto, y es el renglón que queda como último.
+      function isAdminMove(d) {
+        return signIsValid(d) &&
+          driverAfter().get('ledgerLastEntryId', '') == entryId &&
+          near(d.balanceAfter, driverBefore().get('deliveryDebt', 0) + d.amount);
+      }
+
+      allow read: if isAdmin() || isOwnerField('driverId');
+      allow create: if isAdmin() &&
+        request.resource.data.driverId is string &&
+        request.resource.data.amount is number &&
+        request.resource.data.balanceAfter is number &&
+        (isOpening(request.resource.data) || isAdminMove(request.resource.data));
+      // Lo único que cambia de un renglón es la marca de anulado, una sola vez.
+      allow update: if isAdmin() &&
+        onlyFields(['reversedById', 'reversedAt', 'reversedBy']) &&
+        resource.data.get('reversedById', null) == null &&
+        existsAfter(/databases/$(database)/documents/driver_ledger/$(request.resource.data.reversedById));
+      allow delete: if false;
+    }
+
+    // Trabajos que corre el servidor a pedido del admin (p. ej. importar la historia anterior
+    // de las cuentas): el admin crea el pedido y lee cómo va; el resultado lo escribe el servidor.
+    match /system_jobs/{jobId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Movimientos y cuotas del sistema anterior: los siguen escribiendo el servidor y el
+    // admin junto con cada renglón, porque las pantallas y reportes actuales los leen.
+    // El cadete sólo los lee.
     match /delivery_transactions/{transactionId} {
       allow read:  if isAdmin() || isOwnerField('driverId');
       allow write: if isAdmin();
@@ -529,6 +688,24 @@ service cloud.firestore {
 
     // ------------------------------------------------- notificaciones y puntos
 
+    // Diagnóstico de reinicios de la app (utils/reload-log.js). Cada uno anota el suyo.
+    // Detector de errores: los escribe sólo el servidor (functions/client-errors.js).
+    // El admin los mira y les cambia el estado (resuelto / ignorado / abierto).
+    // Estado del vigilante (última pasada, revisiones): lo escribe el servidor, el admin lo mira.
+    match /system/vigilante {
+      allow read: if isAdmin();
+    }
+
+    match /client_errors/{fingerprint} {
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusBy', 'statusAt', 'note']);
+    }
+
+    match /app_restarts/{restartId} {
+      allow create: if isSignedIn() && request.resource.data.get('uid', '') == uid();
+      allow read, delete: if isAdmin();
+    }
+
     match /notifications/{notificationId} {
       allow read:   if isAdmin() || isOwnerField('userId');
       allow create: if isSignedIn();
@@ -552,6 +729,20 @@ service cloud.firestore {
     // Contador para el número de cliente correlativo (se toca al registrarse).
     match /counters/{counterId} {
       allow read, write: if isSignedIn();
+    }
+
+    // --------------------------------------------------------- sorteos
+    // Las entries (y sus chances) las escribe solo el servidor (joinGiveaway,
+    // pedidos entregados, referidos). Si el cliente pudiera crear la suya,
+    // podría anotarse con las chances que quisiera.
+    match /giveaways/{giveawayId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+
+      match /entries/{entryId} {
+        allow read:  if true;
+        allow write: if isAdmin();
+      }
     }
   }
 }

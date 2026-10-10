@@ -114,5 +114,5 @@ export function showGoSheet({ id = '', iconName = 'sparkles', art = '', eyebrow 
 
 /** True while any sheet, modal or first-run overlay is on screen: one conversation at a time. */
 export function isAnySheetOpen() {
-  return !!document.querySelector('.go-bsheet, .go-promo-sheet, .modal-overlay, #onboarding-container, #app-guide-overlay, #splash-screen, #login-wall');
+  return !!document.querySelector('.go-bsheet, .go-promo-sheet, .modal-overlay, #onboarding-container, #splash-screen, #login-wall, .go-tour');
 }

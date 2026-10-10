@@ -436,9 +436,9 @@ export function renderHeader() {
   if (infoBtn) {
     infoBtn.onclick = (e) => {
       e.stopPropagation();
-      import('./app-guide.js').then(m => {
-        m.showAppGuide(null, true);
-      }).catch(err => console.warn('Failed to load app guide:', err));
+      if (location.hash && location.hash !== '#/' && location.hash !== '#') location.hash = '#/';
+      import('./client-tour.js').then(m => m.startClientTour())
+        .catch(err => console.warn('Failed to load the app tour:', err));
     };
   }
 

@@ -1,3 +1,21 @@
+// A screen whose code failed to load. Only these errors: before, any error saying "Failed to
+// fetch" (a geocoding or route request during a second without signal) reloaded the whole app
+// silently, mid-use. The import is retried once; only if it fails again is it a missing deploy.
+function isChunkLoadError(err) {
+  const m = String(err?.message || '');
+  return /dynamically imported module|Importing a module script failed|MIME type|Expected a JavaScript/i.test(m);
+}
+
+async function runRouteHandler(handler, container) {
+  try {
+    return await handler(container);
+  } catch (err) {
+    if (!isChunkLoadError(err)) throw err;
+    await new Promise(r => setTimeout(r, 1200));
+    return handler(container);
+  }
+}
+
 import { isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from './auth.js';
 import { getState, subscribe } from './state.js';
 import { clearActiveListeners } from './utils/cleanup.js';
@@ -174,7 +192,15 @@ export async function handleRoute() {
     const hash = normalizeRoutePath(window.location.hash);
     const slider = document.getElementById('app-slider');
     const overlay = document.getElementById('app-overlay');
-    
+
+    // Las pushes del sorteo usan '#/sorteo' (el SW y la app nativa solo navegan
+    // por hash). Va antes del guard de repartidor para que a ellos también los lleve.
+    if (hash === '/sorteo') {
+      isRouting = false;
+      window.location.replace('/sorteo.html');
+      return;
+    }
+
     // Automatic Driver Guard: Delivery users default to /#/delivery in Dark Mode unless in temporary Client/Admin Mode
     const userIsDelivery = isDelivery();
     let inTempClientMode = false;
@@ -410,16 +436,15 @@ export async function handleRoute() {
           // Pass the panel directly as the container
           panel.innerHTML = ''; // Clear to ensure animation re-triggers
           try {
-            const result = await handler(panel);
+            const result = await runRouteHandler(handler, panel);
             if (result && result.cleanup) {
               currentCleanup = result.cleanup;
             }
           } catch (err) {
             console.error('Route error (main):', err);
-            if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
-              console.warn('Failed to load main route module. Reloading page...');
-              window.location.reload();
-              return;
+            if (isChunkLoadError(err)) {
+              // Still missing after a retry: a deploy removed it. Update now (shows the splash).
+              if (window.checkAppVersion) window.checkAppVersion({ applyNow: true });
             }
             panel.innerHTML = `
               <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:20px; text-align:center;">
@@ -491,6 +516,8 @@ export async function handleRoute() {
 
       document.body.classList.add('overlay-open');
       if (!overlay) { isRouting = false; return; } // Safety guard — DOM not ready
+      // Primera parte de la ruta (admin, profile, pedido…): el CSS de escritorio decide con esto qué pantallas van centradas
+      overlay.dataset.route = hash.split('/')[1] || '';
       overlay.innerHTML = '<div id="overlay-render-target" style="width:100%; height:100%;"></div>';
       const target = document.getElementById('overlay-render-target');
       target.id = 'app-content';
@@ -500,7 +527,7 @@ export async function handleRoute() {
       overlay.scrollTop = 0;
 
       try {
-        const result = await handler(target);
+        const result = await runRouteHandler(handler, target);
         if (result && result.cleanup) {
           const originalCleanup = result.cleanup;
           // The overlay content is removed after its exit animation (or replaced by the next
@@ -511,14 +538,8 @@ export async function handleRoute() {
         }
       } catch (err) {
         console.error('Route error (overlay):', err);
-        if (err.message && (err.message.includes('MIME type') || err.message.includes('dynamically imported module') || err.message.includes('Failed to fetch') || err.message.includes('Expected a JavaScript'))) {
-          console.warn('Failed to load overlay route module. Clearing cache and reloading...');
-          if (window.showUpdateSplashAndReload) {
-            window.showUpdateSplashAndReload();
-          } else {
-            window.location.reload();
-          }
-          return;
+        if (isChunkLoadError(err) && window.checkAppVersion) {
+          window.checkAppVersion({ applyNow: true });
         }
         target.innerHTML = `
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:24px; text-align:center; background:var(--color-bg);">

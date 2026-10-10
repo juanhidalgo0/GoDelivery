@@ -1,11 +1,13 @@
 // SOLO DESARROLLO: servidor de vistas previas con Firebase simulado en memoria.
 //   node node_modules/vite/bin/vite.js --config vite.preview.config.js --port 5175
 // Abrir /?caso=comercio-en-camino#/pedido/demo (casos en src/dev/tracking-seed.js).
+// Con GO_PREVIEW_SEED=comercio-seed carga el panel del comercio (src/dev/comercio-seed.js).
 // No lee ni escribe la base real.
 import { defineConfig } from 'vite';
 import { devMaplibreAssets } from './dev-maplibre-assets.js';
 import path from 'path';
 
+const SEED = process.env.GO_PREVIEW_SEED || 'tracking-seed';
 const MOCK_DIR = path.resolve(__dirname, 'src/dev/mock-firebase');
 const SRC_DIR = path.resolve(__dirname, 'src');
 
@@ -36,7 +38,7 @@ const seedPlugin = {
     order: 'pre',
     handler(html) {
       return html.replace(/<script type="module" src="\/src\/main\.js[^"]*"><\/script>/,
-        (tag) => `<script type="module" src="/src/dev/tracking-seed.js"></script>\n${tag}`);
+        (tag) => `<script type="module" src="/src/dev/${SEED}.js"></script>\n${tag}`);
     },
   },
 };

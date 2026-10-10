@@ -23,6 +23,13 @@ setState({ driverTodayEarnings: 12400, driverTodayOrdersCount: 6 });
 window.currentDemandHotspots = [{ name: 'Pizzería Los Sabores', count: 2, coords: [-57.5147, -35.0815] }, { name: 'Burger Norte', count: 1, coords: [-57.5060, -35.0790] }];
 
 const now = () => Date.now();
+const MANDADO_5 = [
+  ['Maxikiosco Paulos', '2 alfajores Jorgito, 1 Coca-Cola 2,25 L, 1 paquete de galletitas Oreo, 2 chicles Beldent menta'],
+  ['Verdulería El Trébol', '1 kg de papas, 1/2 kg de tomates perita bien rojos, 1 atado de acelga, 3 limones, 1 zapallo anco chico'],
+  ['Farmacia del Pueblo', 'Ibuprofeno 400 x 20, alcohol en gel 250 ml, curitas, si no hay ibuprofeno llevar paracetamol 500'],
+  ['Carnicería Los Hermanos', '1 kg de carne picada especial, 6 milanesas de nalga finitas, 1/2 kg de chorizo'],
+  ['Librería El Estudiante', '1 cuaderno Rivadavia tapa dura rayado, 2 biromes azules, 1 plasticola, 1 cartulina blanca'],
+].map(([s, p], i) => `🏪 **${i + 1}. Comercio:** ${s}\n📦 **Pedido:** ${p}`).join('\n\n');
 const base = {
   comercio: () => ({
     id: 'sim_c1', orderId: '8492', status: 'ready', comercioName: 'Pizzería Los Sabores', comercioAddress: 'San Martín 1240',
@@ -87,6 +94,9 @@ const CASES = {
     mandadoStops: [{ store: 'Cualquier farmacia (la más cercana)', items: 'Ibuprofeno 400', nearest: 'farmacia' }] }] }),
   'Oferta · mandado 2 comercios': () => ({ orders: [], offer: offer({ ...base.mandado(), id: 'sim_m3', stopsCount: 2, description: '',
     details: '🏪 **1. Comercio:** Maxikiosco Paulos\n📦 **Pedido:** 2 alfajores\n\n🏪 **2. Comercio:** Verdulería El Trébol\n📦 **Pedido:** 1kg papas' }) }),
+  // El máximo que permite pedir un mandado: 5 lugares, con listas largas
+  'Mandado · 5 lugares': () => ({ orders: [{ ...base.mandado(), id: 'sim_m5', stopsCount: 5, description: '', details: MANDADO_5 }] }),
+  'Oferta · mandado 5 lugares': () => ({ orders: [], offer: offer({ ...base.mandado(), id: 'sim_m5', stopsCount: 5, description: '', details: MANDADO_5 }) }),
   'Go Cash · salir (llevás efectivo)': () => ({ orders: [base.gocash()] }),
   'Go Cash · salir (recibís efectivo)': () => ({ orders: [{ ...base.gocash(), goCashType: 'cash_to_transfer', paymentMethod: 'cash_to_transfer' }] }),
   '1 encomienda · retirar': () => ({ orders: [base.encomienda()] }),
@@ -105,6 +115,10 @@ const CASES = {
     return { orders: [{ ...pizza, deliveryAddress: 'Calle 25 n° 900', deliveryCoords: { lat: -35.0960, lng: -57.5260 } }, burger] };
   },
   'Panel escondido': () => ({ orders: [base.comercio()], hidden: true }),
+  // GoPoints y cupón: el total ya viene con los dos descuentos restados
+  'Oferta · con GoPoints y cupón': () => ({ orders: [], offer: offer({ ...base.comercio(), discountAmount: 500, pointsRedeemed: 500, couponCode: 'FINDE20', couponDiscount: 1900, totalAmount: 12100, total: 12100 }) }),
+  '1 pedido · entregar con cupón': () => ({ orders: [{ ...base.comercio(), status: 'delivering', pickedUpAt: now(), couponCode: 'FINDE20', couponDiscount: 1900, totalAmount: 12600, total: 12600 }] }),
+  '1 pedido · retirar con GoPoints': () => ({ orders: [{ ...base.comercio(), discountAmount: 800, pointsRedeemed: 800, totalAmount: 13700, total: 13700 }] }),
 };
 
 let orders = [];

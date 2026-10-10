@@ -67,8 +67,10 @@ function formatFavorDetailsHTML(detailsStr) {
 }
 
 let liveMap = null;
+let trackingGen = 0; // sube con cada seguimiento dibujado: el mapa del módulo es del último
 let riderMarker = null;
 let riderMotion = null;      // movimiento fluido de la moto (utils/rider-motion.js)
+let lastPushedRiderKey = ''; // la última posición que se le pasó (el mapa se redibuja por cualquier cambio del pedido)
 let lastUserMapMove = 0;     // si el cliente movió el mapa a mano, la cámara no lo pelea un rato
 let gtSheetCollapsed = false; // hoja del cliente achicada (para ver más mapa)
 let gtRouteEta = false;       // el tiempo del cliente sale de la ruta en vivo (repartidor → casa)
@@ -89,12 +91,16 @@ function refreshDriverLocationFreshness(order) {
   const updatedAt = order.driverLocation?.updatedAt;
   const updatedMs = updatedAt?.toMillis ? updatedAt.toMillis() : (updatedAt ? new Date(updatedAt).getTime() : 0);
   const ageMs = updatedMs ? Date.now() - updatedMs : Infinity;
-  const isStale = ageMs > 60 * 1000;
+  // The driver's phone sends a position at least every ~20s while an order is in progress
+  // (heartbeat in background-tracking.js), so 90s without one means a real gap, not a pause.
+  const isStale = ageMs > 90 * 1000;
   const mins = Number.isFinite(ageMs) ? Math.max(1, Math.round(ageMs / 60000)) : null;
+  // A few minutes behind is usually a tunnel or a weak signal: say it's updating, not "no signal".
+  const shortGap = Number.isFinite(ageMs) && ageMs < 5 * 60 * 1000;
 
   if (livePill) {
     if (isStale) {
-      livePill.innerHTML = mins ? `📶 Ubicación de hace ${mins} min` : '📶 Esperando ubicación';
+      livePill.innerHTML = !mins ? '📶 Esperando ubicación' : shortGap ? '📶 Actualizando ubicación…' : `📶 Última ubicación hace ${mins} min`;
       livePill.style.color = '#b45309';
       livePill.style.background = 'rgba(245, 158, 11, 0.14)';
     } else if (!livePill.querySelector('.v5-pulse-dot')) {
@@ -106,12 +112,12 @@ function refreshDriverLocationFreshness(order) {
   // Hoja del cliente: el punto verde se apaga y se avisa desde cuándo no hay señal
   if (liveDot) {
     liveDot.classList.toggle('stale', isStale);
-    liveDot.title = isStale ? (mins ? `Ubicación de hace ${mins} min` : 'Esperando ubicación') : 'Ubicación en vivo';
+    liveDot.title = isStale ? (mins ? `Última ubicación hace ${mins} min` : 'Esperando ubicación') : 'Ubicación en vivo';
     const meta = liveDot.parentElement;
     let note = meta && meta.querySelector('.gt-stale-note');
     if (isStale && meta) {
       if (!note) { note = document.createElement('span'); note.className = 'gt-stale-note'; note.style.cssText = 'color:var(--gt-amber);font-weight:600'; meta.appendChild(note); }
-      note.textContent = mins ? `sin señal hace ${mins} min` : 'esperando señal';
+      note.textContent = !mins ? 'esperando ubicación' : shortGap ? 'actualizando ubicación…' : `última ubicación hace ${mins} min`;
     } else if (note) note.remove();
   }
   const markerEl = riderMarker?.getElement?.();
@@ -198,10 +204,19 @@ const parseCoords = (c) => {
 };
 
 export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false, isDirectMode = false) {
+  // Primero se cierra el seguimiento anterior (mapa incluido). Antes solo se soltaba la referencia
+  // al mapa: cada seguimiento abierto desde un modal dejaba vivo un mapa con su memoria gráfica, y
+  // abrir varios terminaba cerrando la app.
+  if (window.currentTrackingUnsub) {
+    try { window.currentTrackingUnsub(); } catch(e) {}
+    window.currentTrackingUnsub = null;
+  }
+  const gen = ++trackingGen;
   // Reset all module-level map references to prevent DOM pollution when modal is opened/closed
   liveMap = null;
   if (riderMotion) riderMotion.stop();
   riderMotion = null;
+  lastPushedRiderKey = '';
   lastUserMapMove = 0;
   gtSheetCollapsed = false;
   gtRouteEta = false;
@@ -222,10 +237,6 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
 
   const isDirectStore = isDirectMode || window.location.hash.startsWith('#/tienda/') || document.body.classList.contains('is-direct-store-mode');
 
-  if (window.currentTrackingUnsub) {
-    try { window.currentTrackingUnsub(); } catch(e) {}
-    window.currentTrackingUnsub = null;
-  }
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
 
@@ -731,31 +742,75 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
   }
 
   // Live position: the driver writes it to orders/{id}/live/driver every few seconds; the order
-  // doc only gets it every 30s. Whichever is newer wins.
+  // doc only gets it every 30s (and at acceptance/pickup, from the last point the phone had). The
+  // live one wins unless it went quiet: when both are about as new, the order doc's copy is older
+  // or the same point, and taking it made the moto step back.
   let latestLiveLocation = null;
   const locationMs = (loc) => {
     const t = loc?.updatedAt;
     return t?.toMillis ? t.toMillis() : (t ? new Date(t).getTime() : 0);
   };
+  // Third source: the driver's profile (users/{id}.currentLocation, every ~60s). It covers an
+  // order that has no position yet (just accepted, or the live writes are failing), so the moto
+  // is on the map from the start instead of appearing only when the first live point lands.
+  let latestProfileLocation = null;
   const withFreshestLocation = (order) => {
-    if (latestLiveLocation && locationMs(latestLiveLocation) >= locationMs(order.driverLocation)) {
-      return { ...order, driverLocation: latestLiveLocation };
-    }
-    return order;
+    let best = order.driverLocation?.lat != null ? order.driverLocation : null;
+    if (latestLiveLocation && (!best || locationMs(latestLiveLocation) + 20000 >= locationMs(best))) best = latestLiveLocation;
+    if (latestProfileLocation && order.driverId && (!best || locationMs(latestProfileLocation) > locationMs(best) + 20000)) best = latestProfileLocation;
+    return best && best !== order.driverLocation ? { ...order, driverLocation: best } : order;
   };
+  const refreshWithLocation = () => {
+    const current = window.lastOrderData;
+    if (!current || current.id !== orderDocRef.id || ['completed', 'cancelled'].includes(current.status)) return;
+    const merged = withFreshestLocation(current);
+    window.lastOrderData = merged;
+    updateMap(merged);
+    refreshDriverLocationFreshness(merged);
+  };
+
+  // A listener that errors is dead for good: before, one hiccup (network, a token refresh) left
+  // the map on the order doc's 30-second copy for the rest of the visit. It is restarted instead.
   let unsubLive = () => {};
-  try {
-    unsubLive = onSnapshot(doc(db, 'orders', orderDocRef.id, 'live', 'driver'), (liveSnap) => {
-      if (!liveSnap.exists()) return;
-      latestLiveLocation = liveSnap.data();
-      const current = window.lastOrderData;
-      if (!current || current.id !== orderDocRef.id || ['completed', 'cancelled'].includes(current.status)) return;
-      const merged = withFreshestLocation(current);
-      window.lastOrderData = merged;
-      updateMap(merged);
-      refreshDriverLocationFreshness(merged);
-    }, (err) => console.warn('[OrderTracking] Live location unavailable, using the order doc:', err?.code || err));
-  } catch (e) {}
+  let liveClosed = false;
+  let liveRetryTimer = null;
+  let liveAttempts = 0;
+  const listenLive = () => {
+    if (liveClosed) return;
+    try {
+      unsubLive();
+      unsubLive = onSnapshot(doc(db, 'orders', orderDocRef.id, 'live', 'driver'), (liveSnap) => {
+        liveAttempts = 0;
+        if (!liveSnap.exists()) return;
+        latestLiveLocation = liveSnap.data();
+        refreshWithLocation();
+      }, (err) => {
+        console.warn('[OrderTracking] Live location unavailable, retrying:', err?.code || err);
+        liveAttempts++;
+        clearTimeout(liveRetryTimer);
+        liveRetryTimer = setTimeout(listenLive, Math.min(2000 * liveAttempts, 30000));
+      });
+    } catch (e) {}
+  };
+  listenLive();
+
+  let unsubDriverProfile = () => {};
+  let watchedDriverId = null;
+  const watchDriverProfile = (driverId) => {
+    if (driverId === watchedDriverId) return;
+    unsubDriverProfile();
+    unsubDriverProfile = () => {};
+    watchedDriverId = driverId || null;
+    latestProfileLocation = null;
+    if (!driverId) return;
+    try {
+      unsubDriverProfile = onSnapshot(doc(db, 'users', driverId), (snap) => {
+        const loc = snap.exists() ? snap.data().currentLocation : null;
+        latestProfileLocation = loc?.lat != null ? loc : null;
+        refreshWithLocation();
+      }, (err) => console.warn('[OrderTracking] Driver profile location unavailable:', err?.code || err));
+    } catch (e) {}
+  };
 
   const unsub = onSnapshot(orderDocRef, (snapshot) => {
     if (!snapshot.exists()) {
@@ -877,6 +932,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       }
     }
 
+    watchDriverProfile(['completed', 'cancelled'].includes(order.status) ? null : order.driverId);
     const orderWithLocation = withFreshestLocation(order);
     window.lastOrderData = orderWithLocation;
     updateUI(orderWithLocation, isDriverViewOverride);
@@ -1032,8 +1088,47 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       }, 200);
     }
   });
-  window.currentTrackingUnsub = unsub;
-  
+  // Limpieza completa (escuchas, temporizadores y el mapa). La usan el router al salir de la
+  // pantalla, los modales al cerrarse y el próximo seguimiento antes de dibujarse.
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (window.currentTrackingUnsub === cleanup) window.currentTrackingUnsub = null;
+    unsub();
+    liveClosed = true;
+    clearTimeout(liveRetryTimer);
+    unsubLive();
+    unsubDriverProfile();
+    // El mapa y los marcadores son del módulo: si ya se abrió otro seguimiento, son de ese y no se tocan
+    if (gen !== trackingGen) return;
+    if (freshnessTimer) {
+      clearInterval(freshnessTimer);
+      freshnessTimer = null;
+    }
+    if (riderMoveAnimFrame) {
+      cancelAnimationFrame(riderMoveAnimFrame);
+      riderMoveAnimFrame = null;
+    }
+    if (liveMap) {
+      try {
+        if (riderMarker) riderMarker.remove();
+        if (homeMarker) homeMarker.remove();
+        if (pickupMarker) pickupMarker.remove();
+        if (dropoffMarker) dropoffMarker.remove();
+        liveMap.remove();
+      } catch(e) {}
+      liveMap = null;
+    }
+    riderMarker = null;
+    homeMarker = null;
+    pickupMarker = null;
+    dropoffMarker = null;
+    routeLine = null;
+    routeLineGlow = null;
+  };
+  window.currentTrackingUnsub = cleanup;
+
   if (inModal) {
     setTimeout(() => {
       const modalBackBtn = document.getElementById('v5-modal-back-btn');
@@ -1092,36 +1187,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     }
   };
 
-  return {
-    cleanup: () => {
-      unsub();
-      unsubLive();
-      if (freshnessTimer) {
-        clearInterval(freshnessTimer);
-        freshnessTimer = null;
-      }
-      if (riderMoveAnimFrame) {
-        cancelAnimationFrame(riderMoveAnimFrame);
-        riderMoveAnimFrame = null;
-      }
-      if (liveMap) {
-        try {
-          if (riderMarker) riderMarker.remove();
-          if (homeMarker) homeMarker.remove();
-          if (pickupMarker) pickupMarker.remove();
-          if (dropoffMarker) dropoffMarker.remove();
-          liveMap.remove();
-        } catch(e) {}
-        liveMap = null;
-      }
-      riderMarker = null;
-      homeMarker = null;
-      pickupMarker = null;
-      dropoffMarker = null;
-      routeLine = null;
-      routeLineGlow = null;
-    }
-  };
+  return { cleanup };
 }
 
 function updateUI(order, isDriverViewOverride = false) {
@@ -1135,6 +1201,9 @@ function updateUI(order, isDriverViewOverride = false) {
 
   const rawStatus = (order.status || '').toString().toLowerCase();
   let normalizedStatus = statusMap[rawStatus] || rawStatus;
+  // En un pedido de comercio, "accepted" es que el cadete lo aceptó y va a buscarlo: todavía
+  // no lo retiró (eso es "delivering"). En mandados y viajes sí significa que ya está en curso.
+  if (rawStatus === 'accepted' && !order.isFavor && !order.isTrip) normalizedStatus = 'ready';
   if (normalizedStatus.includes('camin')) normalizedStatus = 'delivering';
   if (normalizedStatus.includes('entreg') || normalizedStatus.includes('complet')) normalizedStatus = 'completed';
   if (normalizedStatus.includes('cancel')) normalizedStatus = 'cancelled';
@@ -1384,7 +1453,7 @@ function updateUI(order, isDriverViewOverride = false) {
     } else if (normalizedStatus === 'confirmed' || normalizedStatus === 'preparing') {
       subtitleHtml = `
         <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
-          El comercio aceptó tu pedido y se encuentra preparándolo. Te avisaremos cuando esté listo.
+          El comercio aceptó tu pedido y se encuentra preparándolo.${prepPromiseText(order)} Te avisaremos cuando esté listo.
         </p>
       `;
     } else if (normalizedStatus === 'pending') {
@@ -1419,7 +1488,7 @@ function updateUI(order, isDriverViewOverride = false) {
     } else if (normalizedStatus === 'confirmed' || normalizedStatus === 'preparing') {
       subtitleHtml = `
         <p class="v5-status-subtitle" style="font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0 0; font-weight: 550; line-height: 1.4;">
-          El comercio aceptó tu pedido y se encuentra preparándolo.
+          El comercio aceptó tu pedido y se encuentra preparándolo.${prepPromiseText(order)}
         </p>
       `;
     } else {
@@ -1703,8 +1772,8 @@ function updateUI(order, isDriverViewOverride = false) {
         <div style="background:var(--color-bg-secondary); padding:14px; border-radius:18px; border:1px solid var(--color-border-light); margin-top:4px; display:flex; flex-direction:column; gap:10px;">
           <div style="font-size:9px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase;">Detalles del Viaje</div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:16px;">${order.tripType === 'moto' ? '🏍️' : '🚗'}</span>
-            <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'moto' ? 'Moto' : 'Auto'}</span>
+            <span style="font-size:16px;">${order.tripType === 'auto' ? '🚗' : '🏍️'}</span>
+            <span style="font-size:12px; font-weight:800; color:var(--color-text-primary); text-transform:capitalize;">Vehículo: ${order.tripType === 'auto' ? 'Auto' : 'Moto'}</span>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--color-border-light); padding-top:10px;">
             <div style="font-size:11.5px; font-weight:600; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px;">
@@ -2092,8 +2161,28 @@ function ensureTrackingRouteLayers() {
 }
 
 async function updateMap(order) {
+  // La librería se carga antes de mirar si ya hay mapa. Antes la espera estaba entre "no hay mapa"
+  // y "crearlo": las actualizaciones que llegan juntas al abrir (pedido, ubicación del repartidor)
+  // creaban cada una su mapa, 5 apilados en el mismo lugar, y la memoria gráfica cerraba la app.
+  if (!maplibregl) maplibregl = await getMapLibre();
   const container = document.getElementById('live-tracking-map');
   if (!container) return;
+
+  // Un mapa colgado de un contenedor que ya no está (la pantalla se volvió a dibujar): se cierra
+  if (liveMap && liveMap.getContainer() !== container) {
+    try {
+      if (riderMarker) riderMarker.remove();
+      if (homeMarker) homeMarker.remove();
+      if (pickupMarker) pickupMarker.remove();
+      if (dropoffMarker) dropoffMarker.remove();
+      liveMap.remove();
+    } catch(e) {}
+    liveMap = null;
+    riderMarker = null;
+    homeMarker = null;
+    pickupMarker = null;
+    dropoffMarker = null;
+  }
 
   const isFinalized = order.status === 'completed' || order.status === 'cancelled';
   if (isFinalized) {
@@ -2128,9 +2217,6 @@ async function updateMap(order) {
   const destPos = isTrip ? (rawStatus === 'delivering' || rawStatus === 'en camino' ? dropoffPos : pickupPos) : dropoffPos;
 
   if (!liveMap) {
-    if (!maplibregl) {
-      maplibregl = await getMapLibre();
-    }
     const magCenterLngLat = [-57.5147, -35.0815];
     const initialCenter = destPos ? [destPos.lng, destPos.lat] : (riderPos ? [riderPos.lng, riderPos.lat] : magCenterLngLat);
 
@@ -2218,7 +2304,9 @@ async function updateMap(order) {
     if (!riderMarker) {
       const el = document.createElement('div');
       el.className = 'v5-marker-shadow';
-      el.style.cssText = 'position:relative; pointer-events:none;';
+      // Sin "position": el mapa lo ubica en absoluto. Con position:relative el contenedor tomaba
+      // todo el ancho y la moto se dibujaba ~190px a la izquierda de donde está el cadete.
+      el.style.cssText = 'width:44px; height:44px; pointer-events:none;';
       el.innerHTML = `
         <div style="width:44px; height:44px; display:flex; align-items:center; justify-content:center; position:relative;">
           <div class="sonar-pulse-ring-1"></div>
@@ -2240,7 +2328,16 @@ async function updateMap(order) {
       });
       if (currentRouteCoordinates) riderMotion.setRoute(currentRouteCoordinates);
     }
-    riderMotion.push(riderPos);
+    // Only a position that's actually new: updateMap also runs for every change to the order
+    // (status, chat...), and pushing the same point again restarted the moto's current stretch.
+    const loc = order.driverLocation || {};
+    const fixAt = Number.isFinite(loc.fixAt) ? loc.fixAt : null;
+    const updatedMs = loc.updatedAt?.toMillis ? loc.updatedAt.toMillis() : 0;
+    const riderKey = `${fixAt ?? updatedMs}|${riderPos.lat}|${riderPos.lng}`;
+    if (riderKey !== lastPushedRiderKey) {
+      lastPushedRiderKey = riderKey;
+      riderMotion.push({ ...riderPos, t: fixAt ?? undefined });
+    }
   }
 
   // Update Route Polyline & ETA
@@ -2474,6 +2571,16 @@ async function updateRoute(start, end) {
 
 const commercePrepTimeCache = new Map();
 
+// " Va a estar listo cerca de las 21:40." cuando el comercio dijo cuánto tarda al aceptar
+function prepPromiseText(order) {
+  const ts = order?.estimatedReadyAt;
+  if (!ts || !Number(order.preparationTimeMinutes)) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if (Number.isNaN(d.getTime()) || d.getTime() < Date.now() - 60000) return '';
+  const hhmm = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return ` Va a estar listo cerca de las <strong>${hhmm}</strong>.`;
+}
+
 /**
  * Calculates the full predictive ETA in minutes.
  * @param {Object} order 
@@ -2587,6 +2694,12 @@ async function calculatePredictiveETA(order) {
         prepTime = 15 + (currentItemCount * 2);
       }
     }
+  }
+
+  // El comercio declaró cuánto tarda al aceptar: esa promesa manda sobre el promedio histórico
+  const declaredPrep = Number(order.preparationTimeMinutes);
+  if (!isFavor && Number.isFinite(declaredPrep) && declaredPrep > 0) {
+    prepTime = Math.max(5, Math.min(120, declaredPrep));
   }
 
   // Calculate remaining preparation time
@@ -3231,11 +3344,11 @@ function getStepCircleContent(order, stepIdx, activeIdx, isFavor) {
         case 0: {
           const type = (order.favorType || '').toString().toLowerCase();
           if (type === 'gocash') {
-            return `<img src="/go-cash.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: bounce-slow 1.5s infinite; display:block;" />`;
+            return `<img src="/go-cash.jpg?v=7" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; border-radius:50%; animation: bounce-slow 1.5s infinite; display:block;" />`;
           } else if (type === 'encomienda') {
             return `<img src="/go-package.jpg" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
           } else {
-            return `<img src="/go-bag.png?v=6" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+            return `<img src="/go-bag.png?v=7" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
           }
         }
         case 1: {
@@ -3247,7 +3360,7 @@ function getStepCircleContent(order, stepIdx, activeIdx, isFavor) {
           const type = (order.favorType || '').toString().toLowerCase();
           const isMandado = type !== 'gocash' && type !== 'encomienda';
           if (type === 'encomienda') {
-            return `<img src="/go-pickup-point.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+            return `<img src="/go-pickup-point.png?v=7" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
           }
           return `<img src="${isMandado ? '/go-delivery-moto.png?v=2' : (order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg')}" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
         }
@@ -3255,7 +3368,7 @@ function getStepCircleContent(order, stepIdx, activeIdx, isFavor) {
           const type = (order.favorType || '').toString().toLowerCase();
           const isMandado = type !== 'gocash' && type !== 'encomienda';
           if (isMandado) {
-            return `<img src="/go-bag.png?v=6" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
+            return `<img src="/go-bag.png?v=7" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
           }
           return `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
         }
@@ -3264,7 +3377,7 @@ function getStepCircleContent(order, stepIdx, activeIdx, isFavor) {
       switch (stepIdx) {
         case 0: return `<img src="/go-hourglass.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: float 2.5s infinite ease-in-out; display:block;" />`;
         case 1: return `<img src="/go-thumbs-up.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
-        case 2: return `<img src="/go-bag.png?v=6" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
+        case 2: return `<img src="/go-bag.png?v=7" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
         case 3: return `<img src="/go-box.png" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: bounce-slow 1.5s infinite; display:block;" />`;
         case 4: return `<img src="/go-delivery-moto.png?v=2" class="step-icon-animated" style="width:20px; height:20px; object-fit:contain; animation: wiggle 1s infinite; display:block;" />`;
       }
@@ -3304,7 +3417,7 @@ function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
       
       if (!isDelivering) {
         const commerceName = order.comercioName || order.pickupAddress || 'Comercio';
-        bannerIcon = `<img src="/go-bag.png?v=6" style="width:54px; height:54px; object-fit:contain;" />`;
+        bannerIcon = `<img src="/go-bag.png?v=7" style="width:54px; height:54px; object-fit:contain;" />`;
         bannerTitle = 'RETIRA EL PEDIDO EN:';
         bannerText = `<strong style="font-size:15px; display:block; margin-top:2px;">${commerceName}</strong>`;
         bannerColor = '#0284c7';
@@ -3393,7 +3506,7 @@ function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
     const favorType = (order.favorType || '').toString().toLowerCase();
     const isMandado = favorType !== 'gocash' && favorType !== 'encomienda';
     if (normalizedStatus === 'pending') {
-      bannerIcon = `<img src="${isMandado ? '/go-bag.png?v=6' : '/go-hourglass.jpg'}" style="width:${isMandado ? '54px' : '38px'}; height:${isMandado ? '54px' : '38px'}; object-fit:contain; ${isMandado ? '' : 'mix-blend-mode:multiply;'}" />`;
+      bannerIcon = `<img src="${isMandado ? '/go-bag.png?v=7' : '/go-hourglass.jpg'}" style="width:${isMandado ? '54px' : '38px'}; height:${isMandado ? '54px' : '38px'}; object-fit:contain; ${isMandado ? '' : 'mix-blend-mode:multiply;'}" />`;
       bannerTitle = isMandado ? '¡Mandado Solicitado!' : (favorType === 'gocash' ? '¡Retiro Solicitado!' : '¡Envío Solicitado!');
       bannerText = isMandado ? 'Estamos asignando un repartidor para tu mandado.' : (favorType === 'gocash' ? 'Registrando tu solicitud de retiro de dinero.' : 'Registrando tu solicitud de envío de encomienda.');
       bannerColor = '#d97706';
@@ -3401,7 +3514,7 @@ function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
       bannerBorder = 'rgba(217, 119, 6, 0.15)';
     } else if (normalizedStatus === 'confirmed' || normalizedStatus === 'preparing') {
       if (order.driverId) {
-        bannerIcon = `<img src="/go-bag.png?v=6" style="width:54px; height:54px; object-fit:contain;" />`;
+        bannerIcon = `<img src="/go-bag.png?v=7" style="width:54px; height:54px; object-fit:contain;" />`;
         bannerTitle = 'Yendo al punto';
         bannerText = 'Tu repartidor está yendo a buscar tu pedido';
         bannerColor = '#0284c7';
@@ -3416,7 +3529,7 @@ function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
         bannerBorder = 'rgba(239, 68, 68, 0.15)';
       }
     } else if (normalizedStatus === 'ready') {
-      bannerIcon = `<img src="${favorType === 'encomienda' ? '/go-pickup-point.png' : (isMandado ? '/go-bag.png?v=6' : (order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'))}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerIcon = `<img src="${favorType === 'encomienda' ? '/go-pickup-point.png?v=7' : (isMandado ? '/go-bag.png?v=7' : (order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'))}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
       bannerTitle = isMandado ? 'Yendo a comprar' : 'Yendo al origen';
       bannerText = isMandado ? 'El repartidor está yendo al punto de compra del mandado.' : (favorType === 'gocash' ? 'El repartidor está yendo a buscar el dinero en efectivo.' : 'El repartidor está yendo al punto de retiro del paquete.');
       bannerColor = '#8B5CF6';
@@ -3424,7 +3537,7 @@ function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
       bannerBorder = 'rgba(139, 92, 246, 0.15)';
     } else if (normalizedStatus === 'delivering' || order.isDelivering) {
       if (order.isFavor) {
-        bannerIcon = `<img src="${favorType === 'gocash' ? '/go-cash.png' : '/go-delivery-moto.png'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+        bannerIcon = `<img src="${favorType === 'gocash' ? '/go-cash.png?v=7' : '/go-delivery-moto.png'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
       } else {
         bannerIcon = `<img src="${order.tripType === 'moto' ? '/go-scooter.jpg' : '/go-car.jpg'}" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
       }
@@ -3465,7 +3578,7 @@ function getStatusBannerHTML(order, normalizedStatus, isDriverView = false) {
       bannerBg = 'rgba(2, 132, 199, 0.05)';
       bannerBorder = 'rgba(2, 132, 199, 0.15)';
     } else if (normalizedStatus === 'preparing') {
-      bannerIcon = `<img src="/go-bag.png?v=6" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
+      bannerIcon = `<img src="/go-bag.png?v=7" style="width:38px; height:38px; object-fit:contain; mix-blend-mode:multiply;" />`;
       bannerTitle = '¡Preparando tu pedido!';
       if (order.isScheduled && order.scheduledFor) {
         const targetMillis = order.scheduledFor.toMillis ? order.scheduledFor.toMillis() : (order.scheduledFor.seconds * 1000);

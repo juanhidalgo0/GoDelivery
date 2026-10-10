@@ -248,7 +248,7 @@ async function executeRefresh() {
 
     // 3. Background app version check
     if (typeof window.checkAppVersion === 'function') {
-      window.checkAppVersion();
+      window.checkAppVersion({ applyNow: true }); // the person asked to refresh: a safe moment
     }
 
     // Minimum visual duration (600ms) for smooth UX feel

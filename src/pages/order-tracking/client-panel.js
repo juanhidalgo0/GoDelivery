@@ -56,7 +56,7 @@ export function trackingModel(o, status) {
     m.steps = ['Recibido', 'Preparando', 'Listo', 'Retirado'];
     if (status === 'completed') return { ...m, tone: 'ok', title: 'Pedido retirado', subtitle: '¡Que lo disfrutes!', active: 3, done: true };
     if (status === 'ready') return { ...m, tone: 'alert', title: 'Listo para retirar', subtitle: `Pasá por ${store}${o.comercioAddress ? ` · ${o.comercioAddress}` : ''}.`, active: 2 };
-    if (status === 'preparing' || status === 'confirmed') return { ...m, title: 'Preparando tu pedido', subtitle: `${store} ya lo está preparando.`, active: 1 };
+    if (status === 'preparing' || status === 'confirmed') return { ...m, title: 'Preparando tu pedido', subtitle: `${store} ya lo está preparando.${readyAtText(o)}`, active: 1 };
     return { ...m, tone: 'wait', title: 'Esperando confirmación', subtitle: `${store} está revisando tu pedido.`, active: 0 };
   }
 
@@ -84,8 +84,15 @@ export function trackingModel(o, status) {
       ? { ...m, eta: true, title: 'Listo para salir', subtitle: `${driver} va a buscarlo a ${store}.`, active: 1 }
       : { ...m, eta: true, tone: 'search', title: 'Buscando repartidor', subtitle: `Tu pedido ya está listo en ${store}.`, active: 1 };
   }
-  if (status === 'preparing' || status === 'confirmed') return { ...m, eta: true, title: 'Preparando tu pedido', subtitle: hasDriver ? `${store} lo está preparando · ${driver} ya lo va a buscar.` : `${store} ya lo está preparando.`, active: 1 };
+  if (status === 'preparing' || status === 'confirmed') return { ...m, eta: true, title: 'Preparando tu pedido', subtitle: hasDriver ? `${store} lo está preparando · ${driver} ya lo va a buscar.${readyAtText(o)}` : `${store} ya lo está preparando.${readyAtText(o)}`, active: 1 };
   return { ...m, tone: 'wait', title: 'Esperando confirmación', subtitle: `${store} está revisando tu pedido.`, active: 0 };
+}
+
+// " Listo cerca de las 21:40." cuando el comercio dijo cuánto tarda al aceptar
+function readyAtText(o) {
+  const at = tsMs(o.estimatedReadyAt);
+  if (!Number(o.preparationTimeMinutes) || !at || at < Date.now() - 60000) return '';
+  return ` Listo cerca de las ${hhmm(at)}.`;
 }
 
 function doneText(o) {
@@ -181,12 +188,26 @@ export function renderClientPanel(o, status, flags = {}) {
       <div class="gt-code-val" aria-label="Código ${esc(String(o.verificationCode).split('').join(' '))}">${esc(o.verificationCode)}</div>
     </div>` : '';
 
+  // 4b. Transferencia: el alias del repartidor bien visible, con un toque para copiarlo
+  const payByTransfer = !final && !isTakeawayOrder(o) && !isGoCash(o) && isTransfer(o) && String(o.paymentMethod || '').toLowerCase() !== 'mercadopago';
+  const aliasCard = payByTransfer && hasDriver ? `
+    <div class="gt-card gt-alias">
+      <div class="gt-alias-info">
+        <div class="gt-alias-label">Pagás por transferencia · ${money(total)}</div>
+        ${o.driverAlias
+          ? `<div class="gt-alias-val" id="v5-driver-alias-val">${esc(o.driverAlias)}</div>`
+          : `<div class="gt-alias-missing">${esc(firstName(o.driverName) || 'Tu repartidor')} todavía no cargó su alias: pedíselo por chat.</div>`}
+      </div>
+      ${o.driverAlias ? `<button class="gt-btn gt-alias-copy" id="v5-copy-alias-btn">${icon('copy', 16)} Copiar alias</button>` : ''}
+    </div>` : (payByTransfer ? `
+    <div class="gt-card gt-alias"><div class="gt-alias-info"><div class="gt-alias-label">Pagás por transferencia · ${money(total)}</div><div class="gt-alias-missing">Cuando un repartidor tome tu pedido, acá vas a ver su alias para copiarlo.</div></div></div>` : '');
+
   // 5. Una sola fila: cuánto y cómo se paga, ver el pedido y ayuda (sin scroll: todo entra)
   let payText = '';
   if (o.isTrip) payText = isTransfer(o) ? 'Por transferencia al terminar' : 'En efectivo al terminar';
   else if (isTakeawayOrder(o)) payText = 'Retirás en el local';
   else if (isGoCash(o)) payText = 'Costo del servicio';
-  else if (isTransfer(o)) payText = o.driverAlias ? `Transferencia a <b id="v5-driver-alias-val">${esc(o.driverAlias)}</b> <button class="gt-copy" id="v5-copy-alias-btn">Copiar</button>` : (hasDriver ? 'Transferencia · pedí el alias por chat' : 'Transferencia al recibir');
+  else if (isTransfer(o)) payText = 'Por transferencia al recibir';
   else payText = o.cashChangeFor ? `Efectivo · cambio de ${money(o.cashChangeFor)}` : 'Efectivo al recibir';
   if (final) payText = status === 'completed' ? 'Total pagado' : 'Total del pedido';
   const foot = `
@@ -215,6 +236,7 @@ export function renderClientPanel(o, status, flags = {}) {
       <div class="gt-more">
         ${driverCard}
         ${code}
+        ${aliasCard}
         ${foot}
         ${viral}
       </div>
@@ -285,6 +307,12 @@ export const CLIENT_PANEL_CSS = `
   .gt-driver-actions { display: flex; gap: 8px; flex-shrink: 0; }
   .gt-round { width: 44px; height: 44px; border-radius: 22px; border: 0; background: var(--gt-bg); color: var(--gt-tx); display: flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; box-shadow: 0 1px 2px rgba(15,23,42,.08); }
   .gt-round-brand { background: var(--gt-brand); color: #fff; }
+  .gt-alias { display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--gt-brand); }
+  .gt-alias-info { flex: 1; min-width: 0; }
+  .gt-alias-label { font-size: 12.5px; font-weight: 700; color: var(--gt-tx2, #64748b); }
+  .gt-alias-val { font-size: 18px; font-weight: 800; color: var(--gt-tx); margin-top: 2px; word-break: break-all; user-select: all; }
+  .gt-alias-missing { font-size: 13.5px; color: var(--gt-tx); margin-top: 3px; line-height: 1.35; }
+  .gt-alias-copy { flex-shrink: 0; background: var(--gt-brand) !important; color: #fff !important; border-color: var(--gt-brand) !important; }
   .gt-code { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #0F172A; color: #fff; border-radius: 16px; padding: 10px 14px; }
   .gt-code-label { font-size: 14px; font-weight: 700; display: flex; flex-direction: column; }
   .gt-code-label span { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.65); margin-top: 1px; }

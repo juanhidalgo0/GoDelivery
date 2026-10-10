@@ -65,7 +65,8 @@ self.addEventListener('push', (event) => {
           title: title,
           body: body,
           url: targetUrl,
-          tag: tag
+          tag: tag,
+          pushType: fcmData.type || nestedData.type || ''
         });
       }
       const isSupportAlert = (fcmData.type === 'admin_support_alert' || nestedData.type === 'admin_support_alert');
@@ -73,16 +74,21 @@ self.addEventListener('push', (event) => {
 
       // 2. Display native notification if app is in background OR if it's an admin/driver alert
       if (!isForeground || isSupportAlert || isDriverAlert) {
-        const isExclusiveOffer = (fcmData.type === 'exclusive_offer' || nestedData.type === 'exclusive_offer');
+        const pushType = fcmData.type || nestedData.type || '';
+        const isExclusiveOffer = pushType === 'exclusive_offer' || pushType === 'new_exclusive_offer';
+        // Offers and support alerts need an answer: they stay on screen and buzz hard. Everything
+        // else (order updates, chat, promos) behaves like any big app: a short buzz and it goes away.
+        const needsAnswer = isExclusiveOffer || isDriverAlert || isSupportAlert || (fcmData.loud || nestedData.loud) === '1';
 
         const options = {
           body: body,
           icon: 'https://godelivery-magdalena.web.app/logo-pwa.png',
           badge: 'https://godelivery-magdalena.web.app/badge-icon.png',
-          vibrate: (isExclusiveOffer || isDriverAlert) ? [500, 150, 500, 150, 800, 150, 800] : [400, 150, 400, 150, 600],
-          requireInteraction: true, // High importance (keeps notification until interacted with)
-          renotify: true, // Forces wakeup/vibration even on same tag
-          silent: false, // Explicitly loud for Android heads-up
+          vibrate: needsAnswer ? [400, 150, 400, 150, 600] : [120, 60, 120],
+          requireInteraction: needsAnswer,
+          renotify: true, // same tag (e.g. the same order) still buzzes when its status changes
+          silent: false,
+          timestamp: Date.now(),
           tag: isDriverAlert ? `driver-offer-${Date.now()}` : tag,
           data: {
             url: isDriverAlert ? 'https://godelivery-magdalena.web.app/#/repartidor' : targetUrl,
@@ -94,11 +100,11 @@ self.addEventListener('push', (event) => {
         
         if (isDriverAlert) {
           options.actions = [
-            { action: 'open_app', title: '🛵 ACEPTAR PEDIDO AHORA' }
+            { action: 'open_app', title: 'Ver pedido' }
           ];
         } else if (isExclusiveOffer) {
           options.actions = [
-            { action: 'open_app', title: '⚡ ACEPTAR / VER EN APP' }
+            { action: 'open_app', title: 'Ver y aceptar' }
           ];
         }
 

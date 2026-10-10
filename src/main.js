@@ -1,4 +1,7 @@
 // GoDelivery — Main Entry Point
+if (typeof window !== 'undefined' && (window.location.pathname === '/sorteo' || window.location.pathname === '/sorteo/')) {
+  window.location.replace('/sorteo.html' + window.location.search + window.location.hash);
+}
 import { registerRoutes, initRouter, routerReady, handleRoute } from './router.js';
 import { initAuth, isDelivery, isComercio } from './auth.js';
 import { initTheme, loadCart, getState, initSettings } from './state.js';
@@ -8,6 +11,13 @@ import { db } from './firebase.js';
 import { icon } from './utils/icons.js';
 import { initScrollAnimations } from './utils/scroll-animations.js';
 import { safeStorage } from './utils/safe-storage.js';
+import { initReloadLog, markReload } from './utils/reload-log.js';
+import { initErrorReporter } from './utils/error-reporter.js';
+
+// Diagnóstico de "la app se recarga sola": ver utils/reload-log.js y Admin → Reinicios
+initReloadLog();
+// Detector de errores: ver utils/error-reporter.js y Admin → Errores
+initErrorReporter();
 if (import.meta.env.VITE_FIREBASE_ENV === 'testing') {
   import('./utils/sync-catalog.js');
 }
@@ -140,6 +150,9 @@ async function init() {
         if (state.isActive && typeof window.checkAppVersion === 'function') {
           window.checkAppVersion();
         }
+        if (state.isActive) {
+          import('./utils/notifications.js').then(m => m.clearDeliveredNotifications()).catch(() => {});
+        }
       });
     }).catch(err => console.warn('Failed to load Capacitor App plugin:', err));
   }
@@ -147,6 +160,7 @@ async function init() {
   // Global updating state with anti-looping protection via sessionStorage
   let isAppUpdating = false;
   async function showUpdateSplashAndReload() {
+    markReload('versión nueva de la app');
     window.showUpdateSplashAndReload = showUpdateSplashAndReload;
     if (isAppUpdating) return;
 
@@ -225,7 +239,23 @@ async function init() {
   const BUNDLE_BUILD_VERSION = "__APP_BUILD_VERSION_TAG__";
 
   // Force-update check against version.json (Runs on Web, PWA and Native apps to always keep app in sync in real time)
-  const checkAppVersion = async () => {
+  // A new version used to reload the app the moment the 60-second check saw it: every deploy
+  // reloaded every open app mid-use (a driver sliding "entregado", someone typing a chat). Now it
+  // only reloads at a safe moment (opening the app, coming back to it after a while, or a part of
+  // the app failing to load); otherwise a small banner offers the update.
+  let pendingUpdate = false;
+  let hiddenSince = 0;
+  const showUpdateBanner = () => {
+    if (document.getElementById('gd-update-banner')) return;
+    const b = document.createElement('button');
+    b.id = 'gd-update-banner';
+    b.type = 'button';
+    b.textContent = 'Hay una versión nueva · Tocá para actualizar';
+    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:30000000;border:0;border-radius:999px;padding:10px 16px;background:#111827;color:#fff;font:600 13px Inter,system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.35);cursor:pointer;max-width:calc(100% - 32px)';
+    b.onclick = () => { b.remove(); showUpdateSplashAndReload(); };
+    document.body.appendChild(b);
+  };
+  const checkAppVersion = async ({ applyNow = false } = {}) => {
     try {
       // Trigger SW check in background
       if (window._swRegistration && typeof window._swRegistration.update === 'function') {
@@ -252,7 +282,9 @@ async function init() {
           if (Date.now() - lastAttempt >= 15000) {
             console.log('[Version] 🚀 New version detected live! Server:', serverVersion, 'Running:', runningBuildTime);
             localStorage.setItem('gd_app_version', serverVersion);
-            showUpdateSplashAndReload();
+            pendingUpdate = true;
+            if (applyNow) showUpdateSplashAndReload();
+            else showUpdateBanner();
             return;
           }
         } else if (serverVersion) {
@@ -265,15 +297,28 @@ async function init() {
   };
   window.checkAppVersion = checkAppVersion;
 
+  // After a deploy, the parts loaded on demand (the mandado amount modal, the delivery
+  // celebration...) no longer exist on the server for an app that was already open: the import
+  // fails and the action "does nothing" until the next version check. Check now: it reloads only
+  // if there really is a new version (with no signal the import failed for another reason, and
+  // reloading the native app offline would leave it on an error page).
+  window.addEventListener('vite:preloadError', (event) => {
+    console.warn('[Version] A part of the app failed to load. Checking for a new version...', event.payload);
+    checkAppVersion({ applyNow: true });
+  });
+
   // Run version check after app has stabilized (3s), on visibility change, and every 60s
-  setTimeout(checkAppVersion, 3000);
-  setInterval(checkAppVersion, 60000);
-  window.addEventListener('focus', () => checkAppVersion());
+  // Right after opening, nobody is in the middle of anything yet: update straight away
+  setTimeout(() => checkAppVersion({ applyNow: true }), 3000);
+  setInterval(() => checkAppVersion(), 60000);
   window.addEventListener('online', () => checkAppVersion());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      checkAppVersion();
-    }
+    if (document.visibilityState === 'hidden') { hiddenSince = Date.now(); return; }
+    // Back after 2+ minutes away: a safe moment. A quick switch (WhatsApp, the camera, the
+    // maps app while delivering) is not, so it only shows the banner.
+    const away = hiddenSince && Date.now() - hiddenSince > 120000;
+    hiddenSince = 0;
+    checkAppVersion({ applyNow: away });
   });
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
@@ -416,239 +461,15 @@ async function init() {
     }
   }
 
-  async function checkCommerceAccessPin(comercioId, container) {
-    const { doc, getDoc } = await import('firebase/firestore');
-    const { db } = await import('./firebase.js');
-    const { isAdmin } = await import('./auth.js');
-    
-    // Admins bypass PIN check
-    if (isAdmin()) {
-      return true;
-    }
-    
-    try {
-      const snap = await getDoc(doc(db, 'comercios', comercioId));
-      if (!snap.exists()) return true;
-      const data = snap.data();
-      const pin = data.pin;
-      
-      console.log(`[PIN Check] id: ${comercioId}, pin in DB: "${pin}", session auth: "${sessionStorage.getItem('gd-comercio-auth-' + comercioId)}"`);
-
-      if (!pin || pin.trim() === '') {
-        return true;
-      }
-      
-      if (sessionStorage.getItem('gd-comercio-auth-' + comercioId) === 'true') {
-        return true;
-      }
-      
-      showPinLockScreen(comercioId, data.name, data.logo, pin, container);
-      return false;
-    } catch (e) {
-      console.error('Error checking commerce pin:', e);
-      return true;
-    }
+  function commerceIdFromHash() {
+    return window.location.hash.split('/')[2]?.split('?')[0] || '';
   }
 
-  function showPinLockScreen(comercioId, commerceName, logoUrl, correctPin, container) {
-    const content = container || document.getElementById('app-content');
-    if (!content) return;
-    
-    const style = document.createElement('style');
-    style.id = 'pin-screen-styles';
-    style.innerHTML = `
-      .pin-dot {
-        width: 14px;
-        height: 14px;
-        border: 2px solid var(--color-primary);
-        border-radius: 50%;
-        transition: all 0.2s;
-      }
-      .pin-dot.filled {
-        background: var(--color-primary);
-        transform: scale(1.15);
-        box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.5);
-      }
-      .pin-key {
-        width: 64px;
-        height: 64px;
-        border-radius: 50%;
-        border: 1px solid var(--color-border-light);
-        background: var(--color-bg-secondary);
-        color: var(--color-text-primary);
-        font-size: 22px;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: all 0.15s;
-        -webkit-user-select: none;
-        user-select: none;
-      }
-      .pin-key:active {
-        background: var(--color-primary-light);
-        color: var(--color-primary);
-        border-color: var(--color-primary);
-        transform: scale(0.92);
-      }
-      @keyframes pin-shake {
-        0%, 100% { transform: translateX(0); }
-        20%, 60% { transform: translateX(-8px); }
-        40%, 80% { transform: translateX(8px); }
-      }
-      .pin-shake-anim {
-        animation: pin-shake 0.3s ease-in-out;
-      }
-    `;
-    document.getElementById('pin-screen-styles')?.remove();
-    document.head.appendChild(style);
-    
-    content.innerHTML = `
-      <div style="width:100%; min-height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; background:var(--color-bg-page); box-sizing:border-box; position:relative; z-index: 99999;">
-        <div style="position: absolute; top: 20px; left: 20px;">
-          <button id="pin-back-btn" class="btn btn-ghost" style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:13px; color:var(--color-text-secondary); background:var(--color-bg-secondary); border-radius:12px; padding:8px 16px; border:1px solid var(--color-border-light);">
-            ${icon('chevronLeft', 16)} VOLVER
-          </button>
-        </div>
-
-        <div style="text-align:center; max-width:320px; width:100%; display:flex; flex-direction:column; align-items:center; gap:24px;">
-          <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
-            <img src="${logoUrl || '/logo.png'}" alt="${commerceName}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; border:3px solid var(--color-primary); box-shadow:0 8px 24px rgba(var(--color-primary-rgb), 0.25);" />
-            <h2 style="font-family:var(--font-display); font-size:20px; font-weight:900; color:var(--color-text-primary); margin:0;">${commerceName}</h2>
-            <p style="font-size:12px; color:var(--color-text-secondary); margin:0; line-height:1.4; font-weight:650;">Panel protegido. Ingresá el PIN numérico de acceso.</p>
-          </div>
-
-          <div id="pin-dots" style="display:flex; gap:16px; justify-content:center; height:20px;">
-            <div class="pin-dot"></div>
-            <div class="pin-dot"></div>
-            <div class="pin-dot"></div>
-            <div class="pin-dot"></div>
-          </div>
-
-          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; justify-items:center; margin-top:12px;">
-            <div class="pin-key" data-val="1">1</div>
-            <div class="pin-key" data-val="2">2</div>
-            <div class="pin-key" data-val="3">3</div>
-            <div class="pin-key" data-val="4">4</div>
-            <div class="pin-key" data-val="5">5</div>
-            <div class="pin-key" data-val="6">6</div>
-            <div class="pin-key" data-val="7">7</div>
-            <div class="pin-key" data-val="8">8</div>
-            <div class="pin-key" data-val="9">9</div>
-            <div class="pin-key" data-val="delete" style="font-size:14px; border:none; background:transparent; display:flex; align-items:center; justify-content:center;">${icon('delete', 22)}</div>
-            <div class="pin-key" data-val="0">0</div>
-            <div class="pin-key" data-val="clear" style="font-size:11px; font-weight:900; border:none; background:transparent; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-tertiary); display:flex; align-items:center; justify-content:center;">Limpiar</div>
-          </div>
-        </div>
-      </div>
-    `;
-    
-    let currentInput = '';
-    const dots = content.querySelectorAll('.pin-dot');
-    const dotsContainer = content.querySelector('#pin-dots');
-    
-    const updateDots = () => {
-      dots.forEach((dot, idx) => {
-        if (idx < currentInput.length) {
-          dot.classList.add('filled');
-        } else {
-          dot.classList.remove('filled');
-        }
-      });
-    };
-    
-    const handleKey = (val) => {
-      if (val === 'delete') {
-        currentInput = currentInput.slice(0, -1);
-        try { AudioManager.hapticLight(); } catch(e){}
-      } else if (val === 'clear') {
-        currentInput = '';
-        try { AudioManager.hapticLight(); } catch(e){}
-      } else {
-        if (currentInput.length < 4) {
-          currentInput += val;
-          try { AudioManager.hapticLight(); } catch(e){}
-        }
-      }
-      
-      updateDots();
-      
-      if (currentInput.length === 4) {
-        setTimeout(() => {
-          if (currentInput === correctPin) {
-            sessionStorage.setItem('gd-comercio-auth-' + comercioId, 'true');
-            showToast('Acceso concedido', 'success');
-            try { AudioManager.playSynthPop(); } catch(e){}
-            window.dispatchEvent(new HashChangeEvent('hashchange'));
-          } else {
-            dotsContainer.classList.add('pin-shake-anim');
-            showToast('PIN incorrecto', 'error');
-            try { AudioManager.hapticLight(); } catch(e){}
-            setTimeout(() => {
-              dotsContainer.classList.remove('pin-shake-anim');
-              currentInput = '';
-              updateDots();
-            }, 350);
-          }
-        }, 150);
-      }
-    };
-    
-    content.querySelectorAll('.pin-key').forEach(key => {
-      key.onclick = () => handleKey(key.dataset.val);
-    });
-    
-    content.querySelector('#pin-back-btn').onclick = () => {
-      location.hash = '#/profile';
-    };
-  }
-
-  async function wrapCommerceRoute(comercioId, container, renderFn) {
-    if (comercioId) {
-      window.verifiedCommerceRoutes = window.verifiedCommerceRoutes || {};
-      if (window.verifiedCommerceRoutes[comercioId]) {
-        return renderFn();
-      }
-
-      // Show loader immediately while verifying credentials/PIN
-      const content = container || document.getElementById('app-content');
-      if (content) {
-        content.innerHTML = `
-          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:80dvh; gap:20px; color:var(--color-text-secondary);">
-            <div class="loader-spinner"></div>
-            <p style="font-weight:700; font-size:14px; animation: pulse 1.5s infinite;">Verificando credenciales...</p>
-          </div>
-          <style>
-            @keyframes spin { to { transform: rotate(360deg); } }
-            .loader-spinner {
-              width: 48px; height: 48px;
-              border: 4px solid var(--color-border-light);
-              border-top-color: var(--color-primary);
-              border-radius: 50%;
-              animation: spin 0.8s linear infinite;
-            }
-          </style>
-        `;
-      }
-
-      const { isAdmin } = await import('./auth.js');
-      if (isAdmin()) {
-        window.verifiedCommerceRoutes[comercioId] = true;
-        ensureAdminOwnership(comercioId);
-        return renderFn();
-      }
-
-      await ensureAdminOwnership(comercioId);
-      const accessGranted = await checkCommerceAccessPin(comercioId, container);
-      if (!accessGranted) {
-        return;
-      }
-      window.verifiedCommerceRoutes[comercioId] = true;
-    }
+  async function commercePanelRoute(renderFn) {
+    const id = commerceIdFromHash();
+    if (id) ensureAdminOwnership(id);
     return renderFn();
   }
-
 
   // Register all routes
   registerRoutes({
@@ -702,9 +523,13 @@ async function init() {
     '/admin/offers': (c) => import('./pages/admin/offers.js').then(m => m.renderAdminOffers(c)),
     '/admin/coupons': (c) => import('./pages/admin/coupons.js').then(m => m.renderAdminCoupons(c)),
     '/admin/lugares': (c) => import('./pages/admin/mandado-places.js').then(m => m.renderAdminMandadoPlaces(c)),
+    '/admin/reinicios': (c) => import('./pages/admin/restarts.js').then(m => m.renderAdminRestarts(c)),
+    '/admin/errores': (c) => import('./pages/admin/errors.js').then(m => m.renderAdminErrors(c)),
     '/admin/metrics': (c) => import('./pages/admin/metrics.js').then(m => m.renderAdminMetrics(c)),
     '/admin/metrics/services': (c) => import('./pages/admin/services-metrics.js').then(m => m.renderServicesMetrics(c)),
     '/admin/metrics/breakdown': (c) => import('./pages/admin/metrics-breakdown.js').then(m => m.renderAdminMetricsBreakdown(c)),
+    '/admin/sorteos': (c) => import('./pages/admin/sorteos.js').then(m => m.renderAdminSorteos(c)),
+    '/admin/sorteos/:id': (c) => import('./pages/admin/sorteos.js').then(m => m.renderAdminSorteoEditor(c)),
 
     '/mi-comercio': async () => {
       const user = getState().user;
@@ -731,53 +556,45 @@ async function init() {
         `;
       }
 
+      // El admin atiende Go! Market: "Mi comercio" siempre lo lleva ahí, aunque antes haya
+      // entrado al panel de otro local desde Admin → Comercios.
+      const { isAdmin } = await import('./auth.js');
+      if (isAdmin()) {
+        try {
+          const gm = await findGoMarketDoc();
+          if (gm) {
+            location.hash = `#/mi-comercio/${gm.id}/orders`;
+            return;
+          }
+        } catch (e) {
+          console.warn('Go! Market lookup failed:', e);
+        }
+      }
+
       // Check cached commerce ID for the user
       const cachedCommerceId = localStorage.getItem(`gd_my_commerce_id_${user.uid}`);
-      if (cachedCommerceId) {
+      if (cachedCommerceId && !isAdmin()) {
         location.hash = `#/mi-comercio/${cachedCommerceId}/orders`;
         return;
       }
 
-      // Check cached Go! Market ID if user is admin
-      const { isAdmin } = await import('./auth.js');
-      if (isAdmin()) {
-        const cachedGoMarketId = localStorage.getItem('gd_gomarket_id');
-        if (cachedGoMarketId) {
-          location.hash = `#/mi-comercio/${cachedGoMarketId}/orders`;
-          return;
-        }
-      }
-      
       const { collection, query, where, getDocs } = await import('firebase/firestore');
 
       try {
         // 1. Priorizar el comercio del cual el usuario es dueño directo
         const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
         const snap = await getDocs(q);
-        if (!snap.empty) {
+        if (snap.size === 1) {
           const commerceId = snap.docs[0].id;
           localStorage.setItem(`gd_my_commerce_id_${user.uid}`, commerceId);
           location.hash = `#/mi-comercio/${commerceId}/orders`;
           return;
         }
-
-        // 2. Si no es dueño de ningún comercio pero es Admin, redirigir a Go! Market
-        if (isAdmin()) {
-          const { limit } = await import('firebase/firestore');
-          // Limit to 30 documents instead of fetching the entire database collection to ensure sub-100ms load speeds
-          const qGoMarket = query(collection(db, 'comercios'), limit(30));
-          const allSnap = await getDocs(qGoMarket);
-          const goMarket = allSnap.docs.find(d => {
-            const name = (d.data().name || '').toLowerCase();
-            return name.includes('go!') && name.includes('market');
-          });
-          if (goMarket) {
-            localStorage.setItem('gd_gomarket_id', goMarket.id);
-            // Also cache it for the admin user specifically so next time they click, it skips database lookup entirely
-            localStorage.setItem(`gd_my_commerce_id_${user.uid}`, goMarket.id);
-            location.hash = `#/mi-comercio/${goMarket.id}/orders`;
-            return;
-          }
+        // Dueño de varios comercios: que elija a cuál entra (después se recuerda el último)
+        if (snap.size > 1) {
+          const { renderCommercePicker } = await import('./pages/comercio-panel/shell.js');
+          renderCommercePicker(appContent || document.body, snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          return;
         }
 
         location.hash = '#/profile';
@@ -786,50 +603,23 @@ async function init() {
         location.hash = '#/profile';
       }
     },
-    '/mi-comercio/:id': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/dashboard.js').then(m => m.renderComercioDashboard(c)));
-    },
-    '/mi-comercio/:id/products': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/products.js').then(m => m.renderComercioProducts(c)));
-    },
-    '/mi-comercio/:id/sabores': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/sabores.js').then(m => m.renderComercioSabores(c)));
-    },
-    '/mi-comercio/:id/settings': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/settings.js').then(m => m.renderComercioSettings(c)));
-    },
-    '/mi-comercio/:id/orders': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      if (id) {
-        await ensureAdminOwnership(id);
-        sessionStorage.removeItem('gd-comercio-auth-' + id);
-      }
-      return import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders(id));
-    },
-    '/mi-comercio/:id/finances': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/finances.js').then(m => m.renderComercioFinances(c)));
-    },
-    '/mi-comercio/:id/offers': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/offers.js').then(m => m.renderComercioOffers(c)));
-    },
-    '/mi-comercio/:id/metrics': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/metrics.js').then(m => m.renderComercioMetrics(c)));
-    },
-    '/mi-comercio/:id/coupons': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/coupons.js').then(m => m.renderComercioCoupons(c)));
-    },
-    '/mi-comercio/:id/ads': async (c) => {
-      const id = window.location.hash.split('/')[2]?.split('?')[0];
-      return wrapCommerceRoute(id, c, () => import('./pages/comercio-panel/ads.js').then(m => m.renderComercioAds(c)));
-    },
+    // Panel del comercio: la estructura (pestañas, estado del local y PIN) la arma
+    // src/pages/comercio-panel/shell.js; cada ruta sólo elige qué pantalla dibuja.
+    '/mi-comercio/:id': (c) => commercePanelRoute(() => import('./pages/comercio-panel/dashboard.js').then(m => m.renderComercioDashboard(c))),
+    '/mi-comercio/:id/orders': () => commercePanelRoute(() => import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders(commerceIdFromHash()))),
+    '/mi-comercio/:id/products': (c) => commercePanelRoute(() => import('./pages/comercio-panel/products.js').then(m => m.renderComercioProducts(c))),
+    '/mi-comercio/:id/categorias': (c) => commercePanelRoute(() => import('./pages/comercio-panel/categories.js').then(m => m.renderComercioCategories(c))),
+    '/mi-comercio/:id/sabores': (c) => commercePanelRoute(() => import('./pages/comercio-panel/sabores.js').then(m => m.renderComercioSabores(c))),
+    '/mi-comercio/:id/promos': (c) => commercePanelRoute(() => import('./pages/comercio-panel/promos.js').then(m => m.renderComercioPromos(c))),
+    // Ofertas y cupones viven juntos en Promos (links viejos incluidos)
+    '/mi-comercio/:id/offers': () => { location.replace(`#/mi-comercio/${commerceIdFromHash()}/promos`); },
+    '/mi-comercio/:id/coupons': () => { location.replace(`#/mi-comercio/${commerceIdFromHash()}/promos`); },
+    '/mi-comercio/:id/metrics': (c) => commercePanelRoute(() => import('./pages/comercio-panel/metrics.js').then(m => m.renderComercioMetrics(c))),
+    '/mi-comercio/:id/finances': (c) => commercePanelRoute(() => import('./pages/comercio-panel/finances.js').then(m => m.renderComercioFinances(c))),
+    '/mi-comercio/:id/settings': (c) => commercePanelRoute(() => import('./pages/comercio-panel/local.js').then(m => m.renderComercioLocal(c))),
+    '/mi-comercio/:id/settings/:section': (c) => commercePanelRoute(() => import('./pages/comercio-panel/local.js').then(m => m.renderComercioLocal(c))),
+    // La publicidad todavía no está habilitada para los comercios
+    '/mi-comercio/:id/ads': () => { location.replace(`#/mi-comercio/${commerceIdFromHash()}/promos`); },
     '/notifications': (c) => import('./pages/notifications.js').then(m => m.renderNotifications(c)),
     '/offers': (c) => import('./pages/offers-page.js').then(m => m.renderOffersPage(c)),
     '/mp-connect': (c) => import('./pages/mp-connect.js').then(m => m.renderMPConnect(c)),
@@ -1387,8 +1177,9 @@ async function init() {
               }
             }
 
+            // Sólo se recuerda el comercio: el panel se dibuja cuando se entra a "Mi comercio"
             if (comId) {
-              import('./pages/comercio-panel/orders.js').then(m => m.renderComercioOrders(comId));
+              try { localStorage.setItem(`gd_my_commerce_id_${user.uid}`, comId); } catch (e) {}
             }
           } catch (err) {
             console.warn('Error in background comercio role sync:', err);
@@ -1415,7 +1206,8 @@ async function init() {
                 import('./components/notification-prompt.js').then(m => m.showNotificationPrompt()).catch(() => {});
               }
               checkAppUpdate();
-              if (user && !getState().deliveryAddress) {
+              // En el panel del comercio no se pide dirección de entrega: ahí se atiende, no se compra
+              if (user && !getState().deliveryAddress && !location.hash.startsWith('#/mi-comercio')) {
                 import('./components/address-modal.js').then(m => {
                   m.ensureAddress(() => {
                     triggerReferralModal();
@@ -1428,27 +1220,12 @@ async function init() {
 
         import('./components/onboarding.js')
           .then(m => {
-            m.showOnboarding(() => {
-              // After onboarding, show the interactive app guide
-              import('./components/app-guide.js').then(g => {
-                g.showAppGuide(() => {
-                  continueAfterGuide();
-                });
-              }).catch(err => {
-                console.warn('App guide failed to load', err);
-                continueAfterGuide();
-              });
-            });
+            // La guía de la app (components/client-tour.js) la arranca el inicio cuando está tranquilo
+            m.showOnboarding(() => continueAfterGuide());
           })
           .catch(err => {
             console.error('Onboarding failed to load', err);
-            import('./components/app-guide.js').then(g => {
-              g.showAppGuide(() => {
-                continueAfterGuide();
-              });
-            }).catch(() => {
-              continueAfterGuide();
-            });
+            continueAfterGuide();
           });
       };
 

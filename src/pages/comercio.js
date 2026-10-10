@@ -14,6 +14,9 @@ import { icon } from '../utils/icons.js';
 import { escapeHtml } from '../utils/escape.js';
 import { openProductModal } from '../components/product-modal.js';
 import { createSlug, getStoreUrl } from '../utils/slug.js';
+import { getArgentinaTime, hasWeeklySchedule } from '../utils/format.js';
+import '../styles/tienda.css';
+import { storeInitials } from '../utils/store-initials.js';
 
 let currentComercio = null;
 let currentActiveOrder = null;
@@ -169,7 +172,7 @@ export async function renderComercio(content, isDirectMode = false) {
         // Update DOM elements in real time
         const logoImg = document.querySelector('.comercio-detail-logo');
         if (logoImg && logoImg.tagName === 'IMG') logoImg.src = comercio.logo || '/logo.png';
-        const bannerImg = document.querySelector('.comercio-header img');
+        const bannerImg = document.getElementById('comercio-banner-img') || document.querySelector('.comercio-header img');
         if (bannerImg && bannerImg.tagName === 'IMG') bannerImg.src = comercio.banner || '/logo.png';
         const nameEl = document.querySelector('.comercio-info-text h1');
         if (nameEl) nameEl.textContent = comercio.name;
@@ -181,10 +184,16 @@ export async function renderComercio(content, isDirectMode = false) {
           // Update open/closed badge
           const statusBadge = document.getElementById('comercio-status-badge');
           if (statusBadge) {
-            const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+            const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
             const badgeText = comercio.isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
             const dotColor = comercio.isPaused ? '#f59e0b' : (isOpen ? '#22c55e' : '#8d8a86');
-            statusBadge.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;"></span> ${badgeText}`;
+            if (statusBadge.classList.contains('tnd-fact')) {
+              // Catálogo online: la etiqueta toma su color por clase
+              statusBadge.className = `tnd-fact ${comercio.isPaused ? 'is-paused' : (isOpen ? 'is-open' : 'is-closed')}`;
+              statusBadge.innerHTML = `<span class="tnd-dot"></span>${comercio.isPaused ? 'Pausado por un rato' : statusLine(comercio, isOpen)}`;
+            } else {
+              statusBadge.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;"></span> ${badgeText}`;
+            }
           }
           // Show/hide paused banner
           const pauseBanner = document.getElementById('comercio-pause-banner');
@@ -286,7 +295,7 @@ export async function renderComercio(content, isDirectMode = false) {
       if (targetProductId && !deepLinkOpened) {
         const targetProd = products.find(p => p.id === targetProductId);
         if (targetProd && targetProd.isAvailable !== false && !(targetProd.stockMode === 'limited' && (targetProd.stockQuantity || 0) <= 0)) {
-          const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+          const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
           deepLinkOpened = true;
           setTimeout(() => {
             openProductModal(targetProd, resolvedComercioId, comercio.name, isOpen);
@@ -370,7 +379,9 @@ export async function renderComercio(content, isDirectMode = false) {
     let products = (initialProdSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
 
     if (hadLoadError && products.length === 0 && categories.length === 0 && !cachedData) {
-      throw new Error('Failed to load comercio menu data (categories/products query error)');
+      // El motivo va en el mensaje: si es un timeout o falta de red, el detector lo marca como red
+      const reasons = [...new Set([catsSnap, offersSnap, initialProdSnap].map(x => x?.reason).filter(Boolean))].join(' | ');
+      throw new Error(`Failed to load comercio menu data (categories/products query error)${reasons ? `: ${reasons}` : ''}`);
     }
 
     // Helper to load products for a specific category dynamically
@@ -434,7 +445,7 @@ export async function renderComercio(content, isDirectMode = false) {
         return JSON.stringify({
           comercioId: c.id,
           comercioName: c.name,
-          comercioOpen: isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen),
+          comercioOpen: isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule),
           categoriesLength: catList.length,
           categoriesIds: catList.map(cat => cat.id).join(','),
           productsLength: pList.length,
@@ -464,7 +475,7 @@ export async function renderComercio(content, isDirectMode = false) {
           }
         }
         if (targetProd && targetProd.isAvailable !== false && !(targetProd.stockMode === 'limited' && (targetProd.stockQuantity || 0) <= 0)) {
-          const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+          const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
           deepLinkOpened = true;
           setTimeout(() => {
             openProductModal(targetProd, resolvedComercioId, comercio.name, isOpen);
@@ -572,7 +583,7 @@ export async function renderComercio(content, isDirectMode = false) {
       // Update brands dropdown dynamically
       activeBrand = updateBrandDropdown(products, activeCategory, activeSubCategory, categories, activeBrand, activeOffers);
 
-      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
       smoothScrollToProductsTop();
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
@@ -602,7 +613,7 @@ export async function renderComercio(content, isDirectMode = false) {
       // Update brands dropdown dynamically
       activeBrand = updateBrandDropdown(products, activeCategory, activeSubCategory, categories, activeBrand, activeOffers);
 
-      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
       smoothScrollToProductsTop();
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
@@ -611,7 +622,7 @@ export async function renderComercio(content, isDirectMode = false) {
     content.addEventListener('change', (e) => {
       if (e.target.id === 'comercio-brand-select') {
         activeBrand = e.target.value;
-        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
         smoothScrollToProductsTop();
         renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
       }
@@ -621,7 +632,7 @@ export async function renderComercio(content, isDirectMode = false) {
     const sortSelect = content.querySelector('#comercio-sort-select') || document.getElementById('comercio-sort-select');
     sortSelect?.addEventListener('change', (e) => {
       activeSort = e.target.value;
-      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
       smoothScrollToProductsTop();
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
@@ -637,7 +648,7 @@ export async function renderComercio(content, isDirectMode = false) {
       }
       if (comercioSearchDebounceTimer) clearTimeout(comercioSearchDebounceTimer);
       comercioSearchDebounceTimer = setTimeout(() => {
-        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
         renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
       }, 120);
     });
@@ -648,7 +659,7 @@ export async function renderComercio(content, isDirectMode = false) {
       if (input) input.value = '';
       activeSearch = '';
       if (clearSearchBtn) clearSearchBtn.style.display = 'none';
-      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+      const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
@@ -656,7 +667,7 @@ export async function renderComercio(content, isDirectMode = false) {
     const productsContainer = content.querySelector('#comercio-products') || document.getElementById('comercio-products');
     if (productsContainer) {
       productsContainer.onclick = (e) => {
-        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+        const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
 
         const card = e.target.closest('.product-card');
         const addBtn = e.target.closest('.product-card-add');
@@ -910,17 +921,20 @@ function updateDirectCartBar(comercioId, activeOrder = currentActiveOrder) {
     bar.style.cssText = `
       position: fixed !important;
       bottom: calc(16px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) !important;
-      left: 16px !important;
-      right: 16px !important;
+      left: 0 !important;
+      right: 0 !important;
+      margin: 0 auto !important;
+      width: calc(100% - 32px) !important;
+      max-width: 560px !important;
       z-index: 99999999 !important;
       display: flex !important;
       align-items: center !important;
       justify-content: space-between !important;
-      background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
+      background: #0b0b0c !important;
       color: white !important;
-      padding: 14px 20px !important;
+      padding: 10px 10px 10px 16px !important;
       border-radius: 20px !important;
-      box-shadow: 0 10px 30px rgba(225, 29, 72, 0.45), 0 2px 8px rgba(0,0,0,0.15) !important;
+      box-shadow: 0 12px 30px rgba(11, 11, 12, 0.35) !important;
       cursor: pointer !important;
       font-family: var(--font-body, system-ui) !important;
       box-sizing: border-box !important;
@@ -930,14 +944,14 @@ function updateDirectCartBar(comercioId, activeOrder = currentActiveOrder) {
 
     bar.innerHTML = `
       <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-        <div style="background: rgba(255,255,255,0.22); width: 40px; height: 40px; border-radius: 12px; display:flex; align-items:center; justify-content:center; font-size: 20px; flex-shrink:0;">🛍️</div>
+        <div style="background: rgba(255,255,255,0.12); width: 40px; height: 40px; border-radius: 12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative;">${icon('shoppingBag', 20)}<span style="position:absolute; top:-5px; right:-5px; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:#e11d48; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center;">${totalCount}</span></div>
         <div style="min-width:0;">
-          <div id="direct-cart-bar-items" style="font-size: 11px; font-weight: 800; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">${totalCount} ${totalCount === 1 ? 'PRODUCTO' : 'PRODUCTOS'}</div>
-          <div id="direct-cart-bar-total" style="font-size: 17px; font-weight: 900; font-family: var(--font-display, inherit);">$${formatPrice(totalPrice).replace('$', '')}</div>
+          <div id="direct-cart-bar-items" style="font-size: 12px; font-weight: 600; opacity: 0.7;">${totalCount} ${totalCount === 1 ? 'producto' : 'productos'}</div>
+          <div id="direct-cart-bar-total" style="font-size: 17px; font-weight: 800; font-family: var(--go-font, inherit);">$${formatPrice(totalPrice).replace('$', '')}</div>
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap:6px; font-weight: 900; font-size: 13.5px; background: rgba(255,255,255,0.22); padding: 9px 16px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); flex-shrink:0;">
-        Ver Mi Pedido ${icon('chevronRight', 16)}
+      <div style="display:flex; align-items:center; gap:6px; font-weight: 700; font-size: 14px; background: #e11d48; padding: 12px 16px; border-radius: 14px; flex-shrink:0;">
+        Ver pedido ${icon('chevronRight', 16)}
       </div>
     `;
 
@@ -1078,7 +1092,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
 
   const cleanPhone = (comercio.whatsapp || comercio.phone || '').replace(/\D/g, '');
 
-  content.innerHTML = `
+  content.innerHTML = isDirect ? directStoreHTML(comercio, categories, activeCategory, activeSubCategory, hasDiscounts) : `
     <div class="comercio-page" style="${isDirect ? 'padding-bottom: 120px;' : ''}">
       <!-- Minimal Sticky Navbar -->
       <div id="comercio-navbar" style="position: sticky; top: 0; z-index: 100; height: calc(56px + max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); display: flex; align-items: center; justify-content: space-between; padding: calc(max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))) 16px 0 16px; box-sizing: border-box; transition: background 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; background: transparent; border-bottom: 1px solid transparent;">
@@ -1115,7 +1129,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
       <div class="comercio-info" style="position: relative; z-index: 2; margin-top: -40px; padding: 0 16px;">
         <div class="comercio-info-card" style="background: var(--color-surface); border-radius: 24px; padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); position: relative;">
           ${(() => {
-            const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+            const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
             const isPausedNow = comercio.isPaused === true;
             const badgeText = isPausedNow ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
             const dotColor = isPausedNow ? '#f59e0b' : (isOpen ? '#22c55e' : '#8d8a86');
@@ -1237,12 +1251,13 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
     </div>
   `;
 
-  const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen);
+  const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
   const isPausedNow = comercio.isPaused === true;
   renderProducts(products, activeCategory, activeOffers, activeSort, '', comercio.id, isOpen, activeBrand, activeSubCategory, categories, isPausedNow);
   
   updateComercioActiveOrderUI(currentActiveOrder, comercio.id, isDirect);
   if (isDirect) {
+    initCatalogCategoryScroll(content);
     updateDirectCartBar(comercio.id, currentActiveOrder);
   } else {
     updateGlobalCartFAB();
@@ -1252,6 +1267,9 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
   document.getElementById('rate-comercio-btn')?.addEventListener('click', () => {
     openRatingModal(comercio);
   });
+  ['tnd-share', 'tnd-share-top'].forEach(id => document.getElementById(id)?.addEventListener('click', () => shareStoreLink(comercio)));
+  // A button, not a link: a global rule hides every google.com/maps link on desktop (map credits)
+  document.getElementById('tnd-directions')?.addEventListener('click', (e) => window.open(e.currentTarget.dataset.url, '_blank', 'noopener'));
 
   // Modern, flicker-free sticky navbar logic
   const navbar = document.getElementById('comercio-navbar');
@@ -1380,6 +1398,263 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
       }
     }
   };
+}
+
+// ---- Catálogo online (#/tienda/<slug>) ------------------------------------------------------
+// La página que el comercio comparte (WhatsApp, QR, redes). Estilos en styles/tienda.css. Usa los
+// mismos ids que la vista de la app para que la búsqueda, las categorías y el carrito funcionen igual.
+
+/** Turnos de hoy [{open, close}] (null si no hay horario cargado). */
+function todaySlots(comercio) {
+  const day = getArgentinaTime().getDay();
+  if (hasWeeklySchedule(comercio.weeklySchedule)) return Array.isArray(comercio.weeklySchedule[String(day)]) ? comercio.weeklySchedule[String(day)].filter(s => s && s.open && s.close) : [];
+  if (Array.isArray(comercio.daysOpen) && comercio.daysOpen.length && !comercio.daysOpen.includes(day)) return [];
+  if (Array.isArray(comercio.schedules) && comercio.schedules.length) return comercio.schedules.filter(s => s && s.open && s.close);
+  if (comercio.schedule?.open) return [comercio.schedule];
+  return null;
+}
+
+/** "Abierto · hasta 23:30" / "Cerrado · abre 19:30" / "Cerrado hoy" / "Abierto" */
+function statusLine(comercio, isOpen) {
+  const slots = todaySlots(comercio);
+  const now = getArgentinaTime();
+  const t = now.getHours() * 60 + now.getMinutes();
+  const mins = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + m; };
+  if (isOpen) {
+    const cur = (slots || []).find(s => { const o = mins(s.open), c = mins(s.close); return c < o ? (t >= o || t <= c) : (t >= o && t <= c); });
+    return cur ? `Abierto · hasta ${cur.close}` : 'Abierto ahora';
+  }
+  if (!slots) return 'Cerrado ahora';
+  const next = slots.map(s => s.open).filter(o => mins(o) > t).sort((a, b) => mins(a) - mins(b))[0];
+  return next ? `Cerrado · abre ${next}` : 'Cerrado por hoy';
+}
+
+/** Horario de hoy para mostrar: "Hoy 19:00 – 23:30", o null si no hay horario cargado. */
+function todayHoursText(comercio) {
+  const day = getArgentinaTime().getDay();
+  let slots = null;
+  if (hasWeeklySchedule(comercio.weeklySchedule)) {
+    slots = Array.isArray(comercio.weeklySchedule[String(day)]) ? comercio.weeklySchedule[String(day)] : [];
+  } else if (Array.isArray(comercio.daysOpen) && comercio.daysOpen.length && !comercio.daysOpen.includes(day)) {
+    slots = [];
+  } else if (Array.isArray(comercio.schedules) && comercio.schedules.length) {
+    slots = comercio.schedules;
+  } else if (comercio.schedule?.open) {
+    slots = [comercio.schedule];
+  }
+  if (!slots) return null;
+  const valid = slots.filter(s => s && s.open && s.close);
+  if (!valid.length) return 'Hoy no abre';
+  return 'Hoy ' + valid.map(s => `${s.open} – ${s.close}`).join(' y ');
+}
+
+function directStoreHTML(comercio, categories, activeCategory, activeSubCategory, hasDiscounts) {
+  const esc = escapeHtml;
+  const name = comercio.name || 'Comercio';
+  const initials = storeInitials(name);
+  const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
+  const isPaused = comercio.isPaused === true;
+  const hours = todayHoursText(comercio);
+  const cleanPhone = (comercio.whatsapp || comercio.phone || '').replace(/\D/g, '');
+  const waPhone = cleanPhone ? (cleanPhone.startsWith('54') ? cleanPhone : `549${cleanPhone}`) : '';
+  const addressShort = comercio.address ? String(comercio.address).split(',')[0] : '';
+  const mapsUrl = comercio.coords?.lat
+    ? `https://www.google.com/maps/search/?api=1&query=${comercio.coords.lat},${comercio.coords.lng}`
+    : (comercio.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(comercio.address)}` : '');
+  const rating = comercio.ratingAverage > 0 ? `${comercio.ratingAverage.toFixed(1)} <span style="opacity:.6;font-weight:500">(${comercio.ratingCount || 0})</span>` : 'Calificar';
+  const subCats = categories.filter(c => c.parentCategoryId === activeCategory);
+  const statusClass = isPaused ? 'is-paused' : (isOpen ? 'is-open' : 'is-closed');
+  const statusText = isPaused ? 'Pausado por un rato' : statusLine(comercio, isOpen);
+  const subPill = (id, label, active) => `<button class="sub-tab-pill ${active ? 'active' : ''}" data-subcat-id="${esc(id)}" style="border:1.5px solid ${active ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${active ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color:${active ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; cursor:pointer; white-space:nowrap;">${esc(label)}</button>`;
+
+  return `
+    <div class="comercio-page tnd">
+      <div id="comercio-navbar" class="tnd-top">
+        <div id="comercio-nav-title" class="tnd-top-title">
+          ${comercio.logo ? `<img src="${esc(comercio.logo)}" alt="" />` : `<div class="tnd-top-ph"></div>`}
+          <span>${esc(name)}</span>
+        </div>
+        <button id="tnd-share-top" class="tnd-icon-btn" aria-label="Compartir">${icon('share', 18)}</button>
+      </div>
+
+      <div class="tnd-hero">
+        ${comercio.banner
+          ? `<img id="comercio-banner-img" src="${esc(comercio.banner)}" alt="" decoding="async" /><div class="tnd-hero-shade"></div>`
+          : `<div class="tnd-hero-ph"><b>${esc(initials)}</b></div>`}
+      </div>
+
+      <div class="tnd-wrap">
+        <section class="tnd-head comercio-info-card">
+          <div class="tnd-head-row">
+            ${comercio.logo
+              ? `<img class="tnd-logo comercio-detail-logo" src="${esc(comercio.logo)}" alt="${esc(name)}" />`
+              : `<div class="tnd-logo tnd-logo-ph">${esc(initials)}</div>`}
+            <div class="comercio-info-text" style="min-width:0">
+              <h1 class="tnd-name">${esc(name)}</h1>
+              <div class="tnd-sub">${esc([comercio.category, addressShort].filter(Boolean).join(' · '))}</div>
+            </div>
+          </div>
+          ${comercio.description ? `<p class="tnd-desc comercio-description">${esc(comercio.description)}</p>` : ''}
+
+          <div class="tnd-facts">
+            <span id="comercio-status-badge" class="tnd-fact ${statusClass}"><span class="tnd-dot"></span>${statusText}</span>
+            <span class="tnd-fact">${icon('bike', 14)}Envío o retiro</span>
+            <button id="rate-comercio-btn" class="tnd-fact">${icon('star', 14, '', '#f59e0b')}${rating}</button>
+          </div>
+
+          <div class="tnd-actions">
+            ${waPhone ? `<a class="tnd-btn is-wa" href="https://wa.me/${waPhone}?text=${encodeURIComponent(`¡Hola ${name}! Te escribo desde tu catálogo online.`)}" target="_blank" rel="noopener noreferrer">${icon('whatsapp', 17)}WhatsApp</a>` : ''}
+            ${mapsUrl ? `<button type="button" id="tnd-directions" class="tnd-btn" data-url="${esc(mapsUrl)}">${icon('mapPin', 16)}Cómo llegar</button>` : ''}
+            ${!waPhone || !mapsUrl ? `<button id="tnd-share" class="tnd-btn">${icon('share', 16)}Compartir</button>` : ''}
+          </div>
+
+          <div id="comercio-pause-banner" class="tnd-notice" style="display:${isPaused ? 'flex' : 'none'}">
+            ${icon('pause', 18)}<span>El comercio pausó los pedidos por un rato. Podés mirar el catálogo y volver a pedir en unos minutos.</span>
+          </div>
+          ${!isPaused && !isOpen ? `<div class="tnd-notice is-closed">${icon('clock', 18)}<span>Podés mirar el catálogo ahora y hacer tu pedido cuando abra.${hours && hours !== 'Hoy no abre' ? ` Horario: ${esc(hours.replace(/^Hoy /, 'hoy '))}.` : ''}</span></div>` : ''}
+        </section>
+
+        <div id="comercio-sticky-filters" class="tnd-filters">
+          <label class="tnd-search">
+            ${icon('search', 18)}
+            <input type="search" id="comercio-product-search" placeholder="Buscar en ${esc(name)}" autocomplete="off" enterkeyhint="search" />
+            <button id="clear-search-btn" type="button" aria-label="Borrar búsqueda">${icon('xCircle', 18)}</button>
+          </label>
+          <div class="tnd-cats tab-pills" id="comercio-categories">
+            <button class="tab-pill ${activeCategory === 'all' ? 'active' : ''}" data-cat-id="all">Todo</button>
+            ${hasDiscounts ? `<button class="tab-pill ${activeCategory === 'discounts' ? 'active' : ''}" data-cat-id="discounts">${icon('tag', 13)}Ofertas</button>` : ''}
+            ${categories.filter(c => !c.parentCategoryId).map(c => `<button class="tab-pill ${activeCategory === c.id ? 'active' : ''}" data-cat-id="${esc(c.id)}">${esc(c.name)}</button>`).join('')}
+          </div>
+          <div id="comercio-subcategories-container" class="tnd-subcats" style="display:${subCats.length ? 'block' : 'none'}">
+            <div class="tab-pills sub-tab-pills" id="comercio-subcategories">
+              ${subCats.length ? subPill('all', 'Ver todo', activeSubCategory === 'all') + subCats.map(sc => subPill(sc.id, sc.name, activeSubCategory === sc.id)).join('') : ''}
+            </div>
+          </div>
+        </div>
+
+        <div class="tnd-products" id="comercio-products"></div>
+
+        <footer class="tnd-foot">
+          <a href="https://godelivery-magdalena.web.app/descargar.html" target="_blank" rel="noopener noreferrer"><span class="tnd-go">GO!</span>Pedidos online con GO! Delivery</a>
+          <span>Magdalena · pedí a domicilio o retirá en el local</span>
+        </footer>
+      </div>
+    </div>`;
+}
+
+/**
+ * Catálogo online: tocar una categoría desplaza suave hasta su sección (no filtra ni salta), y al
+ * bajar con el dedo se marca sola la categoría que se está viendo. Solo cuando la lista está
+ * agrupada ("Todo", sin búsqueda); si no, sigue el filtro de siempre.
+ */
+function initCatalogCategoryScroll(root) {
+  const pills = root.querySelector('#comercio-categories');
+  const products = root.querySelector('#comercio-products');
+  if (!pills || !products) return;
+  // Looked up when used: right after rendering the content isn't laid out yet and nothing scrolls
+  const getScroller = () => {
+    for (let el = products.parentElement; el; el = el.parentElement) {
+      const oy = getComputedStyle(el).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) return el;
+    }
+    return document.scrollingElement || document.documentElement;
+  };
+  // Where the filters' bottom edge sits once they're stuck (at the top of the page they are
+  // still lower, and measuring them there sent the first jump past the section)
+  const stickyBottom = () => {
+    const f = root.querySelector('#comercio-sticky-filters');
+    if (!f) return 0;
+    const scroller = getScroller();
+    const scrollerTop = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+    return scrollerTop + (parseFloat(getComputedStyle(f).top) || 0) + f.offsetHeight;
+  };
+  const sections = () => [...products.querySelectorAll('.tnd-section[data-section-id]')];
+  let programmaticUntil = 0;
+
+  const setActive = (id, scrollPill = true) => {
+    pills.querySelectorAll('.tab-pill').forEach(p => p.classList.toggle('active', p.dataset.catId === id));
+    const pill = pills.querySelector(`.tab-pill[data-cat-id="${CSS.escape(id)}"]`);
+    if (pill && scrollPill) pills.scrollTo({ left: Math.max(0, pill.offsetLeft - 16), behavior: 'smooth' });
+  };
+
+  const scrollToY = (scroller, y) => {
+    programmaticUntil = Date.now() + 900;
+    scroller.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+  };
+
+  pills.addEventListener('click', (e) => {
+    const pill = e.target.closest('.tab-pill');
+    if (!pill) return;
+    const id = pill.dataset.catId;
+    const list = sections();
+    if (!list.length) return; // filtrado o búsqueda: lo maneja el filtro de siempre
+    const target = id === 'all' ? list[0] : list.find(sct => sct.dataset.sectionId === id);
+    if (!target) return; // "Ofertas" u otra vista que no es una sección
+    e.stopPropagation(); // capture: el filtro de comercio.js no llega a correr
+    setActive(id);
+    const scroller = getScroller();
+    const top = target.getBoundingClientRect().top - stickyBottom() - 10;
+    scrollToY(scroller, scroller.scrollTop + top);
+  }, true);
+
+  // Al bajar: se marca la sección que está debajo de los filtros
+  let ticking = false;
+  const onScroll = () => {
+    if (ticking) return;
+    ticking = true;
+    setTimeout(() => {
+      ticking = false;
+      if (!root.isConnected || Date.now() < programmaticUntil) return;
+      const list = sections();
+      if (!list.length) return;
+      const line = stickyBottom() + 24;
+      let current = null;
+      for (const sct of list) { if (sct.getBoundingClientRect().top <= line) current = sct; }
+      const id = current ? current.dataset.sectionId : 'all';
+      const active = pills.querySelector('.tab-pill.active')?.dataset.catId;
+      if (id !== active && id !== '__otros') setActive(id);
+    }, 80);
+  };
+  // Capture on window catches the scroll of whatever element scrolls the page
+  if (window._catalogScrollSpy) window.removeEventListener('scroll', window._catalogScrollSpy, true);
+  window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+  window._catalogScrollSpy = onScroll;
+}
+
+/** Comparte el link del catálogo (menú nativo del celular o, si no hay, copia el link). */
+async function shareStoreLink(comercio) {
+  const url = getStoreUrl(comercio);
+  const text = `Mirá el catálogo de ${comercio.name} y pedí online`;
+  try {
+    if (navigator.share) { await navigator.share({ title: comercio.name, text, url }); return; }
+  } catch (e) { if (e?.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); showToast('Link copiado', 'success'); }
+  catch (e) { showToast(url, 'info'); }
+}
+
+/** Una tarjeta de producto del catálogo online. */
+function directProductCard(p, offer, isOpen, isPaused, isUnavailable) {
+  const esc = escapeHtml;
+  const offerPrice = offer ? (offer.type === 'percentage' ? p.price * (1 - (offer.value || 0) / 100) : p.price) : null;
+  const was = offer ? p.price : (Number(p.originalPrice) > Number(p.price) ? Number(p.originalPrice) : null);
+  const price = offerPrice ?? p.price;
+  const tag = offer ? (offer.type === 'percentage' ? `${offer.value}% OFF` : '2x1') : (was ? `${Math.round((1 - p.price / was) * 100)}% OFF` : '');
+  const state = isPaused ? 'Pausado' : (!isOpen ? 'Cerrado' : (isUnavailable ? 'Agotado' : ''));
+  const action = state ? `<span class="tnd-p-state">${state}</span>` : `<button class="product-card-add" data-product-id="${esc(p.id)}" aria-label="Agregar ${esc(p.name)}">${icon('plus', 16)}</button>`;
+  return `
+    <article class="product-card ${isUnavailable ? 'product-unavailable' : ''} ${p.image ? '' : 'tnd-p-noimg'}" data-product-id="${esc(p.id)}">
+      <div class="tnd-p-info">
+        <div class="tnd-p-name">${esc(p.name)}</div>
+        ${p.description ? `<div class="tnd-p-desc">${esc(p.description)}</div>` : ''}
+        <div class="tnd-p-foot">
+          <span class="tnd-p-price ${tag ? 'is-offer' : ''}">${formatPrice(price)}</span>
+          ${was ? `<span class="tnd-p-was">${formatPrice(was)}</span>` : ''}
+          ${tag ? `<span class="tnd-p-tag">${tag}</span>` : ''}
+          ${p.image ? '' : action}
+        </div>
+      </div>
+      ${p.image ? `<div class="tnd-p-media"><img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" />${action}</div>` : ''}
+    </article>`;
 }
 
 async function openRatingModal(comercio) {
@@ -1594,6 +1869,13 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
     });
   }
 
+  if (filtered.length === 0 && grid.classList.contains('tnd-products')) {
+    grid.innerHTML = searchQuery
+      ? `<div class="tnd-empty"><b>No encontramos "${escapeHtml(searchQuery)}"</b>Probá con otra palabra o mirá todas las categorías.</div>`
+      : `<div class="tnd-empty"><b>${categoryId === 'discounts' ? 'Hoy no hay ofertas' : 'Todavía no hay productos acá'}</b>Mirá las otras categorías del catálogo.</div>`;
+    return;
+  }
+
   if (filtered.length === 0) {
     if (categoryId === 'favorites') {
       grid.innerHTML = `
@@ -1632,6 +1914,31 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
         <div class="empty-state-text">Este comercio aún no cargó productos en esta categoría</div>
       </div>
     `;
+    return;
+  }
+
+  // Catálogo online: tarjetas propias y, en "Todo" sin búsqueda, agrupado por categoría
+  if (grid.classList.contains('tnd-products')) {
+    const stockOut = (p) => p.isAvailable === false || (p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0);
+    const card = (p) => directProductCard(p, activeOffers.find(o => o.productIds && o.productIds.includes(p.id)), isOpen, isPaused, stockOut(p));
+    if (categoryId === 'all' && !searchQuery && sortBy === 'default') {
+      const tops = categories.filter(c => !c.parentCategoryId);
+      const topOf = (catId) => {
+        const c = categories.find(x => x.id === catId);
+        return c?.parentCategoryId || catId;
+      };
+      const groups = tops.map(c => ({ id: c.id, name: c.name, items: filtered.filter(p => topOf(p.categoryId) === c.id) }));
+      const known = new Set(tops.map(c => c.id));
+      const others = filtered.filter(p => !known.has(topOf(p.categoryId)));
+      if (others.length) groups.push({ id: '__otros', name: groups.length ? 'Otros' : 'Productos', items: others });
+      grid.innerHTML = groups.filter(g => g.items.length).map(g => `
+        <section class="tnd-section" data-section-id="${escapeHtml(g.id)}">
+          <h2 class="tnd-section-title">${escapeHtml(g.name)} <small>${g.items.length}</small></h2>
+          <div class="tnd-grid">${g.items.map(card).join('')}</div>
+        </section>`).join('');
+    } else {
+      grid.innerHTML = `<div class="tnd-section"><div class="tnd-grid">${filtered.map(card).join('')}</div></div>`;
+    }
     return;
   }
 

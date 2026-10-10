@@ -309,6 +309,24 @@ body {
   position: relative;
 }
 
+/* ---------- Aviso de sorteo activo (inicio) ---------- */
+
+.go-giveaway-banner {
+  display: flex; align-items: center; gap: 14px;
+  margin: 0 16px 14px; padding: 14px 14px 14px 16px;
+  border-radius: 20px; background: var(--go-ink); color: #fff;
+  text-decoration: none; -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
+}
+.go-giveaway-banner:active { transform: scale(0.985); }
+.go-giveaway-icon { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; background: var(--go-red); color: #fff; display: flex; align-items: center; justify-content: center; }
+.go-giveaway-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.go-giveaway-text .go-eyebrow { display: flex; align-items: center; gap: 7px; color: var(--go-on-ink-2); font-size: 10px; }
+.go-giveaway-text .go-eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.22); flex-shrink: 0; }
+.go-giveaway-text strong { font: 900 16px/1.15 var(--go-font); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-giveaway-text small { font-size: 12.5px; line-height: 1.35; color: rgba(247, 245, 241, 0.7); }
+.go-giveaway-chev { color: rgba(247, 245, 241, 0.6); display: flex; flex-shrink: 0; }
+
 /* ---------- Accesos grandes (Comida / GoMarket) ---------- */
 
 .go-feature-grid {
@@ -847,6 +865,46 @@ html .gofavores-page { background: var(--color-bg) !important; }
   border: 1px solid var(--go-ink-line) !important;
 }
 
+/* ---------- Admin: inicio (franja "Ahora", grupos y filas) ---------- */
+
+.go-admin-header { background: var(--go-ink); padding: 16px 20px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; z-index: 100; }
+.go-admin-header h1 { font: 900 20px/1.1 var(--go-font); color: #fff; margin: 0; text-transform: uppercase; letter-spacing: -0.01em; }
+.go-admin-header p { font: 800 11px/1 var(--font-body); color: var(--go-on-ink-2); text-transform: uppercase; letter-spacing: 0.1em; margin: 5px 0 0; }
+.go-admin-back { width: 40px; height: 40px; border-radius: 12px; background: var(--go-ink-2); border: 1px solid var(--go-ink-line); display: flex; align-items: center; justify-content: center; color: #fff; text-decoration: none; flex-shrink: 0; }
+.go-admin-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 16px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))); }
+.go-admin-inner { max-width: 640px; margin: 0 auto; }
+
+.go-admin-now { padding: 16px 18px 6px; border-radius: 22px; background: var(--go-ink); color: #fff; }
+.go-admin-now .go-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--go-on-ink-2); font-size: 10px; }
+.go-admin-live { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.22); }
+.go-admin-now-grid { display: grid; grid-template-columns: 1fr 1fr 1.35fr; margin: 10px -18px 0; }
+.go-admin-now-grid a { display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 14px 18px; color: #fff; text-decoration: none; min-width: 0; -webkit-tap-highlight-color: transparent; }
+.go-admin-now-grid a + a { border-left: 1px solid rgba(255, 255, 255, 0.08); padding-left: 14px; }
+.go-admin-now-grid strong { font: 900 26px/1 var(--go-font); letter-spacing: -0.02em; white-space: nowrap; }
+.go-admin-now-grid a:last-child strong { font-size: 22px; line-height: 26px; }
+.go-admin-now-grid span { font-size: 11.5px; line-height: 1.3; color: rgba(247, 245, 241, 0.62); }
+
+.go-admin-heading { margin: 22px 4px 10px; font: 800 11px/1 var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--go-text-2); }
+
+.go-admin-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.go-admin-tile { display: flex; flex-direction: column; padding: 14px; border-radius: 20px; background: var(--go-card); border: 1px solid var(--go-line); text-decoration: none; min-width: 0; -webkit-tap-highlight-color: transparent; transition: transform 0.12s ease; }
+.go-admin-tile:active, .go-admin-row:active { transform: scale(0.98); }
+.go-admin-tile-icon { width: 38px; height: 38px; border-radius: 50%; background: var(--go-ink); color: #fff; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+.go-admin-tile strong { font: 800 15.5px/1.15 var(--go-font); color: var(--go-text); }
+.go-admin-tile small { margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--go-text-2); }
+
+.go-admin-list { border-radius: 20px; background: var(--go-card); border: 1px solid var(--go-line); overflow: hidden; }
+.go-admin-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform 0.12s ease; }
+.go-admin-row + .go-admin-row { border-top: 1px solid var(--go-line); }
+.go-admin-row-icon { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; background: var(--go-paper-2); color: var(--go-ink); display: flex; align-items: center; justify-content: center; }
+.go-admin-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.go-admin-row-text strong { font-size: 14.5px; font-weight: 700; color: var(--go-text); }
+.go-admin-row-text small { font-size: 12px; color: var(--go-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-admin-row-chev { color: var(--go-text-3); display: flex; flex-shrink: 0; }
+.go-admin-badge { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; background: var(--go-paper-2); color: var(--go-text); font: 800 11.5px/1 var(--font-body); flex-shrink: 0; }
+.go-admin-badge[hidden] { display: none; }
+.go-admin-badge.is-alert { background: var(--go-red); color: #fff; }
+
 /* ---------- Admin: tarjetas del panel con el mismo lenguaje GO! ---------- */
 
 html .admin-nav-card.admin-nav-card {
@@ -1214,6 +1272,153 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
   flex-shrink: 0;
 }
 
+/* Mandados sin repartidores conectados: aviso y opciones bloqueadas */
+.go-drivers-closed {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+}
+.go-drivers-closed[hidden] { display: none; }
+.go-drivers-closed-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #ffedd5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.go-drivers-closed-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.go-drivers-closed-body strong { font-size: 14.5px; font-weight: 900; }
+.go-drivers-closed-body small { font-size: 12.5px; font-weight: 600; line-height: 1.35; color: #b45309; }
+[data-theme="dark"] .go-drivers-closed { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35); color: #fdba74; }
+[data-theme="dark"] .go-drivers-closed-icon { background: rgba(245, 158, 11, 0.18); }
+[data-theme="dark"] .go-drivers-closed-body small { color: #fcd34d; }
+.mandados-page.is-closed :is(.go-mandado-hero, .go-option-mini, .go-recent, .go-chip, .mandados-banner) {
+  animation: none; /* la animación de entrada termina en opacity: 1 y pisaba la atenuación */
+  opacity: 0.45;
+  filter: grayscale(1);
+  pointer-events: none;
+}
+
+/* Mandados: el pedido libre arriba, Encomienda y Go Cash al lado, repetir y rubros abajo */
+.go-mandado-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 22px;
+  background: var(--color-surface);
+  border: 1.5px solid var(--go-ink);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--go-text, var(--color-text));
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
+  animation: goOptionIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.go-mandado-hero:active { transform: scale(0.985); }
+.go-mandado-hero-top { display: flex; align-items: center; gap: 14px; }
+.go-mandado-hero .go-option-title { font-size: 19px; }
+.go-mandado-hero-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: var(--go-paper-2, #efece7);
+  color: var(--go-text-2, var(--color-text-secondary));
+  font-size: 14px;
+  font-weight: 600;
+}
+.go-option-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.go-option-mini { flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px; animation-delay: 0.04s; }
+.go-option-mini + .go-option-mini { animation-delay: 0.08s; }
+.go-option-mini .go-option-art { width: 44px; height: 44px; border-radius: 14px; margin-bottom: 6px; }
+.go-option-mini .go-option-art img { width: 38px; height: 38px; }
+.go-option-mini .go-option-title { font-size: 15px; }
+.go-option-mini .go-option-text { font-size: 12.5px; }
+.go-mandados-section { padding: 4px 16px 14px; animation: goOptionIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both; }
+.go-mandados-section[hidden] { display: none; }
+.go-mandados-section-title {
+  margin: 0 0 8px 2px;
+  font-family: var(--go-font);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--go-text, var(--color-text));
+}
+.go-recent-list {
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--go-line, var(--color-border-light));
+  overflow: hidden;
+}
+.go-recent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--go-text, var(--color-text));
+  -webkit-tap-highlight-color: transparent;
+}
+.go-recent + .go-recent { border-top: 1px solid var(--go-line, var(--color-border-light)); }
+.go-recent:active { background: var(--go-paper-2, #efece7); }
+.go-recent-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--go-paper-2, #efece7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.go-recent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.go-recent-title,
+.go-recent-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-recent-title { font-size: 14px; font-weight: 800; }
+.go-recent-sub { font-size: 12.5px; color: var(--go-text-2, var(--color-text-secondary)); }
+.go-recent-cta { font-size: 12.5px; font-weight: 800; color: var(--go-red, #e11d48); flex-shrink: 0; }
+.go-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.go-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--go-line, var(--color-border-light));
+  color: var(--go-text, var(--color-text));
+  font: 700 13.5px/1 var(--font-body, inherit);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.go-chip:active { transform: scale(0.97); border-color: var(--go-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .go-mandado-hero,
+  .go-mandados-section { animation: none !important; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .slide-overlay.slide-from-bottom,
   .slide-overlay.slide-exit-bottom,
@@ -1262,7 +1467,8 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 }
 
 /* Mandados: lista y formulario lado a lado */
-.mandados-track-wrap { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+/* clip (no hidden): así scrollIntoView de un campo del formulario no puede correr el carril de costado */
+.mandados-track-wrap { flex: 1; min-height: 0; overflow: hidden; overflow: clip; position: relative; }
 .mandados-track {
   display: flex;
   width: 200%;
@@ -1638,19 +1844,6 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 .go-bsheet-list li > span:last-child { display: flex; flex-direction: column; gap: 2px; padding-top: 1px; }
 .go-bsheet-list strong { font-size: 14.5px; }
 .go-bsheet-list small { font-size: 13px; line-height: 1.4; color: var(--go-text-2); }
-.go-bsheet-ticket {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 6px 0 12px;
-  padding: 16px 18px;
-  border-radius: 18px;
-  border: 1.5px dashed var(--go-line);
-  background: var(--color-surface);
-}
-.go-bsheet-ticket span { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--go-text-2); }
-.go-bsheet-ticket strong { font: 900 22px/1 var(--go-font); color: var(--go-text); white-space: nowrap; }
 .go-bsheet-note { font-size: 13px; color: var(--go-text-3); }
 .go-bsheet-actions { display: flex; flex-direction: column; gap: 6px; padding: 18px 24px 16px; }
 .go-bsheet-cta {
@@ -1753,20 +1946,6 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 }
 .permission-guide ol { color: var(--go-text-2) !important; }
 
-/* Guía de la app */
-.app-guide-overlay::before, .app-guide-overlay::after { display: none !important; }
-.app-guide-card { background: var(--color-bg) !important; border: 0 !important; box-shadow: 0 -12px 50px rgba(11, 11, 12, 0.3) !important; }
-.app-guide-title { font-family: var(--go-font) !important; text-transform: uppercase; letter-spacing: -0.01em; color: var(--go-text) !important; }
-.app-guide-subtitle { color: var(--go-text-2) !important; }
-.app-guide-icon { background: var(--go-paper-2) !important; box-shadow: none !important; }
-.app-guide-icon::before { display: none !important; }
-.app-guide-feature { background: var(--color-surface) !important; border: 1px solid var(--go-line) !important; box-shadow: none !important; }
-.app-guide-feature-icon { background: var(--go-paper-2) !important; }
-.app-guide-step-num { background: var(--go-ink) !important; color: #fff !important; box-shadow: none !important; }
-.app-guide-progress-segment { background: var(--go-line) !important; }
-.app-guide-progress-segment.completed, .app-guide-progress-segment.active::after { background: var(--go-ink) !important; }
-.guide-btn-next { background: var(--go-ink) !important; color: #fff !important; box-shadow: none !important; border-radius: 16px !important; }
-.guide-btn-back { background: var(--color-surface) !important; border: 1px solid var(--go-line) !important; color: var(--go-text) !important; box-shadow: none !important; }
 
 /* ── Firma GO!: el servicio se abre como un círculo desde el botón tocado ──
    El mismo anillo del splash: crece hasta cubrir la pantalla y, al cerrar,
@@ -1922,6 +2101,16 @@ html:not(.is-delivery-mode) [style*="linear-gradient(135deg, #be123c"] {
 .go-profile-row-text strong { font-size: 14.5px; color: var(--go-text); }
 .go-profile-row-text small { font-size: 12.5px; color: var(--go-text-2); line-height: 1.35; }
 .go-profile-row-chev { color: var(--go-text-3); display: flex; }
+a.go-profile-row { text-decoration: none; }
+.go-profile-row-icon.is-ink { background: var(--go-ink); color: #fff; }
+.go-profile-quick { margin: 10px 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.go-profile-quick .go-profile-row { gap: 10px; padding: 12px; min-width: 0; }
+.go-profile-quick .go-profile-row-text small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-profile-heading { margin: 6px 4px 0; font: 800 11px/1 var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--go-text-2); }
+.go-profile-access { border-radius: 18px; background: var(--color-surface); border: 1px solid var(--go-line); overflow: hidden; }
+.go-profile-access .go-profile-row { border: 0; border-radius: 0; padding: 12px 16px; }
+.go-profile-access .go-profile-row + .go-profile-row { border-top: 1px solid var(--go-line); }
+.go-profile-delete { display: block; margin: 16px auto 0; padding: 8px 12px; background: none; border: 0; cursor: pointer; font: 600 12.5px/1 var(--font-body); color: var(--go-text-2); text-decoration: underline; text-underline-offset: 3px; }
 
 /* Lista de ajustes: un solo tono */
 .profile-page .settings-list { border: 1px solid var(--go-line) !important; border-radius: 20px !important; box-shadow: none !important; }
@@ -2214,3 +2403,105 @@ html.is-delivery-mode:not(.driver-light-mode) .go-confirm-cancel { color: #f7f5f
 @keyframes goConnPulse { from { transform: scale(1); opacity: .6; } to { transform: scale(1.9); opacity: 0; } }
 #go-connecting.is-ok .go-connecting-ring { background: #0e9f6e; color: #fff; transform: scale(1.08); }
 #go-connecting.is-ok .go-connecting-ring span { border-color: #0e9f6e; }
+
+/* ── Aviso de pedidos sin aceptar (commerce-monitor.js) ──
+   Pastilla tinta centrada sobre la barra: contador rojo que late mientras suena la alarma,
+   silenciar adentro (sólo mientras suena) y la flecha para ir a los pedidos. */
+.go-order-alert {
+  position: fixed; left: 50%; z-index: 1450;
+  bottom: calc(84px + var(--go-order-alert-lift, 0px) + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+  transform: translate(-50%, 16px); opacity: 0;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  display: flex; align-items: center; gap: 4px;
+  max-width: calc(100vw - 24px);
+  padding: 6px; border-radius: 999px;
+  background: var(--go-ink); color: var(--go-on-ink);
+  border: 1px solid var(--go-ink-line);
+  box-shadow: 0 12px 32px rgba(11, 11, 12, 0.35);
+}
+.go-order-alert.is-in { transform: translate(-50%, 0); opacity: 1; }
+.go-order-alert button { border: 0; background: none; color: inherit; cursor: pointer; font: inherit; padding: 0; }
+.go-order-alert-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding-right: 6px !important; text-align: left; }
+.go-order-alert-count {
+  position: relative; flex-shrink: 0;
+  min-width: 40px; height: 40px; padding: 0 8px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--go-red); color: #fff;
+  font: 900 16px/1 var(--go-font);
+}
+.go-order-alert.is-ringing .go-order-alert-count::after {
+  content: ''; position: absolute; inset: -4px; border-radius: inherit;
+  border: 2px solid var(--go-red); animation: go-order-alert-ring 1.2s ease-out infinite;
+}
+@keyframes go-order-alert-ring { from { transform: scale(0.9); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }
+.go-order-alert-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.go-order-alert-text b { font: 800 14px/1.15 var(--go-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go-order-alert-text small { font-size: 11.5px; color: var(--go-on-ink-2); white-space: nowrap; }
+.go-order-alert-mute, .go-order-alert-go {
+  flex-shrink: 0; width: 40px; height: 40px; border-radius: 50% !important;
+  display: flex !important; align-items: center; justify-content: center;
+  background: var(--go-ink-3) !important;
+}
+.go-order-alert-mute[hidden] { display: none !important; }
+.go-order-alert-go { background: var(--go-on-ink) !important; color: var(--go-ink) !important; }
+@media (prefers-reduced-motion: reduce) {
+  .go-order-alert.is-ringing .go-order-alert-count::after { animation: none; }
+}
+
+/* ---------- Inicio en PC: todo en una misma columna centrada ----------
+   La banda negra y la lámina siguen de borde a borde; lo de adentro se alinea a 1200px. */
+@media (min-width: 1024px) {
+  .home-page .go-hero > *,
+  .home-page .go-sheet > * {
+    max-width: 1184px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    box-sizing: border-box !important;
+  }
+  .home-page .go-hero { padding: 20px 0 44px; }
+  .home-page .go-hero > * { padding-left: 16px; padding-right: 16px; }
+  .home-page .go-hero > .go-bar { margin-left: max(16px, calc((100% - 1152px) / 2)) !important; padding: 0; }
+  .home-page .go-hero .go-title { font-size: 40px; }
+  .home-page .go-services { grid-template-columns: repeat(4, 140px); justify-content: start; gap: 16px; }
+  .home-page .go-service { font-size: 13px; }
+  .home-page .go-service-ring { width: 76px; height: 76px; }
+  .home-page .go-service:hover .go-service-ring { border-color: var(--go-red); transform: translateY(-2px); }
+  .home-page .go-sheet { border-radius: 32px 32px 0 0; padding-top: 32px; }
+
+  /* Las secciones que ya traían su propio ancho (theme.css) entran en la misma grilla */
+  .home-page .go-sheet > .home-section,
+  .home-page .go-sheet > #brands-slider-container,
+  .home-page .go-sheet > #promoted-section,
+  .home-page .go-sheet .category-row-small {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+  .home-page .categories-slider-wrapper { max-width: 1184px !important; }
+  .home-page .go-hero > .go-eyebrow { display: block; }
+  .go-feature-grid { gap: 20px; margin-bottom: 36px; }
+  .go-feature { height: 240px; }
+  .go-feature:hover img { transform: scale(1.03); }
+  .go-feature img { transition: transform 0.35s ease; }
+  .go-section-head { margin-bottom: 18px; }
+  .go-giveaway-banner { margin-left: 16px; margin-right: 16px; }
+}
+
+/* ---------- Pantallas secundarias en PC ----------
+   Perfil, admin, ofertas, chats… se abren sobre todo el ancho: en PC su contenido va en
+   una columna centrada (como el resto del sitio). Las de mapa (seguimiento, viajes,
+   mandados, cadete) y la tienda directa siguen ocupando todo. */
+@media (min-width: 1024px) {
+  #app-overlay.active:where(:not([data-route="pedido"]):not([data-route="delivery"]):not([data-route="viajes"]):not([data-route="mandados"]):not([data-route="tienda"]):not([data-route="seguimiento"]):not([data-route="mi-comercio"])) {
+    background: var(--go-paper-2, #ebe7e0);
+  }
+  #app-overlay.active:where(:not([data-route="pedido"]):not([data-route="delivery"]):not([data-route="viajes"]):not([data-route="mandados"]):not([data-route="tienda"]):not([data-route="seguimiento"]):not([data-route="mi-comercio"])) > #app-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: var(--color-bg);
+    box-shadow: 0 0 0 1px var(--go-line, rgba(0,0,0,0.06));
+  }
+  /* Perfil y avisos: lectura, más angostos */
+  #app-overlay.active[data-route="profile"] > #app-content,
+  #app-overlay.active[data-route="notifications"] > #app-content,
+  #app-overlay.active[data-route="mis-chats"] > #app-content { max-width: 880px; }
+}

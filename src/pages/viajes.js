@@ -8,6 +8,7 @@ import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn } from '../auth.js';
 import { showAddressPrompt } from '../components/address-modal.js';
 import { goServiceHeader, goServiceHint, bindServiceHint, goServiceEmpty, showGoInfoSheet } from '../components/service-screen.js';
+import { CAR_TRIPS_ENABLED } from '../utils/trip-vehicles.js';
 
 function showWarningModal(message) {
   const alertEl = document.createElement('div');
@@ -29,6 +30,9 @@ function showWarningModal(message) {
 export async function renderViajes(content) {
   if (!content) content = document.getElementById('app-content');
   if (!content) return;
+  // Dibujo que llegó tarde (el router dibujó la pantalla dos veces): no enganchar sus botones a los
+  // del dibujo que está en pantalla, o todo se abre dos veces. Ver renderGoFavores.
+  if (!content.isConnected) return;
 
   const user = getState().user;
   if (!user || !isLoggedIn()) {
@@ -83,14 +87,24 @@ export async function renderViajes(content) {
         </div>
 
         <!-- Vehicle Selection -->
-        <div style="display:flex; flex-direction:column; gap:12px;">
+        ${CAR_TRIPS_ENABLED ? '' : `
+        <!-- Solo moto (src/utils/trip-vehicles.js): una tarjeta, sin nada que elegir -->
+        <div id="vehicle-moto" class="vehicle-card-pro active type-moto" style="flex-direction:row; align-items:center; text-align:left; gap:14px; padding:16px 18px; cursor:default;">
+          <div class="vehicle-icon-box" style="margin:0; flex-shrink:0;">${icon('motorcycle', 28)}</div>
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:15px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.01em;">Viaje en Moto</span>
+            <span style="font-size:11px; color:var(--color-text-tertiary); font-weight:700;">Rápido y económico</span>
+          </div>
+          <div id="moto-price-preview" style="font-size:18px; font-weight:900; color:var(--go-text); font-family:var(--go-font); white-space:nowrap;"></div>
+        </div>`}
+        <div style="display:${CAR_TRIPS_ENABLED ? 'flex' : 'none'}; flex-direction:column; gap:12px;">
           <label style="font-size: 10px; font-weight: 850; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing:0.05em; padding-left:4px;">Tipo de Vehículo</label>
           
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          ${!CAR_TRIPS_ENABLED ? '' : `<div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
             <!-- Moto Option -->
             <div id="vehicle-moto" class="vehicle-card-pro active type-moto">
               <div class="vehicle-icon-box" style="background:rgba(120,120,120,0.06); color:var(--color-text-secondary);">
-                ${icon('bike', 28)}
+                ${icon('motorcycle', 28)}
               </div>
               <span style="font-size:15px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.01em;">Viaje en Moto</span>
               <span style="font-size:10.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">Rápido y económico</span>
@@ -106,7 +120,7 @@ export async function renderViajes(content) {
               <span style="font-size:10.5px; color:var(--color-text-tertiary); font-weight:700; margin-top:2px;">Cómodo y seguro</span>
               <div id="auto-price-preview" style="font-size:18px; font-weight:900; color:var(--go-text); margin-top:14px; font-family:var(--go-font);">$ 0</div>
             </div>
-          </div>
+          </div>`}
         </div>
 
         <!-- Cost & Distance Summary Box -->
@@ -129,7 +143,7 @@ export async function renderViajes(content) {
         </div>
 
         <!-- Request Button with premium action styling -->
-        <button id="request-trip-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink) 100%); color: white; border: none; font-weight: 900; font-size: 15.5px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top:auto; transition:all 0.2s;">
+        <button id="request-trip-btn" style="width: 100%; height: 56px; border-radius: 18px; background: var(--go-ink); color: white; border: none; font-weight: 900; font-size: 15.5px; cursor: pointer; box-shadow: none; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top:auto; transition:all 0.2s;">
           ${icon('zap', 18)} Pedir Viaje
         </button>
 
@@ -254,7 +268,7 @@ export async function renderViajes(content) {
 
         // Previews
         motoPreview.textContent = formatPrice(motoCost);
-        autoPreview.textContent = formatPrice(autoCost);
+        if (autoPreview) autoPreview.textContent = formatPrice(autoCost);
 
         // Details
         const activeCost = selectedVehicle === 'moto' ? motoCost : autoCost;
@@ -277,7 +291,7 @@ export async function renderViajes(content) {
       originText.textContent = addr;
       originText.style.color = 'var(--color-text-primary)';
       updateCostDisplay();
-    }, { mode: 'pick', skipDetails: true, justReturnAddress: true });
+    }, { mode: 'pick', skipDetails: true, justReturnAddress: true, eyebrow: 'Viaje', title: '¿Dónde te buscamos?' });
   };
 
   destBtn.onclick = () => {
@@ -286,11 +300,11 @@ export async function renderViajes(content) {
       destText.textContent = addr;
       destText.style.color = 'var(--color-text-primary)';
       updateCostDisplay();
-    }, { mode: 'deliver', skipDetails: true, optionalReference: true, justReturnAddress: true });
+    }, { mode: 'deliver', skipDetails: true, optionalReference: true, justReturnAddress: true, eyebrow: 'Viaje', title: '¿A dónde vas?' });
   };
 
-  // Vehicle toggle
-  motoCard.onclick = () => {
+  // Vehicle toggle (solo cuando hay autos)
+  if (autoCard) motoCard.onclick = () => {
     selectedVehicle = 'moto';
     motoCard.classList.add('active');
     motoCard.style.borderColor = 'var(--go-ink)';
@@ -303,7 +317,7 @@ export async function renderViajes(content) {
     updateCostDisplay();
   };
 
-  autoCard.onclick = () => {
+  if (autoCard) autoCard.onclick = () => {
     selectedVehicle = 'auto';
     autoCard.classList.add('active');
     autoCard.style.borderColor = 'var(--go-ink)';
@@ -394,7 +408,7 @@ export async function renderViajes(content) {
 
         <div style="display:flex; gap:10px;">
           <button id="schedule-cancel-btn" style="flex:1; height:52px; border-radius:16px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); font-weight:800; font-size:14px; color:var(--color-text-secondary); cursor:pointer; transition:all 0.2s;">Cancelar</button>
-          <button id="schedule-confirm-btn" style="flex:2; height:52px; border-radius:16px; background: var(--go-ink) 100%); border:none; font-weight:900; font-size:14px; color:white; cursor:pointer; box-shadow: none; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">${icon('calendar', 18)} Programar Viaje</button>
+          <button id="schedule-confirm-btn" style="flex:2; height:52px; border-radius:16px; background: var(--go-ink); border:none; font-weight:900; font-size:14px; color:white; cursor:pointer; box-shadow: none; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">${icon('calendar', 18)} Programar Viaje</button>
         </div>
       </div>
     `;
@@ -538,7 +552,7 @@ export async function renderViajes(content) {
     requestBtn.innerHTML = `${icon('zap', 18)} Pedir Viaje`;
 
     showConfirm({
-      title: '🚕 ¿Confirmar viaje?',
+      title: `${selectedVehicle === 'auto' ? '🚕' : '🏍️'} ¿Confirmar viaje?`,
       message: `Se enviará una solicitud a todos los choferes de la zona.<br><br>Vehículo: <strong>${selectedVehicle === 'moto' ? 'Moto 🏍️' : 'Auto 🚗'}</strong><br>Costo estimado: <strong>${formatPrice(cost)}</strong>`,
       onConfirm: async () => {
         try {
@@ -606,7 +620,9 @@ export async function renderViajes(content) {
   // Handle general info modal trigger for trips
   const showViajesInfoModal = () => showGoInfoSheet({
     title: 'Viajes',
-    intro: 'Pedí un auto o una moto con conductores habilitados para moverte seguro por Magdalena.',
+    intro: CAR_TRIPS_ENABLED
+      ? 'Pedí un auto o una moto con conductores habilitados para moverte seguro por Magdalena.'
+      : 'Pedí una moto con conductores habilitados para moverte rápido y seguro por Magdalena.',
     steps: [
       { title: 'Indicá origen y destino', text: 'Escribí las direcciones o marcalas en el mapa.' },
       { title: 'Mirá el precio antes de pedir', text: 'Calculamos la distancia y te mostramos la tarifa al instante.' },

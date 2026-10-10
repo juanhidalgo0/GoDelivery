@@ -2,6 +2,7 @@
 import { db } from '../firebase.js';
 import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, collectionGroup, limit } from 'firebase/firestore';
 import { formatPrice, isShopOpen, formatDeliveryTime } from '../utils/format.js';
+import { CAR_TRIPS_ENABLED, tripVehicleOptions } from '../utils/trip-vehicles.js';
 import { getFooterHTML } from '../components/footer.js';
 import { isAdmin, isSuperAdmin, isComercio, isLoggedIn } from '../auth.js';
 import { escapeHtml } from '../utils/escape.js';
@@ -20,6 +21,68 @@ let memoryCachedCats = null;
 let memoryCachedAppOnly = null;
 let memoryCacheTimestamp = 0;
 const MEMORY_CACHE_TTL = 3 * 60 * 1000; // 3 minutes fresh cache in RAM
+
+// Sorteo abierto: aviso en el inicio. Se guarda acá porque el inicio se vuelve a dibujar varias veces.
+let openGiveaway = null;
+let openGiveawayAt = 0;
+const GIVEAWAY_BANNER_TTL_MS = 5 * 60 * 1000;
+
+function giveawayBannerHtml() {
+  const g = openGiveaway;
+  if (!g) return '';
+  const endsMs = g.endsAt?.toMillis ? g.endsAt.toMillis() : 0;
+  if (endsMs && endsMs <= Date.now()) return '';
+  const hoursLeft = endsMs ? (endsMs - Date.now()) / 3600000 : 0;
+  const ends = !endsMs ? ''
+    : hoursLeft < 1 ? 'Termina en menos de 1 hora'
+    : hoursLeft < 24 ? `Termina en ${Math.floor(hoursLeft)} h`
+    : `Termina en ${Math.floor(hoursLeft / 24)} ${Math.floor(hoursLeft / 24) === 1 ? 'día' : 'días'}`;
+  return `
+    <a href="#/sorteo" class="go-giveaway-banner">
+      <span class="go-giveaway-icon">${icon('gift', 22)}</span>
+      <span class="go-giveaway-text">
+        <span class="go-eyebrow"><i></i>Sorteo activo</span>
+        <strong>${escapeHtml(g.title || 'Sorteo GO!')}</strong>
+        <small>${ends ? `${ends}. ` : ''}Cada pedido entregado suma chances.</small>
+      </span>
+      <span class="go-giveaway-chev">${icon('chevronRight', 18)}</span>
+    </a>`;
+}
+
+async function loadGiveawayBanner() {
+  try {
+    if (Date.now() - openGiveawayAt > GIVEAWAY_BANNER_TTL_MS) {
+      const snap = await getDocs(query(collection(db, 'giveaways'), where('active', '==', true)));
+      const now = Date.now();
+      const open = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(g => g.status === 'active' && (!g.endsAt?.toMillis || g.endsAt.toMillis() > now))
+        .sort((a, b) => (a.endsAt?.toMillis?.() || Infinity) - (b.endsAt?.toMillis?.() || Infinity));
+      openGiveaway = open[0] || null;
+      openGiveawayAt = Date.now();
+    }
+    const slot = document.getElementById('go-giveaway-slot');
+    if (slot) slot.innerHTML = giveawayBannerHtml();
+  } catch (err) {
+    console.warn('Error loading giveaway banner:', err);
+  }
+}
+
+// A shop the admin (or its owner) set as not active doesn't appear anywhere on the home: before,
+// the brands row and the shop grid showed it greyed out, so "hiding" a shop looked like it
+// hadn't saved. Filtered once here, where the list is loaded.
+// The hidden ones are remembered too: the products row draws a saved list first and has to
+// leave their products out.
+const hiddenOnHome = new Set();
+const shownOnHome = (list) => {
+  if (!Array.isArray(list)) return [];
+  return list.filter(c => {
+    if (!c) return false;
+    if (c.isActive === false) { hiddenOnHome.add(c.id); return false; }
+    hiddenOnHome.delete(c.id);
+    return true;
+  });
+};
 
 export async function renderHome(content) {
   if (!content) content = document.getElementById('page-home') || document.getElementById('app-content');
@@ -47,7 +110,7 @@ export async function renderHome(content) {
   const isMemoryFresh = memoryCachedComercios && (Date.now() - memoryCacheTimestamp < MEMORY_CACHE_TTL);
 
   if (isMemoryFresh) {
-    comercios = memoryCachedComercios;
+    comercios = shownOnHome(memoryCachedComercios);
     if (memoryCachedOffers) offers = memoryCachedOffers;
     if (memoryCachedCats) categories = memoryCachedCats;
     if (memoryCachedAppOnly) onlyInAppProducts = memoryCachedAppOnly;
@@ -71,7 +134,7 @@ export async function renderHome(content) {
       if (rawComercios) {
         const parsed = JSON.parse(rawComercios);
         if (parsed && parsed.length > 0) {
-          comercios = parsed;
+          comercios = shownOnHome(parsed);
           isLoadingComercios = false;
         }
       }
@@ -97,7 +160,7 @@ export async function renderHome(content) {
               Mandados
             </a>
             <a href="#/viajes" class="go-service">
-              <span class="go-service-ring">${icon('car', 22)}</span>
+              <span class="go-service-ring">${icon(CAR_TRIPS_ENABLED ? 'car' : 'motorcycle', 22)}</span>
               Viajes
             </a>
             <a href="#/marketplace" class="go-service">
@@ -112,6 +175,7 @@ export async function renderHome(content) {
         </section>
 
         <div class="go-sheet">
+        <div id="go-giveaway-slot">${giveawayBannerHtml()}</div>
         <!-- Big entry points (Comida & GoMarket) -->
         <div class="go-feature-grid">
           <a href="#/category/Comida" class="go-feature">
@@ -292,20 +356,17 @@ export async function renderHome(content) {
 
     content.addEventListener('scroll', () => {
       const fabBtn = document.getElementById('support-bot-fab-btn');
-      const guideFab = document.getElementById('app-guide-fab');
       const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 160;
       
       if (isAtBottom) {
         if (fabBtn) fabBtn.classList.add('fab-hidden');
-        if (guideFab) guideFab.classList.add('fab-hidden');
       } else {
         if (fabBtn) fabBtn.classList.remove('fab-hidden');
-        if (guideFab) guideFab.classList.remove('fab-hidden');
       }
     });
 
     checkAndShowWelcomeModal();
-    checkAndShowWelcomeCouponModal();
+    import('../components/client-tour.js').then(m => m.maybeStartClientTour()).catch(() => {});
     checkAndShowAppOnlyPromo();
 
     // Render Sub-components
@@ -338,6 +399,7 @@ export async function renderHome(content) {
 
   // Render static shell immediately on load for instant layout and animated skeletons
   doActualHomeRender();
+  loadGiveawayBanner();
 
   // If cache is present, populate the sub-sections in place immediately
   if (categories && categories.length > 0) {
@@ -375,7 +437,7 @@ export async function renderHome(content) {
   if (listenerDelivered) return;
   getDocs(comerciosQuery).then((comSnap) => {
     if (comSnap.docs && comSnap.docs.length > 0) {
-      const fetchedComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const fetchedComercios = shownOnHome(comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       if (!listenerDelivered) {
         comercios = fetchedComercios;
         isLoadingComercios = false;
@@ -396,7 +458,7 @@ export async function renderHome(content) {
       listenerDelivered = true;
       clearTimeout(homeSafetyTimer);
       const isFromCache = comSnap.metadata.fromCache;
-      const newComercios = comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const newComercios = shownOnHome(comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
       if (newComercios.length > 0 || !isFromCache) {
         comercios = newComercios;
@@ -405,7 +467,8 @@ export async function renderHome(content) {
       const wasLoading = isLoadingComercios;
       isLoadingComercios = false;
 
-      if (!isFromCache && comercios.length > 0) {
+      // The server's answer always refreshes the saved copy, even if every shop is hidden now
+      if (!isFromCache && comSnap.size > 0) {
         memoryCachedComercios = comercios;
         memoryCacheTimestamp = Date.now();
         try {
@@ -414,7 +477,9 @@ export async function renderHome(content) {
       }
 
       // Fast signature check to avoid redundant DOM destruction and reflows if data is unchanged
-      const newSignature = comercios.map(c => `${c.id}:${c.isOpen !== false}:${c.rating || 0}:${c.name || ''}:${c.banner || ''}`).join('|');
+      // Everything that changes what the home shows: without isActive, hiding a shop from the admin
+      // was saved but the home never redrew, so it stayed visible for everyone with the app open.
+      const newSignature = comercios.map(c => `${c.id}:${c.isActive !== false}:${c.isPaused === true}:${c.isOpen !== false}:${c.rating || 0}:${c.name || ''}:${c.logo || ''}:${c.banner || ''}:${c.category || ''}`).join('|');
       if (!wasLoading && lastComerciosSignature && lastComerciosSignature === newSignature) {
         return; // Data has not changed, skip rebuilding the DOM
       }
@@ -527,112 +592,6 @@ function checkAndShowWelcomeModal() {
     // However it is closed, it has been seen.
     onClose: () => localStorage.setItem('welcome_beta_v1', 'true'),
   });
-}
-
-async function checkAndShowWelcomeCouponModal() {
-  const user = getState().user;
-  if (!user) return;
-
-  // Only show if user has no completed purchases
-  if ((user.completedOrdersCount || 0) > 0) return;
-
-  // Show once per account
-  const modalShown = localStorage.getItem('welcome_coupon_modal_shown_v1');
-  if (modalShown === 'true') return;
-
-  // Check the coupon in Firestore first
-  let wData = null;
-  try {
-    const welcomeRef = doc(db, 'coupons', 'BIENVENIDA');
-    const welcomeSnap = await getDoc(welcomeRef);
-    if (!welcomeSnap.exists()) {
-      // Auto-create welcome coupon if missing in Firestore (same as cart.js)
-      wData = {
-        active: true,
-        ownerId: 'admin',
-        comercioIds: [],
-        scope: 'products',
-        discountType: 'fixed',
-        absorbedBy: 'platform',
-        type: 'fixed',
-        value: 3000,
-        usageLimit: 999999,
-        remaining: 999999,
-        usedCount: 0,
-        createdAt: new Date(),
-        description: 'Cupón automático de bienvenida para tu primer pedido'
-      };
-      const { setDoc } = await import('firebase/firestore');
-      await setDoc(welcomeRef, wData);
-      console.log('[Home] Welcome coupon BIENVENIDA initialized.');
-    } else {
-      wData = welcomeSnap.data();
-    }
-  } catch (err) {
-    console.warn('[Home] Welcome coupon check failed:', err);
-  }
-
-  // If the coupon is not active, do not apply or display anything
-  if (!wData || wData.active !== true) {
-    return;
-  }
-
-  const couponValue = wData.value || 3000;
-
-  // Poll until no blocking modal (location picker, push prompt, beta info, onboarding, app guide) is active in DOM
-  let pollAttempts = 0;
-  const maxPollAttempts = 60; // 60 * 150ms = 9s max
-  const checkInterval = setInterval(async () => {
-    pollAttempts++;
-    if (pollAttempts >= maxPollAttempts) {
-      clearInterval(checkInterval);
-      return;
-    }
-
-    const isLocationActive = document.getElementById('location-picker-modal') || document.querySelector('.location-modal-container') || document.getElementById('address-modal');
-    const isPushActive = document.getElementById('push-permission-lock-screen');
-    const isBetaActive = document.getElementById('welcome-beta-modal-overlay');
-    const isOnboardingActive = document.getElementById('onboarding-container');
-    const isAppGuideActive = document.getElementById('app-guide-overlay');
-
-    if (!isLocationActive && !isPushActive && !isBetaActive && !isOnboardingActive && !isAppGuideActive) {
-      clearInterval(checkInterval);
-      
-      if (document.getElementById('welcome-coupon-modal-overlay')) return;
-
-      // Auto-apply the BIENVENIDA coupon in global state immediately
-      try {
-        const { setState: appSetState } = await import('../state.js');
-        appSetState('appliedCoupon', {
-          id: 'BIENVENIDA',
-          code: 'BIENVENIDA',
-          value: couponValue,
-          type: 'fixed',
-          discountType: 'fixed',
-          scope: 'products',
-          active: true
-        });
-      } catch (e) {
-        console.warn('Auto-applying welcome coupon failed:', e);
-      }
-
-      showGoSheet({
-        id: 'welcome-coupon-modal-overlay',
-        iconName: 'gift',
-        eyebrow: 'Regalo de bienvenida',
-        title: `${formatPrice(couponValue)} para tu primer pedido`,
-        bodyHtml: `
-          <div class="go-bsheet-ticket">
-            <span>Cupón BIENVENIDA</span>
-            <strong>${formatPrice(couponValue)} OFF</strong>
-          </div>
-          <p>Ya quedó aplicado: se descuenta solo en tu primer pedido a un comercio. No tenés que copiar nada.</p>
-          <p class="go-bsheet-note">No aplica a Mandados ni Viajes.</p>`,
-        primary: { label: 'Buenísimo, a pedir' },
-        onClose: () => localStorage.setItem('welcome_coupon_modal_shown_v1', 'true'),
-      });
-    }
-  }, 150);
 }
 
 function enableInfiniteHorizontalScroll(sliderContainer) {
@@ -930,7 +889,7 @@ async function renderOffersSection(offers = [], comercios = []) {
     if (!offer || !offer.comercioId) continue;
     const comercio = comerciosMap[offer.comercioId];
     const comercioName = comercio ? comercio.name : (offer.merchantName || 'Comercio');
-    const isClosed = comercio ? !isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen) : false;
+    const isClosed = comercio ? !isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule) : false;
 
     const prodIds = offer.productIds || (offer.targetProductId ? [offer.targetProductId] : []);
 
@@ -1206,9 +1165,12 @@ const CATEGORY_IMAGE_MAP = {
   'Heladeria': '/images/categories/go-heladeria.webp',
   'Fiambrería': '/images/categories/go-fiambreria.webp',
   'Fiambreria': '/images/categories/go-fiambreria.webp',
-  'Postres': '/images/categories/go-kiosco.webp',
+  'Postres': '/images/categories/postres.png',
+  'Postre': '/images/categories/postres.png',
   'Comida': '/images/categories/go-comida.webp',
   'Bazar': '/images/categories/bazar.png',
+  'Bebidas': '/images/categories/go-bebidas.webp',
+  'Bebida': '/images/categories/go-bebidas.webp',
   'Tecnología': '/images/categories/go-tecnologia.webp',
   'Tecnologia': '/images/categories/go-tecnologia.webp',
 };
@@ -1322,7 +1284,7 @@ async function renderComercios(comercios, category, search, filters) {
     if (filters.openOnly) {
       filtered = filtered.filter(c => {
         try {
-          return isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen) && !c.isPaused;
+          return isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule) && !c.isPaused;
         } catch (e) {
           return false;
         }
@@ -1350,7 +1312,7 @@ async function renderComercios(comercios, category, search, filters) {
     try {
       if (c.isPaused) return 0;
       // Use imported isShopOpen to determine if shop is currently open
-      return isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen) ? 1 : 0;
+      return isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule) ? 1 : 0;
     } catch (e) {
       return 0;
     }
@@ -1432,7 +1394,7 @@ async function renderComercios(comercios, category, search, filters) {
     grid.innerHTML = resolvedCards.map(({ comercio: c, distanceKm, deliveryFee }, i) => {
       let isOpen = true;
       try {
-        isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen);
+        isOpen = isShopOpen(c.schedules || (c.schedule ? [c.schedule] : []), c.daysOpen, c.weeklySchedule);
       } catch (e) {
         console.warn('Error checking isShopOpen for', c.name, e);
       }
@@ -1957,7 +1919,7 @@ async function renderPopularProductsSlider(comercios, offers = []) {
   const renderSectionHeader = (rankingLabel) => goSectionHead({ eyebrow: rankingLabel ? 'Top ventas' : 'De los comercios de Magdalena', title: 'Destacados', note: rankingLabel || '' });
 
   const renderSliderContent = (productsList) => {
-    return productsList.map(p => {
+    return productsList.filter(p => !hiddenOnHome.has(p.comercioId)).map(p => {
       const offer = offers.find(o => o.active !== false && o.comercioId === p.comercioId && o.productIds && o.productIds.includes(p.id));
       const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
       const discountedPrice = discountPercent > 0 ? p.price * (1 - discountPercent / 100) : p.price;
@@ -2689,18 +2651,16 @@ async function showJoinTeamModal() {
       toggleVehicleFields();
     } else if (role === 'driver') {
       vehicleSection.style.display = 'flex';
-      vehicleTypeSelect.innerHTML = `
-        <option value="moto">🚴‍♂️ Moto</option>
-        <option value="auto">🚗 Auto</option>
-      `;
+      vehicleTypeSelect.innerHTML = tripVehicleOptions('moto');
       toggleVehicleFields();
     } else if (role === 'both') {
+      // Reparte y lleva pasajeros: el vehículo tiene que servir para los viajes
       vehicleSection.style.display = 'flex';
-      vehicleTypeSelect.innerHTML = `
+      vehicleTypeSelect.innerHTML = CAR_TRIPS_ENABLED ? `
         <option value="moto">🚴‍♂️ Moto</option>
         <option value="auto">🚗 Auto</option>
         <option value="camioneta">🛻 Camioneta</option>
-      `;
+      ` : tripVehicleOptions('moto');
       toggleVehicleFields();
     } else {
       vehicleSection.style.display = 'none';
@@ -2812,7 +2772,7 @@ let appOnlyPromoTries = 0;
 function appOnlyPromoCanShow() {
   const hash = window.location.hash || '#/';
   const onHome = hash === '#/' || hash === '#' || hash === '';
-  const busy = document.querySelector('.modal-overlay, .go-promo-sheet, #welcome-beta-modal-overlay, #onboarding-container, #app-guide-overlay, #welcome-coupon-modal-overlay, .delivery-map-modal-v4, #splash-screen, #app-overlay.active, #login-wall');
+  const busy = document.querySelector('.modal-overlay, .go-promo-sheet, #welcome-beta-modal-overlay, #onboarding-container, .go-tour, .delivery-map-modal-v4, #splash-screen, #app-overlay.active, #login-wall');
   return onHome && !busy && document.visibilityState === 'visible';
 }
 
@@ -2828,8 +2788,8 @@ async function checkAndShowAppOnlyPromo() {
   // First-run guides go first; this can wait for another day.
   const welcomeBetaDone = localStorage.getItem('welcome_beta_v1') === 'true';
   const onboardingDone = localStorage.getItem('gd-onboarding-done') === 'true';
-  const appGuideDone = localStorage.getItem('gd-app-guide-seen-v2') === 'true';
-  if (!welcomeBetaDone || !onboardingDone || !appGuideDone) return;
+  const clientTourDone = !!getState().user?.clientTourDone || localStorage.getItem('gd-client-tour-done') === '1';
+  if (!welcomeBetaDone || !onboardingDone || !clientTourDone) return;
 
   // Wait for a calm moment on the home (at most ~20 s, then give up for this session).
   if (!appOnlyPromoCanShow()) {

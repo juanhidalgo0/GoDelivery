@@ -44,11 +44,14 @@ export async function renderAdminCommerceRequests() {
   `;
 
   let unsub = null;
+  // Lo que muestra la lista: aprobar y rechazar leen el dueño de acá
+  let pendingListStore = [];
 
   try {
     unsub = onSnapshot(collection(db, 'comercios'), (snap) => {
       const allComercios = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const pending = allComercios.filter(c => c.approvedByAdmin === false);
+      pendingListStore = pending;
 
       const countBadge = document.getElementById('requests-count-badge');
       if (countBadge) countBadge.textContent = `${pending.length}`;
@@ -147,39 +150,24 @@ export async function renderAdminCommerceRequests() {
   }
 
   function approveApplication(comId, name) {
+    const com = pendingListStore.find(x => x.id === comId);
+    if (!com?.ownerId) {
+      showToast('Esta solicitud no tiene dueño. Asignáselo desde Comercios → Editar → Dueño.', 'warning');
+      return;
+    }
     showConfirm({
       title: '¿Aprobar solicitud?',
-      message: `Confirmás la aprobación de <b>${name}</b>?<br><br>Esto le dará acceso inmediato al panel de comercio al dueño y creará el local.`,
+      message: `Confirmás la aprobación de <b>${name}</b>?<br><br>El dueño recibe acceso inmediato al panel de comercio y el local aparece en la app.`,
       confirmText: 'Aprobar Comercio',
       onConfirm: async () => {
         try {
-          const snap = doc(db, 'comercios', comId);
-          await updateDoc(snap, {
+          await updateDoc(doc(db, 'comercios', comId), {
             approvedByAdmin: true,
-            isActive: true // Active immediately so it appears in the app automatically
+            isActive: true
           });
-
-          const docSnap = pendingListStore.find(x => x.id === comId);
-          if (docSnap && docSnap.ownerId) {
-            await updateDoc(doc(db, 'users', docSnap.ownerId), {
-              role: 'comercio',
-              isComercio: true,
-              commerceStatus: 'approved'
-            });
-
-            // Log notification for the user
-            const { collection, addDoc } = await import('firebase/firestore');
-            await addDoc(collection(db, 'users', docSnap.ownerId, 'notifications'), {
-              type: 'commerce_approved',
-              title: '🎉 ¡Comercio Aprobado!',
-              body: `Tu comercio "${name}" fue aprobado y ya está disponible en la app para todos.`,
-              status: 'unread',
-              url: '/#/mi-comercio',
-              createdAt: new Date()
-            });
-          }
-
-          showToast('¡Comercio aprobado con éxito!', 'success');
+          const { grantCommerceRole } = await import('../../utils/commerce-owner.js');
+          await grantCommerceRole(com.ownerId, name);
+          showToast('¡Comercio aprobado! El dueño ya puede entrar a su panel.', 'success');
         } catch (e) {
           console.error(e);
           showToast('Error al aprobar el comercio', 'error');
@@ -187,15 +175,6 @@ export async function renderAdminCommerceRequests() {
       }
     });
   }
-
-  let pendingListStore = [];
-  // Reuse data from the main listener above instead of creating a duplicate subscription
-  // pendingListStore will be populated from the first onSnapshot (unsub) above
-  try {
-    // Pull from already-loaded snap data to avoid second listener
-    pendingListStore = [...(typeof unsub !== 'undefined' ? [] : [])];
-  } catch (e) {}
-
 
   function rejectApplication(comId, name) {
     showConfirm({

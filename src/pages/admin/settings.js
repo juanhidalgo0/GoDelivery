@@ -1,5 +1,5 @@
 import { db } from "../../firebase.js";
-import { doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, writeBatch, serverTimestamp, query, where } from "firebase/firestore";
 import { isAdmin } from "../../auth.js";
 import { icon } from "../../utils/icons.js";
 import { formatPrice } from "../../utils/format.js";
@@ -9,7 +9,8 @@ import { showConfirm, showModal, closeModal } from "../../components/modal.js";
 import { compressImage } from "../../utils/image-compressor.js";
 import { argentinaDateStr, isCanonPaid, toggleCanonPaidToday } from "../../utils/canon.js";
 import { settleDriverDebt, voidDriverSettlement } from "../../utils/driver-settlement.js";
-let globalPendingOrders = [];
+import { registerDriverPayout, adjustDriverBalance, newRequestId, round2 } from "../../utils/driver-ledger.js";
+import { openDriverStatement, renderCashTab } from "./driver-account.js";
 export async function renderAdminSettings() {
   const content = document.getElementById("app-content");
   if (!content) return;
@@ -166,7 +167,7 @@ export async function renderAdminLogisticsSettings(container) {
                 <div style="width:44px; height:44px; border-radius:14px; background:rgba(59, 130, 246, 0.1); color:#3b82f6; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon("tag", 22)}</div>
                 <div>
                   <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">GO FAVORES</div>
-                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Gesti\xF3n de favores y base para pago de servicios</div>
+                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Tarifa de gesti\xF3n de los mandados</div>
                 </div>
               </div>
               <div style="color:var(--color-text-tertiary);">${icon("chevronRight", 20)}</div>
@@ -298,10 +299,6 @@ export async function renderAdminLogisticsSettings(container) {
           <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Gesti\xF3n GoFavor ($)</label>
           <input type="number" id="logistics-favor-fee" value="${s.favorPurchaseFee || 800}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
         </div>
-        <div>
-          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Base Pago de Servicios ($)</label>
-          <input type="number" id="logistics-service-fee" value="${s.servicePaymentErrandFee || 2e3}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
-        </div>
       </div>
       <button id="btn-save-go-favores" style="margin-top:16px; height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:850; font-size:14px; cursor:pointer; width:100%;">
         Guardar Ajustes
@@ -318,11 +315,9 @@ export async function renderAdminLogisticsSettings(container) {
           btn.disabled = true;
           btn.textContent = "Guardando...";
           const favorPurchaseFee = parseFloat(modalContent.querySelector("#logistics-favor-fee").value) || 0;
-          const servicePaymentErrandFee = parseFloat(modalContent.querySelector("#logistics-service-fee").value) || 0;
           try {
-            await setDoc(doc(db, "settings", "global"), { favorPurchaseFee, servicePaymentErrandFee }, { merge: true });
+            await setDoc(doc(db, "settings", "global"), { favorPurchaseFee }, { merge: true });
             setState("favorPurchaseFee", favorPurchaseFee);
-            setState("servicePaymentErrandFee", servicePaymentErrandFee);
             showToast("Ajustes de Go Favores guardados.", "success");
             closeModal();
           } catch (err) {
@@ -340,7 +335,7 @@ export async function renderAdminLogisticsSettings(container) {
     const modalContent = document.createElement("div");
     modalContent.style.cssText = "padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg);";
     modalContent.innerHTML = `
-      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Viajes (Moto / Auto)</h3>
+      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Viajes en Moto</h3>
       <div style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
         <div>
           <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo Base ($)</label>
@@ -615,7 +610,9 @@ export async function renderAdminEconomySettings(container) {
     btn.disabled = true;
     btn.innerHTML = "Guardando...";
     const commissionRate = (parseFloat(document.getElementById("global-commission-rate").value) || 10) / 100;
-    const appUsageFeeRate = (parseFloat(document.getElementById("global-app-fee-rate").value) || 5) / 100;
+    // 0 es válido (sin tarifa de servicio): sólo un campo vacío o inválido vuelve al 5%
+    const appFeeInput = parseFloat(document.getElementById("global-app-fee-rate").value);
+    const appUsageFeeRate = (Number.isFinite(appFeeInput) && appFeeInput >= 0 ? appFeeInput : 5) / 100;
     const whatsappPayments = document.getElementById("global-whatsapp-payments").value.trim();
     const canonAmount = parseFloat(document.getElementById("global-canon-amount").value) || 2e3;
     const servicesAppFeeConfig = {
@@ -805,7 +802,7 @@ export async function renderAdminDeliveriesSettings(container) {
           <span id="del-proofs-badge" style="display:none; position:absolute; top:-4px; right:-4px; background:#ef4444; color:white; font-size:9.5px; font-weight:900; padding:2px 6px; border-radius:10px; border:1.5px solid var(--color-surface);">0</span>
         </button>
         <button id="del-tab-settlements-history" style="flex:1; height:38px; border-radius:12px; border:none; font-weight:800; font-size:12px; cursor:pointer; background:var(--color-bg-secondary); color:var(--color-text-secondary); display:flex; align-items:center; justify-content:center; gap:6px;">
-          ${icon("history", 16)} Historial
+          ${icon("wallet", 16)} Caja
         </button>
       </div>
 
@@ -821,6 +818,7 @@ export async function renderAdminDeliveriesSettings(container) {
           <button class="driver-filter-sticky" data-filter="all" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-primary); color:white;">Todos</button>
           <button class="driver-filter-sticky" data-filter="online" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">\u{1F7E2} Conectados</button>
           <button class="driver-filter-sticky" data-filter="debt" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">\u26A0\uFE0F Con Deuda</button>
+          <button class="driver-filter-sticky" data-filter="credit" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">🔵 A favor</button>
           <button class="driver-filter-sticky" data-filter="clean" style="height:34px; padding:0 14px; border-radius:10px; font-weight:800; font-size:11px; border:none; cursor:pointer; white-space:nowrap; background:var(--color-surface); color:var(--color-text-secondary); border:1px solid var(--color-border);">\u2705 Al D\xEDa</button>
         </div>
       </div>
@@ -834,6 +832,7 @@ export async function renderAdminDeliveriesSettings(container) {
   let activeTab = "drivers";
   let searchQuery = "";
   let settlementSearchQuery = "";
+  let showLegacyHistory = false;
   let filterStatus = "all";
   let driversData = [];
   let canonPaymentsData = [];
@@ -855,28 +854,8 @@ export async function renderAdminDeliveriesSettings(container) {
         console.warn("Realtime drivers listener error:", err);
       });
       try {
-        const { orderBy, limit, Timestamp } = await import("firebase/firestore");
-        // Load only last 60 days of orders to reduce reads
-        const sixtyDaysAgo = new Date();
-        sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-        const qOrders = query(
-          collection2(db, "orders"),
-          where("createdAt", ">=", Timestamp.fromDate(sixtyDaysAgo)),
-          orderBy("createdAt", "desc"),
-          limit(1000)
-        );
-        const ordersSnap = await getDocs2(qOrders);
-        globalPendingOrders = ordersSnap.docs.map((doc2) => ({ id: doc2.id, ...doc2.data() }));
-      } catch (err) {
-        console.warn("Error loading orders for coupons credit:", err);
-      }
-      try {
-        // Load canon payments for last 60 days only
-        const { Timestamp: TS2 } = await import("firebase/firestore");
-        const sixtyDaysAgo2 = new Date();
-        sixtyDaysAgo2.setDate(sixtyDaysAgo2.getDate() - 60);
-        const canonQ = query(collection2(db, "delivery_canon_payments"), where("createdAt", ">=", TS2.fromDate(sixtyDaysAgo2)));
-        const canonSnap = await getDocs2(canonQ);
+        // Only today's fees: they drive the "Cuota Hoy" chip. Balances come from each account.
+        const canonSnap = await getDocs2(query(collection2(db, "delivery_canon_payments"), where("dateStr", "==", todayStr)));
         canonPaymentsData = canonSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       } catch (err) {
         console.warn("Error loading cuota payments:", err);
@@ -888,7 +867,7 @@ export async function renderAdminDeliveriesSettings(container) {
         console.warn("Error loading settlements:", err);
       }
       try {
-        const proofsSnap = await getDocs2(collection2(db, "delivery_settlement_proofs"));
+        const proofsSnap = await getDocs2(query(collection2(db, "delivery_settlement_proofs"), where("status", "==", "pending")));
         pendingProofsData = proofsSnap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
         updateProofsBadge();
       } catch (err) {
@@ -915,19 +894,20 @@ export async function renderAdminDeliveriesSettings(container) {
     try {
       const [settlementsSnap, proofsSnap] = await Promise.all([
         getDocs(collection(db, "delivery_debt_settlements")),
-        getDocs(collection(db, "delivery_settlement_proofs"))
+        getDocs(query(collection(db, "delivery_settlement_proofs"), where("status", "==", "pending")))
       ]);
       const byNewest = (a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0);
       settlementsData = settlementsSnap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
       pendingProofsData = proofsSnap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byNewest);
       updateProofsBadge();
-      if (activeTab === "settlements-history") renderTab();
+      if (activeTab === "settlements-history" && showLegacyHistory) renderTab();
     } catch (err) {
       console.warn("Could not refresh settlements:", err);
     }
   }
   function switchTab(tab) {
     activeTab = tab;
+    showLegacyHistory = false;
     ["drivers", "settlements", "settlements-history", "config"].forEach((t) => {
       const btn = document.getElementById(`del-tab-${t}`);
       if (btn) {
@@ -952,67 +932,26 @@ export async function renderAdminDeliveriesSettings(container) {
     } else if (activeTab === "settlements") {
       renderSettlementsTab(body);
     } else if (activeTab === "settlements-history") {
-      renderSettlementsHistoryTab(body);
+      if (showLegacyHistory) renderSettlementsHistoryTab(body);
+      else renderCashView(body);
     } else if (activeTab === "config") {
       renderConfigTab(body);
     }
   }
-  function openIndividualHistoryModal(driver) {
-    const displayId = driver.deliveryId || driver.goId || driver.customId || "go-" + driver.id.slice(0, 4);
-    const modalHtml = `
-      <div id="individual-history-modal" style="position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(6px); z-index:10000; display:flex; align-items:center; justify-content:center; padding:16px;">
-        <div style="background:var(--color-surface); border-radius:24px; width:100%; max-width:500px; max-height:85dvh; display:flex; flex-direction:column; box-shadow:0 20px 50px rgba(0,0,0,0.3); overflow:hidden; border:1px solid var(--color-border-light);">
-          
-          <!-- Header -->
-          <div style="padding:18px 20px; border-bottom:1px solid var(--color-border-light); display:flex; align-items:center; justify-content:space-between; background:var(--color-bg-secondary);">
-            <div>
-              <div style="font-family:var(--font-display); font-size:16px; font-weight:900; color:var(--color-text);">Historial de Cobros</div>
-              <div style="font-size:12px; font-weight:700; color:var(--color-primary); margin-top:2px;">${driver.displayName || driver.name} (${displayId})</div>
-            </div>
-            <button id="close-ind-modal-btn" style="width:32px; height:32px; border-radius:50%; background:rgba(0,0,0,0.06); border:none; color:var(--color-text); font-weight:900; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center;">\u2715</button>
-          </div>
-
-          <!-- Body -->
-          <div id="ind-modal-body" style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; -webkit-overflow-scrolling:touch;">
-            <div class="loader-dots" style="margin:20px auto;"><span></span><span></span><span></span></div>
-          </div>
-
-        </div>
-      </div>
+  // Caja: money the admins took in and paid out, from the drivers' accounts. The settlements
+  // registered before the accounts existed stay reachable below it.
+  function renderCashView(body) {
+    body.innerHTML = `
+      <div data-cash></div>
+      <button id="legacy-history-btn" style="height:44px; border-radius:14px; border:1px dashed var(--color-border); background:transparent; color:var(--color-text-secondary); font-weight:800; font-size:12.5px; cursor:pointer;">
+        Ver cobros anteriores a la cuenta corriente
+      </button>
     `;
-    const div = document.createElement("div");
-    div.id = "ind-modal-container";
-    div.innerHTML = modalHtml;
-    document.body.appendChild(div);
-    document.getElementById("close-ind-modal-btn").onclick = () => div.remove();
-    const driverSettlements = settlementsData.filter((s2) => s2.driverId === driver.id);
-    const body = document.getElementById("ind-modal-body");
-    if (!body) return;
-    if (driverSettlements.length === 0) {
-      body.innerHTML = `
-        <div style="text-align:center; padding:40px 20px; color:var(--color-text-tertiary);">
-          ${icon("receipt", 40)}
-          <p style="margin-top:12px; font-weight:700;">Este repartidor no registra cobros o liquidaciones previas.</p>
-        </div>
-      `;
-      return;
-    }
-    body.innerHTML = driverSettlements.map((s2) => {
-      const dateStr = s2.createdAt?.toDate ? s2.createdAt.toDate().toLocaleString("es-AR") : "Reciente";
-      const methodText = s2.method === "transferencia" ? "\u{1F3E6} Transferencia" : "\u{1F4B5} Efectivo";
-      return `
-        <div style="background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:16px; padding:14px; display:flex; align-items:center; justify-content:space-between;">
-          <div>
-            <div style="font-weight:900; font-size:15px; color:${s2.voided ? "var(--color-text-tertiary)" : "#22c55e"}; ${s2.voided ? "text-decoration:line-through;" : ""}">+${formatPrice(s2.amount)}${s2.voided ? ` <span style="font-size:10px; text-decoration:none;">ANULADA</span>` : ""}</div>
-            <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">${methodText} \u2022 ${dateStr}</div>
-            ${s2.notes ? `<div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; font-style:italic;">"${s2.notes}"</div>` : ""}
-          </div>
-          <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); background:var(--color-surface); padding:4px 8px; border-radius:8px; border:1px solid var(--color-border-light);">
-            Por ${s2.settledBy || "Admin"}
-          </div>
-        </div>
-      `;
-    }).join("");
+    renderCashTab(body.querySelector("[data-cash]"), { db });
+    body.querySelector("#legacy-history-btn").onclick = () => {
+      showLegacyHistory = true;
+      renderTab();
+    };
   }
   // Readable reason for a failed liquidation; offline is the common one and used to look like a hang.
   function settlementErrorText(err) {
@@ -1117,7 +1056,9 @@ export async function renderAdminDeliveriesSettings(container) {
     });
   }
   function renderDriversTab(body) {
-    const totalDebt = driversData.reduce((sum, d) => sum + (d.deliveryDebt || 0), 0);
+    // Negative balances are credit the app owes the driver, not less debt from the others.
+    const totalDebt = driversData.reduce((sum, d) => sum + Math.max(0, d.deliveryDebt || 0), 0);
+    const totalCredit = driversData.reduce((sum, d) => sum + Math.max(0, -(d.deliveryDebt || 0)), 0);
     const onlineCount = driversData.filter((d) => d.isOnline === true).length;
     const activeTodayCount = driversData.filter((d) => d.lastCanonChargeDate === todayStr || d.isOnline === true).length;
     const paidCanonTodayCount = driversData.filter((d) => canonPaidToday(d.id)).length;
@@ -1134,7 +1075,8 @@ export async function renderAdminDeliveriesSettings(container) {
       if (!matchesSearch) return false;
       if (filterStatus === "online") return isOnline;
       if (filterStatus === "debt") return debt > 0;
-      if (filterStatus === "clean") return debt <= 0;
+      if (filterStatus === "credit") return debt < 0;
+      if (filterStatus === "clean") return debt === 0;
       if (filterStatus === "active") return d.lastCanonChargeDate === todayStr || isOnline;
       return true;
     });
@@ -1142,7 +1084,8 @@ export async function renderAdminDeliveriesSettings(container) {
       <!-- KPI Summary Header -->
       <div style="background: linear-gradient(135deg, #1e1e2d 0%, #11111d 100%); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); color: white;">
         <div style="font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 1px;">Deuda Total Acumulada (Repartidores)</div>
-        <div style="font-size: 34px; font-weight: 950; letter-spacing: -1.5px; margin: 4px 0 16px; color: #ef4444;">${formatPrice(totalDebt)}</div>
+        <div style="font-size: 34px; font-weight: 950; letter-spacing: -1.5px; margin: 4px 0 ${totalCredit > 0 ? "4px" : "16px"}; color: #ef4444;">${formatPrice(totalDebt)}</div>
+        ${totalCredit > 0 ? `<div style="font-size: 12px; font-weight: 700; color: #93c5fd; margin-bottom: 16px;">La app les debe ${formatPrice(totalCredit)} a los repartidores con saldo a favor</div>` : ""}
         
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
           <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 14px; text-align: center;">
@@ -1179,15 +1122,14 @@ export async function renderAdminDeliveriesSettings(container) {
           </div>
         ` : filteredDrivers.map((d) => {
       const debt = Math.max(0, d.deliveryDebt || 0);
+      // Negative balance: the app owes the driver (coupons and incentives above their fees).
+      const credit = Math.max(0, -(d.deliveryDebt || 0));
       const isCanonPaidToday = canonPaidToday(d.id);
       const isExempt = d.isCanonExempt === true;
       const isOnlineNow = d.isOnline === true;
       const photo = d.photoURL || d.avatarUrl || d.photo || d.profileImage || "";
       const displayId = d.deliveryId || d.goId || d.customId || "go-" + d.id.slice(0, 4);
-      const driverOrders = debt > 0 ? globalPendingOrders.filter((o) => (o.driverId === d.id || o.driverDeliveryId === d.id) && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")) : [];
-      const totalCouponsCredit = debt > 0 ? driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0) : 0;
-      // deliveryDebt is already net of coupons (the server subtracts them when each order completes).
-      const finalSettleAmount = Math.max(0, debt);
+      const finalSettleAmount = debt;
       return `
             <div style="background:var(--color-surface); border:1.5px solid ${finalSettleAmount > 0 ? "rgba(239,68,68,0.25)" : "var(--color-border-light)"}; border-radius:24px; padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:16px; transition:all 0.2s;">
               
@@ -1225,66 +1167,32 @@ export async function renderAdminDeliveriesSettings(container) {
                     <span style="background:rgba(34,197,94,0.12); color:#22c55e; font-size:10.5px; font-weight:900; padding:5px 10px; border-radius:10px; border:1px solid rgba(34,197,94,0.25); box-shadow:0 0 10px rgba(34,197,94,0.2);">\u{1F7E2} Conectado</span>
                   ` : isCanonPaidToday ? `
                     <span style="background:rgba(59,130,246,0.1); color:#3b82f6; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(59,130,246,0.2);">\u2705 Cuota Hoy</span>
+                  ` : credit > 0 ? `
+                    <span style="background:rgba(59,130,246,0.1); color:#3b82f6; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(59,130,246,0.2);">A favor</span>
                   ` : debt <= 0 ? `
                     <span style="background:rgba(34,197,94,0.1); color:#22c55e; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(34,197,94,0.2);">\u2705 Al D\xEDa</span>
                   ` : `
-                    <span style="background:rgba(239,68,68,0.1); color:#ef4444; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(239,68,68,0.2);">\u26A0\uFE0F Debe Cuota</span>
+                    <span style="background:rgba(239,68,68,0.1); color:#ef4444; font-size:10.5px; font-weight:800; padding:5px 10px; border-radius:10px; border:1px solid rgba(239,68,68,0.2);">\u26A0\uFE0F Con deuda</span>
                   `}
                 </div>
               </div>
 
-              <!-- Debt Info -->
-              ${totalCouponsCredit > 0 ? `
-                <div data-driver-debt-info="${d.id}" style="background:linear-gradient(135deg, rgba(239,68,68,0.01) 0%, rgba(239,68,68,0.04) 100%); border:1.5px solid var(--color-border-light); border-radius:20px; padding:14px; display:flex; flex-direction:column; gap:10px; box-shadow:inset 0 1px 3px rgba(0,0,0,0.02); cursor:pointer; transition:all 0.2s;" onmouseover="this.style.borderColor='rgba(225,29,72,0.3)'; this.style.background='rgba(225,29,72,0.01)';" onmouseout="this.style.borderColor='var(--color-border-light)'; this.style.background='linear-gradient(135deg, rgba(239,68,68,0.01) 0%, rgba(239,68,68,0.04) 100%)';">
-                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; border-bottom:1px dashed var(--color-border-light); padding-bottom:8px;">
-                    <div>
-                      <div style="font-size:9px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em; display:flex; align-items:center; gap:4px;">
-                        Deuda Bruta
-                      </div>
-                      <div style="font-size:15px; font-weight:900; color:#ef4444; margin-top:2px;">${formatPrice(debt + totalCouponsCredit)}</div>
-                    </div>
-                    <div style="text-align:right;">
-                      <div style="font-size:9px; font-weight:800; color:#a855f7; text-transform:uppercase; letter-spacing:0.04em;">Descuentos/Cupones</div>
-                      <div style="font-size:15px; font-weight:900; color:#a855f7; margin-top:2px;">-${formatPrice(totalCouponsCredit)}</div>
-                    </div>
-                  </div>
-                  <div style="display:flex; align-items:center; justify-content:space-between;">
-                    <div>
-                      <div style="font-size:9px; font-weight:850; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.04em;">Neto a Liquidar</div>
-                      <div style="font-size:20px; font-weight:950; color:${finalSettleAmount > 0 ? "#10b981" : "#22c55e"}; letter-spacing:-0.5px; margin-top:2px;">${formatPrice(finalSettleAmount)}</div>
-                    </div>
-                    <span style="font-size:9.5px; font-weight:900; color:white; background:#10b981; padding:5px 10px; border-radius:8px; box-shadow:0 3px 8px rgba(16,185,129,0.2); display:flex; align-items:center; gap:4px;">
-                      Neto Ajustado ${icon("info", 11, "", "white")}
-                    </span>
-                  </div>
+              <!-- Balance (tap: estado de cuenta) -->
+              <button type="button" data-driver-statement="${d.id}" style="width:100%; text-align:left; cursor:pointer; border-radius:18px; padding:14px; display:flex; align-items:center; justify-content:space-between; gap:10px; transition:all 0.2s; background:${debt > 0 ? "rgba(239,68,68,0.05)" : credit > 0 ? "rgba(59,130,246,0.06)" : "rgba(34,197,94,0.05)"}; border:1.5px solid ${debt > 0 ? "rgba(239,68,68,0.18)" : credit > 0 ? "rgba(59,130,246,0.2)" : "rgba(34,197,94,0.18)"};">
+                <div>
+                  <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">${debt > 0 ? "Le debe a la app" : credit > 0 ? "A favor del cadete" : "Cuenta al d\xEDa"}</div>
+                  <div style="font-size:22px; font-weight:950; color:${debt > 0 ? "#ef4444" : credit > 0 ? "#3b82f6" : "#22c55e"}; letter-spacing:-0.5px; margin-top:2px;">${formatPrice(debt > 0 ? debt : credit)}</div>
                 </div>
-              ` : `
-                <div ${debt > 0 ? `data-driver-debt-info="${d.id}" style="background:linear-gradient(135deg, rgba(239,68,68,0.04) 0%, rgba(239,68,68,0.08) 100%); border:1.5px solid rgba(239,68,68,0.15); cursor:pointer;` : `style="background:linear-gradient(135deg, rgba(34,197,94,0.04) 0%, rgba(34,197,94,0.08) 100%); border:1px solid rgba(34,197,94,0.15);`} border-radius:18px; padding:14px; display:flex; align-items:center; justify-content:space-between; transition:all 0.2s;" ${debt > 0 ? `onmouseover="this.style.borderColor='rgba(239,68,68,0.4)'; this.style.background='rgba(239,68,68,0.06)';" onmouseout="this.style.borderColor='rgba(239,68,68,0.15)'; this.style.background='linear-gradient(135deg, rgba(239,68,68,0.04) 0%, rgba(239,68,68,0.08) 100%)';"` : ""}>
-                  <div>
-                    <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">
-                      Deuda Acumulada
-                    </div>
-                    <div style="font-size:22px; font-weight:950; color:${debt > 0 ? "#ef4444" : "#22c55e"}; letter-spacing:-0.5px; margin-top:2px;">${formatPrice(debt)}</div>
-                  </div>
-                  <div>
-                    ${debt > 0 ? `
-                      <span style="font-size:11px; font-weight:900; color:white; background:#ef4444; padding:6px 12px; border-radius:10px; box-shadow:0 3px 8px rgba(239,68,68,0.25); display:flex; align-items:center; gap:4px;">
-                        Saldo Pendiente ${icon("info", 11, "", "white")}
-                      </span>
-                    ` : `
-                      <span style="font-size:11px; font-weight:800; color:#22c55e; background:white; border:1px solid rgba(34,197,94,0.2); padding:5px 10px; border-radius:10px; box-shadow:0 2px 6px rgba(34,197,94,0.1);">Al D\xEDa</span>
-                    `}
-                  </div>
-                </div>
-              `}
+                <span style="font-size:11.5px; font-weight:800; color:var(--color-text-secondary); display:flex; align-items:center; gap:4px; flex-shrink:0;">Estado de cuenta ${icon("chevronRight", 14)}</span>
+              </button>
 
               <!-- Primary Action Buttons -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                 <button data-wsp-driver="${d.id}" style="height:46px; border-radius:16px; background:linear-gradient(135deg, #25D366 0%, #128C7E 100%); color:white; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:0 6px 16px rgba(37,211,102,0.25); transition:transform 0.15s active;">
                   ${icon("whatsappLogo", 18)} WhatsApp Cobro
                 </button>
-                <button data-settle-driver="${d.id}" style="height:46px; border-radius:16px; background:${finalSettleAmount > 0 ? "linear-gradient(135deg, #E11D48 0%, #BE123C 100%)" : "var(--color-bg-secondary)"}; color:${finalSettleAmount > 0 ? "white" : "var(--color-text-tertiary)"}; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:${finalSettleAmount > 0 ? "0 6px 16px rgba(225,29,72,0.25)" : "none"}; opacity:${finalSettleAmount > 0 ? "1" : "0.6"};">
-                  ${icon("bank", 18)} Liquidar Deuda
+                <button data-settle-driver="${d.id}" style="height:46px; border-radius:16px; background:${finalSettleAmount > 0 ? "linear-gradient(135deg, #E11D48 0%, #BE123C 100%)" : credit > 0 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" : "var(--color-bg-secondary)"}; color:${finalSettleAmount > 0 || credit > 0 ? "white" : "var(--color-text-tertiary)"}; border:none; font-weight:900; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:${finalSettleAmount > 0 ? "0 6px 16px rgba(225,29,72,0.25)" : credit > 0 ? "0 6px 16px rgba(59,130,246,0.25)" : "none"}; opacity:${finalSettleAmount > 0 || credit > 0 ? "1" : "0.6"};">
+                  ${icon("bank", 18)} ${credit > 0 ? "Pagar al cadete" : "Cobrar / Ajustar"}
                 </button>
               </div>
 
@@ -1306,8 +1214,8 @@ export async function renderAdminDeliveriesSettings(container) {
                 <button data-driver-orders="${d.id}" style="height:34px; border-radius:10px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); color:#6366f1; font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;">
                   ${icon("bag", 13)} Hist. Pedidos
                 </button>
-                <button data-driver-payments="${d.id}" style="height:34px; border-radius:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;">
-                  ${icon("bank", 13)} Hist. Pagos
+                <button data-driver-statement="${d.id}" style="height:34px; border-radius:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; font-weight:800; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;">
+                  ${icon("receipt", 13)} Estado de cuenta
                 </button>
               </div>
 
@@ -1352,15 +1260,19 @@ export async function renderAdminDeliveriesSettings(container) {
           return;
         }
         const debt = driver.deliveryDebt || 0;
-        const bankAlias = getState().bankAlias || getState().whatsappPayments || "godelivery.oficial";
-        const text = `Hola ${driver.displayName || driver.name}! Te escribimos de GoDelivery para recordarte la rendici\xF3n de tu saldo acumulado:
+        const bankAlias = getState().bankAlias || "godelivery.oficial";
+        const text = debt > 0
+          ? `Hola ${driver.displayName || driver.name}! Te escribimos de GoDelivery por tu cuenta:
 
-\u{1F4CC} Total Adeudado: ${formatPrice(debt)}
+\u{1F4CC} Saldo a pagar: ${formatPrice(debt)}
 
-Pod\xE9s transferir al siguiente Alias:
-\u{1F4B3} ALIAS: ${bankAlias}
+Pod\xE9s transferir al alias:
+\u{1F4B3} ${bankAlias}
 
-Por favor, envi\xE1 el comprobante por este medio una vez realizada la transferencia. \xA1Muchas gracias!`;
+Y subir el comprobante desde la app (Mi cuenta → Pagar). El detalle de cada movimiento est\xE1 en Mi cuenta → Estado de cuenta. \xA1Gracias!`
+          : debt < 0
+            ? `Hola ${driver.displayName || driver.name}! Te escribimos de GoDelivery: ten\xE9s ${formatPrice(-debt)} a favor en tu cuenta. \xBFC\xF3mo te queda mejor que te lo paguemos?`
+            : `Hola ${driver.displayName || driver.name}! Te escribimos de GoDelivery: tu cuenta est\xE1 al d\xEDa. \xA1Gracias!`;
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
       };
     });
@@ -1422,12 +1334,16 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         // is missing or stale, so the admin knows this driver may not be trackable
         // or properly dispatchable even though the system will show them as online.
         let locationWarningHTML = "";
+        const limit = Number(getState().maxDebtLimit) || 0;
+        if (newStatus && getState().debtLimitEnabled === true && limit > 0 && (driver.deliveryDebt || 0) > limit) {
+          locationWarningHTML += `<br><br>⛔ <b>Su saldo (${formatPrice(driver.deliveryDebt)}) supera el tope de deuda (${formatPrice(limit)}).</b> El sistema lo va a desconectar enseguida: primero registrá un cobro que lo deje por debajo del tope.`;
+        }
         if (newStatus) {
           const locUpdatedAt = driver.currentLocation?.updatedAt;
           const locMs = locUpdatedAt?.toMillis ? locUpdatedAt.toMillis() : (locUpdatedAt ? new Date(locUpdatedAt).getTime() : 0);
           const staleMinutes = locMs ? Math.round((Date.now() - locMs) / 60000) : null;
           if (!locMs || staleMinutes > 15) {
-            locationWarningHTML = `<br><br>⚠️ <b>${!locMs ? "Este repartidor nunca report\xF3 su ubicaci\xF3n" : `Su \xFAltima ubicaci\xF3n conocida es de hace ${staleMinutes} minutos`}.</b> Es posible que su GPS no est\xE9 activo o que la app no est\xE9 abierta — puede quedar "en l\xEDnea" sin recibir ni poder entregar pedidos correctamente hasta que abra la app en su tel\xE9fono.`;
+            locationWarningHTML += `<br><br>⚠️ <b>${!locMs ? "Este repartidor nunca report\xF3 su ubicaci\xF3n" : `Su \xFAltima ubicaci\xF3n conocida es de hace ${staleMinutes} minutos`}.</b> Es posible que su GPS no est\xE9 activo o que la app no est\xE9 abierta — puede quedar "en l\xEDnea" sin recibir ni poder entregar pedidos correctamente hasta que abra la app en su tel\xE9fono.`;
           }
         }
 
@@ -1450,7 +1366,6 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
               } else {
                 updateData.disconnectedReason = "admin";
               }
-              // The daily fee is charged by the server (chargeDailyCanonOnConnect) on this switch to online.
               await updateDoc2(doc2(db, "users", uid), updateData);
               driver.isOnline = newStatus;
               showToast(`Repartidor ${newStatus ? "conectado" : "desconectado"} correctamente`, "success");
@@ -1461,14 +1376,6 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
             }
           }
         });
-      };
-    });
-    body.querySelectorAll("[data-driver-history]").forEach((btn) => {
-      btn.onclick = () => {
-        const uid = btn.dataset.driverHistory;
-        const driver = driversData.find((d) => d.id === uid);
-        if (!driver) return;
-        openIndividualHistoryModal(driver);
       };
     });
     body.querySelectorAll("[data-toggle-canon]").forEach((btn) => {
@@ -1482,7 +1389,7 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
           title: "Cuota Diaria",
           message: isCurrentlyPaid
             ? `¿Deshacer el pago de la cuota de hoy de ${name}? Vuelve a quedar como deuda.`
-            : `¿${name} te pagó en mano la cuota de hoy (${formatPrice(getState().canonAmount || 2e3)})? Se descuenta de su deuda, o si todavía no se conectó, no se le cobra al conectarse.`,
+            : `¿${name} te pagó en mano la cuota de hoy (${formatPrice(getState().canonAmount || 2e3)})? Se registra como un cobro en su cuenta. Si la cuota todavía no se le cobró (no llegó a los pedidos del día), le queda a favor.`,
           onConfirm: async () => {
             try {
               const result = await toggleCanonPaidToday({
@@ -1491,7 +1398,7 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
                 canonAmount: getState().canonAmount || 2e3,
                 adminEmail: getState().user?.email || "Admin"
               });
-              showToast(result === "undone" ? "Pago de cuota deshecho" : result === "prepaid" ? "Cuota de hoy registrada como pagada por adelantado" : "Cuota de hoy cobrada y descontada de la deuda", "success");
+              showToast(result === "undone" ? "Pago de cuota deshecho" : result === "prepaid" ? "Pago registrado: queda a favor hasta que se le cobre la cuota" : "Cuota de hoy cobrada y descontada de la deuda", "success");
               loadData();
             } catch (err) {
               console.error(err);
@@ -1533,22 +1440,12 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         if (driver) showDriverOrderHistoryModal(driver, db);
       };
     });
-    body.querySelectorAll("[data-driver-payments]").forEach((btn) => {
+    body.querySelectorAll("[data-driver-statement]").forEach((btn) => {
       btn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const uid = btn.dataset.driverPayments;
-        const driver = driversData.find((d) => d.id === uid);
-        if (driver) showDriverPaymentHistoryModal(driver, db);
-      };
-    });
-    body.querySelectorAll("[data-driver-debt-info]").forEach((btn) => {
-      btn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const uid = btn.dataset.driverDebtInfo;
-        const driver = driversData.find((d) => d.id === uid);
-        if (driver) showDriverDebtDetailModal(driver, db);
+        const driver = driversData.find((d) => d.id === btn.dataset.driverStatement);
+        if (driver) openStatementFor(driver);
       };
     });
     bindPendingProofListeners(body, () => renderDriversTab(body));
@@ -1632,7 +1529,8 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
     bindPendingProofListeners(body, () => renderSettlementsTab(body));
   }
   function renderSettlementsHistoryTab(body) {
-    const filteredSettlements = settlementsData.filter((s2) => {
+    // Only what predates the accounts: newer payments live in the Caja and each statement.
+    const filteredSettlements = settlementsData.filter((s2) => !s2.ledgerEntryId).filter((s2) => {
       const q = settlementSearchQuery.toLowerCase().trim();
       if (!q) return true;
       const name = (s2.driverName || "").toLowerCase();
@@ -1645,7 +1543,9 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
     });
     body.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:16px;">
-        <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; color:var(--color-text); text-transform:uppercase; letter-spacing:0.02em;">Historial de Liquidaciones (${filteredSettlements.length})</h3>
+        <button id="back-to-cash-btn" style="align-self:flex-start; height:34px; padding:0 12px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-weight:800; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:4px;">${icon("chevronLeft", 14)} Volver a la caja</button>
+        <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; color:var(--color-text); text-transform:uppercase; letter-spacing:0.02em;">Cobros anteriores (${filteredSettlements.length})</h3>
+        <div style="font-size:12px; font-weight:600; color:var(--color-text-tertiary); margin-top:-8px;">Liquidaciones registradas antes de la cuenta corriente. Los movimientos nuevos están en la Caja y en el estado de cuenta de cada repartidor.</div>
 
         <!-- Search Bar -->
         <div style="position:relative; width:100%;">
@@ -1695,6 +1595,10 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         `}
       </div>
     `;
+    body.querySelector("#back-to-cash-btn").onclick = () => {
+      showLegacyHistory = false;
+      renderTab();
+    };
     body.querySelectorAll("[data-void-settlement]").forEach((btn) => {
       btn.onclick = () => {
         const s2 = settlementsData.find((x) => x.id === btn.dataset.voidSettlement);
@@ -1739,6 +1643,7 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
   }
   function renderConfigTab(body) {
     const canonAmt = getState().canonAmount || 2e3;
+    const canonMinOrders = getState().canonMinOrders || 1;
     const bankAlias = getState().bankAlias || "godelivery.oficial";
     const bankOwner = getState().bankOwner || "GoDelivery S.R.L.";
     const whatsappPayments = getState().whatsappPayments || "5491123456789";
@@ -1751,6 +1656,12 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         <div>
           <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Cuota Diaria de Repartidores ($)</label>
           <input type="number" class="input" id="cfg-canon-amount" value="${canonAmt}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+        </div>
+
+        <div>
+          <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Pedidos del d\xEDa para cobrar la cuota</label>
+          <input type="number" class="input" id="cfg-canon-min-orders" value="${canonMinOrders}" min="1" step="1" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:15px;" />
+          <div style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:600; margin-top:6px; line-height:1.4;">La cuota se suma a la cuenta del cadete cuando completa este pedido del d\xEDa. Si no llega, ese d\xEDa no paga cuota.</div>
         </div>
 
         <div>
@@ -1797,12 +1708,60 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         </button>
       </div>
     `;
+    // Old history into each driver's statement (server job, see onSystemJob in functions/index.js).
+    body.insertAdjacentHTML("beforeend", `
+      <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:24px; padding:20px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow-sm); margin-top:16px;">
+        <h3 style="font-family:var(--font-display); font-size:16px; font-weight:900; margin:0; color:var(--color-text);">Historial anterior</h3>
+        <p style="margin:0; font-size:12.5px; font-weight:600; color:var(--color-text-secondary); line-height:1.5;">
+          Trae al estado de cuenta de cada repartidor lo que registró el sistema anterior (pedidos, cuotas y pagos), con sus fechas.
+          Si no suma exacto la deuda que tiene, agrega una línea de diferencia. No cambia la deuda de nadie y se puede correr de nuevo: los ya importados se saltean.
+        </p>
+        <div id="history-job-status" style="font-size:12.5px; font-weight:700; color:var(--color-text-tertiary);"></div>
+        <button id="import-history-btn" style="height:46px; border-radius:14px; background:var(--color-bg-secondary); color:var(--color-text); border:1px solid var(--color-border); font-weight:900; font-size:13px; cursor:pointer;">
+          ${icon("history", 16)} Importar historial anterior
+        </button>
+      </div>
+    `);
+    const importBtn = body.querySelector("#import-history-btn");
+    const jobStatus = body.querySelector("#history-job-status");
+    importBtn.onclick = async () => {
+      importBtn.disabled = true;
+      importBtn.textContent = "Importando...";
+      try {
+        const { addDoc: addDoc2, collection: col2, onSnapshot: onSnap2, serverTimestamp: ts2 } = await import("firebase/firestore");
+        const ref = await addDoc2(col2(db, "system_jobs"), { type: "import_driver_history", createdBy: getState().user?.email || "Admin", createdAt: ts2() });
+        const unsub = onSnap2(ref, (snap) => {
+          const j = snap.data() || {};
+          if (j.status === "done") {
+            jobStatus.style.color = "#059669";
+            jobStatus.textContent = `Listo: ${j.imported} de ${j.drivers} repartidores importados (${j.lines} movimientos).${j.errors?.length ? " Con errores: " + j.errors.join("; ") : ""}`;
+            importBtn.disabled = false;
+            importBtn.innerHTML = `${icon("history", 16)} Importar historial anterior`;
+            unsub();
+          } else if (j.status === "error") {
+            jobStatus.style.color = "#e11d48";
+            jobStatus.textContent = `No se pudo importar: ${j.error || "error"}`;
+            importBtn.disabled = false;
+            importBtn.innerHTML = `${icon("history", 16)} Importar historial anterior`;
+            unsub();
+          } else {
+            jobStatus.textContent = j.status === "running" ? "Importando en el servidor..." : "Pedido enviado, esperando al servidor...";
+          }
+        });
+      } catch (err) {
+        console.error(err);
+        showToast("No se pudo iniciar la importación", "error");
+        importBtn.disabled = false;
+        importBtn.innerHTML = `${icon("history", 16)} Importar historial anterior`;
+      }
+    };
     const saveBtn = body.querySelector("#save-del-config-btn");
     if (saveBtn) {
       saveBtn.onclick = async () => {
         saveBtn.disabled = true;
         saveBtn.innerHTML = "Guardando...";
         const newCanon = parseFloat(document.getElementById("cfg-canon-amount").value) || 2e3;
+        const newMinOrders = Math.max(1, Math.floor(Number(document.getElementById("cfg-canon-min-orders").value) || 1));
         const newAlias = document.getElementById("cfg-bank-alias").value.trim() || "godelivery.oficial";
         const newOwner = document.getElementById("cfg-bank-owner").value.trim() || "GoDelivery S.R.L.";
         const newWsp = document.getElementById("cfg-whatsapp-payments").value.trim() || "5491123456789";
@@ -1811,6 +1770,7 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         try {
           await setDoc(doc(db, "settings", "global"), {
             canonAmount: newCanon,
+            canonMinOrders: newMinOrders,
             bankAlias: newAlias,
             bankOwner: newOwner,
             whatsappPayments: newWsp,
@@ -1818,6 +1778,7 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
             debtLimitEnabled: limitEnabled
           }, { merge: true });
           setState("canonAmount", newCanon);
+          setState("canonMinOrders", newMinOrders);
           setState("bankAlias", newAlias);
           setState("bankOwner", newOwner);
           setState("whatsappPayments", newWsp);
@@ -1834,21 +1795,41 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
       };
     }
   }
-  function openSettlementsModal(driver) {
-    const currentDebt = Math.max(0, driver.deliveryDebt || 0);
-    const driverOrders = globalPendingOrders.filter((o) => o.driverId === driver.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
-    const totalCouponsCredit = driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0);
+  // The driver's statement; its "Cobrar / Pagar" opens the modal below and refreshes after it.
+  function openStatementFor(driver) {
+    const statement = openDriverStatement({
+      db,
+      driver,
+      onAction: () => openSettlementsModal(driversData.find((d) => d.id === driver.id) || driver, { onDone: () => statement.reload() })
+    });
+  }
+  // Cobrar, pagarle al cadete o ajustar su saldo. Each is one entry in the driver's account
+  // (src/utils/driver-ledger.js); the form's requestId makes a double tap book only once.
+  function openSettlementsModal(driver, { onDone } = {}) {
+    const balance = round2(driver.deliveryDebt || 0);
+    const currentDebt = Math.max(0, balance);
+    const credit = Math.max(0, -balance);
+    const driverName = driver.displayName || driver.name || "el repartidor";
     const driverPendingProofs = pendingProofsData.filter((p) => p.driverId === driver.id && p.status === "pending");
+    const requestId = newRequestId();
+    const balanceText = (b) => b > 0 ? `Debe ${formatPrice(b)}` : b < 0 ? `A favor ${formatPrice(-b)}` : "Al d\xEDa";
+    const MODES = {
+      payment: { label: "Cobrar", button: "Registrar cobro", color: "#22c55e", help: `${driverName} te paga. Si paga de m\xE1s, le queda a favor.` },
+      payout: { label: "Pagarle", button: "Registrar pago al cadete", color: "#3b82f6", help: `Le pag\xE1s a ${driverName} lo que la app le debe (cupones e incentivos que superan sus tarifas).` },
+      adjustment: { label: "Ajuste", button: "Registrar ajuste", color: "#0b0b0c", help: "Correcci\xF3n del saldo. Queda registrada con su motivo en la cuenta del cadete." }
+    };
+    let mode = credit > 0 ? "payout" : "payment";
+    let advanceConfirmed = false;
+    const label = (text) => `<label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">${text}</label>`;
+    const field = "width:100%; height:48px; border-radius:14px; padding:0 14px; border:1px solid var(--color-border); background:var(--color-bg); color:var(--color-text);";
     const modalContent = document.createElement("div");
     modalContent.style.cssText = "padding:20px; display:flex; flex-direction:column; gap:16px;";
     modalContent.innerHTML = `
       <div style="text-align:center;">
         <div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase;">Repartidor</div>
-        <div style="font-family:var(--font-display); font-size:18px; font-weight:900; color:var(--color-text); margin-top:2px;">${driver.displayName || driver.name}</div>
-        <div style="font-size:24px; font-weight:950; color:#ef4444; margin-top:6px;">${formatPrice(currentDebt)}</div>
-        ${totalCouponsCredit > 0 ? `
-          <div style="font-size:11.5px; font-weight:700; color:#a855f7; margin-top:4px;">Incluye ${formatPrice(totalCouponsCredit)} de cupones ya descontados</div>
-        ` : ""}
+        <div style="font-family:var(--font-display); font-size:18px; font-weight:900; color:var(--color-text); margin-top:2px;">${driverName}</div>
+        <div style="font-size:24px; font-weight:950; color:${credit > 0 ? "#3b82f6" : currentDebt > 0 ? "#ef4444" : "#22c55e"}; margin-top:6px;">${formatPrice(credit > 0 ? credit : currentDebt)}</div>
+        <div style="font-size:11.5px; font-weight:700; color:var(--color-text-tertiary); margin-top:2px;">${credit > 0 ? "A favor del cadete: la app le debe" : currentDebt > 0 ? "Le debe a la app" : "Al d\xEDa"}</div>
       </div>
       ${driverPendingProofs.length > 0 ? `
         <div style="padding:12px 14px; border-radius:14px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); color:#b45309; font-size:12.5px; font-weight:700; line-height:1.45;">
@@ -1856,69 +1837,158 @@ Por favor, envi\xE1 el comprobante por este medio una vez realizada la transfere
         </div>
       ` : ""}
 
-      <div>
-        <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Monto a Liquidar ($)</label>
-        <input type="number" id="settle-amount-input" value="${currentDebt}" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:900; font-size:18px; border:1px solid var(--color-border);" />
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; background:var(--color-bg-secondary); padding:4px; border-radius:14px;">
+        ${Object.entries(MODES).map(([m, cfg]) => `<button type="button" data-settle-mode="${m}" style="height:38px; border-radius:10px; border:none; font-weight:900; font-size:12.5px; cursor:pointer;">${cfg.label}</button>`).join("")}
+      </div>
+      <div id="settle-mode-help" style="font-size:12.5px; font-weight:600; color:var(--color-text-secondary); line-height:1.45; margin-top:-6px;"></div>
+
+      <div id="settle-direction-wrap">
+        ${label("Tipo de ajuste")}
+        <select id="settle-direction-select" style="${field} font-weight:700; font-size:14px;">
+          <option value="set">Dejar la deuda en un monto exacto</option>
+          <option value="sub">Descontar de la deuda</option>
+          <option value="add">Sumar a la deuda</option>
+        </select>
       </div>
 
       <div>
-        <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">M\xE9todo de Cobro</label>
-        <select id="settle-method-select" class="input" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:700; font-size:14px; background:var(--color-bg); border:1px solid var(--color-border); color:var(--color-text);">
+        <div id="settle-amount-label">${label("Monto ($)")}</div>
+        <input type="number" id="settle-amount-input" min="0" style="${field} font-weight:900; font-size:18px;" />
+        <div id="settle-preview" style="font-size:12px; font-weight:700; color:var(--color-text-tertiary); margin-top:6px; line-height:1.4;"></div>
+      </div>
+
+      <div id="settle-method-wrap">
+        ${label("M\xE9todo")}
+        <select id="settle-method-select" style="${field} font-weight:700; font-size:14px;">
           <option value="efectivo">\u{1F4B5} Efectivo</option>
           <option value="transferencia">\u{1F3E6} Transferencia Bancaria</option>
         </select>
       </div>
 
       <div>
-        <label style="font-weight:700; font-size:11px; margin-bottom:6px; display:block; color:var(--color-text-tertiary); text-transform:uppercase;">Notas / Comprobante (Opcional)</label>
-        <input type="text" id="settle-notes-input" placeholder="Ej. Rendici\xF3n semanal abonada en mano" style="width:100%; height:48px; border-radius:14px; padding:0 14px; font-weight:600; font-size:13px; border:1px solid var(--color-border);" />
+        <div id="settle-notes-label">${label("Notas (opcional)")}</div>
+        <input type="text" id="settle-notes-input" style="${field} font-weight:600; font-size:13px;" />
       </div>
 
-      <button id="confirm-settlement-btn" style="height:54px; border-radius:18px; background:#22c55e; color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 20px rgba(34,197,94,0.25); margin-top:8px;">
-        ${icon("checkCircle", 20)} Confirmar Liquidaci\xF3n
-      </button>
+      <button id="confirm-settlement-btn" style="height:54px; border-radius:18px; color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:8px;"></button>
     `;
-    showModal({ title: "Liquidar Deuda de Repartidor", content: modalContent, height: "auto" });
-    modalContent.querySelector("#confirm-settlement-btn").onclick = async () => {
-      const btn = modalContent.querySelector("#confirm-settlement-btn");
-      const amountToSettle = parseFloat(modalContent.querySelector("#settle-amount-input").value) || 0;
-      const method = modalContent.querySelector("#settle-method-select").value;
-      const notes = modalContent.querySelector("#settle-notes-input").value.trim();
-      if (amountToSettle <= 0) {
+    showModal({ title: "Cuenta del Repartidor", content: modalContent, height: "auto" });
+
+    const $ = (sel) => modalContent.querySelector(sel);
+    const amountInput = $("#settle-amount-input");
+    const btn = $("#confirm-settlement-btn");
+    // "Dejar la deuda en X": el renglón del ajuste es la diferencia entre lo que debe hoy y X
+    const isSetMode = () => mode === "adjustment" && $("#settle-direction-select").value === "set";
+    const signedAmount = () => {
+      const a = round2(parseFloat(amountInput.value) || 0);
+      if (mode === "payment") return -a;
+      if (mode === "payout") return a;
+      if (isSetMode()) return round2(a - balance);
+      return $("#settle-direction-select").value === "add" ? a : -a;
+    };
+    const renderPreview = () => {
+      advanceConfirmed = false;
+      const a = round2(parseFloat(amountInput.value) || 0);
+      const after = round2(balance + signedAmount());
+      $("#settle-amount-label").innerHTML = label(isSetMode() ? "Deuda que tiene que quedar ($)" : "Monto ($)");
+      let text = a > 0 ? `Saldo despu\xE9s: ${balanceText(after)}` : "";
+      if (isSetMode()) {
+        const delta = signedAmount();
+        text = amountInput.value === "" ? "" : delta === 0 ? "Ya debe eso: no hay nada que ajustar." : `Queda: ${balanceText(after)} (${delta > 0 ? "suma" : "descuenta"} ${formatPrice(Math.abs(delta))})`;
+      }
+      if (mode === "payout" && a > credit) {
+        text += `<br><span style="color:#d97706;">Es ${formatPrice(a - credit)} m\xE1s de lo que tiene a favor: queda como adelanto y lo pasa a deber.</span>`;
+      }
+      $("#settle-preview").innerHTML = text;
+      btn.innerHTML = `${icon("checkCircle", 20)} ${MODES[mode].button}`;
+    };
+    const setMode = (m) => {
+      mode = m;
+      const cfg = MODES[m];
+      modalContent.querySelectorAll("[data-settle-mode]").forEach((b) => {
+        const on = b.dataset.settleMode === m;
+        b.style.background = on ? "var(--color-surface)" : "transparent";
+        b.style.color = on ? cfg.color === "#0b0b0c" ? "var(--color-text)" : cfg.color : "var(--color-text-tertiary)";
+        b.style.boxShadow = on ? "var(--shadow-sm)" : "none";
+      });
+      $("#settle-mode-help").textContent = cfg.help;
+      $("#settle-direction-wrap").style.display = m === "adjustment" ? "block" : "none";
+      $("#settle-method-wrap").style.display = m === "adjustment" ? "none" : "block";
+      $("#settle-notes-label").innerHTML = label(m === "adjustment" ? "Motivo (obligatorio)" : "Notas (opcional)");
+      $("#settle-notes-input").placeholder = m === "adjustment" ? "Ej. Pedido con problema, se le perdona la tarifa" : m === "payout" ? "Ej. Cupones de la semana" : "Ej. Rendici\xF3n semanal abonada en mano";
+      const suggested = m === "payment" ? currentDebt : m === "payout" ? credit : 0;
+      amountInput.value = suggested > 0 ? suggested : "";
+      if (m === "adjustment") $("#settle-direction-select").value = "set";
+      btn.style.background = cfg.color;
+      btn.style.boxShadow = `0 8px 20px ${cfg.color}40`;
+      renderPreview();
+    };
+    modalContent.querySelectorAll("[data-settle-mode]").forEach((b) => b.onclick = () => setMode(b.dataset.settleMode));
+    amountInput.oninput = renderPreview;
+    $("#settle-direction-select").onchange = renderPreview;
+    setMode(mode);
+
+    btn.onclick = async () => {
+      const amount = round2(parseFloat(amountInput.value) || 0);
+      const method = $("#settle-method-select").value;
+      const notes = $("#settle-notes-input").value.trim();
+      if (isSetMode()) {
+        if (amountInput.value === "" || amount < 0) {
+          showToast("Escrib\xED cu\xE1nto tiene que quedar debiendo (puede ser $0)", "error");
+          return;
+        }
+        if (signedAmount() === 0) {
+          showToast("Ya debe ese monto: no hay nada que ajustar", "info");
+          return;
+        }
+      } else if (amount <= 0) {
         showToast("Ingres\xE1 un monto mayor a $0", "error");
+        return;
+      }
+      if (mode === "adjustment" && !notes) {
+        showToast("Escrib\xED el motivo del ajuste", "error");
+        return;
+      }
+      // Paying the driver more than their credit is an advance: ask once more, on the button itself.
+      if (mode === "payout" && amount > credit && !advanceConfirmed) {
+        advanceConfirmed = true;
+        btn.innerHTML = `${icon("alertTriangle", 20)} Confirmar adelanto de ${formatPrice(amount - credit)}`;
         return;
       }
       btn.disabled = true;
       btn.innerHTML = "Procesando...";
+      const adminEmail = getState().user?.email || "Admin";
       try {
-        const { newDebt } = await settleDriverDebt({
-            db,
-            adminEmail: getState().user?.email || "Admin",
-          driverId: driver.id,
-          driverName: driver.displayName || driver.name,
-          driverEmail: driver.email,
-          currentDebt,
-          amount: amountToSettle,
-          method,
-          notes
-        });
-        showToast(`Se liquidaron ${formatPrice(amountToSettle)} exitosamente.`, "success");
+        let newBalance;
+        let notice;
+        if (mode === "payment") {
+          ({ newDebt: newBalance } = await settleDriverDebt({ db, adminEmail, driverId: driver.id, currentDebt, amount, method, notes, requestId }));
+          notice = { title: "✅ Pago registrado", body: `\xA1Tu pago de ${formatPrice(amount)} fue registrado! Saldo actual: ${balanceText(newBalance)}.`, type: "settlement" };
+          showToast(`Cobro de ${formatPrice(amount)} registrado`, "success");
+        } else if (mode === "payout") {
+          ({ newBalance } = await registerDriverPayout({ db, adminEmail, driverId: driver.id, amount, method, note: notes, requestId }));
+          notice = { title: "\u{1F4B8} Te pagamos", body: `Te pagamos ${formatPrice(amount)}. Saldo actual: ${balanceText(newBalance)}.`, type: "payout" };
+          showToast(`Pago de ${formatPrice(amount)} a ${driverName} registrado`, "success");
+        } else {
+          ({ newBalance } = await adjustDriverBalance({ db, adminEmail, driverId: driver.id, amount: signedAmount(), reason: notes, requestId }));
+          notice = { title: "\u{1F4DD} Ajuste en tu cuenta", body: `${notes}. Saldo actual: ${balanceText(newBalance)}.`, type: "adjustment" };
+          showToast("Ajuste registrado", "success");
+        }
         closeModal();
-        // The payment is committed; the driver's notice and the lists catch up in the background.
+        // The movement is committed; the driver's notice and the lists catch up in the background.
         setDoc(doc(collection(db, "users", driver.id, "notifications")), {
-          title: "✅ Deuda Liquidada",
-          body: `\xA1Tu pago de ${formatPrice(amountToSettle)} fue registrado! Saldo actual: ${formatPrice(newDebt)}.`,
-          type: "settlement",
+          ...notice,
           url: "#/delivery-panel?tab=settlements",
           status: "unread",
           createdAt: serverTimestamp()
         }).catch((notifErr) => console.warn("Could not send notification to driver:", notifErr));
         refreshLedgerLists();
+        onDone?.();
       } catch (err) {
         console.error(err);
         showToast(settlementErrorText(err), "error");
         btn.disabled = false;
-        btn.innerHTML = `${icon("checkCircle", 20)} Confirmar Liquidaci\xF3n`;
+        renderPreview();
       }
     };
   }
@@ -2484,7 +2554,7 @@ export async function renderAdminMaintenanceSettings(container) {
                 <span>\u{1F504}</span> Resetear Saldos de Econom\xEDa a $0
               </div>
               <p style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0;">
-                Resetea a <strong>$0</strong> las deudas de todos los repartidores, comisiones de comercios y tarifas app, marcando las operaciones como liquidadas y limpiando la secci\xF3n de Econom\xEDa.
+                Resetea a <strong>$0</strong> las comisiones de comercios y tarifas app, marcando las operaciones como liquidadas y limpiando la secci\xF3n de Econom\xEDa. La cuenta corriente de los repartidores no se toca: se corrige cadete por cadete con un ajuste.
               </p>
               <button class="btn" id="btn-reset-economy-balances" style="width: 100%; height: 46px; border-radius: 12px; background: #0b0b0c; color: white; border: none; font-weight: 900; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow:none;">
                 ${icon("refresh", 16)} RESETEAR SALDOS A $0 Y LIMPIAR ECONOM\xCDA
@@ -2572,21 +2642,14 @@ export async function renderAdminMaintenanceSettings(container) {
   document.getElementById("btn-reset-economy-balances").onclick = () => {
     showConfirm({
       title: "\u26A0\uFE0F RESETEAR TODO A $0 Y LIMPIAR ECONOM\xCDA",
-      message: "Esta acci\xF3n blanquear\xE1 a <b>$0</b> todas las deudas de repartidores, comisiones de comercios y tarifas app.<br><br>Adem\xE1s se eliminar\xE1 todo el historial de liquidaciones en Econom\xEDa.<br><br>\xBFEst\xE1s seguro de continuar?",
+      message: "Esta acci\xF3n blanquear\xE1 a <b>$0</b> las comisiones de comercios y tarifas app.<br><br>Adem\xE1s se eliminar\xE1 el historial de liquidaciones de comercios en Econom\xEDa. La cuenta corriente de los repartidores no se toca.<br><br>\xBFEst\xE1s seguro de continuar?",
       confirmText: "S\xCD, RESETEAR A $0",
       onConfirm: async () => {
         showToast("Reseteando saldos a $0...", "info");
         try {
           const { collection: fColl, getDocs: fGet, doc: fDoc, writeBatch: fBatch, deleteDoc: fDel, serverTimestamp: fServ } = await import("firebase/firestore");
-          const usersSnap = await fGet(fColl(db, "users"));
-          const b1 = fBatch(db);
-          usersSnap.docs.forEach((uDoc) => {
-            const uData = uDoc.data();
-            if (uData.deliveryDebt || uData.role === "delivery" || uData.isDelivery) {
-              b1.update(fDoc(db, "users", uDoc.id), { deliveryDebt: 0 });
-            }
-          });
-          await b1.commit();
+          // Drivers' balances live in their account (driver_ledger) and only change with an entry
+          // that explains them; the rules reject zeroing them here.
           const ordersSnap = await fGet(fColl(db, "orders"));
           const b2 = fBatch(db);
           ordersSnap.docs.forEach((oDoc) => {
@@ -2605,17 +2668,6 @@ export async function renderAdminMaintenanceSettings(container) {
           const setSnap = await fGet(fColl(db, "settlements"));
           for (const sDoc of setSnap.docs) {
             await fDel(fDoc(db, "settlements", sDoc.id));
-          }
-          const transSnap = await fGet(fColl(db, "delivery_transactions"));
-          for (const tDoc of transSnap.docs) {
-            await fDel(fDoc(db, "delivery_transactions", tDoc.id));
-          }
-          try {
-            const debtSetSnap = await fGet(fColl(db, "delivery_debt_settlements"));
-            for (const dDoc of debtSetSnap.docs) {
-              await fDel(fDoc(db, "delivery_debt_settlements", dDoc.id));
-            }
-          } catch (e) {
           }
           showToast("Saldos reseteados a $0 y Econom\xEDa limpiada con \xE9xito", "success");
           setTimeout(() => location.reload(), 1200);
@@ -3054,300 +3106,4 @@ async function showDriverOrderHistoryModal(driver, db2) {
       wrapper.innerHTML = `<div style="padding:24px; text-align:center; color:#ef4444; font-weight:700;">${err.message}</div>`;
     }
   }
-}
-let _paymentsModalOpen = false;
-async function showDriverPaymentHistoryModal(driver, db2) {
-  if (_paymentsModalOpen) return;
-  _paymentsModalOpen = true;
-  setTimeout(() => {
-    _paymentsModalOpen = false;
-  }, 1e3);
-  const { showModal: showModal2 } = await import("../../components/modal.js");
-  const { collection: collection2, query, where, orderBy, getDocs: getDocs2 } = await import("firebase/firestore");
-  const { formatPrice: formatPrice2 } = await import("../../utils/format.js");
-  const wrapperId = `payments-modal-wrapper-${Date.now()}`;
-  showModal2({
-    title: `\u{1F4B8} Pagos \u2014 ${driver.displayName || driver.name || "Repartidor"}`,
-    hideHeader: false,
-    headerBackground: "var(--go-ink)",
-    headerTextColor: "#FFFFFF",
-    height: "92dvh",
-    content: `
-      <div id="${wrapperId}" style="display:flex; flex-direction:column; height:100%; width:100%; box-sizing:border-box;">
-        <div style="padding:60px 24px; text-align:center; color:var(--color-text-secondary); font-size:14px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; flex:1;">
-          <div class="loader-dots"><span></span><span></span><span></span></div>
-          <span style="font-weight:700;">Cargando pagos...</span>
-        </div>
-      </div>
-    `,
-    onClose: () => {
-      _paymentsModalOpen = false;
-    }
-  });
-  try {
-    const q = query(
-      collection2(db2, "delivery_transactions"),
-      where("driverId", "==", driver.id),
-      orderBy("createdAt", "desc")
-    );
-    const snap = await getDocs2(q);
-    const txns = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const payTxns = txns.filter((t) => t.type === "settlement" || t.type === "liquidation" || t.type === "pago");
-    const formatDate = (ts) => {
-      if (!ts) return "---";
-      const d = ts.toDate ? ts.toDate() : new Date(ts);
-      return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-    };
-    const listHTML = payTxns.length === 0 ? `<div style="padding:40px 24px; text-align:center; color:var(--color-text-tertiary); font-size:13px; font-weight:700;">No se registraron pagos de liquidaci\xF3n para este repartidor</div>` : payTxns.map((t) => `
-        <div style="padding:16px 20px; border-bottom:1px solid var(--color-border-light); display:flex; justify-content:space-between; align-items:center; gap:12px; background:var(--color-surface); margin:8px 12px; border-radius:16px; border:1.5px solid var(--color-border-light); box-shadow:var(--shadow-sm);">
-          <div style="display:flex; flex-direction:column; gap:4px; flex:1;">
-            <span style="font-size:13.5px; font-weight:900; color:var(--color-text-primary);">Liquidaci\xF3n Aprobada</span>
-            ${t.description ? `<span style="font-size:11.5px; color:var(--color-text-secondary); font-weight:600;">${t.description}</span>` : ""}
-            <span style="font-size:10.5px; color:var(--color-text-tertiary); font-weight:700;">${formatDate(t.createdAt)}</span>
-          </div>
-          <div style="text-align:right; flex-shrink:0;">
-            <div style="font-size:16px; font-weight:950; color:#10b981;">
-              + ${formatPrice2(Math.abs(Number(t.amount || 0)))}
-            </div>
-            <div style="font-size:9.5px; font-weight:800; color:#10b981; text-transform:uppercase; margin-top:2px;">Abonado</div>
-          </div>
-        </div>
-      `).join("");
-    const wrapper = document.getElementById(wrapperId);
-    if (wrapper) {
-      wrapper.innerHTML = `
-        <div style="display:flex; flex-direction:column; height:100%; width:100%; overflow:hidden;">
-          <div style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 0 calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 24px))); box-sizing:border-box; background:var(--color-bg);">
-            ${listHTML}
-          </div>
-        </div>
-      `;
-    }
-  } catch (err) {
-    console.error("Error loading driver payment history:", err);
-    const wrapper = document.getElementById(wrapperId);
-    if (wrapper) {
-      wrapper.innerHTML = `<div style="padding:24px; text-align:center; color:#ef4444; font-weight:700;">${err.message}</div>`;
-    }
-    _paymentsModalOpen = false;
-  }
-}
-async function showDriverDebtDetailModal(driver, db2) {
-  const { showModal: showModal2 } = await import("../../components/modal.js");
-  const { formatPrice: formatPrice2 } = await import("../../utils/format.js");
-  const { doc: doc2, getDoc: getDoc2, collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
-  const targetDb = db2 || db;
-
-  // Re-fetch fresh user document from Firestore to ensure real-time accuracy of deliveryDebt
-  let freshDebt = driver.deliveryDebt || 0;
-  try {
-    const userSnap = await getDoc2(doc2(targetDb, "users", driver.id));
-    if (userSnap.exists()) {
-      freshDebt = userSnap.data().deliveryDebt || 0;
-    }
-  } catch (err) {
-    console.warn("Could not re-fetch fresh user doc for debt modal:", err);
-  }
-
-  const currentDebt = Math.max(0, freshDebt);
-  const canonAmt = getState().canonAmount || 1800;
-
-  // Query driver's unsettled orders directly from Firestore or globalPendingOrders
-  let driverOrders = [];
-  try {
-    const { collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
-    const ordersQ = q2(col2(targetDb, "orders"), w2("driverId", "==", driver.id));
-    const ordersSnap = await gD2(ordersQ);
-    driverOrders = ordersSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(o => o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed"));
-  } catch (err) {
-    driverOrders = globalPendingOrders.filter(
-      (o) => o.driverId === driver.id && o.isSettledDriver !== true && (o.status === "delivered" || o.status === "completed")
-    );
-  }
-
-  const appFeesTotal = currentDebt > 0 ? driverOrders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0) : 0;
-  const totalCouponsCredit = currentDebt > 0 ? driverOrders.reduce((sum, o) => sum + (o.couponDiscount || 0), 0) : 0;
-
-  // Fetch driver's itemized canon charges directly from Firestore
-  let driverCanons = [];
-  try {
-    const { collection: col2, query: q2, where: w2, getDocs: gD2 } = await import("firebase/firestore");
-    const canonQ = q2(col2(targetDb, "delivery_canon_payments"), w2("driverId", "==", driver.id));
-    const canonSnap = await gD2(canonQ);
-    driverCanons = canonSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(c => c.status !== "revoked")
-      .sort((a, b) => {
-        const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-        const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-        return tB - tA;
-      });
-  } catch (err) {
-    console.warn("Error fetching driver canons for debt details:", err);
-  }
-
-  // If driver has active debt, ensure canonFeesTotal matches (currentDebt - appFeesTotal)
-  let canonFeesTotal = 0;
-  if (currentDebt > 0) {
-    // deliveryDebt = app fees + daily fees - coupons, so coupons are added back to isolate the daily fees.
-    const rawCanon = Math.max(0, currentDebt - appFeesTotal + totalCouponsCredit);
-    canonFeesTotal = rawCanon;
-
-    // Filter itemized list to show canons matching current debt
-    let accum = 0;
-    const itemized = [];
-    for (const c of driverCanons) {
-      if (accum >= canonFeesTotal) break;
-      itemized.push(c);
-      accum += (c.amount || canonAmt);
-    }
-    driverCanons = itemized;
-  } else {
-    driverCanons = [];
-    canonFeesTotal = 0;
-  }
-
-  const systemDebtSubtotal = currentDebt > 0 ? (appFeesTotal + canonFeesTotal) : 0;
-  const finalSettleAmount = Math.max(0, systemDebtSubtotal - totalCouponsCredit);
-
-  const getOrderTypeName = (o) => {
-    if (o.isTrip) return "🚗 Go Viaje";
-    if (o.isFavor) {
-      if (o.favorType === "gocash") return "💵 Go Cash";
-      if (o.favorType === "encomienda") return "📦 Encomienda";
-      if (o.favorType === "mandado" || o.favorType === "compra") return "🛵 Mandado";
-      if (o.favorType === "pagodeservicios") return "🧾 Pago de Servicios";
-      return "🛵 Mandado";
-    }
-    return `🏪 ${o.comercioName || o.commerce || "Comercio"}`;
-  };
-
-  const formatDate = (ts) => {
-    if (!ts) return "---";
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  };
-
-  const formatDateWithTime = (ts, fallbackStr) => {
-    if (!ts) return fallbackStr || "---";
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-    if (isNaN(d.getTime())) return fallbackStr || "---";
-    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " hs";
-  };
-
-  const canonsBreakdownHTML = driverCanons.length > 0 ? `
-    <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; border-top:1px dashed rgba(239,68,68,0.2); padding-top:8px;">
-      <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;">Cánones Registrados:</div>
-      ${driverCanons.map(c => `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); padding:8px 10px; border-radius:10px; font-size:11px;">
-          <div style="display:flex; flex-direction:column; gap:1px;">
-            <span style="font-weight:800; color:var(--color-text-primary);">🛵 Canon Diario Jornada (${c.dateStr || ''})</span>
-            <span style="font-size:9.5px; color:var(--color-text-tertiary); font-weight:700;">📅 ${formatDateWithTime(c.createdAt, c.dateStr)}</span>
-          </div>
-          <strong style="color:#ef4444; font-family:monospace; font-size:12px;">+${formatPrice2(c.amount || canonAmt)}</strong>
-        </div>
-      `).join('')}
-    </div>
-  ` : '';
-
-  const ordersListHTML = driverOrders.length === 0 ? `<div style="text-align:center; padding:16px; color:var(--color-text-tertiary); font-size:11px; font-weight:700;">Sin tarifas de pedidos pendientes de liquidar.</div>` : driverOrders.map((o) => `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); border-radius:12px; font-size:11.5px; transition:all 0.15s;">
-          <div style="display:flex; flex-direction:column; gap:2px;">
-            <span style="font-weight:800; color:var(--color-text-primary);">${getOrderTypeName(o)}</span>
-            <span style="font-size:10px; color:var(--color-text-tertiary); font-weight:600;">${formatDate(o.createdAt)}</span>
-          </div>
-          <div style="text-align:right;">
-            <strong style="color:#ef4444; font-family:monospace; font-size:12.5px;">+${formatPrice2(o.appUsageFee || 0)}</strong>
-            ${o.couponDiscount > 0 ? `
-              <div style="font-size:9.5px; color:#a855f7; font-weight:850; margin-top:2px;">Cupón: -${formatPrice2(o.couponDiscount)}</div>
-            ` : ""}
-          </div>
-        </div>
-      `).join("");
-  const detailHTML = `
-    <div style="font-family:var(--font-body); padding:20px; display:flex; flex-direction:column; gap:16px; max-height:80dvh; overflow:hidden;">
-      
-      <!-- General Header Info -->
-      <div style="text-align:center; padding-bottom:12px; border-bottom:1px solid var(--color-border-light); flex-shrink:0;">
-        <div style="font-size:11px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Desglose de Saldos</div>
-        <div style="font-family:var(--font-display); font-size:18px; font-weight:900; color:var(--color-text); margin-top:2px;">${driver.displayName || driver.name}</div>
-      </div>
-
-      <!-- Scrollable content area -->
-      <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:16px; padding-right:4px; -webkit-overflow-scrolling:touch;">
-        <!-- Itemized Debt components -->
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          
-          <!-- App Usage Fees -->
-          <div style="background:rgba(59,130,246,0.03); border:1px solid rgba(59,130,246,0.1); border-radius:16px; padding:14px; display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-size:13px; font-weight:900; color:var(--color-text-primary);">Tarifas de Uso App</div>
-              <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Comisiones de pedidos no liquidados</div>
-            </div>
-            <div style="font-size:16px; font-weight:900; color:#ef4444; font-family:monospace;">+${formatPrice2(appFeesTotal)}</div>
-          </div>
-
-          <!-- Canon Diario -->
-          <div style="background:rgba(239,68,68,0.02); border:1px solid rgba(239,68,68,0.12); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:4px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <div style="font-size:13px; font-weight:900; color:var(--color-text-primary);">Canon Diario / Ajustes</div>
-                <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Acumulado de cuotas o diferencias de saldo</div>
-              </div>
-              <div style="font-size:16px; font-weight:900; color:#ef4444; font-family:monospace;">+${formatPrice2(canonFeesTotal)}</div>
-            </div>
-            ${canonsBreakdownHTML}
-          </div>
-
-          <!-- Total Base Debt -->
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:0 8px; font-weight:800; font-size:12.5px; border-bottom:1px dashed var(--color-border-light); padding-bottom:10px;">
-            <span>Subtotal Deuda (Sistema)</span>
-            <span style="color:#ef4444; font-weight:900; font-family:monospace;">${formatPrice2(systemDebtSubtotal)}</span>
-          </div>
-
-          <!-- Coupons Credit (if exists) -->
-          ${totalCouponsCredit > 0 ? `
-            <div style="background:rgba(168,85,247,0.04); border:1.5px dashed rgba(168,85,247,0.2); border-radius:16px; padding:14px; display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-              <div>
-                <div style="font-size:13px; font-weight:900; color:#a855f7;">Cr\xE9dito por Cupones</div>
-                <div style="font-size:11px; color:var(--color-text-tertiary); font-weight:600; margin-top:2px;">Descuentos asumidos por plataforma</div>
-              </div>
-              <div style="font-size:16px; font-weight:900; color:#a855f7; font-family:monospace;">-${formatPrice2(totalCouponsCredit)}</div>
-            </div>
-          ` : ""}
-
-        </div>
-
-        <!-- List of itemized orders debt -->
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <div style="font-size:10.5px; font-weight:850; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Detalle por Pedido Pendiente</div>
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            ${ordersListHTML}
-          </div>
-        </div>
-      </div>
-
-      <!-- Settle suggestions and net totals -->
-      <div style="margin-top:4px; background:linear-gradient(135deg, rgba(16,185,129,0.03) 0%, rgba(16,185,129,0.08) 100%); border:1px solid rgba(16,185,129,0.15); border-radius:20px; padding:16px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow-sm); flex-shrink:0;">
-        <div>
-          <div style="font-size:10px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.04em;">Verdadero a Liquidar</div>
-          <div style="font-size:24px; font-weight:950; color:#10b981; letter-spacing:-0.5px; margin-top:3px; font-family:monospace;">${formatPrice2(finalSettleAmount)}</div>
-        </div>
-        <div style="text-align:right;">
-          <span style="font-size:9.5px; font-weight:900; color:white; background:#10b981; padding:5px 10px; border-radius:8px; text-transform:uppercase; box-shadow:0 4px 10px rgba(16,185,129,0.25);">Neto Sugerido</span>
-        </div>
-      </div>
-      
-    </div>
-  `;
-  showModal2({
-    title: `\u2139\uFE0F Detalles de Deuda`,
-    hideHeader: false,
-    headerBackground: "var(--go-ink)",
-    headerTextColor: "#FFFFFF",
-    content: detailHTML,
-    height: "auto"
-  });
 }

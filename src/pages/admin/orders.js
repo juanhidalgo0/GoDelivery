@@ -1164,6 +1164,11 @@ function renderFilteredOrders(container, filtered) {
       e.stopPropagation();
       const orderId = btn.dataset.orderId;
       if (!orderId) return;
+      const listed = allOrders.find((x) => x.id === orderId);
+      if (listed) {
+        const { openDriverMirror } = await import('./driver-mirror.js');
+        if (await openDriverMirror(listed)) return;
+      }
       const { showModal } = await import('../../components/modal.js');
       const { renderOrderTracking } = await import('../order-tracking.js');
       const modalContent = document.createElement('div');
@@ -1173,9 +1178,17 @@ function renderFilteredOrders(container, filtered) {
         title: `Seguimiento en Vivo - #${orderId.slice(0, 6)}`,
         content: modalContent,
         fullscreen: true,
-        height: '100%'
+        height: '100%',
+        // Sin esto el mapa y las escuchas seguían vivos después de cerrar: cada seguimiento abierto
+        // sumaba otro mapa en memoria hasta que la app se cerraba sola
+        onClose: () => {
+          if (window.currentTrackingUnsub) {
+            try { window.currentTrackingUnsub(); } catch (e) {}
+            window.currentTrackingUnsub = null;
+          }
+        }
       });
-      
+
       renderOrderTracking(orderId, modalContent, true);
     };
   });
@@ -1532,7 +1545,7 @@ window.showOrderDetail = async (idOrObject) => {
     footer: `
       <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
         <button id="admin-live-tracking-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#0b0b0c; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
-          ${icon('navigationArrow', 20)} SEGUIMIENTO EN TIEMPO REAL (GPS)
+          ${icon('navigationArrow', 20)} ${o.driverId && !['completed', 'delivered', 'cancelled'].includes(o.status) ? 'VER COMO EL REPARTIDOR (EN VIVO)' : 'SEGUIMIENTO EN TIEMPO REAL (GPS)'}
         </button>
         ${o.status !== 'cancelled' && o.status !== 'completed' && o.status !== 'entregado' ? `
           <button id="admin-force-complete-order-btn" class="btn" style="width:100%; height:54px; border-radius:18px; font-weight:900; background:#0b0b0c; color:white; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:none;">
@@ -1555,6 +1568,14 @@ window.showOrderDetail = async (idOrObject) => {
       const trackingBtn = document.getElementById('admin-live-tracking-btn');
       if (trackingBtn) {
         trackingBtn.onclick = async () => {
+          // In progress with a driver: the driver's own screen, to follow and run the order as admin.
+          // The audit sheet closes first: the mirror sits below the modal stack so its own dialogs
+          // (confirmations, chat, purchase amount) can open on top of it.
+          const { openDriverMirror, isOrderMirrorable } = await import('./driver-mirror.js');
+          if (isOrderMirrorable(o)) {
+            closeModal();
+            if (await openDriverMirror(o)) return;
+          }
           const { showDeliveryMapModal } = await import('../../components/delivery-map-modal.js');
           showDeliveryMapModal(o);
         };

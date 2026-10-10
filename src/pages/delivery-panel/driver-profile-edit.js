@@ -5,6 +5,7 @@ import { getState, setState } from '../../state.js';
 import { icon } from '../../utils/icons.js';
 import { getDriverMapTheme } from '../../components/driver-navigation-map.js';
 import { db } from '../../firebase.js';
+import { CAR_TRIPS_ENABLED } from '../../utils/trip-vehicles.js';
 
 export async function showDriverProfileEditModal(user) {
   const { showModal, closeModal } = await import('../../components/modal.js');
@@ -73,7 +74,7 @@ export async function showDriverProfileEditModal(user) {
           width:100%; height:50px; border-radius:16px; background:${isLight ? '#f8fafc' : '#0f172a'}; border:1.5px solid var(--driver-border-soft); color:var(--driver-text-primary); padding:0 16px; font-size:14px; font-weight:700; outline:none; box-sizing:border-box; transition:border-color 0.2s;
         " onfocus="this.style.borderColor='#e11d48'" onblur="this.style.borderColor='var(--driver-border-soft)'">
           <option value="moto" ${(latestUser.vehicleType || latestUser.tripVehicleType || 'moto') === 'moto' ? 'selected' : ''}>Moto</option>
-          <option value="auto" ${(latestUser.vehicleType || latestUser.tripVehicleType) === 'auto' ? 'selected' : ''}>Auto</option>
+          ${CAR_TRIPS_ENABLED || (latestUser.vehicleType || latestUser.tripVehicleType) === 'auto' ? `<option value="auto" ${(latestUser.vehicleType || latestUser.tripVehicleType) === 'auto' ? 'selected' : ''}>Auto</option>` : ''}
           <option value="bici" ${(latestUser.vehicleType || latestUser.tripVehicleType) === 'bici' ? 'selected' : ''}>Bicicleta</option>
         </select>
       </div>

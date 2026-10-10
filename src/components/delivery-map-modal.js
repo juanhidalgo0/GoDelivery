@@ -1,5 +1,6 @@
 // GoDelivery — Delivery Map Modal Component (Unified Live Tracking UI)
 import { showModal, closeModal } from './modal.js';
+import { markReload } from '../utils/reload-log.js';
 
 export function isOrderGeolocalizablePickup(o) {
   if (!o) return false;
@@ -29,7 +30,10 @@ export function showDeliveryMapModal(order, batch = null) {
     fullscreen: true,
     onOpen: async () => {
       try {
-        const { renderOrderTracking } = await import('../pages/order-tracking.js');
+        // One retry first: a second without signal also fails the import, and that used to
+        // reload the whole app.
+        const load = () => import('../pages/order-tracking.js');
+        const { renderOrderTracking } = await load().catch(() => new Promise(r => setTimeout(r, 1200)).then(load));
         renderOrderTracking(order.id, modalContent, true, true);
       } catch (err) {
         console.error('Failed to load live tracking map module, forcing service worker reset & reload:', err);
@@ -41,6 +45,7 @@ export function showDeliveryMapModal(order, batch = null) {
             }
           } catch (e) {}
         }
+        markReload('no cargó el mapa de seguimiento');
         window.location.reload(true);
       }
     },

@@ -48,6 +48,7 @@ const newId = () => Math.random().toString(36).slice(2, 12);
 export function getFirestore() { return { type: 'mock-db' }; }
 export function initializeFirestore() { return { type: 'mock-db' }; }
 export const persistentLocalCache = () => ({});
+export const memoryLocalCache = () => ({});
 export const persistentMultipleTabManager = () => ({});
 export const clearIndexedDbPersistence = async () => {};
 export const connectFirestoreEmulator = () => {};

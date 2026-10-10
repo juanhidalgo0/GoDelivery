@@ -14,7 +14,10 @@ export async function showSuccessCelebration(orders, onFinish) {
   const user = getState().user;
   const currentSessionId = user?.currentSessionId;
   let previousSessionEarned = 0;
-  let currentDebt = orders.reduce((sum, o) => sum + (o.appUsageFee || 0), 0);
+  // What these orders add to the driver's account: fee minus coupon, GoPoints and incentive credits
+  // (the server books the same, plus the daily fee on the Nth order). Can be negative: credit.
+  let currentDebt = orders.reduce((sum, o) => sum + (o.appUsageFee || 0) - (o.couponDiscount || 0) - (o.discountAmount || 0) - (o.driverIncentiveAmount || 0), 0);
+  const fmtBalance = (v) => (v < 0 ? `A favor ${formatPrice(-v)}` : formatPrice(v));
 
   const totalEarned = orders.reduce((sum, o) => {
     return sum + getOrderDriverEarnings(o);
@@ -78,7 +81,7 @@ export async function showSuccessCelebration(orders, onFinish) {
     overflow: hidden;
   `;
 
-  const previousDebt = Math.max(0, (getState().user?.deliveryDebt || 0) - currentDebt);
+  const previousDebt = (getState().user?.deliveryDebt || 0) - currentDebt;
 
   overlay.innerHTML = `
     <!-- Expanding Morphing Sphere from Center -->
@@ -127,7 +130,7 @@ export async function showSuccessCelebration(orders, onFinish) {
         <div style="height: 1.5px; background: ${isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.08)'}; width: 100%;"></div>
         
         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 800; color: var(--driver-accent-text);">
-          <span style="display: flex; align-items: center; gap: 8px;">${icon('creditCard', 15)} Tarifa App a Rendir (Total)</span>
+          <span style="display: flex; align-items: center; gap: 8px;">${icon('creditCard', 15)} Tu saldo con GO!</span>
           <span id="celebration-debt-amount" style="font-size: 18px; font-weight: 950; color: var(--driver-accent-text); letter-spacing: -0.5px;">$ 0.00</span>
         </div>
       </div>
@@ -258,7 +261,7 @@ export async function showSuccessCelebration(orders, onFinish) {
   
   sessionAmountEl.textContent = formatPrice(previousSessionEarned);
   if (debtAmountEl) {
-    debtAmountEl.textContent = formatPrice(previousDebt);
+    debtAmountEl.textContent = fmtBalance(previousDebt);
   }
 
   let currentVal = 0;
@@ -279,7 +282,7 @@ export async function showSuccessCelebration(orders, onFinish) {
     
     if (debtAmountEl) {
       const currentDebtVal = isDone ? (previousDebt + currentDebt) : (previousDebt + (currentVal / (totalEarned || 1)) * currentDebt);
-      debtAmountEl.textContent = formatPrice(currentDebtVal);
+      debtAmountEl.textContent = fmtBalance(currentDebtVal);
     }
     
     if (isDone) {

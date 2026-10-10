@@ -1302,7 +1302,7 @@ function generateMockAnalyticsData() {
   const today = new Date();
   const stores = ['Go! Market', 'Burger Magdalena', 'Pizzería Don Corleone', 'Helados Rívoli', 'Empanadas El Fortín'];
   const drivers = ['Carlos Gómez', 'Facundo Díaz', 'Lautaro Rodríguez', 'Mateo Sosa', 'Bautista Pérez'];
-  const coupons = ['BIENVENIDA', 'ENVIOGRATIS', 'PROMO15', 'MAGDALENA10'];
+  const coupons = ['ENVIOGRATIS', 'PROMO15', 'MAGDALENA10'];
 
   for (let i = 29; i >= 0; i--) {
     const date = new Date(today);
@@ -1336,7 +1336,6 @@ function generateMockAnalyticsData() {
       let couponDiscount = 0;
       if (couponCode) {
         if (couponCode === 'ENVIOGRATIS') couponDiscount = 1720;
-        else if (couponCode === 'BIENVENIDA') couponDiscount = 1000;
         else if (couponCode === 'PROMO15') couponDiscount = Math.floor(itemsPrice * 0.15);
         else couponDiscount = 500;
       }

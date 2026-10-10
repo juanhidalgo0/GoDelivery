@@ -50,8 +50,10 @@ export function openOrderBreakdownModal(order) {
   const rainSurcharge = Number(order.rainSurcharge || (order.isRaining ? (getState().deliveryRainSurcharge || 300) : 0));
   const nightSurcharge = Number(order.nightSurcharge || order.extraFee || 0);
   const tipAmount = Number(order.tip || order.tipAmount || 0);
-  const pointsDiscount = Number(order.pointsDiscount || order.discountPoints || order.pointsValue || order.pointsUsedDiscount || 0);
-  const couponDiscount = Number(order.couponDiscount || order.discount || 0);
+  // El servidor guarda los GoPoints canjeados (en pesos) en discountAmount y el cupón en couponDiscount
+  const pointsDiscount = Number(order.discountAmount || 0);
+  const pointsCount = Number(order.pointsRedeemed || 0);
+  const couponDiscount = Number(order.couponDiscount || 0);
 
   // Grand total
   const grandTotal = Number(order.totalAmount || order.total || 0);
@@ -277,7 +279,7 @@ export function openOrderBreakdownModal(order) {
               <span style="display:inline-flex;">${icon('gem', 15)}</span>
               <div style="display:flex; flex-direction:column;">
                 <span style="font-size:12.5px; font-weight:800; color:#16a34a;">Descuento por GoPuntos</span>
-                <span style="font-size:10.5px; color:var(--driver-text-secondary);">Puntos canjeados por el cliente</span>
+                <span style="font-size:10.5px; color:var(--driver-text-secondary);">${pointsCount > 0 ? `${pointsCount.toLocaleString('es-AR')} puntos canjeados por el cliente` : 'Puntos canjeados por el cliente'}</span>
               </div>
             </div>
             <span style="font-size:13.5px; font-weight:900; color:#16a34a;">

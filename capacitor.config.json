@@ -7,6 +7,9 @@
     "cleartext": true,
     "errorPath": "offline.html"
   },
+  "android": {
+    "useLegacyBridge": true
+  },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 300,

@@ -1,8 +1,22 @@
 import { defineConfig } from 'vite';
 import { devMaplibreAssets } from './dev-maplibre-assets.js';
 
+function devSorteoRewrite() {
+  return {
+    name: 'dev-sorteo-rewrite',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url === '/sorteo' || req.url?.startsWith('/sorteo?')) {
+          req.url = req.url.replace('/sorteo', '/sorteo.html');
+        }
+        next();
+      });
+    }
+  };
+}
+
 export default defineConfig({
-  plugins: [devMaplibreAssets()],
+  plugins: [devMaplibreAssets(), devSorteoRewrite()],
   define: {
     __APP_BUILD_TIME__: JSON.stringify(Date.now()),
   },

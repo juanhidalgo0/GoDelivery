@@ -169,7 +169,7 @@ function updateBannerState(order, allOrders = []) {
       if (order.isTrip) {
         color1 = '#EF4444'; color2 = '#DC2626';
         title = 'Chofer en camino';
-        iconName = 'car';
+        iconName = order.tripType === 'auto' ? 'car' : 'motorcycle';
       } else if (order.isFavor) {
         color1 = '#0284c7'; color2 = '#0369a1';
         title = 'Yendo a buscar pedido';
@@ -183,13 +183,13 @@ function updateBannerState(order, allOrders = []) {
     case 'at_door':
       color1 = '#059669'; color2 = '#10b981';
       title = order.isTrip ? '¡Tu chofer llegó!' : '¡El repartidor llegó!';
-      iconName = order.isTrip ? 'car' : 'bike';
+      iconName = order.isTrip ? (order.tripType === 'auto' ? 'car' : 'motorcycle') : 'bike';
       break;
     case 'pending':
       if (order.isTrip) {
         color1 = '#EF4444'; color2 = '#DC2626';
         title = 'Buscando chofer';
-        iconName = 'car';
+        iconName = order.tripType === 'auto' ? 'car' : 'motorcycle';
       } else if (order.isFavor) {
         color1 = '#f59e0b'; color2 = '#d97706';
         title = 'Buscando repartidor';
@@ -204,7 +204,7 @@ function updateBannerState(order, allOrders = []) {
       if (order.isTrip) {
         color1 = '#EF4444'; color2 = '#DC2626'; // Bright Red!
         title = 'Chofer en camino';
-        iconName = 'car';
+        iconName = order.tripType === 'auto' ? 'car' : 'motorcycle';
       } else if (order.isFavor) {
         color1 = '#0284c7'; color2 = '#0369a1';
         title = order.driverId ? 'Yendo a buscar pedido' : 'Buscando repartidor';
@@ -218,7 +218,7 @@ function updateBannerState(order, allOrders = []) {
       if (order.isTrip) {
         color1 = '#EF4444'; color2 = '#DC2626';
         title = 'Chofer en camino';
-        iconName = 'car';
+        iconName = order.tripType === 'auto' ? 'car' : 'motorcycle';
       } else if (order.isFavor) {
         color1 = '#7c3aed'; color2 = '#5b21b6';
         title = 'Yendo a buscar pedido';
@@ -232,7 +232,7 @@ function updateBannerState(order, allOrders = []) {
       if (order.isTrip) {
         color1 = '#059669'; color2 = '#10b981';
         title = 'Viaje iniciado';
-        iconName = 'car';
+        iconName = order.tripType === 'auto' ? 'car' : 'motorcycle';
       } else {
         color1 = '#059669'; color2 = '#10b981';
         title = '¡Pedido en camino!';
