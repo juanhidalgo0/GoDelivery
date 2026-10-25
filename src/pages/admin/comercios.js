@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, getDoc, setDoc, doc, updateDoc, deleteDoc, query, where, orderBy, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
@@ -27,6 +27,7 @@ export async function renderAdminComercios() {
             <span style="font-size:11px; color:rgba(255,255,255,0.65); font-weight:700; overflow:hidden; text-overflow:ellipsis;">Control & Liquidación</span>
           </div>
         </div>
+        <button id="new-comercio-btn" style="height:36px; padding:0 12px; border-radius:10px; background:white; color:#0b0b0c; border:none; font-weight:900; font-size:12.5px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; gap:4px;">${icon('plus', 16)} Nuevo</button>
       </div>
 
       <!-- Sticky Search + Filter Bar (identical layout to Repartidores) -->
@@ -362,6 +363,13 @@ Por favor, enviá el comprobante de transferencia por este medio una vez realiza
     }
   };
 
+  // Nuevo comercio: nombre y (si ya se sabe) el correo del dueño; el resto en el editor
+  document.getElementById('new-comercio-btn')?.addEventListener('click', () => openNewComercio(async (id) => {
+    await refreshData();
+    const snap = await getDoc(doc(db, 'comercios', id));
+    if (snap.exists()) openComercioEditor({ id, ...snap.data() }, () => refreshData());
+  }));
+
   // Initial load
   await refreshData();
 
@@ -373,6 +381,56 @@ Por favor, enviá el comprobante de transferencia por este medio una vez realiza
       renderComerciosList();
     };
   }
+}
+
+function openNewComercio(onCreated) {
+  const box = document.createElement('div');
+  box.style.cssText = 'padding:22px 20px calc(22px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:14px; background:var(--color-bg);';
+  const field = 'width:100%; height:52px; border-radius:14px; border:1px solid var(--color-border); padding:0 14px; font-weight:600; font-size:15px; outline:none; box-sizing:border-box; background:var(--color-bg); color:var(--color-text);';
+  const label = 'display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;';
+  box.innerHTML = `
+    <h2 style="font-family:var(--font-display); font-size:20px; font-weight:900; margin:0;">Nuevo comercio</h2>
+    <p style="margin:0; font-size:13px; color:var(--color-text-secondary); line-height:1.45;">Queda oculto hasta que le cargues logo, dirección y productos. El dueño puede ser un correo que todavía no entró a GO: queda como dueño cuando entre con ese correo.</p>
+    <div><label style="${label}" for="new-com-name">Nombre *</label><input id="new-com-name" maxlength="80" style="${field}" /></div>
+    <div><label style="${label}" for="new-com-owner">Correo del dueño (opcional)</label><input id="new-com-owner" type="email" inputmode="email" placeholder="nombre@gmail.com" style="${field}" /></div>
+    <p id="new-com-err" style="margin:0; color:#e11d48; font-size:13px; font-weight:700;" hidden></p>
+    <button id="new-com-save" style="height:54px; border-radius:16px; border:none; background:var(--color-primary); color:white; font-weight:900; font-size:15px; cursor:pointer;">Crear comercio</button>`;
+  showModal({ title: '', hideHeader: true, content: box });
+  const err = box.querySelector('#new-com-err');
+  box.querySelector('#new-com-save').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const name = box.querySelector('#new-com-name').value.trim();
+    const ownerEmail = box.querySelector('#new-com-owner').value.trim();
+    if (name.length < 2) { err.textContent = 'Poné el nombre del comercio'; err.hidden = false; return; }
+    btn.disabled = true;
+    btn.textContent = 'Creando…';
+    try {
+      const { comercioAccess } = await import('../../utils/my-commerces.js');
+      const r = await comercioAccess('create', { name, ownerEmail: ownerEmail || undefined });
+      closeModal();
+      showToast(r.owner?.pending ? 'Comercio creado: el dueño queda asignado cuando entre a GO' : 'Comercio creado', 'success', 5000);
+      onCreated(r.comercioId);
+    } catch (ex) {
+      err.textContent = ex.message || 'No se pudo crear';
+      err.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Crear comercio';
+    }
+  };
+}
+
+// Código para vincular la caja Ventra del comercio (8 letras y números, sin los que se confunden)
+async function createVentraLinkCode(comercioId) {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  const code = Array.from(bytes, b => abc[b % abc.length]).join('');
+  await setDoc(doc(db, 'ventra_links', code), {
+    comercioId,
+    createdBy: getState().user?.uid || '',
+    createdAt: serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 48 * 3600 * 1000),
+  });
+  return code;
 }
 
 async function openComercioSettleModal(comercio, unsettledOrders, unsettledCommission, onSettled) {
@@ -478,8 +536,8 @@ async function openComercioEditor(comercio, onSaved) {
     
     <div style="display:flex; flex-direction:column; gap:20px;">
       <div class="form-group">
-        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Dueño (quién entra al panel)</label>
-        <div id="edit-com-owner" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:16px; padding:14px; font-size:14px;">Cargando…</div>
+        <label style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:8px;">Dueño y personas con acceso</label>
+        <div id="edit-com-owner"></div>
       </div>
 
       <div class="form-group">
@@ -534,6 +592,26 @@ async function openComercioEditor(comercio, onSaved) {
         </div>
       </div>
 
+      <div id="edit-com-shopper" style="display:flex; flex-direction:column; gap:12px; background:var(--color-bg-secondary); padding:16px; border-radius:16px; border:1px solid var(--color-border-light);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <div style="min-width:0;">
+            <label for="edit-com-shopper-on" style="display:block; font-size:13px; font-weight:800; color:var(--color-text-primary);">Lo compra el repartidor</label>
+            <span style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:600; line-height:1.4; display:block;">El comercio no confirma: el pedido va directo a los repartidores, que pagan en el mostrador. Se paga al recibir (efectivo o transferencia).</span>
+          </div>
+          <input type="checkbox" id="edit-com-shopper-on" ${comercio.fulfillmentMode === 'shopper' ? 'checked' : ''} style="width:22px; height:22px; flex-shrink:0; accent-color:var(--color-primary); cursor:pointer;" />
+        </div>
+        <div id="edit-com-shopper-max-row" style="${comercio.fulfillmentMode === 'shopper' ? '' : 'display:none;'}">
+          <label for="edit-com-shopper-max" style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Tope por pedido ($)</label>
+          <input type="number" id="edit-com-shopper-max" min="1000" step="1000" placeholder="40000" value="${comercio.shopperMaxTotal || ''}" style="width:100%; height:50px; border-radius:14px; border:1px solid var(--color-border); padding:0 14px; font-weight:600; font-size:15px; outline:none; box-sizing:border-box;" />
+        </div>
+        <div style="border-top:1px solid var(--color-border-light); padding-top:12px;">
+          <div style="font-size:13px; font-weight:800; color:var(--color-text-primary);">Caja Ventra</div>
+          <div id="edit-com-ventra-status" style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 10px; line-height:1.4;">…</div>
+          <button type="button" id="edit-com-ventra-code" style="width:100%; min-height:46px; border-radius:14px; border:1.5px solid var(--color-border); background:var(--color-bg); color:var(--color-text); font-weight:800; font-size:13.5px; cursor:pointer;">Generar código para Ventra</button>
+          <div id="edit-com-ventra-out" style="display:none; margin-top:10px;"></div>
+        </div>
+      </div>
+
       <div style="display:flex; flex-direction:column; gap:14px; background:var(--color-bg-secondary); padding:16px; border-radius:16px; border:1px solid var(--color-border-light);">
         <div style="display:flex; align-items:center; justify-content:space-between;">
           <div>
@@ -571,53 +649,44 @@ async function openComercioEditor(comercio, onSaved) {
 
   showModal({ title: '', hideHeader: true, height: '90dvh', content: modalContent });
 
-  // --- Dueño: ver quién es y asignarlo (candidatos por el nombre de la solicitud, o por mail)
-  const ownerBox = modalContent.querySelector('#edit-com-owner');
-  const escOwner = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-  const paintOwner = async () => {
-    const om = await import('../../utils/commerce-owner.js');
-    const owner = await om.getUserSummary(comercio.ownerId).catch(() => null);
-    ownerBox.innerHTML = `
-      ${owner
-        ? `<div style="font-weight:800;">${escOwner(owner.name || 'Sin nombre')}</div><div style="font-size:12.5px; color:var(--color-text-secondary);">${escOwner(owner.email)}${owner.phone ? ` · ${escOwner(owner.phone)}` : ''} · rol: ${escOwner(owner.role)}</div>`
-        : `<div style="font-weight:800; color:#e11d48;">Sin dueño</div><div style="font-size:12.5px; color:var(--color-text-secondary);">Nadie puede entrar al panel de este comercio.</div>`}
-      <div id="owner-candidates" style="margin-top:10px; display:flex; flex-direction:column; gap:6px;"></div>
-      <div style="display:flex; gap:8px; margin-top:10px;">
-        <input type="email" id="owner-email" placeholder="mail del dueño" style="flex:1; min-width:0; height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:14px; background:var(--color-bg); color:var(--color-text);" />
-        <button type="button" id="owner-assign-email" style="height:44px; padding:0 14px; border-radius:12px; border:none; background:#0b0b0c; color:white; font-weight:800; cursor:pointer;">Asignar</button>
-      </div>`;
-    const assign = async (uid) => {
-      try {
-        await om.assignCommerceOwner(comercio.id, uid, comercio.name);
-        comercio.ownerId = uid;
-        showToast('Dueño asignado: ya puede entrar a su panel', 'success');
-        paintOwner();
-        onSaved();
-      } catch (err) {
-        console.error('Asignar dueño:', err);
-        showToast('No se pudo asignar el dueño', 'error');
-      }
-    };
-    ownerBox.querySelector('#owner-assign-email').onclick = async () => {
-      const email = ownerBox.querySelector('#owner-email').value.trim();
-      if (!email) { showToast('Escribí el mail con el que entra a la app', 'warning'); return; }
-      const u = await om.findUserByEmail(email).catch(() => null);
-      if (!u) { showToast('No hay ningún usuario con ese mail. Tiene que entrar a la app al menos una vez.', 'warning'); return; }
-      assign(u.uid);
-    };
-    const candidates = await om.findOwnerCandidates(comercio.name).catch(() => []);
-    const list = ownerBox.querySelector('#owner-candidates');
-    const others = candidates.filter(c => c.uid !== comercio.ownerId);
-    if (others.length) {
-      list.innerHTML = `<div style="font-size:12px; font-weight:800; color:var(--color-text-tertiary);">Pidieron el alta con un nombre parecido:</div>` + others.map(c => `
-        <button type="button" data-owner-uid="${c.uid}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; text-align:left; padding:10px 12px; border-radius:12px; border:1px solid var(--color-border); background:var(--color-bg); color:var(--color-text); cursor:pointer;">
-          <span><b>${escOwner(c.name || c.email)}</b><br><span style="font-size:12px; color:var(--color-text-secondary);">${escOwner(c.email)} · pidió "${escOwner(c.applicationName)}"</span></span>
-          <span style="font-weight:900; color:#0e9f6e; flex-shrink:0;">Asignar</span>
-        </button>`).join('');
-      list.querySelectorAll('[data-owner-uid]').forEach(b => { b.onclick = () => assign(b.dataset.ownerUid); });
+  // --- Dueño y personas con acceso (el dueño puede no tener cuenta todavía: queda invitado)
+  import('../../components/commerce-team.js').then(m => m.mountCommerceTeam(modalContent.querySelector('#edit-com-owner'), {
+    comercio, asAdmin: true, onChanged: onSaved,
+  }));
+
+  // --- "Compra el repartidor" y vinculación con Ventra
+  const shopperBox = modalContent.querySelector('#edit-com-shopper');
+  const paintVentra = async () => {
+    const st = modalContent.querySelector('#edit-com-ventra-status');
+    if (!st) return;
+    const snap = await getDoc(doc(db, 'ventra_stores', comercio.id)).catch(() => null);
+    const v = snap && snap.exists() ? snap.data() : null;
+    const when = (t) => t?.toDate ? t.toDate().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+    st.innerHTML = v && v.keyHash
+      ? `<b style="color:#0e9f6e;">Vinculado con Ventra</b>${v.lastCatalogAt ? ` · catálogo ${when(v.lastCatalogAt)}` : ''}${v.lastOrdersAt ? ` · pedidos ${when(v.lastOrdersAt)}` : ''}`
+      : 'Sin vincular con Ventra.';
+  };
+  shopperBox.querySelector('#edit-com-shopper-on').onchange = (e) => {
+    shopperBox.querySelector('#edit-com-shopper-max-row').style.display = e.target.checked ? '' : 'none';
+  };
+  shopperBox.querySelector('#edit-com-ventra-code').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const code = await createVentraLinkCode(comercio.id);
+      const out = shopperBox.querySelector('#edit-com-ventra-out');
+      out.style.display = 'block';
+      out.innerHTML = `<div style="font-size:12.5px; color:var(--color-text-secondary); margin-bottom:6px; line-height:1.4;">En Ventra: Configuración → GO Delivery → pegá este código. Vence en 48 horas y sirve una sola vez.</div>
+        <div style="font-family:monospace; font-size:26px; font-weight:900; letter-spacing:4px; text-align:center; padding:10px; border-radius:12px; background:var(--color-bg); border:1px dashed var(--color-border); user-select:all; overflow-wrap:anywhere;">${code}</div>`;
+      navigator.clipboard?.writeText(code).then(() => showToast('Código copiado', 'success')).catch(() => {});
+    } catch (err) {
+      console.error('Código Ventra:', err);
+      showToast('No se pudo generar el código', 'error');
+    } finally {
+      btn.disabled = false;
     }
   };
-  paintOwner();
+  paintVentra();
 
   const addressInput = modalContent.querySelector('#edit-com-address');
   const suggestionsDropdown = modalContent.querySelector('#edit-com-address-suggestions');
@@ -782,7 +851,9 @@ async function openComercioEditor(comercio, onSaved) {
       address: document.getElementById('edit-com-address').value.trim(),
       coords: comercioCoords,
       approvedByAdmin: document.getElementById('edit-com-approved').checked,
-      isActive: document.getElementById('edit-com-active').checked
+      isActive: document.getElementById('edit-com-active').checked,
+      fulfillmentMode: document.getElementById('edit-com-shopper-on').checked ? 'shopper' : null,
+      shopperMaxTotal: Number(document.getElementById('edit-com-shopper-max').value) > 0 ? Number(document.getElementById('edit-com-shopper-max').value) : null
     };
 
     const showCenterAlert = (title, message) => {

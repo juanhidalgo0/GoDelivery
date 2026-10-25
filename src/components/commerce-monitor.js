@@ -1,4 +1,5 @@
 import { db } from '../firebase.js';
+import { myCommercesQuery } from '../utils/my-commerces.js';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { getState, subscribe } from '../state.js';
 import { icon } from '../utils/icons.js';
@@ -75,7 +76,7 @@ function startCommerceListListener(user) {
   // pedidos, y la consulta vacía de un cliente común no cuesta nada.
   const q = admin
     ? query(collection(db, 'comercios'))
-    : query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
+    : myCommercesQuery(user.uid);
 
   comerciosListUnsub = onSnapshot(q, (snap) => {
     let ids;

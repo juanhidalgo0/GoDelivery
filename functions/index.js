@@ -11,6 +11,11 @@ const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
 const { applyCompletedOrder, reverseCompletedOrder, blockIfOverDebtLimit, loadDebtPolicy, isOverDebtLimit, importLegacyHistory } = require("./ledger");
 const { createReportHandler } = require("./client-errors");
 const { runVigilante, sendDailyDigest } = require("./vigilante");
+const { runPushAutomations, tokensForAudience } = require("./push-automaticas");
+const { isSoldByWeight, weightStepOf, stepPrice } = require("./weight");
+const shopper = require("./shopper");
+const ventraBridge = require("./ventra-bridge");
+const commerceAccess = require("./commerce-access");
 
 setGlobalOptions({ maxInstances: 20, memory: "512Mi", region: "us-central1" });
 
@@ -508,7 +513,10 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
           const code = r.error?.code;
           logger.warn(`[sendPush] Token failed (${token.slice(0, 12)}...): ${code} - ${r.error?.message}`);
           const owner = ownerUid || tokenOwners.get(token);
-          if (owner && DEAD_TOKEN_ERROR_CODES.has(code)) {
+          // invalid-argument también sale si el mensaje está mal armado: solo cuenta como token
+          // muerto cuando FCM dice que no es un token válido (tokens APNs de iPhones viejos)
+          const notAToken = code === 'messaging/invalid-argument' && /registration token/i.test(r.error?.message || '');
+          if (owner && (DEAD_TOKEN_ERROR_CODES.has(code) || notAToken)) {
             pruneDeadToken(owner, token);
           } else if (TRANSIENT_ERROR_CODES.has(code)) {
             retryTokens.push(token);
@@ -539,6 +547,64 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
   }
 
   logger.info(`Push sent total: ${totalSuccess} success, ${totalFailure} failed`);
+}
+
+const isGoMarketName = (name) => {
+  const n = String(name || "").toLowerCase();
+  return n.includes("go!") && n.includes("market");
+};
+
+/**
+ * Aviso de pedido al comercio (pedido nuevo, recordatorio, pago aprobado).
+ * Antes, si el dueño no tenía ningún dispositivo registrado (nunca dio el permiso o lo
+ * rechazó) el aviso no salía y no quedaba rastro: el 10-10-2026 seis comercios estaban así.
+ * Ahora queda en el log con el motivo y, con alertAdmins, los admins reciben una push para
+ * llamar al comercio (mismo tag por pedido: no se apilan).
+ * goMarketToAdmins: GO! Market lo atienden los admins.
+ * Devuelve { sent, reason }.
+ */
+async function notifyCommerceOrder(orderId, order, notification, { alertAdmins = true, goMarketToAdmins = false } = {}) {
+  const orderNum = order.orderId || orderId.slice(0, 6);
+  const data = { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders`, type: "new_order", channelId: "store_orders" };
+  const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
+  if (!comercioDoc.exists) {
+    logger.warn(`[StorePush] Pedido ${orderNum}: el comercio ${order.comercioId} no existe.`);
+    return { sent: 0, reason: "sin_comercio" };
+  }
+  const com = comercioDoc.data();
+  const adminTokens = await getAdminTokens();
+
+  if (goMarketToAdmins && isGoMarketName(com.name)) {
+    await sendPush(adminTokens, notification, data);
+    return { sent: adminTokens.length, reason: "gomarket" };
+  }
+
+  let ownerId = com.ownerId;
+  if (!ownerId) {
+    const q = await db.collection("users").where("comercioId", "==", order.comercioId).limit(1).get();
+    if (!q.empty) ownerId = q.docs[0].id;
+  }
+  const ownerTokens = ownerId ? await getUserTokens(ownerId) : [];
+  // Los tokens que también son de un admin ya reciben el aviso de admin: no se duplican
+  const adminSet = new Set(adminTokens);
+  const pure = ownerTokens.filter(t => !adminSet.has(t));
+
+  if (pure.length > 0) {
+    logger.info(`[StorePush] Pedido ${orderNum} → ${com.name || order.comercioId} (${pure.length} dispositivos).`);
+    await sendPush(pure, notification, data);
+    return { sent: pure.length, reason: "ok" };
+  }
+  if (ownerTokens.length > 0) return { sent: 0, reason: "dueno_admin" }; // el dueño es admin: ya le llegó como admin
+
+  const reason = ownerId ? "sin_dispositivos" : "sin_dueno";
+  logger.warn(`[StorePush] Pedido ${orderNum}: ${com.name || order.comercioId} no recibe avisos (${reason}).`);
+  if (alertAdmins && adminTokens.length > 0) {
+    await sendPush(adminTokens, {
+      title: `${com.name || "Un comercio"} no recibe avisos`,
+      body: `Entró el pedido #${orderNum} y ${ownerId ? "no tiene avisos activados en ningún dispositivo" : "no tiene dueño cargado"}. Llamalo para que lo acepte.`
+    }, { tag: `store-unreachable-${orderId}`, url: `#/admin/orders`, type: "admin_support_alert", channelId: "admin_alerts" });
+  }
+  return { sent: 0, reason };
 }
 
 /**
@@ -638,7 +704,7 @@ async function serverSideDispatch(orderId, order) {
     }
 
     // Guard: Regular commerce orders must ONLY be dispatched when they are 'ready'
-    if (!order.isFavor && !order.isTrip && order.status !== 'ready') {
+    if (!order.isFavor && !order.isTrip && !order.isShopper && order.status !== 'ready') {
       logger.info(`[ServerDispatch] Order ${orderId} is a commerce order with status '${order.status}'. Skipping dispatch until 'ready'.`);
       return;
     }
@@ -885,7 +951,20 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
   const orderNum = order.orderId || orderId.slice(0, 6);
 
   try {
-    // 0. Notify ALL admins of ANY new order
+    // 0. El comercio primero: es quien tiene que reaccionar. Antes salía después de avisar a
+    //    todos los admins (push + un doc por admin), 2-3 s más tarde.
+    if (!order.isFavor && !order.isTrip && !order.isShopper && order.comercioId) {
+      try {
+        await notifyCommerceOrder(orderId, order, {
+          title: `Nuevo pedido #${orderNum}`,
+          body: `${orderLine(order)}. Confirmalo para que empiecen a prepararlo.`
+        });
+      } catch (err) {
+        logger.error(`[StorePush] Pedido ${orderNum}: no se pudo avisar al comercio:`, err);
+      }
+    }
+
+    // 1. Notify ALL admins of ANY new order
     try {
       const allAdminDocs = await getAllAdminDocs();
       let orderTypeLabel = 'Pedido general';
@@ -933,41 +1012,20 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
 
     // 1. GoFavor and GoViaje orders are dispatched immediately
     //    server-side so only the targeted driver receives the exclusive offer push.
-    if (order.isFavor || order.isTrip) {
+    //    "Compra el repartidor" también: el comercio no confirma.
+    if (order.isShopper) {
+      await Promise.allSettled((order.items || []).filter(item => item.productId).map(item =>
+        db.collection("comercios").doc(order.comercioId).collection("products").doc(item.productId)
+          .update({ salesCount: FieldValue.increment(item.qty || 1) })));
+    }
+    if (order.isFavor || order.isTrip || order.isShopper) {
       // Small delay to let Firestore settle before running dispatch
       await new Promise(r => setTimeout(r, 1500));
       await serverSideDispatch(orderId, order);
       return;
     }
 
-    // 2. Regular commerce owner notification (Only sent to the actual commerce owner, NOT admins)
-    const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
-    if (comercioDoc.exists) {
-      const comData = comercioDoc.data();
-      let ownerId = comData.ownerId;
-      if (!ownerId) {
-        const ownerQuerySnap = await db.collection("users").where("comercioId", "==", order.comercioId).get();
-        if (!ownerQuerySnap.empty) {
-          ownerId = ownerQuerySnap.docs[0].id;
-        }
-      }
-
-      if (ownerId) {
-        const ownerTokens = await getUserTokens(ownerId);
-        const adminTokens = await getAdminTokens();
-        const adminTokenSet = new Set(adminTokens);
-        // Exclude admin tokens so admins only receive their single admin audit alert (#/admin/orders)
-        const pureOwnerTokens = ownerTokens.filter(t => !adminTokenSet.has(t));
-
-        if (pureOwnerTokens.length > 0) {
-          logger.info(`[FCM] Sending new order push to commerce owner ${ownerId} (${pureOwnerTokens.length} tokens).`);
-          await sendPush(pureOwnerTokens, {
-            title: `Nuevo pedido #${orderNum}`,
-            body: `${orderLine(order)}. Confirmalo para que empiecen a prepararlo.`
-          }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${order.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
-        }
-      }
-    }
+    // (El aviso al comercio salió al principio: ver paso 0.)
 
     // 3. Denormalize per-product sales count so the home "más pedidos" section
     //    can read a single sorted query instead of one query per product.
@@ -1196,7 +1254,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
     // 00. Queue rotation trigger: if the target driver is released (from exclusive to null)
     // and the order is still active/unassigned, re-run dispatch.
     // Commerce orders ONLY re-dispatch if they are in 'ready' status.
-    const isDispatchableStatus = (after.isFavor || after.isTrip) 
+    const isDispatchableStatus = (after.isFavor || after.isTrip || after.isShopper) 
       ? ['pending', 'confirmed', 'preparing', 'ready'].includes(after.status)
       : (after.status === 'ready');
 
@@ -1233,7 +1291,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             driverVehicleModel: dData.vehicleModel || dData.deliveryVehicleModel || '',
             driverVehicleColor: dData.vehicleColor || '',
             driverVehiclePatent: dData.vehicleDetails || dData.patente || dData.vehiclePlate || dData.deliveryVehiclePlate || '',
-            status: (after.isFavor || after.isTrip) ? 'confirmed' : after.status,
+            status: (after.isFavor || after.isTrip) ? 'confirmed' : (after.isShopper ? 'accepted' : after.status),
             acceptedAt: FieldValue.serverTimestamp(),
             estimatedDeliveryTime: estTime
           });
@@ -1245,7 +1303,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
 
           // Fetch the customer's photo URL from their user profile
           let customerPhoto = "";
-          try {
+          // Pedidos cargados a mano no tienen cliente con cuenta: no hay foto que buscar
+          if (after.userId) try {
             const customerDoc = await db.collection("users").doc(after.userId).get();
             if (customerDoc.exists) {
               customerPhoto = customerDoc.data().photoURL || "";
@@ -1322,30 +1381,15 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       }
     }
     // Payment Status Change Notification (For Commerce - Now unifies as the single 'Nuevo Pedido Recibido' alert for MP)
-    if (before.paymentStatus !== after.paymentStatus && after.paymentStatus === "paid") {
-       const comercioDoc = await db.collection("comercios").doc(after.comercioId).get();
-       if (comercioDoc.exists) {
-         const comData = comercioDoc.data();
-         const ownerId = comData.ownerId;
-         const commerceName = (comData.name || "").toLowerCase();
-         const isGoMarket = commerceName.includes("go!") && commerceName.includes("market");
-
-         if (isGoMarket) {
-           // Notify ALL admins for GoMarket
-           const adminTokens = await getAdminTokens();
-           await sendPush(adminTokens, {
-             title: `Nuevo pedido en GoMarket #${orderNum}`,
-             body: `${orderLine(after)}. Pagado con Mercado Pago.`
-           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
-         } else {
-           // Regular commerce owner notification
-           const ownerTokens = await getUserTokens(ownerId);
-           await sendPush(ownerTokens, {
-             title: `Nuevo pedido #${orderNum}`,
-             body: `${orderLine(after)}. Pagado con Mercado Pago, confirmalo para empezar.`
-           }, { tag: `new-order-${orderId}`, url: `#/mi-comercio/${after.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
-         }
-       }
+    if (before.paymentStatus !== after.paymentStatus && after.paymentStatus === "paid" && after.comercioId && !after.isFavor && !after.isTrip) {
+      try {
+        await notifyCommerceOrder(orderId, after, {
+          title: `Nuevo pedido #${orderNum}`,
+          body: `${orderLine(after)}. Pagado con Mercado Pago, confirmalo para empezar.`
+        }, { goMarketToAdmins: true });
+      } catch (err) {
+        logger.error(`[StorePush] Pago aprobado del pedido ${orderNum}: no se pudo avisar al comercio:`, err);
+      }
     }
     
     // Notification for delivery driver at door
@@ -1471,9 +1515,13 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
 
           // Notify client: "Un delivery está yendo a buscarlo"
           const clientTokens2 = await getUserTokens(after.userId);
+          // Con productos por peso, el aviso de "listo" trae el total que quedó al pesar
+          const weighedLine = after.hasWeighedItems && after.weighPending === false
+            ? `Ya lo pesaron: total final $${money(after.total)}. `
+            : "";
           await sendPush(clientTokens2, {
             title: "Tu pedido está listo",
-            body: storeOf(after) ? `${storeOf(after)} ya lo tiene. Estamos asignando un repartidor.` : "Estamos asignando un repartidor."
+            body: weighedLine + (storeOf(after) ? `${storeOf(after)} ya lo tiene. Estamos asignando un repartidor.` : "Estamos asignando un repartidor.")
           }, { tag: `order-${orderId}`, url: `#/pedido/${orderId}` });
 
           // Manual Assignment only: Geohash & Distance Auto-Assignment algorithm is disabled.
@@ -2168,7 +2216,8 @@ function secureUnitPrice(pData, clientOptions) {
   const replaceOption = resolved.find(o => o.replace);
   const base = replaceOption ? replaceOption.price : (Number(pData.price) || 0);
   const extras = resolved.reduce((sum, o) => (o === replaceOption ? sum : sum + o.price * o.qty), 0);
-  return base + extras;
+  // Por peso: base y opciones son por kilo, y la unidad del carrito es un paso (functions/weight.js)
+  return isSoldByWeight(pData) ? stepPrice(base + extras, pData) : base + extras;
 }
 
 exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 }, withOrderIdempotency(async (req, res) => {
@@ -2358,6 +2407,28 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         }
       }
 
+      // "Compra el repartidor": el repartidor adelanta la plata en el mostrador, así que el pedido
+      // tiene un tope, se paga al recibirlo (efectivo o transferencia) y no entra lo agotado
+      for (const [cId, g] of commerceEntries) {
+        const cData = commerceDataMap[cId];
+        if (!shopper.isShopperCommerce(cData)) continue;
+        if (shopper.isOnlinePayment(paymentMethod)) {
+          throw new Error(`En ${g.comercioName} el pedido lo compra el repartidor: pagalo en efectivo o por transferencia al recibirlo.`);
+        }
+        for (const item of g.items) {
+          const pData = productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path].data();
+          if (pData.isAvailable === false) throw new Error(`"${pData.name}" no está disponible ahora en ${g.comercioName}.`);
+        }
+        const estimated = g.items.reduce((s, item) => {
+          const pData = productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path].data();
+          return s + secureUnitPrice(pData, item.options) * item.qty;
+        }, 0);
+        const max = shopper.shopperMaxTotal(cData);
+        if (estimated > max) {
+          throw new Error(`En ${g.comercioName} el tope por pedido es de $${Math.round(max)} (lo compra el repartidor). Sacá algunos productos.`);
+        }
+      }
+
       // --- STOCK VALIDATION AND ATOMIC DECREMENT ---
       const productStockDecrements = {};
       for (const [cId, g] of commerceEntries) {
@@ -2371,7 +2442,8 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
       for (const [path, reqQty] of Object.entries(productStockDecrements)) {
         const pSnap = productDocsMap[path];
         const pData = pSnap.data();
-        if (pData.stockMode === 'limited') {
+        // Por peso no lleva stock: qty son pasos de 250 g, no unidades
+        if (pData.stockMode === 'limited' && !isSoldByWeight(pData)) {
           const stockQty = typeof pData.stockQuantity === 'number' ? pData.stockQuantity : 0;
           if (stockQty < reqQty) {
             throw new Error(`Stock insuficiente para "${pData.name}". Disponible: ${stockQty}, Solicitado: ${reqQty}`);
@@ -2521,6 +2593,10 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         }
 
         const subTotal = Math.max(subProductsTotal + subDeliveryCost + subAppUsageFee - subDiscount - subCouponDiscount, 0);
+        const hasWeighedItems = pDocs.some(pSnap => isSoldByWeight(pSnap.data()));
+        const productsCouponPercent = couponData && subCouponDiscount > 0 && (couponData.scope || 'products') === 'products' &&
+          couponData.type !== 'free_delivery' && (couponData.discountType || 'percentage') === 'percentage'
+          ? Number(couponData.value) || 0 : 0;
 
         let scheduledForObj = null;
         if (isScheduled && scheduledDate && scheduledTime) {
@@ -2575,7 +2651,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
               }
             }
 
-            return {
+            const line = {
               comercioId: cId,
               comercioName: g.comercioName,
               productId: pSnap.id,
@@ -2585,6 +2661,16 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
               options: item.options || [],
               notes: item.notes || ''
             };
+            // Producto publicado desde Ventra: la caja lo reconoce al cobrarle al repartidor
+            if (pData.ventraId) line.ventraId = pData.ventraId;
+            if (pData.barcode) line.barcode = pData.barcode;
+            if (pData.image && /^https?:\/\//.test(pData.image)) line.image = pData.image;
+            // Por peso: el precio es estimado hasta que el comercio pesa (src/utils/weight.js applyWeights)
+            if (isSoldByWeight(pData)) {
+              const step = weightStepOf(pData);
+              Object.assign(line, { soldByWeight: true, weightStep: step, grams: item.qty * step, pricePerKg: finalUnitPrice * 1000 / step });
+            }
+            return line;
           }),
           subtotal: subProductsTotal,
           deliveryCost: subDeliveryCost,
@@ -2601,6 +2687,24 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           couponAbsorbedBy: couponData ? (couponData.absorbedBy || 'platform') : null,
           total: subTotal,
           commissionAmount: subCommission,
+          // Con productos por peso el total es estimado: el comercio lo cierra al pesar.
+          // Guardamos cómo se calcularon servicio y cupón para recalcularlos igual.
+          ...(hasWeighedItems ? {
+            hasWeighedItems: true,
+            weighPending: true,
+            appUsageFeeRate,
+            couponProductsPercent: productsCouponPercent
+          } : {}),
+          // Lo compra el repartidor en el mostrador: va directo a los repartidores, sin que el
+          // comercio confirme, y el total se cierra con lo que realmente llevó (shopper.js)
+          ...(shopper.isShopperCommerce(cData) && !isTakeaway ? {
+            isShopper: true,
+            shopPending: true,
+            appUsageFeeRate,
+            couponProductsPercent: productsCouponPercent,
+            estimatedSubtotal: subProductsTotal,
+            estimatedTotal: subTotal,
+          } : {}),
           deliveryType: isTakeaway ? 'takeaway' : 'delivery',
           source: source || (isDirectOrder ? 'catalogo_whatsapp' : 'app'),
           isDirectOrder: isDirectOrder === true || source === 'catalogo_whatsapp' || source === 'direct_store',
@@ -2613,7 +2717,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         };
 
         transaction.set(orderRef, orderData);
-        createdOrders.push({ docId: orderRef.id, orderId: lastId, commerceId: cId, total: subTotal });
+        createdOrders.push({ docId: orderRef.id, orderId: lastId, commerceId: cId, total: subTotal, isShopper: orderData.isShopper === true });
 
         // Update direct catalog stats on commerce document
         if (orderData.isDirectOrder) {
@@ -2675,8 +2779,9 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
       return createdOrders;
     });
 
-    // Notify all comercios
+    // Notify all comercios (los de "compra el repartidor" no tienen que hacer nada: lo ven en su caja)
     for (const order of result) {
+      if (order.isShopper) continue;
       await db.collection("notifications").add({
         comercioId: order.commerceId,
         orderId: order.docId,
@@ -3095,6 +3200,15 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
 
     const targetAudience = audience || "all";
 
+    // "me" = solo los dispositivos de quien manda (botón "Probar en mi móvil"): no queda en el historial
+    if (targetAudience === "me") {
+      const myTokens = await tokensForAudience(db, "me", { uid, owners: tokenOwners });
+      if (myTokens.length > 0) {
+        await sendPush(myTokens, { title: title || "Go Delivery", body }, { url: url || "/#/", type: "custom_global_push", imageUrl: imageUrl || "" });
+      }
+      return res.status(200).json({ success: true, sentCount: myTokens.length });
+    }
+
     // Check if scheduled
     let isScheduled = false;
     let scheduledDate = null;
@@ -3126,40 +3240,10 @@ exports.sendGlobalPush = onRequest({ cors: true }, async (req, res) => {
     // 2. Fetch target devices' tokens in matching segments (Instant direct delivery, bypassing topic delay)
     let targetTokens = [];
     try {
-      if (targetAudience === "all") {
-        const tokensSnap = await db.collectionGroup("fcmTokens").get();
-        targetTokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
-      } else {
-        const roleQueryVal = targetAudience === "clients" ? "client" :
-                             targetAudience === "drivers" ? "driver" : "commerce";
-        
-        let usersSnap;
-        if (targetAudience === "clients") {
-          usersSnap = await db.collection("users").where("role", "in", ["client", "admin"]).get();
-        } else if (targetAudience === "drivers") {
-          usersSnap = await db.collection("users").where("role", "in", ["driver", "delivery"]).get();
-        } else {
-          usersSnap = await db.collection("users").where("role", "in", ["commerce", "comercio"]).get();
-        }
-
-        const userIds = usersSnap.docs.map(d => d.id);
-        if (userIds.length > 0) {
-          for (const uId of userIds) {
-            const tSnap = await db.collection("users").doc(uId).collection("fcmTokens").get();
-            tSnap.docs.forEach(d => {
-              if (d.data().token) {
-                targetTokens.push(d.data().token);
-              }
-            });
-          }
-        }
-      }
+      targetTokens = await tokensForAudience(db, targetAudience, { owners: tokenOwners });
     } catch (cErr) {
       logger.warn("Target devices tokens query failed:", cErr);
     }
-
-    // Deduplicate to avoid sending multiples to same device
-    targetTokens = [...new Set(targetTokens)];
     const sentCount = targetTokens.length;
 
     // 3. Create a broadcast record in Firestore for real-time Campaign Analytics (CTR tracking)
@@ -3696,7 +3780,7 @@ exports.cancelUnassignedOrders = onSchedule("every 1 minutes", async () => {
       if (o.driverId) continue;
 
       const createdMs = tsToMs(o.createdAt);
-      const isService = o.isFavor === true || o.isTrip === true;
+      const isService = o.isFavor === true || o.isTrip === true || o.isShopper === true;
       const isTakeaway = o.deliveryType === "takeaway" || o.deliveryType === "retiro";
 
       let referenceMs = 0;
@@ -3765,12 +3849,10 @@ const STORE_REMINDER_MAX = 8;
 exports.remindPendingStoreOrders = onSchedule({ schedule: "every 2 minutes", maxInstances: 1, timeoutSeconds: 120 }, async () => {
   const now = Date.now();
   const snap = await db.collection("orders").where("status", "==", "pending").get();
-  let adminTokensCache = null;
-  const adminTokens = async () => (adminTokensCache = adminTokensCache || await getAdminTokens());
 
   for (const docSnap of snap.docs) {
     const o = docSnap.data();
-    if (!o.comercioId || o.isFavor || o.isTrip || o.isScheduled) continue;
+    if (!o.comercioId || o.isFavor || o.isTrip || o.isShopper || o.isScheduled) continue;
     const age = now - tsToMs(o.createdAt);
     if (!(age >= STORE_REMINDER_EVERY_MS - 15000) || age > 40 * 60 * 1000) continue;
 
@@ -3781,36 +3863,19 @@ exports.remindPendingStoreOrders = onSchedule({ schedule: "every 2 minutes", max
       if (count >= STORE_REMINDER_MAX) continue;
       if (rem.lastAt && now - tsToMs(rem.lastAt) < STORE_REMINDER_EVERY_MS - 15000) continue;
 
-      const comercioDoc = await db.collection("comercios").doc(o.comercioId).get();
-      if (!comercioDoc.exists) continue;
-      const com = comercioDoc.data();
-      const name = (com.name || "").toLowerCase();
-      const isGoMarket = name.includes("go!") && name.includes("market");
-
-      let tokens = [];
-      if (isGoMarket) {
-        tokens = await adminTokens();
-      } else {
-        let ownerId = com.ownerId;
-        if (!ownerId) {
-          const q = await db.collection("users").where("comercioId", "==", o.comercioId).limit(1).get();
-          if (!q.empty) ownerId = q.docs[0].id;
-        }
-        if (ownerId) {
-          const admins = new Set(await adminTokens());
-          tokens = (await getUserTokens(ownerId)).filter(t => !admins.has(t));
-        }
-      }
-
       await remRef.set({ count: count + 1, lastAt: new Date(), comercioId: o.comercioId }, { merge: true });
-      if (!tokens.length) continue;
 
       const orderNum = o.orderId || docSnap.id.slice(0, 6);
       const minutes = Math.max(1, Math.round(age / 60000));
-      await sendPush(tokens, {
+      // Comercio sin dispositivos: los admins ya recibieron el aviso al entrar el pedido; se
+      // les repite solo en el primer recordatorio (sigue sin aceptar a los 2 minutos)
+      const result = await notifyCommerceOrder(docSnap.id, o, {
         title: `Pedido #${orderNum} sin aceptar`,
         body: `Entró hace ${minutes} min. ${orderLine(o)}. Aceptalo o rechazalo.`
-      }, { tag: `new-order-${docSnap.id}`, url: `#/mi-comercio/${o.comercioId}/orders`, type: "new_order", channelId: "store_orders" });
+      }, { goMarketToAdmins: true, alertAdmins: count === 0 });
+      if (result.sent === 0 && result.reason !== "dueno_admin") {
+        await remRef.set({ unreachable: result.reason }, { merge: true });
+      }
     } catch (err) {
       logger.error(`[StoreReminder] ${docSnap.id}:`, err);
     }
@@ -4150,6 +4215,8 @@ exports.checkScheduledCommerceOrders = onSchedule({
     let activatedCount = 0;
 
     for (const doc of scheduledOrdersSnap.docs) {
+      // Con productos por peso lo pasa a "Listo" el comercio, cuando carga lo que pesó
+      if (doc.data().weighPending === true) continue;
       batch.update(doc.ref, { 
         status: "ready", 
         updatedAt: FieldValue.serverTimestamp() 
@@ -4194,17 +4261,14 @@ exports.onMarketplaceProductCreated = onDocumentCreated("marketplace_products/{p
 /**
  * Scheduled task: Check for scheduled push broadcasts and deliver them (runs every 1 minute)
  */
-exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => {
-  const now = Timestamp.now();
+exports.processScheduledBroadcasts = onSchedule({ schedule: "*/1 * * * *", maxInstances: 1, timeoutSeconds: 300 }, async () => {
   try {
     const snap = await db.collection("broadcasts")
       .where("status", "==", "scheduled")
-      .where("scheduledAt", "<=", now)
+      .where("scheduledAt", "<=", Timestamp.now())
       .get();
 
-    if (snap.empty) return;
-
-    logger.info(`Found ${snap.size} scheduled push campaigns to process.`);
+    if (!snap.empty) logger.info(`Found ${snap.size} scheduled push campaigns to process.`);
 
     for (const doc of snap.docs) {
       const campaign = doc.data();
@@ -4220,36 +4284,10 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
       // 2. Fetch target tokens
       let targetTokens = [];
       try {
-        if (targetAudience === "all") {
-          const tokensSnap = await db.collectionGroup("fcmTokens").get();
-          targetTokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
-        } else {
-          let usersSnap;
-          if (targetAudience === "clients") {
-            usersSnap = await db.collection("users").where("role", "in", ["client", "admin"]).get();
-          } else if (targetAudience === "drivers") {
-            usersSnap = await db.collection("users").where("role", "in", ["driver", "delivery"]).get();
-          } else {
-            usersSnap = await db.collection("users").where("role", "in", ["commerce", "comercio"]).get();
-          }
-
-          const userIds = usersSnap.docs.map(d => d.id);
-          if (userIds.length > 0) {
-            for (const uId of userIds) {
-              const tSnap = await db.collection("users").doc(uId).collection("fcmTokens").get();
-              tSnap.docs.forEach(d => {
-                if (d.data().token) {
-                  targetTokens.push(d.data().token);
-                }
-              });
-            }
-          }
-        }
+        targetTokens = await tokensForAudience(db, targetAudience || "all", { owners: tokenOwners });
       } catch (tokenErr) {
         logger.error(`Error querying tokens for scheduled campaign ${campaignId}:`, tokenErr);
       }
-
-      targetTokens = [...new Set(targetTokens)];
       const sentCount = targetTokens.length;
 
       // 3. Send the campaign
@@ -4277,110 +4315,39 @@ exports.processScheduledBroadcasts = onSchedule("*/1 * * * *", async (event) => 
         sentAt: FieldValue.serverTimestamp()
       });
     }
-
-    // --- AUTOMATED RECURRING PUSH CAMPAIGNS (MEAL-TIMES & SMART TRIGGERS) ---
-    try {
-      const autoSnap = await db.collection("automated_broadcasts").where("enabled", "==", true).get();
-      if (!autoSnap.empty) {
-        // Current time in Argentina
-        const nowArg = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
-        const currentDayOfWeek = nowArg.getDay(); // 0 = Domingo, 1 = Lunes, etc.
-        const currentHour = String(nowArg.getHours()).padStart(2, "0");
-        const currentMinute = String(nowArg.getMinutes()).padStart(2, "0");
-        const currentTimeStr = `${currentHour}:${currentMinute}`;
-        const todayDateStr = nowArg.toISOString().slice(0, 10); // YYYY-MM-DD
-
-        for (const docSnap of autoSnap.docs) {
-          const auto = docSnap.data();
-          const autoId = docSnap.id;
-          const scheduledDays = Array.isArray(auto.days) ? auto.days : [0, 1, 2, 3, 4, 5, 6];
-          const scheduledTime = auto.time || "12:00";
-          const lastSentDate = auto.lastSentDate || "";
-
-          // Check if scheduled for today's day of week and current minute
-          if (scheduledDays.includes(currentDayOfWeek) && currentTimeStr === scheduledTime && lastSentDate !== todayDateStr) {
-            logger.info(`[Automated Push] Triggering: ${auto.name} (${autoId}) at ${currentTimeStr}`);
-
-            // Mark lastSentDate immediately to prevent duplicate runs
-            await db.collection("automated_broadcasts").doc(autoId).update({
-              lastSentDate: todayDateStr,
-              lastSentAt: FieldValue.serverTimestamp()
-            });
-
-            // 1. Fetch target tokens
-            let targetTokens = [];
-            try {
-              if (!auto.targetAudience || auto.targetAudience === "all") {
-                const tokensSnap = await db.collectionGroup("fcmTokens").get();
-                targetTokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
-              } else {
-                let usersSnap;
-                if (auto.targetAudience === "clients") {
-                  usersSnap = await db.collection("users").where("role", "in", ["client", "admin"]).get();
-                } else if (auto.targetAudience === "drivers") {
-                  usersSnap = await db.collection("users").where("role", "in", ["driver", "delivery"]).get();
-                } else {
-                  usersSnap = await db.collection("users").where("role", "in", ["commerce", "comercio"]).get();
-                }
-
-                const userIds = usersSnap.docs.map(d => d.id);
-                for (const uId of userIds) {
-                  const tSnap = await db.collection("users").doc(uId).collection("fcmTokens").get();
-                  tSnap.docs.forEach(d => {
-                    if (d.data().token) targetTokens.push(d.data().token);
-                  });
-                }
-              }
-            } catch (tokenErr) {
-              logger.error(`[Automated Push] Error querying tokens for ${autoId}:`, tokenErr);
-            }
-
-            targetTokens = [...new Set(targetTokens)];
-            const sentCount = targetTokens.length;
-
-            // 2. Send the push
-            if (targetTokens.length > 0) {
-              try {
-                await sendPush(targetTokens, {
-                  title: auto.title || "Go Delivery",
-                  body: auto.body
-                }, {
-                  url: auto.url || "/#/",
-                  type: "automated_push",
-                  automationId: autoId,
-                  imageUrl: auto.imageUrl || ""
-                });
-                logger.info(`[Automated Push] ${autoId} sent successfully to ${sentCount} devices.`);
-              } catch (sendErr) {
-                logger.error(`[Automated Push] Error sending push for ${autoId}:`, sendErr);
-              }
-            }
-
-            // 3. Log to broadcasts history for analytics CTR tracking
-            await db.collection("broadcasts").add({
-              title: auto.title || "Go Delivery",
-              body: auto.body,
-              url: auto.url || "/#/",
-              imageUrl: auto.imageUrl || "",
-              targetAudience: auto.targetAudience || "clients",
-              status: "sent",
-              sentCount: sentCount,
-              clicks: 0,
-              isAutomated: true,
-              automationId: autoId,
-              automationName: auto.name || "Automatización",
-              createdAt: FieldValue.serverTimestamp(),
-              sentAt: FieldValue.serverTimestamp()
-            });
-          }
-        }
-      }
-    } catch (autoErr) {
-      logger.error("[Automated Push] Error evaluating automated broadcasts:", autoErr);
-    }
-
   } catch (err) {
     logger.error("Error in processScheduledBroadcasts:", err);
+  }
+
+  // Pushes automáticas (functions/push-automaticas.js). Antes estaban después de un "return" que
+  // cortaba cuando no había campañas programadas, así que nunca salía ninguna.
+  try {
+    await runPushAutomations({ db, sendPush, tokenOwners });
+  } catch (err) {
+    logger.error("[Push automáticas] Error:", err);
+  }
+});
+
+/**
+ * Trigger: reseña creada, cambiada o borrada → promedio de estrellas del comercio.
+ * Antes lo recalculaba la app del cliente, pero ratingAverage/ratingCount solo los escribe el
+ * admin (firestore.rules): la reseña se guardaba, el promedio nunca cambiaba y el cliente veía
+ * "Error al enviar calificación" (Admin → Errores, 11-10-2026).
+ */
+exports.onReviewWritten = onDocumentWritten("reviews/{reviewId}", async (event) => {
+  const before = event.data?.before?.exists ? event.data.before.data() : null;
+  const after = event.data?.after?.exists ? event.data.after.data() : null;
+  const ids = new Set([before?.comercioId, after?.comercioId].filter(id => typeof id === "string" && id));
+  for (const comercioId of ids) {
+    try {
+      const snap = await db.collection("reviews").where("comercioId", "==", comercioId).get();
+      const ratings = snap.docs.map(d => Number(d.data().rating)).filter(r => r >= 1 && r <= 5);
+      const ratingCount = ratings.length;
+      const ratingAverage = ratingCount ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratingCount) * 100) / 100 : 0;
+      await db.collection("comercios").doc(comercioId).set({ ratingAverage, ratingCount }, { merge: true });
+    } catch (err) {
+      logger.error(`[Reseñas] No se pudo recalcular el promedio de ${comercioId}:`, err);
+    }
   }
 });
 
@@ -4619,7 +4586,13 @@ exports.rotateExpiredOffers = onSchedule("every 1 minutes", async () => {
 // This covers ALL disconnect scenarios: admin action, inactivity auto-logout,
 // session expiry, app crash, etc.
 // ═══════════════════════════════════════════════════
-exports.onDriverDisconnected = onDocumentUpdated("users/{userId}", async (event) => {
+// Los disparadores de users/{userId} corren con CADA cambio de cualquier perfil (ubicación de los
+// repartidores cada minuto, actividad, tokens…). Con 1 evento por instancia y tope 20 se quedaban sin
+// instancias y descartaban eventos ("no available instance", 79 veces el 13-10-2026). Casi todos terminan
+// enseguida: una instancia atiende muchos a la vez (la concurrencia pide cpu 1).
+const USERS_TRIGGER_OPTS = { document: "users/{userId}", cpu: 1, concurrency: 80, maxInstances: 20 };
+
+exports.onDriverDisconnected = onDocumentUpdated(USERS_TRIGGER_OPTS, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -4707,7 +4680,7 @@ async function recomputeDriverAvailability() {
   return onlineCount;
 }
 
-exports.onDriverOnlineStatusChanged = onDocumentWritten("users/{userId}", async (event) => {
+exports.onDriverOnlineStatusChanged = onDocumentWritten(USERS_TRIGGER_OPTS, async (event) => {
   try {
     const before = event.data.before.exists ? event.data.before.data() : null;
     const after = event.data.after.exists ? event.data.after.data() : null;
@@ -4719,6 +4692,8 @@ exports.onDriverOnlineStatusChanged = onDocumentWritten("users/{userId}", async 
     if (wasOnline === isOnline) return null;
 
     await recomputeDriverAvailability();
+    // Clientes de WhatsApp que pidieron "Avisame" cuando no había cadetes
+    if (isOnline) await wa().notify.onDriverOnline().catch((err) => logger.error("[WhatsApp] Error avisando cadete conectado:", err));
     return null;
   } catch (err) {
     logger.error("[DriverAvailability] Error updating counter:", err);
@@ -4775,7 +4750,7 @@ exports.onSystemJob = onDocumentCreated({ document: "system_jobs/{jobId}", timeo
 // TOPE DE DEUDA: un cadete que se conecta con el saldo por encima del tope vuelve a quedar
 // desconectado (disconnectedReason "debt_limit"). Vive acá y no sólo en la app para que no se
 // pueda saltear con una versión vieja o conectándolo desde otro lado.
-exports.enforceDebtLimitOnConnect = onDocumentUpdated("users/{userId}", async (event) => {
+exports.enforceDebtLimitOnConnect = onDocumentUpdated(USERS_TRIGGER_OPTS, async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
   if (before.isOnline === true || after.isOnline !== true || !isDeliveryDoc(after)) return null;
@@ -5261,13 +5236,29 @@ async function collectGiveawayAudienceTokens(audience) {
     const roles = audience === 'clients' ? ['client', 'user', 'admin']
       : audience === 'drivers' ? ['driver', 'delivery', 'repartidor', 'chofer']
       : ['commerce', 'comercio'];
-    const usersSnap = await db.collection('users').where('role', 'in', roles).get();
+    const [usersSnap, adminsSnap] = await Promise.all([
+      db.collection('users').where('role', 'in', roles).get(),
+      // Los admins siempre ven los avisos del sorteo, tengan el rol que tengan (un admin que
+      // también reparte tiene rol "delivery" y no le llegaba nada de un sorteo "para clientes")
+      db.collection('users').where('isAdmin', '==', true).get(),
+    ]);
     const allowed = new Set(usersSnap.docs
       .filter(d => giveawayAudienceAllows(audience, d.data().role, d.data()))
       .map(d => d.id));
+    adminsSnap.docs.forEach(d => allowed.add(d.id));
     docs = docs.filter(d => allowed.has(d.ref.parent.parent?.id));
   }
-  return [...new Set(docs.map(d => d.data().token || d.id).filter(t => typeof t === 'string' && t.length > 20))];
+  const tokens = [];
+  for (const d of docs) {
+    const t = d.data().token || d.id;
+    if (typeof t !== 'string' || t.length <= 20) continue;
+    // Dueño de cada token: así sendPush borra los que FCM da por muertos. Antes no se sabía de
+    // quién eran y no se limpiaban nunca (11-10-2026: 335 de 829 fallaron en cada aviso).
+    const owner = d.ref.parent.parent?.id;
+    if (owner) tokenOwners.set(t, owner);
+    tokens.push(t);
+  }
+  return [...new Set(tokens)];
 }
 
 async function sendGiveawayReminder(giveawayId, giveaway, title, body) {
@@ -5409,7 +5400,35 @@ function wa() {
   if (!whatsappBot) {
     whatsappBot = require("./whatsapp").createWhatsApp({
       db,
-      helpers: { computeDeliveryFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled: COMMERCE_COMMISSION_ENABLED },
+      helpers: {
+        computeDeliveryFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled: COMMERCE_COMMISSION_ENABLED,
+        // Sorteos desde el bot: mismas reglas que joinGiveaway (el uid es el del cliente de WhatsApp)
+        giveaways: {
+          async listOpen() {
+            const snap = await db.collection("giveaways").where("status", "==", "active").get();
+            return snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((g) => isGiveawayOpen(g));
+          },
+          async entryOf(id, uid) {
+            const e = await db.collection("giveaways").doc(id).collection("entries").doc(uid).get();
+            return e.exists ? e.data() : null;
+          },
+          async join(id, uid) {
+            const ref = db.collection("giveaways").doc(id);
+            const snap = await ref.get();
+            if (!snap.exists) return { error: "not_found" };
+            const g = snap.data();
+            const existing = await ref.collection("entries").doc(uid).get();
+            if (existing.exists) return { created: false, entry: existing.data(), title: g.title };
+            if (!isGiveawayOpen(g)) return { error: "closed" };
+            try {
+              const r = await createGiveawayEntry(ref, g, uid, {});
+              return { ...r, title: g.title };
+            } catch (err) {
+              return { error: err.code || "failed" };
+            }
+          },
+        },
+      },
       push: { getUserTokens, sendPush },
     });
   }
@@ -5418,6 +5437,10 @@ function wa() {
 
 // URL que se carga en Meta como webhook. Atiende la verificación (GET) y los mensajes (POST).
 exports.whatsappWebhook = onRequest({ maxInstances: 10, timeoutSeconds: 60 }, (req, res) => wa().webhook(req, res));
+
+// Link de seguimiento en vivo de los pedidos del bot (/en-vivo/{token}): cambia el token del link
+// por una sesión del cliente de WhatsApp (functions/whatsapp/tracking.js).
+exports.waTrackingSession = onRequest({ maxInstances: 10, timeoutSeconds: 30 }, (req, res) => wa().tracking.handle(req, res));
 
 // Pedido escrito a un comercio: aviso al comercio, precio o rechazo al cliente.
 exports.onWhatsAppQuoteWritten = onDocumentWritten("wa_quotes/{quoteId}", async (event) => {
@@ -5432,4 +5455,56 @@ exports.onWhatsAppQuoteWritten = onDocumentWritten("wa_quotes/{quoteId}", async 
 
 exports.expireWhatsAppQuotes = onSchedule("every 2 minutes", async () => {
   await wa().notify.expireQuotes();
+});
+
+// ─── Ventra (sistema de caja) ↔ GoDelivery: ver functions/ventra-bridge.js ───
+// La PC del comercio publica su catálogo y lee sus pedidos con una clave propia del comercio
+// (se vincula con un código que genera un admin). Nunca con la clave de administrador de GO.
+exports.ventraBridge = onRequest({ maxInstances: 10, timeoutSeconds: 120, memory: "512MiB" }, (req, res) =>
+  ventraBridge.handle(db, admin.storage(), req, res, logger));
+
+// "Compra el repartidor": el repartidor carga lo que encontró, lo que faltó y el ticket
+exports.shopperCheckout = onRequest({ cors: true, maxInstances: 15 }, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  const authHeader = req.headers.authorization || "";
+  if (!authHeader.startsWith("Bearer ")) return res.status(401).json({ error: "No autorizado" });
+  let uid;
+  try {
+    uid = (await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1])).uid;
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+  try {
+    return res.status(200).json(await ventraBridge.shopperCheckout(db, uid, req.body || {}));
+  } catch (err) {
+    if (err instanceof ventraBridge.BridgeError) return res.status(err.status).json({ error: err.message });
+    logger.error("[shopperCheckout] error", err);
+    return res.status(500).json({ error: "No se pudo guardar la compra" });
+  }
+});
+
+// Lo que se agotó porque el repartidor no lo encontró vuelve a mostrarse a las 24 h
+exports.restoreShopperUnavailable = onSchedule({ schedule: "every 60 minutes", maxInstances: 1 }, async () => {
+  const n = await ventraBridge.restoreMissing(db);
+  if (n) logger.info(`[shopper] ${n} productos vuelven a estar disponibles`);
+});
+
+// Dueño y correos con acceso a cada comercio (ver functions/commerce-access.js)
+exports.comercioAccess = onRequest({ cors: true, maxInstances: 10 }, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  const authHeader = req.headers.authorization || "";
+  if (!authHeader.startsWith("Bearer ")) return res.status(401).json({ error: "No autorizado" });
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+  try {
+    return res.status(200).json(await commerceAccess.handle({ db, auth: admin.auth(), decoded, body: req.body || {} }));
+  } catch (err) {
+    if (err instanceof commerceAccess.AccessError) return res.status(err.status).json({ error: err.message });
+    logger.error("[comercioAccess] error", err);
+    return res.status(500).json({ error: "No se pudo guardar" });
+  }
 });

@@ -8,12 +8,26 @@ import { isLoggedIn } from '../auth.js';
 import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { escapeHtml } from '../utils/escape.js';
+import { isShopperCommerce, shopperMaxTotal } from '../utils/shopper.js';
+
+// Comercios donde el pedido lo compra el repartidor: cid -> tope del pedido (null si es un comercio común)
+const shopperLimits = {};
 import { db, auth } from '../firebase.js';
 import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { AudioManager } from '../utils/audio-manager.js';
 import { ConfettiCelebrator } from '../utils/confetti.js';
 import { functionUrl } from '../utils/functions-url.js';
+import { isSoldByWeight, weightStepOf, formatWeight, WEIGHT_TOLERANCE } from '../utils/weight.js';
+
+// Por peso, la cantidad del carrito son pasos de 250 g (…): se muestra el peso y el precio por kilo.
+const qtyLabelOf = (item) => (isSoldByWeight(item.product) ? formatWeight(item.qty * weightStepOf(item.product)) : String(item.qty));
+const unitNoteOf = (item, unitPrice) => (isSoldByWeight(item.product)
+  ? `(precio estimado · ${formatPrice(unitPrice * 1000 / weightStepOf(item.product))}/kg)`
+  : `(${item.qty} x ${formatPrice(unitPrice)})`);
+const showUnitNote = (item) => isSoldByWeight(item.product) || item.qty > 1;
+const cartHasWeighed = () => getState().cart.some(i => isSoldByWeight(i.product));
+const weighedNoteHtml = () => `<div style="font-size:11.5px; line-height:1.4; color:var(--color-text-secondary); background:var(--color-bg-secondary); border-radius:10px; padding:8px 10px; margin-top:6px;">Tenés productos por peso: el comercio los pesa al prepararlos y pagás lo que pesaron (hasta un ${Math.round(WEIGHT_TOLERANCE * 100)}% más o menos). Te avisamos el total final antes de que salga.</div>`;
 
 let currentCartStep = 1;
 let isSubmitting = false;
@@ -115,7 +129,7 @@ export async function renderCart(content, isDirectMode = false) {
       if (!itemEl) return;
       
       const qtyValEl = itemEl.querySelector('.qty-value');
-      if (qtyValEl) qtyValEl.textContent = item.qty;
+      if (qtyValEl) qtyValEl.textContent = qtyLabelOf(item);
       
       const minusBtn = itemEl.querySelector('[data-action="minus"]');
       if (minusBtn) {
@@ -152,8 +166,8 @@ export async function renderCart(content, isDirectMode = false) {
       
       const multEl = itemEl.querySelector('.cart-item-qty-multiplier');
       if (multEl) {
-        if (item.qty > 1) {
-          multEl.textContent = `(${item.qty} x ${formatPrice(basePrice)})`;
+        if (showUnitNote(item)) {
+          multEl.textContent = unitNoteOf(item, basePrice);
           multEl.style.display = '';
         } else {
           multEl.style.display = 'none';
@@ -402,13 +416,14 @@ export async function calculateAllFees(proactiveCommerceId = null) {
   let comerciosDataChanged = false;
 
   for (const cid of comercioIds) {
-    if (newComerciosData[cid] === undefined) {
+    if (newComerciosData[cid] === undefined || shopperLimits[cid] === undefined) {
       try {
         const cSnap = await getDoc(doc(db, 'comercios', cid));
         if (cSnap.exists()) {
           const cData = cSnap.data();
           const logoUrl = cData.logo || cData.image || null;
           newComerciosData[cid] = logoUrl;
+          shopperLimits[cid] = isShopperCommerce(cData) ? shopperMaxTotal(cData) : null;
           comerciosDataChanged = true;
         } else {
           newComerciosData[cid] = null;
@@ -512,7 +527,7 @@ function renderCartContent(content) {
             <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
             Continuar con Google
           </button>
-          <button id="cart-apple-login-btn" style="height: 50px; border-radius: 16px; background: #000000; color: #ffffff; border: none; font-weight: 800; font-size: 14.5px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.1); transition: all 0.2s;">
+          <button id="cart-apple-login-btn" style="height: 50px; border-radius: 16px; background: #000000; color: #ffffff; border: none; font-weight: 800; font-size: 14.5px; display: ${window.Capacitor?.getPlatform?.() === 'android' ? 'none' : 'flex'}; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.1); transition: all 0.2s;">
             <svg width="18" height="22" viewBox="0 0 18 22" fill="white"><path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/></svg>
             Continuar con Apple
           </button>
@@ -699,6 +714,17 @@ function renderCartContent(content) {
                 </div>
               </div>
               
+              ${(() => {
+                // "Compra el repartidor": se paga al recibir, lo que falta no se cobra y hay un tope
+                const max = shopperLimits[comercioId];
+                if (!max) return '';
+                const sum = group.items.reduce((s, it) => s + getItemUnitPrice(it) * it.qty, 0);
+                const over = sum > max;
+                return `<div style="margin:12px 16px 0; padding:10px 12px; border-radius:12px; background:${over ? 'rgba(239,68,68,0.08)' : 'var(--color-bg-secondary)'}; border:1px solid ${over ? 'rgba(239,68,68,0.35)' : 'var(--color-border-light)'}; font-size:12.5px; line-height:1.45; color:var(--color-text-secondary);">
+                  <b style="color:var(--color-text-primary);">Lo compra el repartidor en el local.</b> Pagás al recibir, en efectivo o por transferencia. Si algo no hay, no lo pagás.
+                  ${over ? `<div style="margin-top:6px; font-weight:800; color:#ef4444;">El tope por pedido acá es ${formatPrice(max)}: sacá algunos productos.</div>` : ''}
+                </div>`;
+              })()}
               ${group.items.map(item => {
                 const basePrice = getItemUnitPrice(item);
                 const activeOffers = getState().activeOffers || [];
@@ -732,7 +758,7 @@ function renderCartContent(content) {
                       <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
                         <span class="cart-item-total-price" style="color:var(--go-text); font-family:var(--go-font); font-weight:800; font-size:14px;">${formatPrice(finalTotal)}</span>
                         ${finalTotal !== originalTotal ? `<span class="cart-item-original-price" style="font-size:11px; color:var(--color-text-tertiary); font-weight:500; text-decoration:line-through;">${formatPrice(originalTotal)}</span>` : ''}
-                        ${item.qty > 1 ? `<span class="cart-item-qty-multiplier" style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:500; opacity:0.85;">(${item.qty} x ${formatPrice(basePrice)})</span>` : ''}
+                        ${showUnitNote(item) ? `<span class="cart-item-qty-multiplier" style="font-size:11.5px; color:var(--color-text-tertiary); font-weight:500; opacity:0.85;">${unitNoteOf(item, basePrice)}</span>` : ''}
                       </div>
                       ${item.options && item.options.length > 0 ? `
                         <div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; opacity:0.8; line-height:1.3;">
@@ -750,7 +776,7 @@ function renderCartContent(content) {
                         <button class="qty-btn cart-qty-btn" data-action="minus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px; font-weight:800; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:${item.qty === 1 ? 'var(--color-danger)' : 'var(--color-text-primary)'};">
                           ${item.qty === 1 ? icon('trash', 12) : '−'}
                         </button>
-                        <span class="qty-value" style="font-size:13px; font-weight:800; min-width:24px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
+                        <span class="qty-value" style="font-size:13px; font-weight:800; min-width:24px; text-align:center; color:var(--color-text-primary); white-space:nowrap; padding:0 2px;">${qtyLabelOf(item)}</span>
                         <button class="qty-btn cart-qty-btn" data-action="plus" data-id="${escapeHtmlAttr(item.cartItemId)}" data-cid="${comercioId}" style="width:24px; height:24px; font-size:14px; font-weight:800; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--color-text-primary);">+</button>
                       </div>
                     </div>
@@ -1015,7 +1041,7 @@ function renderCartContent(content) {
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-4); padding:0 var(--space-2);">
 
                 <div style="display:flex; flex-direction:column;">
-                  <span style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">Total a pagar</span>
+                  <span style="font-size:11px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.05em;">${cartHasWeighed() ? 'Total estimado' : 'Total a pagar'}</span>
                   <span id="cart-summary-grandtotal" style="font-family:var(--go-font); font-size:26px; font-weight:900; color:var(--color-text-primary); letter-spacing:-0.02em;">${isReadyToCalculate ? formatPrice(grandTotal) : '---'}</span>
                 </div>
                 
@@ -1978,7 +2004,8 @@ function openCouponModal() {
       showToast(`¡Cupón ${valStr} aplicado con éxito!`, 'success');
       close();
     } catch (err) {
-      console.error('Error validating coupon:', err);
+      // Cupón inexistente o vencido es lo esperable: no va al detector de errores
+      (err?.code ? console.error : console.warn)('Error validating coupon:', err);
       errorMsg.textContent = err.message || 'Error al validar el cupón.';
       errorMsg.style.display = 'block';
 
@@ -2472,11 +2499,12 @@ async function openCheckoutConfirmationModal() {
       <div style="height: 1px; background: var(--color-border-light); margin: 2px 0;"></div>
 
       <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-size: var(--confirm-total-label); font-weight: 900; color: var(--color-text-primary);">Total final</span>
+        <span style="font-size: var(--confirm-total-label); font-weight: 900; color: var(--color-text-primary);">${cartHasWeighed() ? 'Total estimado' : 'Total final'}</span>
         <span style="font-size: var(--confirm-total-val); font-weight: 900; color: var(--color-primary); letter-spacing: -0.02em;">
           ${formatPrice(grandTotal)}
         </span>
       </div>
+      ${cartHasWeighed() ? weighedNoteHtml() : ''}
     </div>
 
     </div>

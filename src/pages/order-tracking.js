@@ -14,6 +14,7 @@ import { createRiderMotion } from '../utils/rider-motion.js';
 import { goMapStyle } from '../utils/go-map-style.js';
 import { renderClientPanel, setClientEta, trackingModel, CLIENT_PANEL_CSS } from './order-tracking/client-panel.js';
 import { openClientOrderSheet } from './order-tracking/order-sheet.js';
+import { isWeighedItem, itemWeightLabel } from '../utils/weight.js';
 
 function getFavorTypeMeta(favorType) {
   switch (favorType) {
@@ -74,6 +75,9 @@ let lastPushedRiderKey = ''; // la última posición que se le pasó (el mapa se
 let lastUserMapMove = 0;     // si el cliente movió el mapa a mano, la cámara no lo pelea un rato
 let gtSheetCollapsed = false; // hoja del cliente achicada (para ver más mapa)
 let gtRouteEta = false;       // el tiempo del cliente sale de la ruta en vivo (repartidor → casa)
+// Cliente de WhatsApp en /en-vivo (src/en-vivo.js): la página es solo este seguimiento. Sin volver,
+// sin ayuda ni "Descubrí GoDelivery"; chat, cancelar y calificar funcionan como en la app.
+let waClientMode = false;
 // Distancia máxima para dibujar la moto sobre la línea de la ruta (antes 350 m: la ponía en
 // calles por las que no iba)
 const ROUTE_SNAP_METERS = 40;
@@ -203,7 +207,8 @@ const parseCoords = (c) => {
   return null;
 };
 
-export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false, isDirectMode = false) {
+export function renderOrderTracking(orderId, content, inModal = false, isDriverViewOverride = false, isDirectMode = false, opts = {}) {
+  waClientMode = opts.waClient === true;
   // Primero se cierra el seguimiento anterior (mapa incluido). Antes solo se soltaba la referencia
   // al mapa: cada seguimiento abierto desde un modal dejaba vivo un mapa con su memoria gráfica, y
   // abrir varios terminaba cerrando la app.
@@ -264,7 +269,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
       <div class="tracking-v5-nav">
         ${inModal ? `
           <button id="v5-modal-back-btn" class="v5-back-btn" style="pointer-events:auto; border:1px solid var(--color-border); cursor:pointer;">${icon('chevronLeft', 24)}</button>
-        ` : (isDirectStore ? `
+        ` : waClientMode ? '' : (isDirectStore ? `
           <button id="v5-direct-back-btn" class="v5-back-btn" style="cursor:pointer; border:none; background:rgba(255,255,255,0.92);">${icon('chevronLeft', 24)}</button>
         ` : `
           <button onclick="window.safeGoBack ? window.safeGoBack('#/profile/orders') : (window.location.hash = '#/profile/orders')" class="v5-back-btn" style="cursor:pointer; border:none; background:rgba(255,255,255,0.92);">${icon('chevronLeft', 24)}</button>
@@ -823,7 +828,7 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
           <div style="font-size:48px; margin-bottom:12px;">❌</div>
           <h2 style="font-size:20px; font-weight:900; margin-bottom:8px; color:var(--color-text-primary);">Pedido no encontrado o eliminado</h2>
           <p style="font-size:14px; color:var(--color-text-secondary); max-width:320px; line-height:1.5; margin-bottom:24px;">Este pedido fue cancelado o eliminado del sistema.</p>
-          <button onclick="window.location.hash = '#/'" class="btn btn-primary" style="height:48px; border-radius:14px; font-weight:900; padding:0 24px;">Volver al Inicio</button>
+          ${waClientMode ? '' : `<button onclick="window.location.hash = '#/'" class="btn btn-primary" style="height:48px; border-radius:14px; font-weight:900; padding:0 24px;">Volver al Inicio</button>`}
         </div>
       `;
       return;
@@ -847,12 +852,14 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
             Tu pedido fue cancelado en el sistema.
             ${reason ? `<br><br><strong>Motivo:</strong> <em>${reason}</em>` : ''}
           </p>
-          <div style="display:flex; flex-direction:column; gap:10px; width:100%; max-width:280px; margin-top:16px;">
+          ${waClientMode ? `
+          <p style="font-size:13px; color:var(--color-text-tertiary); max-width:300px; line-height:1.5;">Para pedir otra cosa o hacer una consulta, volvé a la charla de WhatsApp con GO! y escribí <b>menú</b>.</p>
+          ` : `<div style="display:flex; flex-direction:column; gap:10px; width:100%; max-width:280px; margin-top:16px;">
             <button onclick="window.location.hash = '#/'" class="btn btn-primary" style="height:48px; border-radius:14px; font-weight:900;">Hacer Nuevo Pedido</button>
             <a href="https://wa.me/5492212025603?text=Hola%2C%20tengo%20una%20consulta%20sobre%20mi%20pedido%20%23${shortId}" target="_blank" class="btn btn-ghost" style="height:44px; border-radius:14px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; text-decoration:none;">
               💬 Hablar con Soporte
             </a>
-          </div>
+          </div>`}
         </div>
       `;
       return;
@@ -1204,6 +1211,10 @@ function updateUI(order, isDriverViewOverride = false) {
   // En un pedido de comercio, "accepted" es que el cadete lo aceptó y va a buscarlo: todavía
   // no lo retiró (eso es "delivering"). En mandados y viajes sí significa que ya está en curso.
   if (rawStatus === 'accepted' && !order.isFavor && !order.isTrip) normalizedStatus = 'ready';
+  // "Compra el repartidor": el comercio no confirma, así que apenas entra ya se busca repartidor
+  if (order.isShopper && rawStatus === 'pending') normalizedStatus = 'ready';
+  // Mientras nadie lo tomó, el cliente lo puede cancelar (igual que un pedido sin confirmar)
+  const shopperCancelable = order.isShopper === true && rawStatus === 'pending' && !order.driverId;
   if (normalizedStatus.includes('camin')) normalizedStatus = 'delivering';
   if (normalizedStatus.includes('entreg') || normalizedStatus.includes('complet')) normalizedStatus = 'completed';
   if (normalizedStatus.includes('cancel')) normalizedStatus = 'cancelled';
@@ -1232,7 +1243,8 @@ function updateUI(order, isDriverViewOverride = false) {
     extraStopsFee: Number(order.extraStopsFee || 0),
     serviceFee: Number(serviceFee) || 0,
     total: Number(totalAmount) || 0,
-    modifiedAt: order.modifiedAt?.toMillis ? order.modifiedAt.toMillis() : (order.modifiedAt || '')
+    modifiedAt: order.modifiedAt?.toMillis ? order.modifiedAt.toMillis() : (order.modifiedAt || ''),
+    shop: order.isShopper ? `${order.shopPending !== false}|${order.shopMissingCount || 0}|${order.shopReplacedCount || 0}` : ''
   });
 
   if (container.dataset.lastTrackingFingerprint === trackingFingerprint) {
@@ -1504,7 +1516,7 @@ function updateUI(order, isDriverViewOverride = false) {
     }
   }
 
-  const isDirectStore = window.location.hash.startsWith('#/tienda/') || document.body.classList.contains('is-direct-store-mode');
+  const isDirectStore = !waClientMode && (window.location.hash.startsWith('#/tienda/') || document.body.classList.contains('is-direct-store-mode'));
 
   const viralBannerHTML = (isCompleted && isDirectStore) ? `
     <div style="background: linear-gradient(135deg, rgba(225,29,72,0.08), rgba(244,63,94,0.03)); border: 1.5px solid rgba(225,29,72,0.25); border-radius: 20px; padding: 18px 16px; margin-top: 14px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;">
@@ -1529,8 +1541,8 @@ function updateUI(order, isDriverViewOverride = false) {
     }
     container.closest('.tracking-v5-viewport')?.classList.add('gt-client-view');
     container.classList.add('gt-client');
-    const canCancel = normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
-    container.innerHTML = renderClientPanel(order, normalizedStatus, { canCancel, isDirectStore, collapsed: gtSheetCollapsed });
+    const canCancel = normalizedStatus === 'pending' || shopperCancelable || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
+    container.innerHTML = renderClientPanel(order, normalizedStatus, { canCancel, isDirectStore, collapsed: gtSheetCollapsed, waClient: waClientMode });
 
     // Arriba: solo qué pedido es (el repartidor y el chat están en la hoja)
     if (headerDriverCard) {
@@ -1892,7 +1904,7 @@ function updateUI(order, isDriverViewOverride = false) {
             ${order.items.map(item => `
               <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.04);">
                 <div style="flex:1;">
-                  <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${item.qty}x</span> ${item.name}</div>
+                  <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);"><span style="color:var(--color-primary); margin-right:4px;">${isWeighedItem(item) ? itemWeightLabel(item) : `${item.qty}x`}</span> ${item.name}</div>
                   ${item.notes ? `<div style="font-size:10px; color:var(--color-text-secondary); margin-top:2px; font-style:italic;">"${item.notes}"</div>` : ''}
                 </div>
                 <div style="font-size:12px; font-weight:800; color:var(--color-text-primary);">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
@@ -1957,7 +1969,7 @@ function updateUI(order, isDriverViewOverride = false) {
   document.getElementById('v5-toggle-details-btn')?.addEventListener('click', () => {
     // Cliente: una sola hoja con productos, precio línea por línea y entrega
     if (!isDriverView) {
-      const canCancel = normalizedStatus === 'pending' || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
+      const canCancel = normalizedStatus === 'pending' || shopperCancelable || (order.isTrip && ['ready', 'preparing', 'confirmed'].includes(normalizedStatus));
       openClientOrderSheet(window.lastOrderData || order, { canCancel });
     } else window.openOrderDetailsModal(order);
   });
@@ -3083,7 +3095,7 @@ window.openOrderDetailsModal = function(order) {
         <div style="font-size:10px; font-weight:900; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:4px;">Productos del Pedido</div>
         ${o.items.map(item => `
           <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-bg-secondary); padding:10px 14px; border-radius:14px; border:1px solid var(--color-border-light);">
-            <div style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${item.name} <span style="color:var(--color-primary); font-size:11px;">x${item.qty || 1}</span></div>
+            <div style="font-size:13px; font-weight:800; color:var(--color-text-primary);">${item.name} <span style="color:var(--color-primary); font-size:11px;">${isWeighedItem(item) ? itemWeightLabel(item) : `x${item.qty || 1}`}</span></div>
             <div style="font-size:13px; font-weight:900; color:var(--color-text-secondary);">$${(Number(item.price || 0) * Number(item.qty || 1)).toLocaleString('es-AR')}</div>
           </div>
         `).join('')}

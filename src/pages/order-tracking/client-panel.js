@@ -75,6 +75,18 @@ export function trackingModel(o, status) {
   }
 
   // Pedido a un comercio, con envío
+  // "Compra el repartidor": el comercio no confirma; el repartidor lo compra en el mostrador
+  if (o.isShopper) {
+    m.steps = ['Recibido', 'Comprando', 'En camino', 'Entregado'];
+    const miss = Number(o.shopMissingCount) || 0;
+    const changes = miss ? ` Faltó ${miss} producto${miss === 1 ? '' : 's'}: pagás menos.` : '';
+    if (status === 'completed') return { ...m, tone: 'ok', title: 'Pedido entregado', subtitle: doneText(o), active: 3, done: true };
+    if (o.isAtDoor) return { ...m, tone: 'alert', title: `¡${driver} llegó!`, subtitle: 'Salí a recibirlo y tené a mano tu código.', active: 2 };
+    if (status === 'delivering') return { ...m, eta: true, title: 'En camino', subtitle: `${driver} ya compró tu pedido y va hacia vos.${changes}`, active: 2 };
+    if (hasDriver) return { ...m, eta: true, title: o.shopPending === false ? 'Ya está comprado' : 'Comprando tu pedido', subtitle: o.shopPending === false ? `${driver} sale de ${store}.${changes}` : `${driver} va a ${store} a comprarlo.`, active: 1 };
+    return { ...m, eta: true, tone: 'search', title: 'Buscando repartidor', subtitle: `Un repartidor lo compra en ${store} y te lo lleva.`, active: 0 };
+  }
+
   m.steps = ['Recibido', 'Preparando', 'En camino', 'Entregado'];
   if (status === 'completed') return { ...m, tone: 'ok', title: 'Pedido entregado', subtitle: doneText(o), active: 3, done: true };
   if (o.isAtDoor) return { ...m, tone: 'alert', title: `¡${driver} llegó!`, subtitle: 'Salí a recibirlo y tené a mano tu código.', active: 2 };

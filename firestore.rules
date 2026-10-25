@@ -63,12 +63,14 @@ service cloud.firestore {
       return isAdmin() || isDriver() || isComercioUser();
     }
 
-    // ¿El usuario es dueño de este comercio? (cacheado por Firestore dentro
-    // de la misma consulta, así que una query de pedidos cuesta 1 lectura).
+    // ¿El usuario es dueño de este comercio, o un correo con acceso de dueño (managerIds, que
+    // solo escribe functions/commerce-access.js)? Cacheado por Firestore dentro de la misma
+    // consulta, así que una query de pedidos cuesta 1 lectura.
     function ownsComercio(cid) {
       return isSignedIn() && cid is string && cid != '' &&
         exists(/databases/$(database)/documents/comercios/$(cid)) &&
-        get(/databases/$(database)/documents/comercios/$(cid)).data.get('ownerId', '') == uid();
+        (get(/databases/$(database)/documents/comercios/$(cid)).data.get('ownerId', '') == uid() ||
+         uid() in get(/databases/$(database)/documents/comercios/$(cid)).data.get('managerIds', []));
     }
 
     // Campos que modifica esta escritura.
@@ -125,8 +127,10 @@ service cloud.firestore {
       // Identificadores que la app completa al iniciar sesión en cuentas viejas
       // (clientId, código de referido, ID de cadete). Se pueden escribir una
       // sola vez: si ya existen, no se tocan. Sin esto se rompe el login.
+      // Vacío o null cuenta como que no existe: había cuentas con goId '' que nunca podían
+      // completarlo (Admin → Errores, "Error assigning goId inside profile", 16-10-2026).
       function backfillOnly(key) {
-        return !changed().hasAny([key]) || !resource.data.keys().hasAny([key]);
+        return !changed().hasAny([key]) || resource.data.get(key, null) in [null, ''];
       }
 
       function backfillIsValid() {
@@ -198,6 +202,27 @@ service cloud.firestore {
     // -------------------------------------------------------------- comercios
     // Catálogo público: se navega sin login.
 
+    // Vinculación con Ventra: los códigos los genera un admin. Las claves y el estado de cada
+    // comercio vinculado solo los maneja el servidor (functions/ventra-bridge.js).
+    match /ventra_links/{code} {
+      allow read, create, delete: if isAdmin();
+    }
+    match /ventra_keys/{hash} {
+      allow read, write: if false;
+    }
+    match /ventra_stores/{comercioId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Invitaciones a un comercio para un correo que todavía no entró a GO. Las crea y las
+    // aplica el servidor (functions/commerce-access.js); el invitado solo ve las suyas.
+    match /comercio_invites/{inviteId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.token.email != null &&
+        resource.data.email == request.auth.token.email.lower());
+      allow write: if false;
+    }
+
     match /comercios/{comercioId} {
       // Plata, dueño, aprobación, destaque pago y calificación: sólo el admin
       // (o el servidor). La comisión la lee la function al crear cada pedido.
@@ -205,7 +230,11 @@ service cloud.firestore {
         return [
           'ownerId', 'commissionRate', 'approvedByAdmin', 'isGoMarket',
           'promotion', 'isSponsored', 'sponsoredUntil',
-          'ratingAverage', 'ratingCount'
+          'ratingAverage', 'ratingCount',
+          // "Compra el repartidor" y la vinculación con Ventra (ver functions/ventra-bridge.js)
+          'fulfillmentMode', 'shopperMaxTotal', 'ventraLinked', 'ventraLinkedAt',
+          // Correos con acceso de dueño (functions/commerce-access.js)
+          'managerIds'
         ];
       }
 
@@ -218,7 +247,8 @@ service cloud.firestore {
       // Lo que sólo pone el admin, menos approvedByAdmin (va en false) y ownerId (es él mismo).
       function applicantForbiddenKeys() {
         return ['commissionRate', 'isGoMarket', 'promotion', 'isSponsored',
-          'sponsoredUntil', 'ratingAverage', 'ratingCount'];
+          'sponsoredUntil', 'ratingAverage', 'ratingCount',
+          'fulfillmentMode', 'shopperMaxTotal', 'ventraLinked', 'ventraLinkedAt', 'managerIds'];
       }
 
       allow read: if true;
@@ -239,8 +269,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       // PIN del panel y demás datos que no deben ser públicos.
+      // "team" (quién tiene acceso) lo escribe solo el servidor.
       match /private/{docId} {
-        allow read, write: if isAdmin() || ownsComercio(comercioId);
+        allow read: if isAdmin() || ownsComercio(comercioId);
+        allow write: if docId != 'team' && (isAdmin() || ownsComercio(comercioId));
       }
 
       match /products/{productId} {
@@ -425,9 +457,21 @@ service cloud.firestore {
     }
 
     // Estado de cada charla, mensajes ya atendidos y mensajes de prueba: solo el servidor.
-    match /wa_sessions/{waId} { allow read: if isAdmin(); }
+    // El admin puede tomar una charla (pasa a soporte) o devolverla al bot, nada más.
+    match /wa_sessions/{waId} {
+      allow read: if isAdmin();
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['step', 'data', 'humanTakeoverAt']);
+    }
     match /wa_inbound/{messageId} { allow read: if isAdmin(); }
     match /wa_outbox/{messageId} { allow read: if isAdmin(); }
+    // Modo prueba del bot: lista de números (personales) a los que contesta. No va en settings,
+    // que lee cualquiera.
+    match /wa_config/{docId} { allow read, write: if isAdmin(); }
+    // Uso de la IA del bot (tokens por llamada) y clientes esperando cadete: solo el servidor escribe
+    match /wa_ai_log/{id} { allow read: if isAdmin(); }
+    match /wa_waitlist/{waId} { allow read: if isAdmin(); }
+    // Mensajes del bot por mes (cupo gratis de Meta): solo el servidor escribe
+    match /wa_usage/{month} { allow read: if isAdmin(); }
 
     // ------------------------------------------------------------ marketplace
 

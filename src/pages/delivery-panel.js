@@ -50,6 +50,8 @@ import { mandadoShoppingPlan, placeSearchQuery, categoryLabel, onPlacesChange, p
 import { loadMandadoPlaces, learnMandadoPlace, getVisitedStores, markStoreVisited, lastStoreStepAt } from '../utils/mandado-places-store.js';
 import { isPlaceholderCoords, toLatLng } from '../utils/mandado-places.js';
 import { purchaseDwell } from '../utils/driver-dwell.js';
+import { enforceDriverApp, assertCanGoOnline } from '../components/driver-app-gate.js';
+import { isWeighedItem, itemWeightLabel } from '../utils/weight.js';
 
 // Set while the driver asked to disconnect and the server hasn't confirmed it yet,
 // so a write that never landed is re-sent instead of leaving the driver "online".
@@ -1136,6 +1138,8 @@ export async function renderDeliveryPanel(containerArg) {
     if (sessionStorage.getItem('gd_temp_client_mode') === 'true' && !(window.location.hash || '').startsWith('#/delivery')) return;
   } catch (e) {}
   loadMandadoPlaces(); // dónde quedan los comercios de los mandados (con caché; no frena la pantalla)
+  // Fuera de la app de la tienda no se reparte: pantalla de "instalá la app" (components/driver-app-gate.js)
+  enforceDriverApp().catch((e) => console.warn('[DriverGate]', e));
   const panelId = 'page-delivery';
   const content = containerArg || document.getElementById(panelId) || document.getElementById('app-content');
   if (!content) return;
@@ -1631,6 +1635,12 @@ export async function renderDeliveryPanel(containerArg) {
           display: flex; flex-direction: column; gap: 10px; z-index: 9990; pointer-events: auto;
         ">
           <!-- Sin +/− ni velocidad (como Uber/Google Maps: zoom con dos dedos). "Centrar" aparece solo si el repartidor movió el mapa. -->
+          <!-- Voz del GPS: solo con un pedido en curso (ahí habla y el menú no está a mano); ver .go-voice-fab en go-brand.css -->
+          <button id="driver-voice-fab" class="go-voice-fab${NavigationVoice.isMuted() ? ' is-muted' : ''}" aria-pressed="${NavigationVoice.isMuted() ? 'true' : 'false'}" aria-label="${NavigationVoice.isMuted() ? 'Prender la voz del GPS' : 'Apagar la voz del GPS'}" style="
+            width: 44px; height: 44px; border-radius: 14px; background: ${cardBg}; border: 1px solid ${cardBd};
+            color: ${txt}; align-items: center; justify-content: center; cursor: pointer; box-shadow: ${shadow};">
+            ${icon(NavigationVoice.isMuted() ? 'volumeOff' : 'volumeOn', 20)}
+          </button>
           <button id="driver-recenter-compass-btn" aria-label="Recentrar mi ubicación" title="Recentrar mi ubicación" style="display: none; 
             width: 44px; height: 44px; border-radius: 14px; background: ${cardBg}; border: 1px solid ${cardBd};
             color: ${txt}; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: ${shadow};">
@@ -1817,6 +1827,13 @@ export async function renderDeliveryPanel(containerArg) {
       ${drawerItem({ id: 'delivery-drawer-support-btn', iconName: 'headset', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Soporte técnico', subtitle: 'Abrir un ticket' })}
       ${drawerItem({ id: 'delivery-drawer-tour-btn', iconName: 'sparkles', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Ver la guía del panel', subtitle: 'Un recorrido de un minuto' })}
       ${drawerItem({ id: 'delivery-drawer-info-btn', iconName: 'helpCircle', bg: drawerTone('rgba(255,255,255,0.08)', '#ebe7e0'), fg: drawerTone('#f7f5f1', '#0b0b0c'), title: 'Cómo funciona el sistema', subtitle: 'Asignación, pausas y cancelaciones' })}
+      <div class="dsheet-label">Sonido</div>
+      <!-- Only the spoken guidance (NavigationVoice). New-order alarms and sounds are not touched. -->
+      <button type="button" id="delivery-drawer-voice-btn" role="switch" aria-checked="false" class="dsheet-row go-drawer-voice">
+        <div class="dsheet-tile go-drawer-voice-tile" data-voice-icon></div>
+        <div style="flex:1; min-width:0;"><div class="dsheet-row-title">Voz del GPS</div><div class="dsheet-row-sub" data-voice-sub></div></div>
+        <span class="go-drawer-switch" aria-hidden="true"><span></span></span>
+      </button>
       <div class="dsheet-label">Jornada</div>
       <button type="button" id="delivery-drawer-session-btn" class="dsheet-row go-drawer-session${user?.isOnline ? ' is-online' : ''}">
         <div class="dsheet-tile go-drawer-session-tile">${icon('power', 20)}</div>
@@ -1839,8 +1856,21 @@ export async function renderDeliveryPanel(containerArg) {
     row.querySelector('[data-session-title]').textContent = online ? 'Desconectarme' : 'Conectarme';
     row.querySelector('[data-session-sub]').textContent = online ? 'Terminar la jornada de hoy' : 'Empezar a recibir pedidos';
   };
+  const syncDrawerVoice = () => {
+    const row = document.getElementById('delivery-drawer-voice-btn');
+    if (!row) return;
+    const on = !NavigationVoice.isMuted();
+    row.classList.toggle('is-on', on);
+    row.setAttribute('aria-checked', on ? 'true' : 'false');
+    row.querySelector('[data-voice-icon]').innerHTML = icon(on ? 'volumeOn' : 'volumeOff', 20);
+    row.querySelector('[data-voice-sub]').textContent = on
+      ? 'Te habla las indicaciones. Tocá para apagarla'
+      : 'Apagada. Las alarmas de pedidos siguen sonando';
+  };
+  syncDrawerVoice();
   const openDeliveryDrawer = () => {
     syncDrawerSession();
+    syncDrawerVoice();
     deliveryDrawerEl.style.transition = 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)';
     deliveryDrawerEl.style.transform = 'translateX(0)';
     deliveryBackdropEl.style.opacity = '1';
@@ -1887,6 +1917,13 @@ export async function renderDeliveryPanel(containerArg) {
     const current = getState().user || user;
     if (current?.isOnline) promptEndSession(current);
     else promptStartSession(current);
+  });
+
+  document.getElementById('delivery-drawer-voice-btn')?.addEventListener('click', () => {
+    const muted = NavigationVoice.toggleMute();
+    syncDrawerVoice();
+    if (!muted) NavigationVoice.speak('Voz activada', true);
+    showToast(muted ? 'Voz del GPS apagada 🔇' : 'Voz del GPS prendida 🔊', 'info');
   });
 
   // Support button
@@ -2120,8 +2157,14 @@ export async function renderDeliveryPanel(containerArg) {
       if (!serverOnline) {
         localStorage.removeItem(DRIVER_OFFLINE_INTENT_KEY);
 
-        // Went online -> offline without the driver pressing the button.
-        if (previousServerOnline === true && !selfInitiated) {
+        // The screen still shows the online map and dock ("Buscando pedidos"). previousServerOnline
+        // alone missed it: it starts at null every time the panel re-renders (and cache snapshots
+        // never set it), so a disconnect that arrived in the first server snapshot (admin, another
+        // device, the server's inactivity check while the phone slept) left the map up for good.
+        const showingOnlineUi = Boolean(document.querySelector('#driver-hud-container #driver-footer-dock-container'));
+        const localOnline = getState().user?.isOnline === true;
+        if (!selfInitiated && (previousServerOnline === true || showingOnlineUi || localOnline)) {
+          if (localOnline) setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
           stopHeartbeat();
           hideExclusiveOfferOverlay();
           stopExclusiveOfferAlert();
@@ -2139,6 +2182,10 @@ export async function renderDeliveryPanel(containerArg) {
           if (byDebtLimit) {
             import('./delivery-panel/earnings.js').then(({ showBalanceManagementModal }) => showBalanceManagementModal({ ...(getState().user || user), ...serverData, uid: user.uid }));
           }
+        } else if (showingOnlineUi) {
+          // The driver pressed the button but the online map is still up: just redraw.
+          if (localOnline) setState('user', { ...getState().user, isOnline: false, currentSessionId: null, lastActivityAt: null });
+          renderDeliveryPanel();
         }
         return;
       }
@@ -2206,7 +2253,7 @@ export async function renderDeliveryPanel(containerArg) {
            if (requestedTripType !== driverVehicleType) return;
            batches.add(o.id);
         }
-        else if (o.isFavor) batches.add(o.id);
+        else if (o.isFavor || o.isShopper) batches.add(o.id);
         else if (o.bundleId) batches.add(o.bundleId);
         else if (o.status === 'ready') batches.add(o.id);
       });
@@ -2502,7 +2549,7 @@ function loadTabContent(tab, container, user) {
           const isCoPickup = o.isCoPickupOffer || o.isSuggestedCoPickup || false;
           const isOwn = o.isOwnDeliveryOrder || o.isPermanentOffer || isCoPickup || false;
 
-          const isCommerceReady = o.isFavor || o.isTrip || o.status === 'ready';
+          const isCommerceReady = o.isFavor || o.isTrip || o.isShopper || o.status === 'ready';
           const offerAgeMs = now - offeredAt;
           const needsQueueAssign = isCommerceReady && !isOwn && (
                                    !o.queueTargetDriverId || 
@@ -2523,7 +2570,7 @@ function loadTabContent(tab, container, user) {
           if (window.expiredLocalOrders.has(o.id) && !isTargetedToMe) return;
 
           // For regular commerce orders, require status === 'ready' before offering to drivers, UNLESS targeted to me
-          if (!isTargetedToMe && !o.isFavor && !o.isTrip && o.status !== 'ready') return;
+          if (!isTargetedToMe && !o.isFavor && !o.isTrip && !o.isShopper && o.status !== 'ready') return;
 
           if (o.queueTargetDriverId) {
             // Exclusive offer: only show to targeted driver
@@ -2750,7 +2797,7 @@ function loadTabContent(tab, container, user) {
           snap.docChanges().forEach(change => {
             if (change.type === 'added') {
               const order = { id: change.doc.id, ...change.doc.data() };
-              if (!order.driverId && (order.status === 'ready' || order.bundleId)) {
+              if (!order.driverId && (order.status === 'ready' || order.isShopper || order.bundleId)) {
                 if (order.queueTargetDriverId !== user.uid) return;
                 showToast(`¡Nuevo pedido disponible!`, 'info');
               }
@@ -2866,7 +2913,7 @@ function loadTabContent(tab, container, user) {
               ` : '';
 
               const anyPending = isBundle ? b.orders.some(o => o.status === 'pending') : false;
-              const allReady = isBundle ? b.orders.every(o => o.status === 'ready') : (isFavor || isTrip || b.order.status === 'ready');
+              const allReady = isBundle ? b.orders.every(o => o.status === 'ready') : (isFavor || isTrip || b.order.isShopper || b.order.status === 'ready');
 
               const favorMeta = isFavor ? getFavorTypeMeta(favorType) : null;
               const favorColor = favorMeta ? favorMeta.color : '#ef4444';
@@ -3918,7 +3965,7 @@ function loadTabContent(tab, container, user) {
                                     <div style="font-size:12px; color:var(--color-text-secondary); margin-top:2px; font-weight:600; padding-left:8px; border-left:2px solid var(--color-primary); display:flex; flex-direction:column; gap:4px;">
                                       ${o.items.map(item => `
                                         <div style="display:flex; flex-direction:column; gap:1px; text-align:left;">
-                                          <div style="color:var(--color-text-primary);"><span style="color:var(--color-primary); font-weight:800;">${item.qty || 1}x</span> ${item.name}</div>
+                                          <div style="color:var(--color-text-primary);"><span style="color:var(--color-primary); font-weight:800;">${isWeighedItem(item) ? itemWeightLabel(item) : `${item.qty || 1}x`}</span> ${item.name}</div>
                                           ${item.options && item.options.length > 0 ? `
                                             <div style="font-size:10.5px; color:var(--color-primary); font-weight:700; padding-left:8px; margin-top:1px; text-align:left;">
                                               Sabores: ${item.options.map(opt => `${opt.qty > 1 ? `${opt.qty}x ` : ''}${opt.name}`).join(', ')}
@@ -4134,6 +4181,13 @@ function loadTabContent(tab, container, user) {
 
                           ${(() => {
                             const isManualStop = stop.orders && stop.orders[0] && stop.orders[0].isManual === true;
+                            // Pedido de WhatsApp: al cliente se le escribe por WhatsApp, no por el chat de la app
+                            const waOrder = stop.orders && stop.orders[0] && stop.orders[0].source === 'whatsapp_bot' ? stop.orders[0] : null;
+                            if (waOrder) {
+                              return `
+                                <button class="btn whatsapp-client-btn" data-phone="${waOrder.waPhone || waOrder.userPhone || ''}" data-client-name="${waOrder.userName || stop.userName || 'Cliente'}" data-order-num="${waOrder.orderId}" style="flex:2; height:48px; padding:0 12px; display:flex; align-items:center; justify-content:center; gap:8px; border-radius:16px; border:1px solid rgba(37,211,102,0.35); background:rgba(37,211,102,0.08); color:#128c4a; font-weight:800; font-size:13px; transition:all 0.3s; box-shadow: var(--shadow-sm);" title="Pedido de WhatsApp: escribile por WhatsApp">${icon('whatsapp', 20)} WhatsApp</button>
+                              `;
+                            }
                             if (stop.type === 'DROP_OFF') {
                               return !isManualStop ? `
                                 <button class="btn chat-client-btn" data-order-id="${stop.orders[0].id}" data-order-num="${stop.orders[0].orderId}" data-client-name="${stop.userName}" style="flex:1; height:48px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:16px; border:1px solid var(--color-border-light); background:var(--color-bg-card); color:var(--color-text-primary); transition:all 0.3s; box-shadow: var(--shadow-sm);">${icon('chat', 20)}</button>
@@ -4923,7 +4977,7 @@ function loadTabContent(tab, container, user) {
                             }
                           })() : (o.items ? o.items.map(item => `
                             <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px; padding-left:8px;">
-                              <span style="color:var(--color-text-tertiary); font-weight:600;">${item.qty || 1}× ${item.name}</span>
+                              <span style="color:var(--color-text-tertiary); font-weight:600;">${isWeighedItem(item) ? itemWeightLabel(item) : `${item.qty || 1}×`} ${item.name}</span>
                               <span style="color:var(--color-text-tertiary);">${formatPrice((item.price || 0) * (item.qty || 1))}</span>
                             </div>
                           `).join('') : '')}
@@ -4954,7 +5008,11 @@ function loadTabContent(tab, container, user) {
                     </div>
 
                     <div style="padding:0 20px 16px;">
-                      ${!main.isManual ? `
+                      ${main.source === 'whatsapp_bot' ? `
+                        <button disabled style="width:100%; height:40px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text-tertiary); font-size:11px; font-weight:800; opacity:0.6; cursor:not-allowed; display:flex; align-items:center; justify-content:center; gap:8px;">
+                          ${icon('whatsapp', 14)} Pedido de WhatsApp: el cliente se contacta por WhatsApp
+                        </button>
+                      ` : !main.isManual ? `
                         <button class="view-history-chat-btn" data-order-id="${main.id}" data-order-num="${main.orderId}" data-client-name="${main.userName}" style="width:100%; height:40px; border-radius:12px; background:var(--color-bg-secondary); border:1.5px solid var(--color-border-light); color:var(--color-text-primary); font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.2s;">
                           ${icon('messageSquare', 14)} Chat con cliente
                         </button>
@@ -6083,6 +6141,7 @@ async function notifyAdminsOnDriverConnection(driverUser, action) {
 async function startSession(user) {
   const latestUser = getState().user || user;
   if (!latestUser) return;
+  if (!assertCanGoOnline(latestUser)) return;
 
   try {
     const { setDoc, collection, doc, updateDoc, serverTimestamp, deleteField } = await import('firebase/firestore');
@@ -6451,7 +6510,7 @@ function renderStatusBar(user) {
         const allComercios = getState().comercios || [];
         const foundCom = o.comercioId ? allComercios.find(c => c.id === o.comercioId) : null;
         directiveLogo = o.comercioRealLogo || o.comercioLogo || foundCom?.logo || '/go-bag.png?v=7';
-        destTitle = `Retirá el pedido en ${o.comercioName || 'Local'}`;
+        destTitle = (o.isShopper && o.shopPending !== false) ? `Comprá en ${o.comercioName || 'el local'}` : `Retirá el pedido en ${o.comercioName || 'Local'}`;
       }
     } else {
       directiveLogo = clientPhoto || '/go-bag.png?v=7';
@@ -6662,6 +6721,7 @@ function dockStopText(o, isPickup) {
       const items = cur && cur.items ? cur.items : (isPago ? '' : cleanMandadoText(o.description || o.itemsText || ''));
       return { verb, title, sub: [where, items].filter(Boolean).join(' · '), store: cur, plan };
     }
+    if (o.isShopper && o.shopPending !== false) return { verb: 'Comprar en', title: o.comercioName || 'Comercio', sub: o.pickupAddress || o.comercioAddress || '' };
     return { verb: 'Retirar en', title: o.comercioName || o.originAddress || 'Comercio', sub: o.pickupAddress || o.comercioAddress || o.originAddress || '' };
   }
   return { verb: 'Entregar a', title: client, sub: o.deliveryAddress || o.address || o.destinationAddress || o.shippingAddress || '' };
@@ -6707,6 +6767,11 @@ function dockMoneyRow(o, isPickup, isLight) {
     const edit = `<button class="edit-mandado-purchase-btn" data-order-id="${esc(o.id)}" style="height:36px;padding:0 12px;border-radius:10px;background:${t.brand};border:0;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:inherit">Cargar monto</button>`;
     return moneyRow({ label: isPago ? 'Valor de las facturas' : 'Valor de la compra', amount: buy > 0 ? money(buy) : '', sub: 'Lo adelantás y te lo devuelve el cliente', tone: 'amber', icon: 'bag', action: edit }, isLight);
   }
+  if (isPickup && o.isShopper && o.shopPending !== false) {
+    const buy = Number(o.estimatedSubtotal ?? o.subtotal) || 0;
+    // Sin botón al costado: el texto tiene que entrar en un celular chico
+    return moneyRow({ label: 'Pagás en el local', amount: money(buy), sub: 'Aprox. Te lo devuelve el cliente', tone: 'amber', icon: 'bag' }, isLight);
+  }
   // GoPoints / cupón: el total ya viene con el descuento restado, y el repartidor tiene que saberlo
   const discount = discountRow(o, isLight);
   if (isCashPayment(o)) {
@@ -6727,7 +6792,7 @@ function renderDockActionRow(order, orderIsPickup, isLight) {
       ? (isOrderEncomienda(order) ? 'Deslizá: retiré la encomienda'
         : (isGoCashOrder(order) ? 'Deslizá: salgo hacia el cliente'
           : (order.favorType === 'pagodeservicios' ? 'Deslizá: ya pagué'
-            : (isShoppingFavor(order) ? 'Deslizá: ya compré' : 'Deslizá: retiré el pedido'))))
+            : ((isShoppingFavor(order) || (order.isShopper && order.shopPending !== false)) ? 'Deslizá: ya compré' : 'Deslizá: retiré el pedido'))))
       : 'Deslizá: entregado');
   return `
     <div id="dock-pinned-action-slider-row" style="flex-shrink:0;width:100%">
@@ -6943,7 +7008,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
     const items = Array.isArray(o.items) ? o.items : (Array.isArray(o.products) ? o.products : []);
     const itemsHtml = items.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;color:${t.tx2}">
-          <span>${esc(it.qty || it.quantity || it.cant || 1)}× ${esc(it.name || it.title || 'Producto')}</span>
+          <span>${isWeighedItem(it) ? itemWeightLabel(it) : `${esc(it.qty || it.quantity || it.cant || 1)}×`} ${esc(it.name || it.title || 'Producto')}</span>
           ${it.price ? `<span style="color:${t.tx};font-weight:600;white-space:nowrap">${money(it.price * (it.qty || it.quantity || 1))}</span>` : ''}
         </div>`).join('')}</div>` : '';
     const notes = o.addressNotes || o.notes || o.clientNotes;
@@ -7484,7 +7549,20 @@ export function attachBottomDockListeners(user, activeOrders = []) {
             const pickupCheck = await confirmPickupDistance(targetOrder);
             if (!pickupCheck) { resetSlider(); return; }
 
-            if (isShoppingMandado) {
+            if (targetOrder && targetOrder.isShopper && targetOrder.shopPending !== false) {
+              const { openShopperChecklist } = await import('./delivery-panel/shopper.js');
+              openShopperChecklist({
+                order: targetOrder,
+                onCancel: resetSlider,
+                onDone: (res) => {
+                  if (res && res.cancelled) {
+                    showToast('No había nada: el pedido se canceló y el cliente ya fue avisado.', 'info', 6000);
+                    return;
+                  }
+                  markAsPickedUp(oId, pickupCheck).then(ok => { if (ok === false) resetSlider(); });
+                }
+              });
+            } else if (isShoppingMandado) {
               // Se guarda dónde queda el último comercio del mandado (donde se quedó comprando)
               learnShoppingStore(targetOrder, shoppingPlanOf(targetOrder).current);
               const { openMandadoPurchaseModal } = await import('./delivery-panel/mandado.js');
@@ -8433,6 +8511,7 @@ export async function promptEndSession(user) {
 export async function promptStartSession(user) {
   const currentUser = getState().user || user;
   if (!currentUser) return;
+  if (!assertCanGoOnline(currentUser)) return;
 
   // 1. Mandatory Profile Fields Check
   const name = (currentUser.displayName || currentUser.name || '').trim();
@@ -8558,6 +8637,28 @@ if (!window.__goRecenterBtnBound) {
   };
   window.addEventListener('driver-map-user-moved', () => setRecenterVisible(true));
   window.addEventListener('driver-map-recentered', () => setRecenterVisible(false));
+}
+
+// Voice button on the map (#driver-voice-fab): delegated, so it survives the controls re-rendering
+if (!window.__goVoiceFabBound) {
+  window.__goVoiceFabBound = true;
+  const syncVoiceFab = () => {
+    const b = document.getElementById('driver-voice-fab');
+    if (!b) return;
+    const muted = NavigationVoice.isMuted();
+    b.classList.toggle('is-muted', muted);
+    b.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    b.setAttribute('aria-label', muted ? 'Prender la voz del GPS' : 'Apagar la voz del GPS');
+    b.innerHTML = icon(muted ? 'volumeOff' : 'volumeOn', 20);
+  };
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest?.('#driver-voice-fab')) return;
+    e.stopPropagation();
+    const muted = NavigationVoice.toggleMute();
+    if (!muted) NavigationVoice.speak('Voz activada', true);
+    showToast(muted ? 'Voz del GPS apagada 🔇' : 'Voz del GPS prendida 🔊', 'info');
+  });
+  window.addEventListener('driver-voice-muted-changed', syncVoiceFab);
 }
 
 function attachStatusBarListeners(user) {
@@ -8942,8 +9043,10 @@ export async function takeBatch(batchId, user, batchData = null, btn = null) {
     window.dispatchEvent(new CustomEvent('switch-delivery-tab', { detail: 'active' }));
     return true;
   } catch (err) {
-    console.error('takeBatch error:', err);
-    showToast(describeTakeBatchError(err), 'error');
+    // Otro cadete lo tomó primero: es una carrera normal, no una falla
+    const raced = typeof err === 'string';
+    if (!raced) console.error('takeBatch error:', err);
+    showToast(describeTakeBatchError(err), raced ? 'warning' : 'error');
     if (btn) {
       btn.disabled = false;
       if (btn.classList.contains('add-suggested-order-btn')) {
@@ -10201,6 +10304,7 @@ export function showPausedSessionModal(user) {
   const btn = overlay.querySelector('#paused-session-reconnect-btn');
   if (btn) {
     btn.onclick = async () => {
+      if (!assertCanGoOnline(getState().user || user)) { overlay.remove(); return; }
       btn.disabled = true;
       btn.innerHTML = '⏳ CONECTANDO...';
       try {
@@ -10329,7 +10433,7 @@ function showStopDetailsBottomSheet(stop) {
         ${o.items && o.items.length > 0 ? `
           <div style="font-size:12px; color:var(--color-text-secondary); padding-left:8px; border-left:2.5px solid var(--color-primary); display:flex; flex-direction:column; gap:4px;">
             ${o.items.map(item => `
-              <div><span style="color:var(--color-primary); font-weight:800;">${item.qty || 1}x</span> ${item.name}</div>
+              <div><span style="color:var(--color-primary); font-weight:800;">${isWeighedItem(item) ? itemWeightLabel(item) : `${item.qty || 1}x`}</span> ${item.name}</div>
             `).join('')}
           </div>
         ` : `<div style="font-size:11.5px; color:var(--color-text-tertiary); font-style:italic;">Pedido de Comercio</div>`}

@@ -8,6 +8,13 @@ const isTakeaway = (o) => o.deliveryType === 'takeaway' || o.deliveryType === 'r
 const isEncomienda = (o) => o.favorType === 'encomienda' || o.serviceType === 'encomienda' || o.favorType === 'mandado' || o.isEncomienda === true;
 const isGoCash = (o) => o.favorType === 'gocash' || o.isGoCash === true;
 const isTransfer = (o) => { const pm = String(o.paymentMethod || '').toLowerCase(); return pm === 'mercadopago' || pm.includes('transf'); };
+// "Compra el repartidor": qué pasó con cada producto en el mostrador
+function shopNote(it) {
+  if (it.shopStatus === 'missing') return '<small>No había: no lo pagás</small>';
+  if (it.shopStatus === 'partial') return `<small>Había ${esc(it.qty)} de ${esc(it.orderedQty)}</small>`;
+  if (it.shopStatus === 'replaced' && it.replacement) return `<small>Cambiado por ${esc(it.replacement.name)}</small>`;
+  return '';
+}
 
 /** Líneas del precio. Lo que no llega a sumar el total va en "Otros ajustes": nunca queda descuadrado. */
 export function priceLines(o) {
@@ -21,7 +28,7 @@ export function priceLines(o) {
   else {
     if (o.isFavor) {
       if (!isGoCash(o) && !isEncomienda(o)) lines.push({ label: o.favorType === 'pagodeservicios' ? 'Facturas' : 'Compra', value: items, pending: items === 0, hint: items === 0 ? 'La carga el repartidor cuando compra' : '' });
-    } else lines.push({ label: 'Productos', value: items });
+    } else lines.push({ label: 'Productos', value: items, hint: o.isShopper && o.shopPending !== false ? 'Aproximado: se confirma cuando el repartidor compra' : '' });
     if (!isTakeaway(o)) lines.push({ label: 'Envío', value: shipping });
   }
   if (n(o.purchaseFee)) lines.push({ label: 'Gestión de la compra', value: n(o.purchaseFee) });

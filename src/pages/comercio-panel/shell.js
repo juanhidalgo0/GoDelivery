@@ -4,6 +4,7 @@
 // cambiar de pestaña no parpadea. Cada pantalla pide su cuerpo con enterCommercePanel().
 import '../../styles/commerce-panel.css';
 import { db } from '../../firebase.js';
+import { myCommercesQuery } from '../../utils/my-commerces.js';
 import { doc, onSnapshot, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { setState, getState } from '../../state.js';
 import { isAdmin } from '../../auth.js';
@@ -83,6 +84,7 @@ function mountShell(comercioId) {
     </header>
     <button class="cp-alarm" id="cp-alarm" type="button" hidden>${icon('bell', 18)} Hay pedidos sin aceptar <u>Silenciar</u></button>
     <button class="cp-alarm is-sound" id="cp-sound" type="button" hidden>${icon('volumeOff', 18)} El sonido de los pedidos está apagado <u>Activar</u></button>
+    <button class="cp-alarm is-push" id="cp-push" type="button" hidden>${icon('bell', 18)} <span id="cp-push-text"></span> <u id="cp-push-act"></u></button>
     <main class="cp-body" id="cp-body"></main>
     <nav class="cp-nav" aria-label="Secciones del panel">
       ${TABS.map(t => `
@@ -100,7 +102,7 @@ function mountShell(comercioId) {
   if (uid) {
     // El admin entra a paneles ajenos desde Admin → Comercios: eso no cambia "su" comercio
     if (!isAdmin()) { try { localStorage.setItem(`gd_my_commerce_id_${uid}`, comercioId); } catch (e) {} }
-    getDocs(query(collection(db, 'comercios'), where('ownerId', '==', uid)))
+    getDocs(myCommercesQuery(uid))
       .then(snap => { if (shell && shell.comercioId === comercioId) shell.owned = snap.docs.map(d => ({ id: d.id, ...d.data() })); })
       .catch(() => {});
   }
@@ -134,10 +136,21 @@ function mountShell(comercioId) {
     window.removeEventListener('pointerdown', onGesture, true);
     window.removeEventListener('keydown', onGesture, true);
   });
+  setupPushStrip(el);
   el.querySelector('#cp-status').addEventListener('click', () => onStatusTap());
 
   shell.unsubs.push(onSnapshot(doc(db, 'comercios', comercioId), (snap) => {
-    if (!shell || !snap.exists()) return;
+    if (!shell) return;
+    if (!snap.exists()) {
+      // El comercio fue dado de baja (o el enlace es viejo): antes el panel quedaba en "Cargando…"
+      // y pedidos y números fallaban con permission-denied (Admin → Errores, 11-10-2026)
+      const uid = getState().user?.uid;
+      try { if (uid && localStorage.getItem(`gd_my_commerce_id_${uid}`) === comercioId) localStorage.removeItem(`gd_my_commerce_id_${uid}`); } catch (e) {}
+      const body = el.querySelector('#cp-body');
+      if (body) body.innerHTML = cpEmpty('store', 'Este comercio ya no está disponible', 'Puede que lo hayan dado de baja. Si es un error, escribinos desde Soporte.', `<a class="cp-btn is-ink" href="#/">Ir al inicio</a>`);
+      el.querySelector('#cp-sub').textContent = 'No disponible';
+      return;
+    }
     shell.data = { id: snap.id, ...snap.data() };
     setState('currentComercio', shell.data);
     paintHeader();
@@ -356,6 +369,110 @@ export async function enterCommercePanel({ comercioId, tab, sub = null, pin = tr
 }
 
 // ---------------------------------------------------------------- hojas
+
+// Avisos de pedidos nuevos en este dispositivo. Con el celular bloqueado la push es lo único que
+// suena: el 10-10-2026 seis comercios no tenían ningún dispositivo registrado (nunca dieron el
+// permiso o lo rechazaron) y sus pedidos entraban sin aviso. La franja dice qué falta y lo arregla.
+const PUSH_STRIP = {
+  prompt: { text: 'Activá los avisos de pedidos nuevos', act: 'Activar' },
+  denied: { text: 'Los avisos de pedidos están bloqueados en este dispositivo', act: 'Cómo activarlos' },
+  muted: { text: 'Los avisos de pedidos están silenciados en este celular', act: 'Cómo activarlos' },
+  unsupported: { text: 'En este navegador no te llegan avisos de pedidos', act: 'Instalá la app' },
+  error: { text: 'No pudimos registrar este dispositivo para los avisos', act: 'Reintentar' },
+};
+
+function setupPushStrip(el) {
+  // El admin entra a paneles ajenos: su dispositivo no es el del comercio
+  if (isAdmin()) return;
+  const strip = el.querySelector('#cp-push');
+  let status = null;
+  const paint = (s) => {
+    status = s;
+    const info = PUSH_STRIP[s];
+    strip.hidden = !info;
+    if (!info) return;
+    strip.querySelector('#cp-push-text').textContent = info.text;
+    strip.querySelector('#cp-push-act').textContent = info.act;
+  };
+  const check = async (opts = {}) => {
+    try {
+      const { ensureCommercePushReady } = await import('../../utils/notifications.js');
+      const s = await ensureCommercePushReady(opts);
+      if (shell?.el === el) paint(s);
+      return s;
+    } catch (e) {
+      console.warn('[Panel] avisos:', e);
+      return null;
+    }
+  };
+
+  strip.addEventListener('click', async () => {
+    if (status === 'prompt' || status === 'error') {
+      // En la web el pedido de permiso tiene que salir de un toque: por eso es un botón
+      const s = await check({ ask: true });
+      if (s === 'ok') showToast('Listo: te van a llegar los avisos de pedidos nuevos', 'success');
+      else if (s === 'denied') showPushHelp('denied');
+      else if (s === 'error') showToast('No se pudo registrar el dispositivo. Revisá la conexión y probá de nuevo.', 'error');
+    } else if (status) {
+      showPushHelp(status);
+    }
+  });
+
+  check({ force: true });
+  const onVisible = () => { if (document.visibilityState === 'visible') check({ force: true }); };
+  document.addEventListener('visibilitychange', onVisible);
+  const timer = setInterval(() => check({ force: true }), 10 * 60 * 1000);
+  shell.unsubs.push(() => {
+    document.removeEventListener('visibilitychange', onVisible);
+    clearInterval(timer);
+  });
+}
+
+function showPushHelp(status) {
+  const platform = window.Capacitor?.getPlatform?.() || 'web';
+  const ua = navigator.userAgent || '';
+  const isIOS = platform === 'ios' || /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = platform === 'android' || /Android/.test(ua);
+  const steps = (list) => `<ol class="cp-push-steps">${list.map(s => `<li>${s}</li>`).join('')}</ol>`;
+
+  if (status === 'unsupported') {
+    cpSheet({
+      title: 'Recibí los avisos de pedidos',
+      sub: isIOS
+        ? 'En el iPhone, Safari no muestra avisos de esta página. Con la app de GO! te suenan los pedidos aunque tengas el celular bloqueado.'
+        : 'Este navegador no recibe avisos. Con la app de GO! te suenan los pedidos aunque tengas el celular bloqueado.',
+      actions: [
+        { label: isIOS ? 'Abrir App Store' : 'Abrir Play Store', cls: 'is-ink', onClick: async () => {
+          const { APP_STORE_URL, PLAY_STORE_URL } = await import('../../components/install-prompt.js');
+          window.open(isIOS ? APP_STORE_URL : PLAY_STORE_URL, '_blank');
+        } },
+        { label: 'Ahora no' },
+      ],
+    });
+    return;
+  }
+
+  let body;
+  if (platform === 'android') {
+    body = status === 'muted'
+      ? steps(['Abrí <b>Ajustes</b> del celular → <b>Apps</b> → <b>GO!</b> → <b>Notificaciones</b>.', 'Activá <b>Pedidos nuevos</b> (y dejalo con sonido).', 'Volvé a la app.'])
+      : steps(['Abrí <b>Ajustes</b> del celular → <b>Apps</b> → <b>GO!</b>.', 'Entrá a <b>Notificaciones</b> y activá <b>Permitir notificaciones</b>.', 'Volvé a la app: esta franja desaparece sola.']);
+  } else if (platform === 'ios') {
+    body = steps(['Abrí <b>Ajustes</b> del iPhone → <b>Notificaciones</b> → <b>GO!</b>.', 'Activá <b>Permitir notificaciones</b>, <b>Sonidos</b> y <b>Pantalla bloqueada</b>.', 'Volvé a la app: esta franja desaparece sola.']);
+  } else if (isIOS) {
+    body = steps(['Abrí <b>Ajustes</b> del iPhone → <b>Notificaciones</b> → <b>GO!</b> (la app que agregaste a la pantalla de inicio).', 'Activá <b>Permitir notificaciones</b>.', 'Volvé a la app.']);
+  } else if (isAndroid) {
+    body = steps(['Tocá el candado <b>🔒</b> al lado de la dirección, arriba.', 'Entrá a <b>Permisos</b> → <b>Notificaciones</b> → <b>Permitir</b>.', 'Recargá la página.']);
+  } else {
+    body = steps(['Hacé clic en el ícono <b>🔒</b> a la izquierda de la dirección, arriba.', 'En <b>Notificaciones</b> elegí <b>Permitir</b>.', 'Recargá la página. Dejá esta pestaña abierta mientras atendés.']);
+  }
+  cpSheet({
+    title: 'Activá los avisos de pedidos',
+    sub: 'Sin esto, si no estás mirando la pantalla, los pedidos nuevos entran sin sonar.',
+    bodyHtml: body,
+    actions: [{ label: 'Entendido', cls: 'is-ink' }],
+  });
+}
 
 /**
  * Hoja que sube desde abajo, con el estilo del panel.

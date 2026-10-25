@@ -581,9 +581,9 @@ async function init() {
       const { collection, query, where, getDocs } = await import('firebase/firestore');
 
       try {
-        // 1. Priorizar el comercio del cual el usuario es dueño directo
-        const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
-        const snap = await getDocs(q);
+        // 1. Los comercios de los que es dueño o donde su correo tiene acceso
+        const { myCommercesQuery } = await import('./utils/my-commerces.js');
+        const snap = await getDocs(myCommercesQuery(user.uid));
         if (snap.size === 1) {
           const commerceId = snap.docs[0].id;
           localStorage.setItem(`gd_my_commerce_id_${user.uid}`, commerceId);
@@ -1127,6 +1127,18 @@ async function init() {
           console.warn('Error auto-syncing GoMarket assets:', e);
         }
       })();
+      // Invitaciones a un comercio para este correo (dueño o acceso): se aplican al entrar
+      if (user && user.email && !isPreview) {
+        import('./utils/my-commerces.js')
+          .then(m => m.claimCommerceInvites(user))
+          .then(applied => {
+            if (!applied.length) return;
+            import('./components/toast.js').then(t => t.showToast(applied.some(a => a.role === 'owner')
+              ? 'Ya sos el dueño de un comercio en GO: entrá desde Mi comercio'
+              : 'Te dieron acceso a un comercio en GO: entrá desde Mi comercio', 'success', 7000));
+          })
+          .catch(err => console.warn('[Comercio] invitaciones:', err?.message || err));
+      }
       if (isComercio() && user && !isPreview) {
         (async () => {
           try {
@@ -1169,8 +1181,8 @@ async function init() {
                 }
               }
             } else {
-              const q = query(collection(db, 'comercios'), where('ownerId', '==', user.uid));
-              const snap = await getDocs(q);
+              const { myCommercesQuery } = await import('./utils/my-commerces.js');
+              const snap = await getDocs(myCommercesQuery(user.uid));
               if (!snap.empty) {
                 comId = snap.docs[0].id;
                 import('./state.js').then(m => m.setState('currentComercio', { id: snap.docs[0].id, ...snap.docs[0].data() }));

@@ -72,7 +72,9 @@ async function loadKioskPaulosData() {
       const isPaulos = data.isPaulosPreset || 
                        (data.storeName && data.storeName.toLowerCase().includes('paulos')) ||
                        (data.details && data.details.toLowerCase().includes('paulos')) ||
-                       (data.favorType === 'compra' && data.stores && JSON.stringify(data.stores).toLowerCase().includes('paulos'));
+                       (data.favorType === 'compra' && data.stores && JSON.stringify(data.stores).toLowerCase().includes('paulos')) ||
+                       // Pedidos al comercio Paulos que compra el repartidor (catálogo de Ventra)
+                       (data.isShopper === true && String(data.comercioName || '').toLowerCase().includes('paulos'));
       
       if (isPaulos) {
         allPaulosOrders.push({ id: docSnap.id, ...data });

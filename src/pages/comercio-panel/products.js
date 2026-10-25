@@ -1,5 +1,6 @@
 // GoDelivery — Comercio Products Management
 import { db } from '../../firebase.js';
+import { canManageCommerce } from '../../utils/my-commerces.js';
 import { collection, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
@@ -12,6 +13,7 @@ import { uploadDataUrlImage } from '../../utils/storage-upload.js';
 import { isAdmin } from '../../auth.js';
 import { escapeHtml } from '../../utils/escape.js';
 import { enterCommercePanel, cpEmpty, cpSkeleton, cpSheet } from './shell.js';
+import { WEIGHT_STEPS, weightStepOf, isSoldByWeight, formatWeight } from '../../utils/weight.js';
 
 let panelFilteredProducts = [];
 let panelDisplayedCount = 20;
@@ -71,12 +73,13 @@ export async function renderComercioProducts() {
       return;
     }
     comercioData = comercioSnap.data();
-    if (comercioData.ownerId !== user.uid && !isAdmin()) {
+    if (!canManageCommerce(comercioData, user.uid) && !isAdmin()) {
       location.hash = '#/profile';
       return;
     }
     panelComercioData = comercioData;
-    isSyncAllowed = (comercioId === '6R8ikb9wsjUCQuOANOMHuAZZxss2' || comercioData.ownerId === user.uid);
+    // La conexión vieja con la caja local; con Ventra vinculado (puente nuevo) ya no se usa
+    isSyncAllowed = !comercioData.ventraLinked && (comercioId === '6R8ikb9wsjUCQuOANOMHuAZZxss2' || canManageCommerce(comercioData, user.uid));
 
 
     const prodsSnap = await getDocs(collection(db, 'comercios', comercioId, 'products'));
@@ -314,7 +317,8 @@ export async function renderComercioProducts() {
       if (product) {
         const newAvail = product.isAvailable === false;
         try {
-          await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), { isAvailable: newAvail });
+          // Producto de Ventra: ocultarlo acá queda firme (Ventra no lo vuelve a mostrar)
+          await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), { isAvailable: newAvail, ...(product.source === 'ventra' ? { hiddenInGo: !newAvail } : {}) });
           product.isAvailable = newAvail;
           renderCategoriesFilter(categories);
           renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
@@ -662,7 +666,7 @@ function renderProductsList(products, search, categoryId) {
           <span class="cp-grow">
             <span class="cp-prod-name" style="display:block">${name}</span>
             <span class="cp-prod-price cp-row" style="flex-wrap:wrap; gap:6px; margin-top:4px">
-              <span class="cp-money">${formatPrice(p.price)}</span>
+              <span class="cp-money">${formatPrice(p.price)}${isSoldByWeight(p) ? ' /kg' : ''}</span>
               ${off ? '<span class="cp-tag is-red">Sin stock</span>' : stockLabel(p)}
               ${p.onlyInApp ? '<span class="cp-tag">Sólo en la app</span>' : ''}
               ${categoryName ? `<span class="cp-small">${escapeHtml(categoryName)}</span>` : ''}
@@ -885,7 +889,12 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
           
           <div class="input-group">
             <label>Nombre del Producto *</label>
-            <input type="text" class="input-premium" id="prod-name" value="${product?.name || ''}" placeholder="Ej: Empanada de Carne Receta Salteña" />
+            <input type="text" class="input-premium" id="prod-name" value="${escapeHtml(product?.name || '')}" placeholder="Ej: Empanada de Carne Receta Salteña" />
+            ${product?.source === 'ventra' ? `
+              <div style="font-size:12px; color:var(--color-text-secondary); margin-top:6px; line-height:1.4;">
+                Viene de tu caja Ventra${product.ventraName ? ` como <b>${escapeHtml(product.ventraName)}</b>` : ''}. Si le cambiás el nombre acá, en la app queda este y Ventra ya no lo cambia. El precio sigue viniendo de la caja.
+              </div>
+              ${product.nameLockedInGo && product.ventraName && product.ventraName !== product.name ? `<button type="button" id="prod-name-from-ventra" style="margin-top:6px; min-height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-bg); color:var(--color-text); font-weight:700; font-size:12.5px; cursor:pointer;">Volver al nombre de Ventra</button>` : ''}` : ''}
           </div>
           
           <div class="input-group">
@@ -898,13 +907,36 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
             <textarea class="textarea-premium" id="prod-desc" placeholder="Detallá los ingredientes o características del producto...">${product?.description || ''}</textarea>
           </div>
           
+          <div class="switch-container">
+            <div style="text-align:left;">
+              <div style="font-size:13px; font-weight:750; color:var(--color-text-primary);">Se vende por peso</div>
+              <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">Para carne, fiambre, verdura… Cargás el precio por kilo y al preparar el pedido anotás lo que pesó.</div>
+            </div>
+            <label class="prod-switch" style="width:50px; height:28px; cursor:pointer; position:relative; display:inline-block; margin:0; flex-shrink:0;">
+              <input type="checkbox" id="prod-sold-by-weight" ${isSoldByWeight(product) ? 'checked' : ''} style="opacity:0; width:0; height:0;" />
+              <span class="prod-slider" style="position:absolute; inset:0; border-radius:34px; transition:0.2s; cursor:pointer;"></span>
+            </label>
+          </div>
+
+          <div id="prod-weight-fields" class="input-group" style="display:${isSoldByWeight(product) ? 'flex' : 'none'};">
+            <label>El cliente elige de a</label>
+            <select class="input-premium" id="prod-weight-step" style="background-image: none;">
+              ${WEIGHT_STEPS.map(g => `<option value="${g}" ${weightStepOf(product) === g ? 'selected' : ''}>${formatWeight(g)}</option>`).join('')}
+            </select>
+            <div style="font-size:11px; color:var(--color-text-secondary); margin-top:4px; line-height:1.4;">
+              El cliente ve un precio estimado. Al marcar el pedido como listo cargás el peso real y se cobra eso: hasta un 10% más o menos de lo pedido sin preguntarle. Si te pasás de ahí, primero hablalo con él por el chat.
+              Si el producto tiene opciones con precio, ese precio también es por kilo.
+            </div>
+          </div>
+
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
             <div class="input-group">
-              <label>Precio de Venta ($) *</label>
+              <label id="prod-price-label">${isSoldByWeight(product) ? 'Precio por kilo ($) *' : 'Precio de Venta ($) *'}</label>
               <div style="position:relative; display:flex; align-items:center;">
                 <span style="position:absolute; left:16px; font-weight:900; color:var(--color-primary); font-size:16px;">$</span>
-                <input type="number" class="input-premium" id="prod-price" value="${product?.price || ''}" placeholder="0" min="0" style="padding-left:32px; font-size:16px; font-weight:900; color:var(--color-primary);" />
+                <input type="number" class="input-premium" id="prod-price" value="${product?.price || ''}" placeholder="0" min="0" ${product?.source === 'ventra' ? 'readonly title="El precio lo manda tu caja Ventra"' : ''} style="padding-left:32px; font-size:16px; font-weight:900; color:var(--color-primary);" />
               </div>
+              ${product?.source === 'ventra' ? '<div style="font-size:11.5px; color:var(--color-text-tertiary); margin-top:4px;">Lo cambiás en la caja Ventra.</div>' : ''}
             </div>
 
             <div class="input-group">
@@ -972,7 +1004,7 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         </div>
 
         <!-- Stock Card -->
-        <div class="form-card">
+        <div class="form-card" id="prod-stock-card" style="${isSoldByWeight(product) ? 'display:none;' : ''}">
           <div class="form-card-title">
             ${icon('package', 18)} Control de Stock
           </div>
@@ -1227,6 +1259,14 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     }
   });
 
+  // Por peso: precio por kilo, paso en gramos y sin control de stock (la cantidad son pasos, no unidades)
+  document.getElementById('prod-sold-by-weight')?.addEventListener('change', (e) => {
+    const on = e.target.checked;
+    document.getElementById('prod-weight-fields').style.display = on ? 'flex' : 'none';
+    document.getElementById('prod-price-label').textContent = on ? 'Precio por kilo ($) *' : 'Precio de Venta ($) *';
+    document.getElementById('prod-stock-card').style.display = on ? 'none' : '';
+  });
+
   // Reactive Stock Fields Toggle
   document.getElementById('prod-stock-mode')?.addEventListener('change', (e) => {
     const mode = e.target.value;
@@ -1468,6 +1508,11 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
     });
   }
 
+  document.getElementById('prod-name-from-ventra')?.addEventListener('click', (e) => {
+    const input = document.getElementById('prod-name');
+    if (input && product?.ventraName) input.value = product.ventraName;
+    e.currentTarget.remove();
+  });
   document.getElementById('prod-cancel')?.addEventListener('click', closeModal);
   document.getElementById('prod-save')?.addEventListener('click', async () => {
     const name = document.getElementById('prod-name')?.value.trim();
@@ -1489,7 +1534,9 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       }
     }
 
-    const stockMode = document.getElementById('prod-stock-mode')?.value || 'unlimited';
+    const soldByWeight = document.getElementById('prod-sold-by-weight')?.checked || false;
+    const weightStep = Number(document.getElementById('prod-weight-step')?.value) || weightStepOf(null);
+    const stockMode = soldByWeight ? 'unlimited' : (document.getElementById('prod-stock-mode')?.value || 'unlimited');
     let stockQuantity = 0;
     let stockThreshold = 3;
 
@@ -1548,7 +1595,14 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
       const rawCost = document.getElementById('prod-cost-price')?.value;
       const costPrice = rawCost !== undefined && rawCost !== '' ? parseFloat(rawCost) : 0;
 
+      // Producto de Ventra: si el dueño le cambió el nombre o lo ocultó acá, Ventra ya no lo pisa
+      const ventraFlags = product?.source === 'ventra' ? {
+        // Sin cambios queda como estaba; volver al nombre de la caja lo destraba
+        nameLockedInGo: name === product.name ? product.nameLockedInGo === true : !(product.ventraName && name === product.ventraName),
+        hiddenInGo: !isAvailable,
+      } : {};
       const productData = {
+        ...ventraFlags,
         name,
         barcode,
         description: desc,
@@ -1568,6 +1622,8 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
         selectedFlavorCategory: document.getElementById('prod-flavors-category-filter')?.value || 'all',
         flavorCategory: document.getElementById('prod-flavors-category-filter')?.value || 'all',
         onlyInApp,
+        soldByWeight,
+        weightStep: soldByWeight ? weightStep : null,
         order: product?.order || 0,
         createdAt: product?.createdAt || new Date()
       };

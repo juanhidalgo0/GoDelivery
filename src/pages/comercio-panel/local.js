@@ -3,6 +3,7 @@
 //   /settings/datos      → Datos y fotos (settings.js)
 //   /settings/horarios   → horario de cada día
 //   /settings/seguridad  → PIN del panel
+//   /settings/accesos    → dueño y personas con acceso (components/commerce-team.js)
 //   /settings/avanzado   → zona peligrosa
 import { db } from '../../firebase.js';
 import { doc, updateDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
@@ -23,6 +24,7 @@ export async function renderComercioLocal() {
   }
   if (section === 'horarios') return renderHours(comercioId);
   if (section === 'seguridad') return renderSecurity(comercioId);
+  if (section === 'accesos') return renderAccess(comercioId);
   if (section === 'avanzado') return renderDanger(comercioId);
   return renderHub(comercioId);
 }
@@ -83,6 +85,7 @@ async function renderHub(comercioId) {
         ${item(`${back(comercioId)}/datos`, 'image', 'Datos y fotos', esc(c.address || 'Nombre, logo, portada y dirección'))}
         ${item(`${back(comercioId)}/horarios`, 'clock', 'Horarios', esc(hoursSummary))}
         ${item('', 'bike', 'Mis repartidores', 'Cadetes propios que pueden llevar tus pedidos', false, 'drivers')}
+        ${item(`${back(comercioId)}/accesos`, 'users', 'Personas con acceso', 'Empleados o socios que entran con su propio correo')}
         ${item(`${back(comercioId)}/seguridad`, 'lock', 'Seguridad', hasPin === null ? 'PIN del panel' : hasPin ? 'PIN activado: se pide para entrar a la gestión' : 'Sin PIN: cualquiera con tu teléfono entra a la gestión')}
       </div>
       <div class="cp-list">
@@ -268,6 +271,19 @@ async function renderSecurity(comercioId) {
       showToast('No se pudo guardar el PIN. Probá de nuevo.', 'error');
     }
   });
+}
+
+// ---------------------------------------------------------------- personas con acceso
+
+async function renderAccess(comercioId) {
+  const body = await enterCommercePanel({ comercioId, tab: 'local', sub: { title: 'Personas con acceso', back: back(comercioId) } });
+  if (!body) return;
+  body.innerHTML = `<div class="cp-page" id="cp-team"></div>`;
+  // Quién es el dueño decide si puede sumar o sacar personas: se lee el comercio si el panel no lo tiene todavía
+  const { getDoc } = await import('firebase/firestore');
+  const c = getPanelComercio() || (await getDoc(doc(db, 'comercios', comercioId)).then(s => s.data()).catch(() => null));
+  const { mountCommerceTeam } = await import('../../components/commerce-team.js');
+  mountCommerceTeam(body.querySelector('#cp-team'), { comercio: { id: comercioId, ...(c || {}) } });
 }
 
 // ---------------------------------------------------------------- zona peligrosa

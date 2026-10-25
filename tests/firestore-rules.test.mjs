@@ -599,3 +599,50 @@ console.log('================================================');
 
 await env.cleanup();
 process.exit(fail > 0 ? 1 : 0);
+console.log('');
+console.log('=========== PERSONAS CON ACCESO A UN COMERCIO ===========');
+
+// managerIds y private/team los escribe solo functions/commerce-access.js
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, 'comercios/kioscoEquipo'), { name: 'Kiosco con empleados', ownerId: 'duenoKiosco', managerIds: ['empleado1'], isActive: true });
+  await setDoc(doc(db, 'comercios/kioscoEquipo/private/team'), { ownerEmail: 'kiosco@mail.com', members: [{ email: 'emp@mail.com', uid: 'empleado1' }] });
+  await setDoc(doc(db, 'comercios/kioscoEquipo/private/access'), { pin: '1234' });
+  await setDoc(doc(db, 'orders/oEquipo'), { userId: 'cliente1', comercioId: 'kioscoEquipo', status: 'pending', total: 4000, commissionAmount: 400 });
+  await setDoc(doc(db, 'comercio_invites/kioscoEquipo__inv@mail.com'), { comercioId: 'kioscoEquipo', email: 'inv@mail.com', role: 'member' });
+});
+const empleado1 = env.authenticatedContext('empleado1', { email: 'emp@mail.com' }).firestore();
+const duenoKiosco = env.authenticatedContext('duenoKiosco', { email: 'kiosco@mail.com' }).firestore();
+const invitado = env.authenticatedContext('invitado1', { email: 'Inv@Mail.com' }).firestore();
+
+await check('el empleado con acceso atiende los pedidos del comercio',
+  assertSucceeds(updateDoc(doc(empleado1, 'orders/oEquipo'), { status: 'confirmed' })));
+await check('el empleado con acceso edita el menu',
+  assertSucceeds(setDoc(doc(empleado1, 'comercios/kioscoEquipo/products/p1'), { name: 'Alfajor', price: 900 })));
+await check('el empleado con acceso pausa el local',
+  assertSucceeds(updateDoc(doc(empleado1, 'comercios/kioscoEquipo'), { isPaused: true })));
+await check('el empleado con acceso lee quien tiene acceso',
+  assertSucceeds(getDoc(doc(empleado1, 'comercios/kioscoEquipo/private/team'))));
+await check('el empleado NO puede sumarse a otros (managerIds)',
+  assertFails(updateDoc(doc(empleado1, 'comercios/kioscoEquipo'), { managerIds: ['empleado1', 'cliente2'] })));
+await check('el dueno NO puede tocar managerIds a mano (lo hace el servidor)',
+  assertFails(updateDoc(doc(duenoKiosco, 'comercios/kioscoEquipo'), { managerIds: ['cliente2'] })));
+await check('nadie escribe la lista de accesos desde la app',
+  assertFails(setDoc(doc(duenoKiosco, 'comercios/kioscoEquipo/private/team'), { members: [] })));
+await check('el dueno sigue cambiando su PIN',
+  assertSucceeds(setDoc(doc(duenoKiosco, 'comercios/kioscoEquipo/private/access'), { pin: '9999' })));
+await check('un cliente NO ve los pedidos del comercio con empleados',
+  assertFails(getDoc(doc(cliente2, 'orders/oEquipo'))));
+await check('el empleado de un comercio NO entra a otro',
+  assertFails(updateDoc(doc(empleado1, 'comercios/pizza'), { isPaused: true })));
+await check('el postulante NO puede crearse con accesos ya cargados',
+  assertFails(setDoc(doc(nuevo2, 'comercios/solicitudEquipo'), { name: 'X', ownerId: 'nuevoUsuario2', isActive: false, approvedByAdmin: false, managerIds: ['nuevoUsuario2'] })));
+await check('el postulante NO puede ponerse "compra el repartidor"',
+  assertFails(setDoc(doc(nuevo2, 'comercios/solicitudShopper'), { name: 'X', ownerId: 'nuevoUsuario2', isActive: false, approvedByAdmin: false, fulfillmentMode: 'shopper' })));
+await check('el invitado ve su invitacion (aunque escriba el correo con mayusculas)',
+  assertSucceeds(getDocs(query(collection(invitado, 'comercio_invites'), where('email', '==', 'inv@mail.com')))));
+await check('otro usuario NO ve invitaciones ajenas',
+  assertFails(getDocs(query(collection(cliente1, 'comercio_invites'), where('email', '==', 'inv@mail.com')))));
+await check('nadie crea invitaciones desde la app',
+  assertFails(setDoc(doc(cliente1, 'comercio_invites/x'), { comercioId: 'kioscoEquipo', email: 'c1@mail.com', role: 'owner' })));
+
