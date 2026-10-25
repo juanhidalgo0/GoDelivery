@@ -24,6 +24,7 @@ const VENTRA = process.env.VENTRA_URL || 'http://127.0.0.1:3020/api';
 const VENTRA_PASS = process.env.VENTRA_PASS || 'sim1234';
 if (!process.env.VENTRA_DB) throw new Error('Falta VENTRA_DB: la base de la caja de prueba');
 const CID = SIM.comercioId;
+let LINK_CATS = [];
 
 let ok = 0, bad = 0;
 const t = async (name, fn) => { try { await fn(); ok++; console.log(`ok    ${name}`); } catch (e) { bad++; console.log(`FALLA ${name}\n      ${e.stack || e.message}`); } };
@@ -74,6 +75,8 @@ await ventraDb(async (pc) => {
     ['7790580000011', 900, 'Alfajor Guaymallén Triple'], ['7790580000028', 1100, 'Alfajor Jorgito Chocolate'],
     ['7790387000017', 5200, 'Yerba Playadito 1 kg'], ['7622300000011', 1400, 'Galletitas Oreo 118 g'],
   ]) await pc.$executeRawUnsafe('UPDATE products SET sale_price = ?, name = ?, is_active = 1 WHERE barcode = ?', price, name, code);
+  // Un producto sin rubro con nombre de bebida alcohólica (como en los comercios que no cargan rubros)
+  await pc.$executeRawUnsafe(`UPDATE products SET name = 'FERNET BRANCA X 750', sale_price = 9000, is_active = 1 WHERE id = (SELECT id FROM products WHERE category_id IS NULL AND (unit IS NULL OR unit IN ('UNIT','PACK')) ORDER BY id LIMIT 1)`);
 });
 for (const col of ['products', 'categories']) {
   const s = await db.collection(`comercios/${CID}/${col}`).get();
@@ -103,7 +106,8 @@ await t('caja: vincula con el código de GO y queda en modo "lo compra el repart
   assert.strictEqual(r.body.fulfillmentMode, 'shopper');
   assert.strictEqual(r.body.shopperMaxTotal, 40000);
   assert.strictEqual(r.body.isMainPc, true);
-  assert.strictEqual(r.body.publishMode, 'categories');
+  assert.strictEqual(r.body.publishMode, 'selected', 'al vincular no se publica nada hasta que el dueño elige');
+  LINK_CATS = r.body.publishCategories;
   const cats = await ventra('GET', '/categories');
   const names = new Map(cats.body.map((c) => [c.id, c.name]));
   const chosen = r.body.publishCategories.map((id) => names.get(id));
@@ -112,7 +116,15 @@ await t('caja: vincula con el código de GO y queda en modo "lo compra el repart
 });
 
 // ─── 2. Catálogo ───
-await t('catálogo: se publica solo, con fotos y rubros; sin cigarrillos, alcohol, sin precio ni por peso', async () => {
+await t('catálogo: recién vinculada no publica nada', async () => {
+  await ventra('POST', '/go/sync-now');
+  await sleep(2000);
+  assert.strictEqual((await ventra('GET', '/go/products?only=published')).body.length, 0);
+  assert.strictEqual((await goProducts()).filter((p) => p.isAvailable !== false).length, 0, 'en GO no hay nada a la venta');
+});
+await t('catálogo: el dueño elige "Por rubros" y se publica, con fotos y rubros; sin cigarrillos, alcohol (también por el nombre), sin precio ni por peso', async () => {
+  const st = await ventra('PUT', '/go/settings', { publishMode: 'categories', publishCategories: LINK_CATS });
+  assert.strictEqual(st.body.publishMode, 'categories');
   await ventra('POST', '/go/sync-now');
   const ps = await until(async () => { const l = await goProducts(); return l.length >= 34 ? l : null; });
   assert.ok(ps, 'llegaron los productos');
@@ -121,6 +133,9 @@ await t('catálogo: se publica solo, con fotos y rubros; sin cigarrillos, alcoho
   assert.ok(!names.some((n) => /Marlboro|Quilmes|Fernet|Philip/.test(n)), 'sin cigarrillos ni alcohol');
   assert.ok(!names.includes('Pan francés'), 'por peso no');
   assert.ok(!names.includes('Bolsa de regalo (sin precio)'), 'sin precio no');
+  assert.ok(!names.includes('FERNET BRANCA X 750'), 'alcohol sin rubro: afuera por el nombre');
+  const fernet = (await ventra('GET', '/go/products?search=FERNET')).body.find((p) => p.name === 'FERNET BRANCA X 750');
+  assert.ok(fernet && !fernet.published && /Alcohol o cigarrillos/.test(fernet.reason), JSON.stringify(fernet));
   // 38 - 2 cigarrillos - 2 alcohol = 34 (los sin rubro entran: "Sin rubro" arranca elegido)
   // GO muestra exactamente lo que la caja dice que publica (la base de prueba trae además productos viejos sin rubro)
   const published = (await ventra('GET', '/go/products?only=published')).body;
