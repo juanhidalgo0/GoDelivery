@@ -173,7 +173,8 @@ export async function renderComercio(content, isDirectMode = false) {
   const resolvedComercioId = comercio.id;
   try {
   // La ficha del producto lo usa para explicar quién pesa (el comercio o el repartidor)
-  setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null });
+  setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '' });
+  try {
     safeStorage.setItem('gd_last_visited_comercio', JSON.stringify({ id: comercio.id, name: comercio.name || 'Comercio' }));
   } catch (e) {}
 

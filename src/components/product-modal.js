@@ -11,6 +11,33 @@ import { isSoldByWeight, weightStepOf, stepPrice, defaultSteps, formatWeight, WE
 /**
  * Opens a modal to customize and add a product to the cart
  */
+/**
+ * Caja de aclaraciones: solo donde sirve. En comida ("sin tomate"), carnicería ("cortado fino") o
+ * verdulería sí; en un kiosco, almacén o bebidas no (no hay nada que aclarar de una lata).
+ * Devuelve null si no va, o el texto de la etiqueta y el ejemplo.
+ */
+function notesConfig(product, comercioId) {
+  const mode = getState().currentComercioMode;
+  let com = mode && mode.id === comercioId ? mode : null;
+  if (!com) {
+    try { com = (JSON.parse(localStorage.getItem('gd_cached_comercios') || '[]') || []).find(c => c.id === comercioId) || null; } catch { com = null; }
+  }
+  const cat = String(com?.category || '').toLowerCase();
+  const who = com?.fulfillmentMode === 'shopper' ? 'el repartidor' : 'el comercio';
+  const label = `Aclaraciones para ${who} (opcional)`;
+  if (/carnic|polleri|pollo/.test(cat)) return { label, placeholder: 'Ej: cortado fino, sin grasa, para milanesas…' };
+  if (/fiambr/.test(cat)) return { label, placeholder: 'Ej: cortado bien fino…' };
+  if (/verdul|fruter/.test(cat)) return { label, placeholder: 'Ej: bien maduras, para comer hoy…' };
+  if (/panader|confiter/.test(cat)) return { label, placeholder: 'Ej: bien tostado, cortado en rodajas…' };
+  if (/rotis|pizz|hambur|burger|comida|resto|helad|caf|empan|sushi|parrill|gastro|lomit|pasta|vianda|cervecer|\bbar\b|postre/.test(cat)) {
+    return { label, placeholder: 'Ej: sin tomate, sin mayonesa, bien cocido…' };
+  }
+  if (isSoldByWeight(product)) return { label, placeholder: 'Ej: cortado fino…' };
+  // Kiosco, almacén, súper, bebidas, farmacia… (o rubro desconocido de un producto de Ventra)
+  if (cat || product?.source === 'ventra') return null;
+  return { label: 'Aclaraciones o notas para el comercio (opcional)', placeholder: 'Ej: sin tomate, sin mayonesa, bien cocido…' };
+}
+
 export function openProductModal(product, comercioId, comercioName, isCommerceOpen = true) {
   const modalContent = document.createElement('div');
   modalContent.className = 'product-detail-modal-v2';
@@ -478,13 +505,14 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           `;
         }).join('') : ''}
 
-        <!-- Tarjeta de Aclaraciones / Notas para el comercio -->
+        <!-- Tarjeta de Aclaraciones: solo donde sirve (notesConfig) -->
+        ${(() => { const nc = notesConfig(product, comercioId); return nc ? `
         <div style="padding: 14px 16px; margin: 12px 16px 16px 16px; background: var(--color-surface); border-radius: 16px; border: 1px solid var(--color-border-light); box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
           <label for="pm-product-notes" style="font-size: 12px; font-weight: 850; color: var(--color-text); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-family: var(--font-display);">
-            📝 Aclaraciones o notas para el comercio (opcional)
+            📝 ${escapeHtml(nc.label)}
           </label>
-          <input type="text" id="pm-product-notes" value="${productNotes}" placeholder="Ej: Sin tomate, sin mayonesa, bien cocido..." style="width: 100%; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; font-weight: 600; color: var(--color-text); outline: none; box-sizing: border-box; transition: border-color 0.2s;" />
-        </div>
+          <input type="text" id="pm-product-notes" value="${productNotes}" placeholder="${escapeHtml(nc.placeholder)}" style="width: 100%; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; font-weight: 600; color: var(--color-text); outline: none; box-sizing: border-box; transition: border-color 0.2s;" />
+        </div>` : ''; })()}
 
         <!-- Sugeridos / Similares Section (At bottom of body, above footer) -->
         ${suggested.length > 0 ? `
