@@ -171,7 +171,6 @@ export async function renderComercio(content, isDirectMode = false) {
 
   currentComercio = comercio;
   const resolvedComercioId = comercio.id;
-  try {
   // La ficha del producto lo usa para explicar quién pesa (el comercio o el repartidor)
   setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '' });
   try {
