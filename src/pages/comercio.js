@@ -380,6 +380,9 @@ export async function renderComercio(content, isDirectMode = false) {
     const activeOffers = (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
     let products = (initialProdSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
 
+    // Si la tanda llegó al tope (comercios con miles de productos ocultos, como los de Ventra), se
+    // piden aparte los que están a la venta: si no, los publicados podían quedar afuera de la tanda
+    products = await withAvailable(products, 400, null);
     if (hadLoadError && products.length === 0 && categories.length === 0 && !cachedData) {
       // El motivo va en el mensaje: si es un timeout o falta de red, el detector lo marca como red
       const reasons = [...new Set([catsSnap, offersSnap, initialProdSnap].map(x => x?.reason).filter(Boolean))].join(' | ');
@@ -388,6 +391,17 @@ export async function renderComercio(content, isDirectMode = false) {
 
     // Helper to load products for a specific category dynamically
     const loadCategoryProducts = async (catId) => {
+    async function withAvailable(list, max, catId) {
+      if (list.length < max) return list;
+      const filters = [where('isAvailable', '==', true), ...(catId ? [where('categoryId', '==', catId)] : [])];
+      const snap = await getDocsOptimized(
+        query(collection(db, 'comercios', resolvedComercioId, 'products'), ...filters, limit(max)),
+        `comercio_products_${resolvedComercioId}_avail_${catId || 'all'}`,
+        2 * 60 * 1000
+      ).catch(() => ({ docs: [] }));
+      const seen = new Set(list.map(p => p.id));
+      return [...list, ...(snap.docs || []).filter(d => !seen.has(d.id)).map(d => ({ id: d.id, ...d.data() }))];
+    }
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
       if (catId === 'all') {
@@ -415,7 +429,10 @@ export async function renderComercio(content, isDirectMode = false) {
 
       try {
         const prodsSnap = await getDocsOptimized(q, cacheKey, 2 * 60 * 1000);
-        return (prodsSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+        const list = (prodsSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+        if (catId === 'all') return withAvailable(list, 400, null);
+        if (catId !== 'discounts' && catId !== 'favorites') return withAvailable(list, 300, catId);
+        return list;
       } catch (err) {
         try {
           const directSnap = await getDocs(q);
