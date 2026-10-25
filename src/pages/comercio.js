@@ -12,6 +12,23 @@ import { getFooterHTML } from '../components/footer.js';
 import { renderNavbar, updateGlobalCartFAB } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { escapeHtml } from '../utils/escape.js';
+
+// Subcategorías y selectores de la tienda: el mismo estilo al dibujar la página y al cambiar de rubro.
+// Los selectores van sin el aspecto propio del celular (dejaba doble borde) y con su flechita.
+const SUB_PILL_BASE = 'height:34px; padding:0 15px; font-size:13px; border-radius:999px; font-weight:700; cursor:pointer; white-space:nowrap; flex-shrink:0; outline:none; transition:background .15s, color .15s, border-color .15s;';
+function subPillStyle(active) {
+  return `${SUB_PILL_BASE} border:1.5px solid ${active ? 'var(--color-primary)' : 'var(--color-border-light)'}; background:${active ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color:${active ? 'var(--color-primary)' : 'var(--color-text-secondary)'};`;
+}
+function subPillHtml(id, label, active) {
+  return `<button class="sub-tab-pill ${active ? 'active' : ''}" data-subcat-id="${escapeHtml(id)}" style="${subPillStyle(active)}">${escapeHtml(label)}</button>`;
+}
+function selectBoxHtml(id, iconName, optionsHtml) {
+  return `<label style="position:relative; flex:1; min-width:0; display:flex; align-items:center; height:42px; background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:14px; box-shadow:var(--shadow-xs); cursor:pointer;">
+    <span style="position:absolute; left:12px; display:flex; color:var(--color-text-tertiary); pointer-events:none;">${icon(iconName, 15)}</span>
+    <select id="${id}" style="-webkit-appearance:none; -moz-appearance:none; appearance:none; border:0; outline:0; box-shadow:none; background:transparent; color:var(--color-text); width:100%; height:100%; margin:0; padding:0 32px 0 34px; font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-radius:14px;">${optionsHtml}</select>
+    <span style="position:absolute; right:11px; display:flex; color:var(--color-text-tertiary); pointer-events:none;">${icon('chevronDown', 16)}</span>
+  </label>`;
+}
 import { openProductModal } from '../components/product-modal.js';
 import { createSlug, getStoreUrl } from '../utils/slug.js';
 import { getArgentinaTime, hasWeeklySchedule } from '../utils/format.js';
@@ -349,7 +366,7 @@ export async function renderComercio(content, isDirectMode = false) {
       getDocsOptimized(
         query(collection(db, 'comercios', resolvedComercioId, 'categories'), orderBy('order')),
         `comercio_categories_${resolvedComercioId}`,
-        15 * 60 * 1000
+        2 * 60 * 1000
       ),
       getDocsOptimized(
         query(collection(db, 'offers'), where('comercioId', '==', resolvedComercioId), where('active', '==', true)),
@@ -542,12 +559,7 @@ export async function renderComercio(content, isDirectMode = false) {
       if (subContainer && subGrid) {
         if (subCats.length > 0) {
           subContainer.style.display = 'block';
-          subGrid.innerHTML = `
-            <button class="sub-tab-pill active" data-subcat-id="all" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid var(--color-primary); background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">Ver Todo</button>
-            ${subCats.map(sub => `
-              <button class="sub-tab-pill" data-subcat-id="${sub.id}" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-secondary); font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">${sub.name}</button>
-            `).join('')}
-          `;
+          subGrid.innerHTML = subPillHtml('all', 'Todo', true) + subCats.map(sub => subPillHtml(sub.id, sub.name, false)).join('');
         } else {
           subContainer.style.display = 'none';
           subGrid.innerHTML = '';
@@ -623,10 +635,7 @@ export async function renderComercio(content, isDirectMode = false) {
       }
       
       content.querySelectorAll('.sub-tab-pill').forEach(p => {
-        const isActive = p.dataset.subcatId === activeSubCategory;
-        p.style.borderColor = isActive ? 'var(--color-primary)' : 'var(--color-border-light)';
-        p.style.background = isActive ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)';
-        p.style.color = isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)';
+        p.setAttribute('style', subPillStyle(p.dataset.subcatId === activeSubCategory));
       });
 
       // Update brands dropdown dynamically
@@ -1093,7 +1102,7 @@ function updateBrandDropdown(products, categoryId, activeSubCategory, categories
   }
   
   select.innerHTML = `
-    <option value="all" ${targetBrand === 'all' ? 'selected' : ''}>Todas las marcas</option>
+    <option value="all" ${targetBrand === 'all' ? 'selected' : ''}>Marcas</option>
     ${brands.map(brand => `<option value="${brand}" ${targetBrand === brand ? 'selected' : ''}>${brand}</option>`).join('')}
   `;
   
@@ -1224,33 +1233,21 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
 
         <!-- Subcategories container -->
         <div id="comercio-subcategories-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: ${subCats.length > 0 ? 'block' : 'none'};">
-          <div class="tab-pills sub-tab-pills" id="comercio-subcategories" style="display: flex; gap: var(--space-2); overflow-x: auto; padding: 4px 0 var(--space-2) 0; border-bottom: none; position: relative;">
-            <button class="sub-tab-pill ${activeSubCategory === 'all' ? 'active' : ''}" data-subcat-id="all" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid ${activeSubCategory === 'all' ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${activeSubCategory === 'all' ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color: ${activeSubCategory === 'all' ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">Ver Todo</button>
-            ${subCats.map(sub => `
-              <button class="sub-tab-pill ${activeSubCategory === sub.id ? 'active' : ''}" data-subcat-id="${sub.id}" style="padding: 6px 14px; font-size: 11.5px; border-radius: 12px; border: 1.5px solid ${activeSubCategory === sub.id ? 'var(--color-primary)' : 'var(--color-border-light)'}; background: ${activeSubCategory === sub.id ? 'rgba(var(--color-primary-rgb), 0.1)' : 'var(--color-surface)'}; color: ${activeSubCategory === sub.id ? 'var(--color-primary)' : 'var(--color-text-secondary)'}; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s; box-shadow: var(--shadow-xs); outline: none;">${sub.name}</button>
-            `).join('')}
+          <div class="tab-pills sub-tab-pills" id="comercio-subcategories" style="display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px 0; border-bottom: none; position: relative; scrollbar-width: none;">
+            ${subPillHtml('all', 'Todo', activeSubCategory === 'all')}${subCats.map(sub => subPillHtml(sub.id, sub.name, activeSubCategory === sub.id)).join('')}
           </div>
         </div>
 
-        <div class="comercio-sort-container" style="padding: 0 var(--space-4); margin-bottom: var(--space-3); display: flex; flex-direction: row; gap: 8px; border-bottom: 1px solid var(--color-border-light); padding-bottom: 12px;">
-          <div style="flex: 1; display: flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 10px; padding-left: 8px; box-shadow: var(--shadow-xs); overflow: hidden;">
-            <span style="color: var(--color-text-tertiary); display: flex; align-items: center; flex-shrink: 0;">${icon('sliders', 14)}</span>
-            <select id="comercio-sort-select" style="flex: 1; border: none; background: transparent; color: var(--color-text); padding: 8px 6px; font-size: 11.5px; font-weight: 700; outline: none; cursor: pointer; width: 100%; text-overflow: ellipsis;">
+        <div class="comercio-sort-container" style="padding: 0 var(--space-4) 12px; margin-bottom: var(--space-3); display: flex; gap: 8px; border-bottom: 1px solid var(--color-border-light);">
+          ${selectBoxHtml('comercio-sort-select', 'filter', `
               <option value="default" ${activeSort === 'default' ? 'selected' : ''}>Recomendados</option>
               <option value="price-asc" ${activeSort === 'price-asc' ? 'selected' : ''}>Menor precio</option>
               <option value="price-desc" ${activeSort === 'price-desc' ? 'selected' : ''}>Mayor precio</option>
               <option value="sales-desc" ${activeSort === 'sales-desc' ? 'selected' : ''}>Más vendido</option>
-              <option value="sales-asc" ${activeSort === 'sales-asc' ? 'selected' : ''}>Menos vendido</option>
-            </select>
-          </div>
-
-          <div style="flex: 1; display: flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 10px; padding-left: 8px; box-shadow: var(--shadow-xs); overflow: hidden;">
-            <span style="color: var(--color-text-tertiary); display: flex; align-items: center; flex-shrink: 0;">${icon('tag', 14)}</span>
-            <select id="comercio-brand-select" style="flex: 1; border: none; background: transparent; color: var(--color-text); padding: 8px 6px; font-size: 11.5px; font-weight: 700; outline: none; cursor: pointer; width: 100%; text-overflow: ellipsis;">
-              <option value="all" ${activeBrand === 'all' ? 'selected' : ''}>Todas las marcas</option>
-              ${getUniqueBrandsForCategory(products, activeCategory, activeSubCategory, categories, activeOffers).map(brand => `<option value="${brand}" ${activeBrand === brand ? 'selected' : ''}>${brand}</option>`).join('')}
-            </select>
-          </div>
+              <option value="sales-asc" ${activeSort === 'sales-asc' ? 'selected' : ''}>Menos vendido</option>`)}
+          ${selectBoxHtml('comercio-brand-select', 'tag', `
+              <option value="all" ${activeBrand === 'all' ? 'selected' : ''}>Marcas</option>
+              ${getUniqueBrandsForCategory(products, activeCategory, activeSubCategory, categories, activeOffers).map(brand => `<option value="${brand}" ${activeBrand === brand ? 'selected' : ''}>${brand}</option>`).join('')}`)}
         </div>
         </div>
         <div class="products-grid" id="comercio-products">
