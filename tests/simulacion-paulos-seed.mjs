@@ -55,7 +55,7 @@ export async function seed() {
     logo: '/go-bag.png?v=6', banner: '/go-bag.png?v=6',
     schedules: allDay, daysOpen: [0, 1, 2, 3, 4, 5, 6],
     weeklySchedule: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, allDay])),
-    fulfillmentMode: 'shopper', shopperMaxTotal: 40000, createdAt: Timestamp.now(),
+    fulfillmentMode: 'shopper', createdAt: Timestamp.now(),
   }, { merge: true });
   await db.doc(`comercios/${SIM.comercioId}/private/team`).set({ ownerEmail: SIM.dueno.email, pendingOwnerEmail: '', members: [] });
   await db.doc(`ventra_links/${SIM.code}`).set({

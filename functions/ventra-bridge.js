@@ -15,7 +15,7 @@
 const crypto = require("crypto");
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
-const { applyShopping, isShopperCommerce, shopperMaxTotal, MISSING_HIDE_MS } = require("./shopper");
+const { applyShopping, isShopperCommerce, MISSING_HIDE_MS } = require("./shopper");
 
 const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
 const LINK_CODE = /^[A-Z0-9]{8}$/;
@@ -45,7 +45,6 @@ function storeSummary(comercioId, c) {
     comercioId,
     name: c.name || "",
     fulfillmentMode: c.fulfillmentMode || "store",
-    shopperMaxTotal: isShopperCommerce(c) ? shopperMaxTotal(c) : null,
     isActive: c.isActive !== false,
     isPaused: c.isPaused === true,
     approved: c.approvedByAdmin !== false,

@@ -8,10 +8,10 @@ import { isLoggedIn } from '../auth.js';
 import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
 import { escapeHtml } from '../utils/escape.js';
-import { isShopperCommerce, shopperMaxTotal } from '../utils/shopper.js';
+import { isShopperCommerce } from '../utils/shopper.js';
 
-// Comercios donde el pedido lo compra el repartidor: cid -> tope del pedido (null si es un comercio común)
-const shopperLimits = {};
+// Comercios donde el pedido lo compra el repartidor: cid -> true / false
+const shopperCommerces = {};
 import { db, auth } from '../firebase.js';
 import { collection, serverTimestamp, runTransaction, doc, addDoc, getDoc, increment, query, where, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
@@ -416,14 +416,14 @@ export async function calculateAllFees(proactiveCommerceId = null) {
   let comerciosDataChanged = false;
 
   for (const cid of comercioIds) {
-    if (newComerciosData[cid] === undefined || shopperLimits[cid] === undefined) {
+    if (newComerciosData[cid] === undefined || shopperCommerces[cid] === undefined) {
       try {
         const cSnap = await getDoc(doc(db, 'comercios', cid));
         if (cSnap.exists()) {
           const cData = cSnap.data();
           const logoUrl = cData.logo || cData.image || null;
           newComerciosData[cid] = logoUrl;
-          shopperLimits[cid] = isShopperCommerce(cData) ? shopperMaxTotal(cData) : null;
+          shopperCommerces[cid] = isShopperCommerce(cData);
           comerciosDataChanged = true;
         } else {
           newComerciosData[cid] = null;
@@ -715,14 +715,10 @@ function renderCartContent(content) {
               </div>
               
               ${(() => {
-                // "Compra el repartidor": se paga al recibir, lo que falta no se cobra y hay un tope
-                const max = shopperLimits[comercioId];
-                if (!max) return '';
-                const sum = group.items.reduce((s, it) => s + getItemUnitPrice(it) * it.qty, 0);
-                const over = sum > max;
-                return `<div style="margin:12px 16px 0; padding:10px 12px; border-radius:12px; background:${over ? 'rgba(239,68,68,0.08)' : 'var(--color-bg-secondary)'}; border:1px solid ${over ? 'rgba(239,68,68,0.35)' : 'var(--color-border-light)'}; font-size:12.5px; line-height:1.45; color:var(--color-text-secondary);">
+                // "Compra el repartidor": se paga al recibir y lo que falta no se cobra
+                if (!shopperCommerces[comercioId]) return '';
+                return `<div style="margin:12px 16px 0; padding:10px 12px; border-radius:12px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); font-size:12.5px; line-height:1.45; color:var(--color-text-secondary);">
                   <b style="color:var(--color-text-primary);">Lo compra el repartidor en el local.</b> Pagás al recibir, en efectivo o por transferencia. Si algo no hay, no lo pagás.
-                  ${over ? `<div style="margin-top:6px; font-weight:800; color:#ef4444;">El tope por pedido acá es ${formatPrice(max)}: sacá algunos productos.</div>` : ''}
                 </div>`;
               })()}
               ${group.items.map(item => {

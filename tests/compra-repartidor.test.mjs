@@ -4,7 +4,7 @@
 //     --only auth,firestore,functions,storage "node tests/compra-repartidor.test.mjs"
 //
 // Vincula un comercio con un código, publica su catálogo como lo hace Ventra (reutilizando un
-// producto viejo por código de barras), crea pedidos de cliente (pago, tope, agotados), el
+// producto viejo por código de barras), crea pedidos de cliente (pago, sin tope, agotados), el
 // repartidor carga la compra (faltante, parcial, reemplazo, ticket) y la caja lee los pedidos.
 // También revisa que un pedido a un comercio común siga esperando la confirmación del comercio.
 
@@ -54,7 +54,7 @@ const cadete = await account('cadete.shop@e2e.test', 'shop-cadete-123', { displa
 const otro = await account('otro.shop@e2e.test', 'shop-otro-123', { displayName: 'Otro Cadete', role: 'delivery', isDelivery: true, deliveryStatus: 'approved', isOnline: false, deliveryDebt: 0 });
 const CID = 'shop-paulos';
 const PIZZA = 'shop-pizzeria';
-for (const [id, name, extra] of [[CID, 'Kiosco Paulos (prueba)', { fulfillmentMode: 'shopper', shopperMaxTotal: 40000 }], [PIZZA, 'Pizzería común (prueba)', {}]]) {
+for (const [id, name, extra] of [[CID, 'Kiosco Paulos (prueba)', { fulfillmentMode: 'shopper' }], [PIZZA, 'Pizzería común (prueba)', {}]]) {
   await db.doc(`comercios/${id}`).set({
     name, ownerId: 'dueno-' + id, approvedByAdmin: true, isActive: true, isPaused: false, address: 'San Martín 1240', coords: STORE,
     schedules: allDay, daysOpen: [0, 1, 2, 3, 4, 5, 6], weeklySchedule: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, allDay])), createdAt: Timestamp.now(), ...extra,
@@ -191,10 +191,11 @@ await t('pedido: "TRANSFERENCIA" del carrito (mercadopago) sí se acepta', async
   assert.strictEqual((await db.doc(`orders/${id}`).get()).data().isShopper, true);
   await db.doc(`orders/${id}`).update({ status: 'cancelled' });
 });
-await t('pedido: más que el tope no se puede', async () => {
+await t('pedido: no hay tope por pedido (uno grande pasa)', async () => {
   const yerba = await prod('v-yerba');
-  const r = await order(CID, [item(CID, yerba.id, 'Yerba', 8, 5200)]);
-  assert.match(r.body.error || '', /tope por pedido es de \$40000/);
+  const r = await order(CID, [item(CID, yerba.id, 'Yerba', 20, 5200)]);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+  await db.doc(`orders/${r.body.orders[0].docId}`).update({ status: 'cancelled' });
 });
 await t('pedido a un comercio común: sigue esperando que el comercio confirme', async () => {
   const r = await order(PIZZA, [item(PIZZA, 'muzza', 'Muzzarella', 1, 9000)]);
@@ -314,7 +315,6 @@ await t('la app muestra las mismas cuentas que el servidor (src/utils/shopper.js
   for (const m of ['efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'online']) {
     assert.strictEqual(client.isOnlinePayment(m), server.isOnlinePayment(m), m);
   }
-  assert.strictEqual(client.shopperMaxTotal({}), server.shopperMaxTotal({}));
 });
 
 console.log(`\n${ok} bien, ${bad} con falla`);

@@ -600,10 +600,6 @@ async function openComercioEditor(comercio, onSaved) {
           </div>
           <input type="checkbox" id="edit-com-shopper-on" ${comercio.fulfillmentMode === 'shopper' ? 'checked' : ''} style="width:22px; height:22px; flex-shrink:0; accent-color:var(--color-primary); cursor:pointer;" />
         </div>
-        <div id="edit-com-shopper-max-row" style="${comercio.fulfillmentMode === 'shopper' ? '' : 'display:none;'}">
-          <label for="edit-com-shopper-max" style="display:block; font-size:12px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; margin-bottom:6px;">Tope por pedido ($)</label>
-          <input type="number" id="edit-com-shopper-max" min="1000" step="1000" placeholder="40000" value="${comercio.shopperMaxTotal || ''}" style="width:100%; height:50px; border-radius:14px; border:1px solid var(--color-border); padding:0 14px; font-weight:600; font-size:15px; outline:none; box-sizing:border-box;" />
-        </div>
         <div style="border-top:1px solid var(--color-border-light); padding-top:12px;">
           <div style="font-size:13px; font-weight:800; color:var(--color-text-primary);">Caja Ventra</div>
           <div id="edit-com-ventra-status" style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 10px; line-height:1.4;">…</div>
@@ -665,9 +661,6 @@ async function openComercioEditor(comercio, onSaved) {
     st.innerHTML = v && v.keyHash
       ? `<b style="color:#0e9f6e;">Vinculado con Ventra</b>${v.lastCatalogAt ? ` · catálogo ${when(v.lastCatalogAt)}` : ''}${v.lastOrdersAt ? ` · pedidos ${when(v.lastOrdersAt)}` : ''}`
       : 'Sin vincular con Ventra.';
-  };
-  shopperBox.querySelector('#edit-com-shopper-on').onchange = (e) => {
-    shopperBox.querySelector('#edit-com-shopper-max-row').style.display = e.target.checked ? '' : 'none';
   };
   shopperBox.querySelector('#edit-com-ventra-code').onclick = async (e) => {
     const btn = e.currentTarget;
@@ -852,8 +845,7 @@ async function openComercioEditor(comercio, onSaved) {
       coords: comercioCoords,
       approvedByAdmin: document.getElementById('edit-com-approved').checked,
       isActive: document.getElementById('edit-com-active').checked,
-      fulfillmentMode: document.getElementById('edit-com-shopper-on').checked ? 'shopper' : null,
-      shopperMaxTotal: Number(document.getElementById('edit-com-shopper-max').value) > 0 ? Number(document.getElementById('edit-com-shopper-max').value) : null
+      fulfillmentMode: document.getElementById('edit-com-shopper-on').checked ? 'shopper' : null
     };
 
     const showCenterAlert = (title, message) => {

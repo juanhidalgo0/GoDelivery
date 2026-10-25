@@ -10,18 +10,12 @@ const SHOP_STATUSES = ["found", "missing", "replaced"];
 // es un error de carga y se pide revisarlo.
 const TICKET_TOLERANCE = 0.2;
 const TICKET_TOLERANCE_MIN = 500;
-// Tope por defecto de un pedido de este tipo: el repartidor adelanta la plata en el mostrador.
-const DEFAULT_SHOPPER_MAX_TOTAL = 40000;
 // Un producto que el repartidor no encontró queda "agotado" en la app este tiempo.
 const MISSING_HIDE_MS = 24 * 60 * 60 * 1000;
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const isShopperCommerce = (c) => !!c && c.fulfillmentMode === "shopper";
-const shopperMaxTotal = (c) => {
-  const n = Number(c && c.shopperMaxTotal);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_SHOPPER_MAX_TOTAL;
-};
 // Pagado antes de que el repartidor compre (no existe hoy en el carrito). Ojo: "mercadopago" en
 // el carrito es TRANSFERENCIA al alias del repartidor al recibir, así que sí se acepta.
 const isOnlinePayment = (method) => /tarjeta|card|online|prepago|mp_checkout/i.test(String(method || ""));
@@ -110,6 +104,6 @@ function applyShopping(order, results = {}, ticketTotal = null) {
 }
 
 module.exports = {
-  SHOP_STATUSES, TICKET_TOLERANCE, DEFAULT_SHOPPER_MAX_TOTAL, MISSING_HIDE_MS,
-  isShopperCommerce, shopperMaxTotal, isOnlinePayment, applyShopping,
+  SHOP_STATUSES, TICKET_TOLERANCE, MISSING_HIDE_MS,
+  isShopperCommerce, isOnlinePayment, applyShopping,
 };

@@ -2407,8 +2407,8 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         }
       }
 
-      // "Compra el repartidor": el repartidor adelanta la plata en el mostrador, así que el pedido
-      // tiene un tope, se paga al recibirlo (efectivo o transferencia) y no entra lo agotado
+      // "Compra el repartidor": el pedido se paga al recibirlo (efectivo o transferencia) y no
+      // entra lo agotado
       for (const [cId, g] of commerceEntries) {
         const cData = commerceDataMap[cId];
         if (!shopper.isShopperCommerce(cData)) continue;
@@ -2418,14 +2418,6 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         for (const item of g.items) {
           const pData = productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path].data();
           if (pData.isAvailable === false) throw new Error(`"${pData.name}" no está disponible ahora en ${g.comercioName}.`);
-        }
-        const estimated = g.items.reduce((s, item) => {
-          const pData = productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path].data();
-          return s + secureUnitPrice(pData, item.options) * item.qty;
-        }, 0);
-        const max = shopper.shopperMaxTotal(cData);
-        if (estimated > max) {
-          throw new Error(`En ${g.comercioName} el tope por pedido es de $${Math.round(max)} (lo compra el repartidor). Sacá algunos productos.`);
         }
       }
 

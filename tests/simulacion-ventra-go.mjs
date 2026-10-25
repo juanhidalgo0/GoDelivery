@@ -104,15 +104,15 @@ await t('caja: vincula con el código de GO y queda en modo "lo compra el repart
   assert.strictEqual(r.status, 201, JSON.stringify(r.body));
   assert.strictEqual(r.body.linked, true);
   assert.strictEqual(r.body.fulfillmentMode, 'shopper');
-  assert.strictEqual(r.body.shopperMaxTotal, 40000);
   assert.strictEqual(r.body.isMainPc, true);
   assert.strictEqual(r.body.publishMode, 'selected', 'al vincular no se publica nada hasta que el dueño elige');
   LINK_CATS = r.body.publishCategories;
   const cats = await ventra('GET', '/categories');
   const names = new Map(cats.body.map((c) => [c.id, c.name]));
   const chosen = r.body.publishCategories.map((id) => names.get(id));
-  assert.ok(!chosen.includes('Cigarrillos') && !chosen.includes('Bebidas con alcohol'), 'cigarrillos y alcohol arrancan afuera: ' + chosen);
-  assert.ok(chosen.includes('Golosinas'));
+  assert.ok(chosen.includes('Cigarrillos') && chosen.includes('Golosinas'), 'para "Por rubros" vienen todos marcados: ' + chosen);
+  // El dueño de la prueba no vende cigarrillos ni alcohol por la app: los desmarca
+  LINK_CATS = r.body.publishCategories.filter((id) => !['Cigarrillos', 'Bebidas con alcohol'].includes(names.get(id)));
 });
 
 // ─── 2. Catálogo ───
@@ -122,7 +122,7 @@ await t('catálogo: recién vinculada no publica nada', async () => {
   assert.strictEqual((await ventra('GET', '/go/products?only=published')).body.length, 0);
   assert.strictEqual((await goProducts()).filter((p) => p.isAvailable !== false).length, 0, 'en GO no hay nada a la venta');
 });
-await t('catálogo: el dueño elige "Por rubros" y se publica, con fotos y rubros; sin cigarrillos, alcohol (también por el nombre), sin precio ni por peso', async () => {
+await t('catálogo: el dueño elige "Por rubros" y se publica lo de esos rubros, con fotos; sin precio ni por peso no', async () => {
   const st = await ventra('PUT', '/go/settings', { publishMode: 'categories', publishCategories: LINK_CATS });
   assert.strictEqual(st.body.publishMode, 'categories');
   await ventra('POST', '/go/sync-now');
@@ -133,10 +133,8 @@ await t('catálogo: el dueño elige "Por rubros" y se publica, con fotos y rubro
   assert.ok(!names.some((n) => /Marlboro|Quilmes|Fernet|Philip/.test(n)), 'sin cigarrillos ni alcohol');
   assert.ok(!names.includes('Pan francés'), 'por peso no');
   assert.ok(!names.includes('Bolsa de regalo (sin precio)'), 'sin precio no');
-  assert.ok(!names.includes('FERNET BRANCA X 750'), 'alcohol sin rubro: afuera por el nombre');
-  const fernet = (await ventra('GET', '/go/products?search=FERNET')).body.find((p) => p.name === 'FERNET BRANCA X 750');
-  assert.ok(fernet && !fernet.published && /Alcohol o cigarrillos/.test(fernet.reason), JSON.stringify(fernet));
-  // 38 - 2 cigarrillos - 2 alcohol = 34 (los sin rubro entran: "Sin rubro" arranca elegido)
+  assert.ok(names.includes('FERNET BRANCA X 750'), 'cualquier producto se puede publicar (sin rubro, eligió "Sin rubro")');
+  // 38 - 2 cigarrillos - 2 alcohol (los desmarcó el dueño) = 34; los sin rubro entran ("Sin rubro" viene marcado)
   // GO muestra exactamente lo que la caja dice que publica (la base de prueba trae además productos viejos sin rubro)
   const published = (await ventra('GET', '/go/products?only=published')).body;
   assert.ok(published.length >= 34);
@@ -273,10 +271,11 @@ await t('pedido sin nada en el local: se cancela sin cargo', async () => {
   const c = await go('shopperCheckout', { orderId: id, results: { 0: { status: 'missing' } } }, cadete.token);
   assert.strictEqual(c.body.cancelled, true);
 });
-await t('pedido: más que el tope no se puede; por transferencia sí', async () => {
-  const aceite = await byBarcode('7790387000048'); // 3100 x 13 = 40300
-  const big = await order([[aceite, 13]]);
-  assert.match(big.body.error || '', /tope por pedido/);
+await t('pedido: sin tope por pedido (uno grande pasa); por transferencia también', async () => {
+  const aceite = await byBarcode('7790387000048'); // 3100 x 20 = 62000
+  const big = await order([[aceite, 20]]);
+  assert.strictEqual(big.status, 200, JSON.stringify(big.body));
+  await db.doc(`orders/${big.body.orders[0].docId}`).delete(); // no entra en los números de la prueba
   const coca = await byBarcode('7790895000997');
   const tr = await order([[coca, 1]], { paymentMethod: 'mercadopago' });
   assert.strictEqual(tr.status, 200, JSON.stringify(tr.body));
@@ -293,6 +292,20 @@ await t('caja: números de GO (vendido, entregados, faltantes, cancelados)', asy
   assert.ok(s.missing.some((m) => /Coca-Cola 500/.test(m.name)));
   assert.deepStrictEqual(s.topProducts.map((p) => p.name).sort(), ['Alfajor Guaymallén Triple', 'Coca-Cola 2,25 L']);
   assert.ok(s.cancelReasons.some((r) => /No había ninguno/.test(r.reason)));
+});
+await t('caja: "Sacar todos de la tienda" deja todo sin publicar en GO (también lo elegido a mano)', async () => {
+  const marl = await vProduct('7790400000017');
+  await ventra('PUT', '/go/products', { ids: [marl.id], publish: true });
+  const r = await ventra('POST', '/go/products/unpublish-all');
+  assert.ok(r.status < 300, JSON.stringify(r.body));
+  assert.strictEqual(r.body.publishMode, 'selected');
+  await ventra('POST', '/go/sync-now');
+  assert.strictEqual((await ventra('GET', '/go/products?only=published')).body.length, 0, 'en la caja no queda nada publicado');
+  const left = await until(async () => { const l = (await goProducts()).filter((p) => p.isAvailable !== false); return l.length === 0 ? l : null; });
+  assert.ok(left, 'en GO no queda nada a la venta');
+  // Vuelve a "Por rubros" para lo que sigue
+  await ventra('PUT', '/go/settings', { publishMode: 'categories', publishCategories: LINK_CATS });
+  await ventra('POST', '/go/sync-now');
 });
 await t('caja: abre el panel de su comercio en GO sin iniciar sesión (link de un solo uso, solo su comercio)', async () => {
   const r = await ventra('POST', '/go/panel-link', { section: 'settings' });
