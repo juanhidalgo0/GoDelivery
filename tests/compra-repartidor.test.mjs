@@ -62,6 +62,8 @@ for (const [id, name, extra] of [[CID, 'Kiosco Paulos (prueba)', { fulfillmentMo
 }
 // Un producto de la conexión vieja (sin ventraId): Ventra tiene que reutilizarlo por código de barras
 await db.doc(`comercios/${CID}/products/viejo-coca`).set({ name: 'COCA VIEJA', barcode: '7790895000997', price: 1000, isAvailable: true, stockMode: 'limited', stockQuantity: 3, salesCount: 42 });
+// Un corte por peso: precio por kilo, se elige de a 500 g
+await db.doc(`comercios/${CID}/products/vacio`).set({ name: 'Vacío', price: 24000, soldByWeight: true, weightStep: 500, isAvailable: true, stockMode: 'unlimited' });
 await db.doc(`comercios/${PIZZA}/products/muzza`).set({ name: 'Muzzarella', price: 9000, isAvailable: true, stockMode: 'unlimited' });
 
 let KEY = '';
@@ -153,6 +155,16 @@ await t('catálogo: nombre y precio de Ventra llegan; el nombre que el dueño ca
   a = (await q()).data();
   assert.strictEqual(a.name, 'Alfajor Triple');
   assert.strictEqual(a.isAvailable, true);
+});
+await t('catálogo: el rubro que le ponen en GO queda si en Ventra no tiene rubro', async () => {
+  const q = () => db.collection(`comercios/${CID}/products`).where('ventraId', '==', 'v-alfa').get().then((s) => s.docs[0]);
+  const cat = await db.collection(`comercios/${CID}/categories`).add({ name: 'Golosinas GO', order: 9, isActive: true });
+  await (await q()).ref.update({ categoryId: cat.id });
+  await bridge({ action: 'catalog', upserts: [{ ventraId: 'v-alfa', name: 'Alfajor Triple', price: 1100 }] }, KEY);
+  assert.strictEqual((await q()).data().categoryId, cat.id, 'sin rubro en Ventra: queda el de GO');
+  await bridge({ action: 'catalog', upserts: [{ ventraId: 'v-alfa', name: 'Alfajor Triple', price: 1100, category: 'Golosinas' }] }, KEY);
+  const ventraCat = (await db.collection(`comercios/${CID}/categories`).where('name', '==', 'Golosinas').get()).docs[0];
+  assert.strictEqual((await q()).data().categoryId, ventraCat.id, 'con rubro en Ventra: manda el de Ventra');
 });
 
 // ─── Pedidos ───
@@ -296,6 +308,26 @@ await t('desvincular: la clave deja de servir', async () => {
   assert.strictEqual((await bridge({ action: 'unlink' }, KEY)).status, 200);
   assert.strictEqual((await bridge({ action: 'status' }, KEY)).status, 401);
 });
+await t('por peso: el repartidor carga lo que le cobraron y el cliente paga eso', async () => {
+  const r = await order(CID, [item(CID, 'vacio', 'Vacío', 2, 12000)]); // 2 × 500 g = 1 kg
+  assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+  const id = r.body.orders[0].docId;
+  const o0 = (await db.doc(`orders/${id}`).get()).data();
+  assert.strictEqual(o0.hasWeighedItems, true);
+  assert.strictEqual(o0.estimatedSubtotal, 24000);
+  await db.doc(`orders/${id}`).update({ driverId: cadete.uid, status: 'accepted', queueTargetDriverId: null });
+  const sin = await post('shopperCheckout', { orderId: id, results: { 0: { status: 'found' } } }, { Authorization: `Bearer ${cadete.token}` });
+  assert.strictEqual(sin.status, 400);
+  assert.match(sin.body.error, /cuánto te cobraron/);
+  const ok = await post('shopperCheckout', { orderId: id, results: { 0: { status: 'found', paid: 25300 } } }, { Authorization: `Bearer ${cadete.token}` });
+  assert.strictEqual(ok.status, 200, JSON.stringify(ok.body));
+  const o = (await db.doc(`orders/${id}`).get()).data();
+  assert.strictEqual(o.subtotal, 25300, 'se cobra lo que le cobraron');
+  assert.strictEqual(o.weighPending, false);
+  assert.strictEqual(o.items[0].actualGrams, Math.round(25300 * 1000 / 24000), 'los gramos salen del precio por kilo');
+  assert.strictEqual(o.total, 25300 + o.deliveryCost + o.appUsageFee);
+  await db.doc(`orders/${id}`).update({ status: 'cancelled' });
+});
 await t('la app muestra las mismas cuentas que el servidor (src/utils/shopper.js)', async () => {
   const server = require('./shopper.js');
   const client = await import('../src/utils/shopper.js');
@@ -309,6 +341,11 @@ await t('la app muestra las mismas cuentas que el servidor (src/utils/shopper.js
     [{ 0: { status: 'missing' }, 1: { status: 'missing' }, 2: { status: 'missing' } }, null],
     [{}, 99999],
   ];
+  // Por peso: lo que le cobraron
+  const weighed = { ...base, items: [...base.items, { name: 'Vacío', qty: 2, price: 12000, soldByWeight: true, weightStep: 500, pricePerKg: 24000 }] };
+  for (const [results, ticket] of [[{}, null], [{ 3: { status: 'found', paid: 25300 } }, null], [{ 3: { status: 'missing' } }, null]]) {
+    assert.deepStrictEqual(client.applyShopping(weighed, results, ticket), server.applyShopping(weighed, results, ticket), JSON.stringify(results));
+  }
   for (const [results, ticket] of cases) {
     assert.deepStrictEqual(client.applyShopping(base, results, ticket), server.applyShopping(base, results, ticket), JSON.stringify(results));
   }

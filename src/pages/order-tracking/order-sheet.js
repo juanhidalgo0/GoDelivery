@@ -1,13 +1,13 @@
 // Hoja "Tu pedido" del seguimiento (vista del cliente): qué pediste, cuánto pagás línea por línea
 // (con recargos y descuentos, siempre cuadrando con el total) y dónde se entrega.
 import { icon } from '../../utils/icons.js';
+import { isWeighedItem, itemWeightLabel, itemPricePerKg, formatWeight, orderedGrams, WEIGHT_TOLERANCE } from '../../utils/weight.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
 const isTakeaway = (o) => o.deliveryType === 'takeaway' || o.deliveryType === 'retiro';
 const isEncomienda = (o) => o.favorType === 'encomienda' || o.serviceType === 'encomienda' || o.favorType === 'mandado' || o.isEncomienda === true;
 const isGoCash = (o) => o.favorType === 'gocash' || o.isGoCash === true;
-const isTransfer = (o) => { const pm = String(o.paymentMethod || '').toLowerCase(); return pm === 'mercadopago' || pm.includes('transf'); };
 // "Compra el repartidor": qué pasó con cada producto en el mostrador
 function shopNote(it) {
   if (it.shopStatus === 'missing') return '<small>No había: no lo pagás</small>';
@@ -15,6 +15,7 @@ function shopNote(it) {
   if (it.shopStatus === 'replaced' && it.replacement) return `<small>Cambiado por ${esc(it.replacement.name)}</small>`;
   return '';
 }
+const isTransfer = (o) => { const pm = String(o.paymentMethod || '').toLowerCase(); return pm === 'mercadopago' || pm.includes('transf'); };
 
 /** Líneas del precio. Lo que no llega a sumar el total va en "Otros ajustes": nunca queda descuadrado. */
 export function priceLines(o) {
@@ -79,8 +80,8 @@ function sheetHtml(o, flags) {
   } else {
     what = (Array.isArray(o.items) ? o.items : []).map(it => `
       <div class="gt-od-item">
-        <span class="gt-od-qty">${esc(it.qty || it.quantity || 1)}×</span>
-        <div class="gt-od-name">${esc(it.name || it.title || 'Producto')}${it.notes ? `<small>“${esc(it.notes)}”</small>` : ''}</div>
+        <span class="gt-od-qty">${isWeighedItem(it) ? esc(itemWeightLabel(it)) : `${esc(it.qty || it.quantity || 1)}×`}</span>
+        <div class="gt-od-name">${it.shopStatus === 'missing' ? `<s style="opacity:.6">${esc(it.name || it.title || 'Producto')}</s>` : esc(it.name || it.title || 'Producto')}${shopNote(it)}${isWeighedItem(it) ? `<small>${money(itemPricePerKg(it))}/kg · ${Number(it.actualGrams) > 0 ? `pediste ${formatWeight(orderedGrams(it))}, pesó ${formatWeight(it.actualGrams)}` : 'falta pesar'}</small>` : ''}${it.notes ? `<small>“${esc(it.notes)}”</small>` : ''}</div>
         <span class="gt-od-price">${money((Number(it.price) || 0) * (Number(it.qty || it.quantity) || 1))}</span>
       </div>`).join('');
   }
@@ -103,7 +104,11 @@ function sheetHtml(o, flags) {
         <div class="gt-od-sec">Cuánto pagás</div>
         <div class="gt-od-box gt-od-prices">
           ${lines.map(l => `<div class="gt-od-line ${l.good ? 'good' : ''}"><span>${esc(l.label)}${l.hint ? `<small>${esc(l.hint)}</small>` : ''}</span><b>${l.pending ? '<em>A confirmar</em>' : (l.value < 0 ? '−' : '') + money(Math.abs(l.value))}</b></div>`).join('')}
-          <div class="gt-od-total"><span>Total</span><b>${money(total)}</b></div>
+          <div class="gt-od-total"><span>${o.hasWeighedItems && o.weighPending ? 'Total estimado' : 'Total'}</span><b>${money(total)}</b></div>
+          ${o.hasWeighedItems && o.weighPending ? `<div class="gt-od-pay"><span>${o.isShopper
+            ? 'Tenés productos por peso: el precio es aproximado y puede variar un poco según lo que pese. El precio final lo carga el repartidor con lo que le cobren en el local.'
+            : `Tenés productos por peso: el comercio los pesa al prepararlos y pagás lo que pesaron (hasta un ${Math.round(WEIGHT_TOLERANCE * 100)}% más o menos). Te avisamos el total final.`}</span></div>` : ''}
+          ${o.hasWeighedItems && o.weighPending === false && Math.round(Number(o.estimatedTotal) || 0) !== Math.round(total) ? `<div class="gt-od-pay"><span>Ya lo pesaron: el estimado era ${money(o.estimatedTotal)}.</span></div>` : ''}
           <div class="gt-od-pay">${icon(isTransfer(o) ? 'creditCard' : 'dollarSign', 15)}<span>${payNote}</span></div>
         </div>
         ${!o.isTrip && !isTakeaway(o) && o.deliveryAddress ? `

@@ -6,6 +6,7 @@ import { formatPrice } from '../utils/format.js';
 import { addToCart, isProductFavorite, toggleProductFavorite, getState } from '../state.js';
 import { showToast } from './toast.js';
 import { renderNavbar } from './navbar.js';
+import { isSoldByWeight, weightStepOf, stepPrice, defaultSteps, formatWeight, WEIGHT_TOLERANCE } from '../utils/weight.js';
 
 /**
  * Opens a modal to customize and add a product to the cart
@@ -17,6 +18,9 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   
   // Local state for the modal
   let qty = (!isCommerceOpen || (product.stockMode === 'limited' && typeof product.stockQuantity === 'number' && product.stockQuantity <= 0)) ? 0 : 1;
+  // Por peso, qty cuenta pasos (de 250 g, …) y arranca en 1 kg
+  const byWeight = isSoldByWeight(product);
+  if (byWeight && qty > 0) qty = defaultSteps(product);
   const selectedOptions = []; // Array of { groupName, name, price, qty }
   let productNotes = '';
   let flavorSearchQuery = '';
@@ -103,6 +107,8 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           let filteredRawList = rawList.filter(f => {
             // Discard paused or explicitly inactive flavors
             if (f.active === false || f.status === 'inactive' || f.isPaused === true) return false;
+            // Los que el comercio marcó que no hay hoy (llave apagada en Sabores = stock 0)
+            if (f.isAvailable === true && f.stock !== undefined && f.stock !== null && f.stock !== '' && Number(f.stock) <= 0) return false;
             return true;
           });
 
@@ -194,11 +200,15 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     let effectiveOriginalBasePrice = replaceOption ? (replaceOption.price || 0) : (activeProduct.price || 0);
 
     const optionsPrice = selectedOptions.reduce((s, o) => s + (o.priceMode === 'replace' ? 0 : (o.price * o.qty || 0)), 0);
+    // Por peso, base y opciones son por kilo: el total es el precio de un paso × pasos
+    const perUnit = (price) => (byWeight ? stepPrice(price, activeProduct) : price);
     const unitPrice = effectiveBasePrice + optionsPrice;
-    const totalPrice = unitPrice * qty;
+    const totalPrice = perUnit(unitPrice) * qty;
 
     const originalUnitPrice = effectiveOriginalBasePrice + optionsPrice;
-    const originalTotalPrice = originalUnitPrice * qty;
+    const originalTotalPrice = perUnit(originalUnitPrice) * qty;
+    const kgSuffix = byWeight ? ' /kg' : '';
+    const qtyLabel = byWeight ? formatWeight(qty * weightStepOf(activeProduct)) : String(qty);
 
     const isFav = isProductFavorite(activeProduct.id);
 
@@ -237,7 +247,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     } else {
       btnText = `
         <span>Agregar</span>
-        <strong style="display: inline-flex; align-items: center; gap: 6px;">
+        <strong style="display: inline-flex; align-items: center; gap: 6px;">${byWeight ? '<span style="font-weight:600; opacity:0.8">≈</span>' : ''}
           ${offer && offer.type === 'percentage' ? `
             <span style="font-size: 11px; font-weight: 500; opacity: 0.7; text-decoration: line-through; margin-right: 4px;">${formatPrice(originalTotalPrice)}</span>
           ` : ''}
@@ -291,14 +301,21 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           <h2 style="font-family: var(--go-font); font-size: 20px; font-weight: 800; margin: 0; line-height: 1.2; flex: 1;">${escapeHtml(product.name)}</h2>
           ${offer ? `
             <div style="display:flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; text-align: right;">
-              <span style="font-family:var(--font-display); font-size:20px; font-weight:900; color:var(--color-primary);">${formatPrice(baseDiscountedPrice)}</span>
-              <span style="font-size:12px; color:var(--color-text-tertiary); text-decoration:line-through; font-weight:700; line-height:1;">${formatPrice(product.price)}</span>
+              <span style="font-family:var(--font-display); font-size:20px; font-weight:900; color:var(--color-primary);">${formatPrice(baseDiscountedPrice)}${kgSuffix}</span>
+              <span style="font-size:12px; color:var(--color-text-tertiary); text-decoration:line-through; font-weight:700; line-height:1;">${formatPrice(product.price)}${kgSuffix}</span>
             </div>
           ` : `
-            <div class="price" style="font-family: var(--go-font); font-size: 20px; font-weight: 900; color: var(--go-text); flex-shrink: 0; margin: 0;">${formatPrice(product.price)}</div>
+            <div class="price" style="font-family: var(--go-font); font-size: 20px; font-weight: 900; color: var(--go-text); flex-shrink: 0; margin: 0;">${formatPrice(product.price)}${kgSuffix}</div>
           `}
         </div>
         ${product.description ? `<p style="font-size: 13.5px; color: var(--color-text-secondary); line-height: 1.45; margin: 2px 0 0 0;">${escapeHtml(product.description)}</p>` : ''}
+        ${byWeight ? `<div class="pm-weight-note">${(() => {
+          const mode = getState().currentComercioMode;
+          // Lo compra el repartidor: él carga lo que pesó lo que le dieron en el local
+          return mode && mode.id === comercioId && mode.fulfillmentMode === 'shopper'
+            ? 'El precio es aproximado: puede variar un poco según lo que pese. El precio final lo carga el repartidor con lo que le cobren en el local, y pagás eso.'
+            : `El precio es aproximado: lo pesan al prepararlo y pagás lo que pesó, que puede variar un poco (hasta un ${Math.round(WEIGHT_TOLERANCE * 100)}%). Te avisamos el total final antes de que salga.`;
+        })()}</div>` : ''}
         ${stockBadgeHTML ? `<div style="margin-top: 2px;">${stockBadgeHTML.replace('margin-top: 8px;', 'margin-top: 2px;').replace('padding: 4px 12px;', 'padding: 3px 10px;')}</div>` : ''}
 
         ${comercioName ? `
@@ -441,7 +458,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                         </div>
                         <div class="pm-option-text">
                           <div class="pm-option-name">${opt.name}</div>
-                          ${opt.price ? `<div class="pm-option-price">+ ${formatPrice(opt.price)}</div>` : ''}
+                          ${opt.price ? `<div class="pm-option-price">+ ${formatPrice(opt.price)}${kgSuffix}</div>` : ''}
                         </div>
                       </div>
                       
@@ -495,7 +512,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                       </div>
                     </div>
                     <div style="font-size: 12.5px; font-weight: 900; color: var(--color-primary); text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">
-                      <span>${formatPrice(itemFinalPrice)}</span>
+                      <span>${formatPrice(itemFinalPrice)}${isSoldByWeight(item) ? ' /kg' : ''}</span>
                       ${hasItemOffer ? `
                         <span style="font-size: 9.5px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(item.price)}</span>
                       ` : ''}
@@ -512,7 +529,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     <div class="pm-footer" style="flex-shrink:0 !important; position:relative !important; bottom:0 !important; background:var(--color-surface) !important; padding:12px 16px calc(14px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 16px !important; border-top:1px solid var(--color-border-light) !important; display:flex !important; gap:12px !important; align-items:center !important; z-index:100 !important; box-shadow:0 -4px 20px rgba(0,0,0,0.08) !important;">
         <div class="pm-qty-main" style="${(!isCommerceOpen || isOutOfStock) ? 'opacity: 0.5; pointer-events: none;' : ''}">
           <button class="pm-main-qty-btn" id="pm-qty-minus">${icon('minus', 18)}</button>
-          <span class="pm-main-qty-val">${qty}</span>
+          <span class="pm-main-qty-val ${byWeight ? 'is-weight' : ''}">${qtyLabel}</span>
           <button class="pm-main-qty-btn" id="pm-qty-plus">${icon('plus', 18)}</button>
         </div>
         <button class="pm-add-btn" id="pm-add-btn" ${(isAddDisabled && !(isCommerceOpen && !isOutOfStock && missingRequired)) ? 'disabled ' : ''}${isAddDisabled ? 'style="background: var(--go-paper-2); color: var(--go-text-3); cursor: not-allowed; justify-content: center; width: 100%; display: flex; border: none; box-shadow: none;"' : 'style="display: flex; align-items: center; justify-content: space-between; gap: 8px;"'}>
@@ -653,7 +670,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       // (possibly stale) copy from the list, and the cart must not keep the old price.
       addToCart(activeProduct, comercioId, comercioName, qty, selectedOptions, productNotes);
       closeModal();
-      showToast(`${qty} x ${product.name} al carrito`, 'success');
+      showToast(`${byWeight ? qtyLabel : `${qty} x`} ${product.name} al carrito`, 'success');
 
       setTimeout(() => {
         renderNavbar();

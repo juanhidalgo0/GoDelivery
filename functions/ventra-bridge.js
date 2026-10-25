@@ -236,13 +236,15 @@ async function catalog(db, storage, { comercioId }, body) {
     // Lo que el dueño cambió desde el panel de GO manda: su nombre y si lo ocultó
     const keepName = prev.nameLockedInGo === true && prev.name;
     const hiddenInGo = prev.hiddenInGo === true;
+    // Si en Ventra no tiene rubro, queda el que le pusieron en GO (no se le borra)
+    const ventraCategory = await categoryId(u.category);
     const data = {
       name: keepName ? prev.name : name,
       ventraName,
       price: Math.round(price * 100) / 100,
       barcode: clean(u.barcode, 40),
       description: clean(u.description, 500),
-      categoryId: await categoryId(u.category),
+      categoryId: ventraCategory || prev.categoryId || "",
       ventraId,
       source: "ventra",
       isAvailable: u.available === false || hiddenInGo ? false : (tempMissing ? false : (syncStock ? stock > 0 : true)),

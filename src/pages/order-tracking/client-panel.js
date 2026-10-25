@@ -8,6 +8,7 @@
 //   5. el pedido, la dirección y las acciones (ver detalle, ayuda, cancelar).
 // La hoja se achica tocando la manija para ver más mapa.
 import { icon } from '../../utils/icons.js';
+import { WEIGHT_TOLERANCE } from '../../utils/weight.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
@@ -74,7 +75,6 @@ export function trackingModel(o, status) {
     return { ...m, tone: 'search', title: 'Buscando repartidor', subtitle: 'Te avisamos apenas uno acepte.', active: 0 };
   }
 
-  // Pedido a un comercio, con envío
   // "Compra el repartidor": el comercio no confirma; el repartidor lo compra en el mostrador
   if (o.isShopper) {
     m.steps = ['Recibido', 'Comprando', 'En camino', 'Entregado'];
@@ -87,6 +87,7 @@ export function trackingModel(o, status) {
     return { ...m, eta: true, tone: 'search', title: 'Buscando repartidor', subtitle: `Un repartidor lo compra en ${store} y te lo lleva.`, active: 0 };
   }
 
+  // Pedido a un comercio, con envío
   m.steps = ['Recibido', 'Preparando', 'En camino', 'Entregado'];
   if (status === 'completed') return { ...m, tone: 'ok', title: 'Pedido entregado', subtitle: doneText(o), active: 3, done: true };
   if (o.isAtDoor) return { ...m, tone: 'alert', title: `¡${driver} llegó!`, subtitle: 'Salí a recibirlo y tené a mano tu código.', active: 2 };
@@ -135,7 +136,7 @@ function avatar(name, photo, size = 48) {
   return `<div class="gt-avatar" style="width:${size}px;height:${size}px;background:${bg}"><span>${letter}</span>${inner}</div>`;
 }
 
-/** HTML de la hoja del cliente. flags: { canCancel, isDirectStore, collapsed } */
+/** HTML de la hoja del cliente. flags: { canCancel, isDirectStore, collapsed, waClient } (waClient: link de WhatsApp, sin ayuda) */
 export function renderClientPanel(o, status, flags = {}) {
   const md = trackingModel(o, status);
   const tone = TONES[md.tone] || TONES.live;
@@ -180,16 +181,16 @@ export function renderClientPanel(o, status, flags = {}) {
       </div>
       <div class="gt-driver-actions">
         ${canCall ? `<a class="gt-round" href="tel:${esc(phone)}" aria-label="Llamar a ${esc(o.driverName || 'tu repartidor')}">${icon('phone', 19)}</a>` : ''}
-        <button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear">${icon('chatBubble', 19)}</button>
+        ${flags.waClient ? '' : `<button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear">${icon('chatBubble', 19)}</button>`}
       </div>
     </div>` : (!hasDriver && !final && store && !o.isTrip && !o.isFavor ? `
     <div class="gt-card gt-driver">
       <div class="gt-avatar gt-logo" style="width:48px;height:48px"><img src="${esc(o.comercioRealLogo || o.comercioLogo || '/logo.png')}" alt="" onerror="this.src='/logo.png'"></div>
       <div class="gt-driver-info">
         <div class="gt-driver-name">${esc(store)}</div>
-        <div class="gt-driver-meta">¿Una duda con tu pedido? Escribile</div>
+        <div class="gt-driver-meta">${flags.waClient ? 'Está preparando tu pedido' : '¿Una duda con tu pedido? Escribile'}</div>
       </div>
-      <div class="gt-driver-actions"><button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear con el comercio">${icon('chatBubble', 19)}</button></div>
+      ${flags.waClient ? '' : `<div class="gt-driver-actions"><button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear con el comercio">${icon('chatBubble', 19)}</button></div>`}
     </div>` : '');
 
   // 4. Código de entrega (lo pide el repartidor al entregar): una franja
@@ -221,6 +222,11 @@ export function renderClientPanel(o, status, flags = {}) {
   else if (isGoCash(o)) payText = 'Costo del servicio';
   else if (isTransfer(o)) payText = 'Por transferencia al recibir';
   else payText = o.cashChangeFor ? `Efectivo · cambio de ${money(o.cashChangeFor)}` : 'Efectivo al recibir';
+  // Por peso: hasta que el comercio pesa, el total es estimado; después es el final
+  if (o.hasWeighedItems && o.weighPending) payText = o.isShopper
+    ? `Aproximado (el repartidor carga el precio final) · ${payText}`
+    : `Estimado (±${Math.round(WEIGHT_TOLERANCE * 100)}%, lo están pesando) · ${payText}`;
+  else if (o.hasWeighedItems && o.weighPending === false) payText = `Ya pesado · ${payText}`;
   if (final) payText = status === 'completed' ? 'Total pagado' : 'Total del pedido';
   const foot = `
     <div class="gt-foot">
@@ -229,7 +235,7 @@ export function renderClientPanel(o, status, flags = {}) {
         <div class="gt-pay-sub">${payText}</div>
       </div>
       <button class="gt-btn" id="v5-toggle-details-btn">${icon('receipt', 16)}Detalle y precios</button>
-      <button class="gt-round gt-round-sm" id="gt-help-btn" aria-label="Ayuda">${icon('helpCircle', 18)}</button>
+      ${flags.waClient ? '' : `<button class="gt-round gt-round-sm" id="gt-help-btn" aria-label="Ayuda">${icon('helpCircle', 18)}</button>`}
     </div>
     ${flags.canCancel ? `<button class="gt-cancel" id="v5-cancel-order-btn">${o.isTrip ? 'Cancelar viaje' : 'Cancelar pedido'}${o.pointsRedeemed > 0 ? ' · te devolvemos los Go Points' : ''}</button>` : ''}`;
 

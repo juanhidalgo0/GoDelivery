@@ -27,7 +27,11 @@ const unitNoteOf = (item, unitPrice) => (isSoldByWeight(item.product)
   : `(${item.qty} x ${formatPrice(unitPrice)})`);
 const showUnitNote = (item) => isSoldByWeight(item.product) || item.qty > 1;
 const cartHasWeighed = () => getState().cart.some(i => isSoldByWeight(i.product));
-const weighedNoteHtml = () => `<div style="font-size:11.5px; line-height:1.4; color:var(--color-text-secondary); background:var(--color-bg-secondary); border-radius:10px; padding:8px 10px; margin-top:6px;">Tenés productos por peso: el comercio los pesa al prepararlos y pagás lo que pesaron (hasta un ${Math.round(WEIGHT_TOLERANCE * 100)}% más o menos). Te avisamos el total final antes de que salga.</div>`;
+// byDriver: todo lo por peso es de comercios donde lo compra el repartidor (él carga lo que pesó)
+const weighedNoteHtml = (byDriver = false) => `<div style="font-size:11.5px; line-height:1.4; color:var(--color-text-secondary); background:var(--color-bg-secondary); border-radius:10px; padding:8px 10px; margin-top:6px;">${byDriver
+  ? 'Tenés productos por peso: el precio es aproximado y puede variar un poco según lo que pese. El precio final lo carga el repartidor con lo que le cobren en el local, y pagás eso.'
+  : `Tenés productos por peso: el precio es aproximado. El comercio los pesa al prepararlos y pagás lo que pesaron (puede variar hasta un ${Math.round(WEIGHT_TOLERANCE * 100)}%). Te avisamos el total final antes de que salga.`}</div>`;
+const weighedByDriver = () => getState().cart.filter(i => isSoldByWeight(i.product)).every(i => shopperCommerces[i.comercioId || i.product?.comercioId] === true);
 
 let currentCartStep = 1;
 let isSubmitting = false;
@@ -2500,7 +2504,7 @@ async function openCheckoutConfirmationModal() {
           ${formatPrice(grandTotal)}
         </span>
       </div>
-      ${cartHasWeighed() ? weighedNoteHtml() : ''}
+      ${cartHasWeighed() ? weighedNoteHtml(weighedByDriver()) : ''}
     </div>
 
     </div>

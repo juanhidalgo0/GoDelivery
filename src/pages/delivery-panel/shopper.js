@@ -8,6 +8,9 @@ import { functionUrl } from '../../utils/functions-url.js';
 import { getDriverMapTheme } from '../../components/driver-navigation-map.js';
 import { esc, money, isCashPayment } from '../../components/driver-ui.js';
 import { applyShopping } from '../../utils/shopper.js';
+import { isWeighedItem, orderedGrams, itemPricePerKg, formatWeight } from '../../utils/weight.js';
+
+const moneyInput = (v) => Number(String(v || '').replace(/[^\d,.]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')) || 0;
 
 const CHOICES = [
   { id: 'found', label: 'Lo llevo' },
@@ -21,6 +24,7 @@ function toResults(state) {
   const out = {};
   state.forEach((s, idx) => {
     if (s.choice === 'missing') out[idx] = { status: 'missing' };
+    else if (s.weighed && s.choice === 'found') out[idx] = { status: 'found', paid: moneyInput(s.paid) };
     else if (s.choice === 'partial') out[idx] = { status: 'found', qty: s.qty };
     else if (s.choice === 'replaced') out[idx] = { status: 'replaced', qty: s.qty, replacementName: s.repName, replacementPrice: Number(s.repPrice) || 0 };
     else out[idx] = { status: 'found' };
@@ -34,7 +38,7 @@ export function openShopperChecklist({ order, onDone, onCancel }) {
   const isLight = getDriverMapTheme() === 'light';
   const items = Array.isArray(order.items) ? order.items : [];
   const canReplace = order.allowReplacement === true;
-  const state = items.map(it => ({ choice: 'found', qty: Number(it.qty) || 1, repName: '', repPrice: '' }));
+  const state = items.map(it => ({ choice: 'found', qty: Number(it.qty) || 1, repName: '', repPrice: '', weighed: isWeighedItem(it), paid: '' }));
   let ticket = '';
   let saving = false;
 
@@ -54,7 +58,10 @@ export function openShopperChecklist({ order, onDone, onCancel }) {
   const itemRow = (it, idx) => {
     const s = state[idx];
     const ordered = Number(it.qty) || 1;
-    const choices = CHOICES.filter(c => (c.id !== 'replaced' || canReplace) && (c.id !== 'partial' || ordered > 1));
+    // Por peso no hay "Menos": se carga lo que le cobraron
+    const choices = CHOICES.filter(c => (c.id !== 'replaced' || canReplace) && (c.id !== 'partial' || (ordered > 1 && !s.weighed)));
+    const paid = s.weighed ? moneyInput(s.paid) : 0;
+    const approxGrams = (p) => Math.round(p * 1000 / (itemPricePerKg(it) || 1));
     const img = it.image ? `<img src="${esc(it.image)}" alt="" style="width:46px; height:46px; border-radius:12px; object-fit:cover; flex-shrink:0; background:#fff;">`
       : `<div style="width:46px; height:46px; border-radius:12px; flex-shrink:0; display:flex; align-items:center; justify-content:center; background:var(--driver-fill-subtle); color:var(--driver-text-secondary);">${icon('shoppingBag', 20)}</div>`;
     const qtyStepper = (max, min) => `
@@ -69,8 +76,8 @@ export function openShopperChecklist({ order, onDone, onCancel }) {
         <div style="display:flex; gap:10px; align-items:center;">
           ${img}
           <div style="flex:1; min-width:0;">
-            <div style="font-size:14.5px; font-weight:900; color:var(--driver-text-primary); line-height:1.25; ${s.choice === 'missing' ? 'text-decoration:line-through; opacity:.6;' : ''}">${ordered} × ${esc(it.name)}</div>
-            <div style="font-size:12px; font-weight:700; color:var(--driver-text-secondary); margin-top:2px;">${money(it.price)} c/u${it.barcode ? ` · cód. ${esc(it.barcode)}` : ''}</div>
+            <div style="font-size:14.5px; font-weight:900; color:var(--driver-text-primary); line-height:1.25; ${s.choice === 'missing' ? 'text-decoration:line-through; opacity:.6;' : ''}">${s.weighed ? `${formatWeight(orderedGrams(it))} de ${esc(it.name)}` : `${ordered} × ${esc(it.name)}`}</div>
+            <div style="font-size:12px; font-weight:700; color:var(--driver-text-secondary); margin-top:2px;">${s.weighed ? `${money(itemPricePerKg(it))} el kilo · por peso` : `${money(it.price)} c/u`}${it.barcode ? ` · cód. ${esc(it.barcode)}` : ''}</div>
             ${it.notes ? `<div style="font-size:12px; font-weight:700; color:#f59e0b; margin-top:2px;">Nota: ${esc(it.notes)}</div>` : ''}
           </div>
         </div>
@@ -80,6 +87,12 @@ export function openShopperChecklist({ order, onDone, onCancel }) {
             background:${s.choice === c.id ? (c.id === 'missing' ? '#ef4444' : c.id === 'found' ? '#16a34a' : '#f59e0b') : 'transparent'};
             color:${s.choice === c.id ? '#fff' : 'var(--driver-text-primary)'};">${c.label}</button>`).join('')}
         </div>
+        ${s.weighed && s.choice === 'found' ? `
+          <label style="display:flex; flex-direction:column; gap:6px;">
+            <span style="font-size:12px; font-weight:800; color:var(--driver-text-secondary);">¿Cuánto te cobraron? (lo que dice la etiqueta o el ticket)</span>
+            <input data-paid="${idx}" inputmode="decimal" placeholder="Ej: 25300" value="${esc(s.paid)}" style="${inputCss}">
+          </label>
+          <div data-paid-out="${idx}" style="font-size:12.5px; font-weight:800; color:${paid ? 'var(--driver-text-primary)' : '#f59e0b'};">${paid ? `${money(paid)} · unos ${formatWeight(approxGrams(paid))}` : 'Falta cargar lo que te cobraron'}</div>` : ''}
         ${s.choice === 'partial' ? qtyStepper(ordered - 1, 1) : ''}
         ${s.choice === 'replaced' ? `
           <input data-rep-name="${idx}" placeholder="¿Qué llevás en su lugar?" value="${esc(s.repName)}" maxlength="120" style="${inputCss}">
@@ -131,7 +144,7 @@ export function openShopperChecklist({ order, onDone, onCancel }) {
         <button id="shopper-close" aria-label="Cerrar" style="width:44px; height:44px; border-radius:50%; background:var(--driver-fill-subtle); border:none; color:var(--driver-text-secondary); font-size:16px; font-weight:900; cursor:pointer;">✕</button>
       </div>
       <div style="padding:10px 18px 0; font-size:12.5px; line-height:1.4; color:var(--driver-text-secondary); flex-shrink:0;">
-        Pagá en el mostrador y marcá cómo te fue con cada producto. Si algo no estaba, se saca del pedido y el cliente paga menos.
+        Pagá en el mostrador y marcá cómo te fue con cada producto. Si algo no estaba, se saca del pedido y el cliente paga menos.${items.some(isWeighedItem) ? ' En lo que va por peso, cargá lo que te cobraron: el cliente paga eso.' : ''}
       </div>
       <div id="shopper-items" class="scrollable-y" data-scrollable="true" style="padding:10px 18px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; flex:1 1 auto; min-height:120px;"></div>
       <div style="padding:12px 18px calc(14px + env(safe-area-inset-bottom)); border-top:1px solid ${border}; display:flex; flex-direction:column; gap:10px; flex-shrink:0;">
@@ -172,6 +185,17 @@ export function openShopperChecklist({ order, onDone, onCancel }) {
     if (t.id === 'shopper-ticket') ticket = t.value;
     else if (t.dataset.repName !== undefined) state[Number(t.dataset.repName)].repName = t.value;
     else if (t.dataset.repPrice !== undefined) state[Number(t.dataset.repPrice)].repPrice = t.value.replace(/[^\d.,]/g, '').replace(',', '.');
+    else if (t.dataset.paid !== undefined) {
+      const idx = Number(t.dataset.paid);
+      state[idx].paid = t.value;
+      // Solo ese renglón (no se redibuja la lista para no perder el foco)
+      const out = overlay.querySelector(`[data-paid-out="${idx}"]`);
+      const p = moneyInput(t.value);
+      if (out) {
+        out.textContent = p ? `${money(p)} · unos ${formatWeight(Math.round(p * 1000 / (itemPricePerKg(items[idx]) || 1)))}` : 'Falta cargar lo que te cobraron';
+        out.style.color = p ? 'var(--driver-text-primary)' : '#f59e0b';
+      }
+    }
     else return;
     renderSummary();
   });
