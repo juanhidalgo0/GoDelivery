@@ -75,6 +75,8 @@ await ventraDb(async (pc) => {
     ['7790580000011', 900, 'Alfajor Guaymallén Triple'], ['7790580000028', 1100, 'Alfajor Jorgito Chocolate'],
     ['7790387000017', 5200, 'Yerba Playadito 1 kg'], ['7622300000011', 1400, 'Galletitas Oreo 118 g'],
   ]) await pc.$executeRawUnsafe('UPDATE products SET sale_price = ?, name = ?, is_active = 1 WHERE barcode = ?', price, name, code);
+  // "Lo que se vende": el Sugus y el fernet arrancan sin ventas en cada corrida (solo en la base de prueba)
+  await pc.$executeRawUnsafe(`DELETE FROM sale_items WHERE product_id IN (SELECT id FROM products WHERE barcode = '7790580000066' OR name = 'FERNET BRANCA X 750')`);
   // Un producto sin rubro con nombre de bebida alcohólica (como en los comercios que no cargan rubros)
   await pc.$executeRawUnsafe(`UPDATE products SET name = 'FERNET BRANCA X 750', sale_price = 9000, is_active = 1 WHERE id = (SELECT id FROM products WHERE category_id IS NULL AND (unit IS NULL OR unit IN ('UNIT','PACK')) ORDER BY id LIMIT 1)`);
 });
@@ -303,6 +305,53 @@ await t('caja: "Sacar todos de la tienda" deja todo sin publicar en GO (también
   assert.strictEqual((await ventra('GET', '/go/products?only=published')).body.length, 0, 'en la caja no queda nada publicado');
   const left = await until(async () => { const l = (await goProducts()).filter((p) => p.isAvailable !== false); return l.length === 0 ? l : null; });
   assert.ok(left, 'en GO no queda nada a la venta');
+  // Vuelve a "Por rubros" para lo que sigue
+  await ventra('PUT', '/go/settings', { publishMode: 'categories', publishCategories: LINK_CATS });
+  await ventra('POST', '/go/sync-now');
+});
+await t('caja: "Lo que se vende" publica lo vendido; una venta nueva lo suma, "no había" lo saca y venderlo lo devuelve; el rubro de la IA llega a GO', async () => {
+  const active = (await ventra('GET', '/cash/active')).body;
+  let session = (Array.isArray(active) ? active : []).find((x) => x.status === 'OPEN');
+  if (!session) session = (await ventra('POST', '/cash/open', { terminalName: 'SIM-GO', openingAmount: 0 })).body;
+  const sell = async (p) => {
+    const r = await ventra('POST', '/sales', { sessionId: session.id, items: [{ productId: p.id, quantity: 1 }], payments: [{ method: 'CASH', amount: Number(p.salePrice ?? p.price) }] });
+    assert.ok(r.status < 300, JSON.stringify(r.body));
+  };
+  const avail = async () => new Set((await goProducts()).filter((p) => p.isAvailable !== false).map((p) => p.ventraId));
+  const coca = await vProduct('7790895000997'); // se vendió en "Cobrar pedido GO"
+  const sugus = await vProduct('7790580000066'); // nunca se vendió
+  const fernet = (await ventra('GET', '/go/products?search=FERNET')).body.find((p) => p.name === 'FERNET BRANCA X 750');
+  // La IA (que en la prueba no está) le habría puesto este rubro de GO
+  await ventraDb((pc) => pc.$executeRawUnsafe(`INSERT INTO go_products (id, publish, go_category) VALUES (?, NULL, 'Vinos y bebidas blancas › Fernet y aperitivos')
+    ON CONFLICT(id) DO UPDATE SET go_category = excluded.go_category, missing_at = NULL`, fernet.id));
+  await ventraDb((pc) => pc.$executeRawUnsafe(`UPDATE go_products SET missing_at = NULL`));
+  const st = await ventra('PUT', '/go/settings', { publishMode: 'sold' });
+  assert.strictEqual(st.body.publishMode, 'sold');
+  await ventra('POST', '/go/sync-now');
+  let a = await avail();
+  assert.ok(a.has(coca.id), 'lo que se vendió está');
+  assert.ok(!a.has(sugus.id), 'lo que nunca se vendió no');
+  const sinVender = (await ventra('GET', '/go/products?search=Sugus')).body.find((p) => p.id === sugus.id);
+  assert.match(sinVender.reason, /Todavía no se vendió/);
+  // Una venta en la caja: se publica sola en unos segundos (sin apretar nada)
+  await sell(sugus);
+  assert.ok(await until(async () => (await avail()).has(sugus.id)), 'la venta lo publicó solo');
+  // El repartidor no encontró la Coca: sale hasta que se vuelva a vender
+  await ventraDb((pc) => pc.$executeRawUnsafe(`INSERT INTO go_products (id, publish, missing_at) VALUES (?, NULL, ?)
+    ON CONFLICT(id) DO UPDATE SET missing_at = excluded.missing_at`, coca.id, Date.now() + 1000));
+  await ventra('POST', '/go/sync-now');
+  assert.ok(!(await avail()).has(coca.id), '"no había" la saca');
+  await new Promise((r) => setTimeout(r, 1200));
+  await sell(coca);
+  assert.ok(await until(async () => (await avail()).has(coca.id)), 'venderla de nuevo la devuelve');
+  // El rubro de la IA: "Rubro › Subrubro" en GO
+  await sell(fernet);
+  const g = await until(async () => (await goProducts()).find((p) => p.ventraId === fernet.id && p.isAvailable !== false && p.categoryId));
+  assert.ok(g, 'el fernet se publicó con rubro');
+  const cats = (await db.collection(`comercios/${CID}/categories`).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const sub = cats.find((c) => c.id === g.categoryId);
+  const top = cats.find((c) => c.id === sub?.parentCategoryId);
+  assert.deepStrictEqual([top?.name, sub?.name], ['Vinos y bebidas blancas', 'Fernet y aperitivos']);
   // Vuelve a "Por rubros" para lo que sigue
   await ventra('PUT', '/go/settings', { publishMode: 'categories', publishCategories: LINK_CATS });
   await ventra('POST', '/go/sync-now');

@@ -166,6 +166,22 @@ await t('catálogo: el rubro que le ponen en GO queda si en Ventra no tiene rubr
   const ventraCat = (await db.collection(`comercios/${CID}/categories`).where('name', '==', 'Golosinas').get()).docs[0];
   assert.strictEqual((await q()).data().categoryId, ventraCat.id, 'con rubro en Ventra: manda el de Ventra');
 });
+await t('catálogo: el rubro de la IA ("Rubro › Subrubro") se crea en GO y no pisa uno puesto', async () => {
+  await bridge({ action: 'catalog', upserts: [{ ventraId: 'v-ia1', name: 'FERNET BRANCA 750', price: 9000, goCategory: 'Vinos y bebidas blancas › Fernet y aperitivos' }] }, KEY);
+  const p1 = (await db.collection(`comercios/${CID}/products`).where('ventraId', '==', 'v-ia1').get()).docs[0];
+  const cats = (await db.collection(`comercios/${CID}/categories`).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const sub = cats.find((c) => c.id === p1.data().categoryId);
+  assert.strictEqual(sub?.name, 'Fernet y aperitivos');
+  assert.strictEqual(cats.find((c) => c.id === sub.parentCategoryId)?.name, 'Vinos y bebidas blancas');
+  // El dueño lo pasa a otro rubro en GO: la IA no lo vuelve a mover
+  await p1.ref.update({ categoryId: sub.parentCategoryId });
+  await bridge({ action: 'catalog', upserts: [{ ventraId: 'v-ia1', name: 'FERNET BRANCA 750', price: 9100, goCategory: 'Vinos y bebidas blancas › Fernet y aperitivos' }] }, KEY);
+  assert.strictEqual((await p1.ref.get()).data().categoryId, sub.parentCategoryId);
+  // Un rubro apagado en GO se vuelve a prender si se usa
+  const off = await db.collection(`comercios/${CID}/categories`).add({ name: 'Golosinas viejas', order: 50, isActive: false });
+  await bridge({ action: 'catalog', upserts: [{ ventraId: 'v-ia2', name: 'TURRON', price: 500, category: 'Golosinas viejas' }] }, KEY);
+  assert.strictEqual((await off.get()).data().isActive, true);
+});
 
 // ─── Pedidos ───
 const prod = async (vid) => (await db.collection(`comercios/${CID}/products`).where('ventraId', '==', vid).get()).docs[0];

@@ -195,16 +195,44 @@ async function catalog(db, storage, { comercioId }, body) {
 
   // Categorías por nombre (se crean las que falten)
   const catSnap = await categoriesRef.get();
-  const catByName = new Map(catSnap.docs.map((d) => [String(d.data().name || "").trim().toLowerCase(), d.id]));
+  const keyOf = (n) => String(n || "").trim().toLowerCase();
+  // Rubros por nombre (los de arriba) y subrubros por "rubro|subrubro"; los apagados se vuelven a prender al usarlos
+  const catByName = new Map();
+  const subByKey = new Map();
+  const inactive = new Set();
+  for (const d of catSnap.docs) {
+    const c = d.data();
+    if (c.isActive === false) inactive.add(d.id);
+    if (c.parentCategoryId) subByKey.set(`${c.parentCategoryId}|${keyOf(c.name)}`, d.id);
+    else catByName.set(keyOf(c.name), d.id);
+  }
   let nextOrder = catSnap.size;
+  const activate = async (id) => {
+    if (!inactive.has(id)) return id;
+    inactive.delete(id);
+    await categoriesRef.doc(id).update({ isActive: true });
+    return id;
+  };
   const categoryId = async (name) => {
     const n = clean(name, 60);
     if (!n || n.toLowerCase() === "varios") return "";
     const key = n.toLowerCase();
-    if (catByName.has(key)) return catByName.get(key);
+    if (catByName.has(key)) return activate(catByName.get(key));
     const ref = categoriesRef.doc();
     await ref.set({ name: n, order: nextOrder++, isActive: true, source: "ventra", createdAt: FieldValue.serverTimestamp() });
     catByName.set(key, ref.id);
+    return ref.id;
+  };
+  // "Rubro › Subrubro" que eligió la IA de Ventra para un producto sin rubro en la caja
+  const goCategoryId = async (path) => {
+    const [top, sub] = String(path || "").split(/\s*[›>]\s*/).map((x) => clean(x, 60));
+    const parent = top ? await categoryId(top) : "";
+    if (!parent || !sub) return parent;
+    const key = `${parent}|${sub.toLowerCase()}`;
+    if (subByKey.has(key)) return activate(subByKey.get(key));
+    const ref = categoriesRef.doc();
+    await ref.set({ name: sub, parentCategoryId: parent, order: nextOrder++, isActive: true, source: "ventra", createdAt: FieldValue.serverTimestamp() });
+    subByKey.set(key, ref.id);
     return ref.id;
   };
 
@@ -244,7 +272,8 @@ async function catalog(db, storage, { comercioId }, body) {
       price: Math.round(price * 100) / 100,
       barcode: clean(u.barcode, 40),
       description: clean(u.description, 500),
-      categoryId: ventraCategory || prev.categoryId || "",
+      // Rubro de la caja; si no tiene, el que ya tenía en GO; si tampoco, el que eligió la IA
+      categoryId: ventraCategory || prev.categoryId || (u.goCategory ? await goCategoryId(u.goCategory) : ""),
       ventraId,
       source: "ventra",
       isAvailable: u.available === false || hiddenInGo ? false : (tempMissing ? false : (syncStock ? stock > 0 : true)),

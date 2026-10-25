@@ -17,6 +17,7 @@ import { WEIGHT_STEPS, weightStepOf, isSoldByWeight, formatWeight } from '../../
 
 let panelFilteredProducts = [];
 let panelDisplayedCount = 20;
+let panelLastViewKey = '';
 let panelScrollObserver = null;
 let panelComercioData = null;
 let panelCategories = [];
@@ -321,7 +322,16 @@ export async function renderComercioProducts() {
           await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), { isAvailable: newAvail, ...(product.source === 'ventra' ? { hiddenInGo: !newAvail } : {}) });
           product.isAvailable = newAvail;
           renderCategoriesFilter(categories);
-          renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
+          // Solo esa tarjeta: redibujar la lista la volvía a la primera tanda y la pantalla saltaba arriba
+          const card = toggleBtn.closest('.cp-prod');
+          if (card && currentCategoryId === '__off' && newAvail) card.remove();
+          else if (card) {
+            card.classList.toggle('is-off', !newAvail);
+            toggleBtn.setAttribute('aria-checked', String(newAvail));
+            const tag = card.querySelector('.cp-tag.is-red');
+            if (!newAvail && !tag) card.querySelector('.cp-money')?.insertAdjacentHTML('afterend', '<span class="cp-tag is-red">Sin stock</span>');
+            if (newAvail && tag) tag.remove();
+          } else renderProductsList(products, document.getElementById('products-search')?.value || '', currentCategoryId);
           showToast(newAvail ? 'Producto disponible' : 'Producto no disponible', 'info');
         } catch (e) {
           showToast('Error', 'error');
@@ -652,7 +662,10 @@ function renderProductsList(products, search, categoryId) {
   }
 
   panelFilteredProducts = filtered;
-  panelDisplayedCount = 30;
+  // Misma vista (filtro y búsqueda): se dibujan los mismos que había, así la pantalla no salta arriba
+  const viewKey = `${categoryId}|${search || ''}`;
+  panelDisplayedCount = viewKey === panelLastViewKey ? Math.max(30, panelDisplayedCount) : 30;
+  panelLastViewKey = viewKey;
 
   const renderPanelBatch = (startIndex, count) => panelFilteredProducts.slice(startIndex, startIndex + count).map(p => {
     const off = p.isAvailable === false;
