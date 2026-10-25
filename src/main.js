@@ -474,6 +474,8 @@ async function init() {
   // Register all routes
   registerRoutes({
     '/': (c) => import('./pages/home.js').then(m => m.renderHome(c)),
+    // Desde la caja Ventra: entra al panel de su comercio con un código de un solo uso
+    '/ventra/:code': (c) => import('./pages/ventra-panel.js').then(m => m.renderVentraPanel(c)),
     '/seguimiento/wa/:id': (c) => {
       const params = window.location.hash.match(/#\/seguimiento\/wa\/([^?]+)/);
       const orderId = params ? params[1] : '';
@@ -1207,6 +1209,8 @@ async function init() {
       // Show Onboarding and Notifications if NOT on the Install Lock Screen
       const runStartupFlow = () => {
         if (isPreview || isDirectStore) return; // Bypass onboarding, push notifications, and address modals in preview or direct store mode
+        // La cuenta de una caja Ventra (o entrando desde Ventra) solo atiende su comercio: sin guía de cliente, dirección ni avisos
+        if (location.hash.startsWith('#/ventra/') || String(user?.uid || '').startsWith('ventra_')) return;
 
         const triggerReferralModal = () => {
           import('./auth.js').then(m => m.checkAndShowReferralWelcome());

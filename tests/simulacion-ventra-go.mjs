@@ -294,6 +294,29 @@ await t('caja: números de GO (vendido, entregados, faltantes, cancelados)', asy
   assert.deepStrictEqual(s.topProducts.map((p) => p.name).sort(), ['Alfajor Guaymallén Triple', 'Coca-Cola 2,25 L']);
   assert.ok(s.cancelReasons.some((r) => /No había ninguno/.test(r.reason)));
 });
+await t('caja: abre el panel de su comercio en GO sin iniciar sesión (link de un solo uso, solo su comercio)', async () => {
+  const r = await ventra('POST', '/go/panel-link', { section: 'settings' });
+  assert.ok(r.status < 300, JSON.stringify(r.body));
+  const m = String(r.body.url).match(/#\/ventra\/([A-Za-z0-9_-]+)\?s=settings$/);
+  assert.ok(m, r.body.url);
+  const login = await go('ventraBridge', { action: 'panelLogin', code: m[1] });
+  assert.strictEqual(login.status, 200, JSON.stringify(login.body));
+  assert.strictEqual(login.body.comercioId, CID);
+  assert.strictEqual((await go('ventraBridge', { action: 'panelLogin', code: m[1] })).status, 404, 'el link sirve una sola vez');
+  assert.ok((await db.doc(`comercios/${CID}`).get()).data().managerIds.includes(`ventra_${CID}`));
+  const cred = await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: login.body.token, returnSecureToken: true }),
+  }).then((x) => x.json());
+  assert.ok(cred.idToken, 'la app entra con esa sesión');
+  // Con las reglas de verdad: edita su comercio y no otro
+  const patch = (cid) => fetch(`http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/documents/comercios/${cid}?updateMask.fieldPaths=description`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cred.idToken}` },
+    body: JSON.stringify({ fields: { description: { stringValue: 'Desde Ventra' } } }),
+  });
+  assert.strictEqual((await patch(CID)).status, 200, 'edita los datos de su comercio');
+  await db.doc('comercios/otro-sim').set({ name: 'Otro comercio', ownerId: 'alguien-mas', isActive: true });
+  assert.strictEqual((await patch('otro-sim')).status, 403, 'no toca otros comercios');
+});
 await t('caja: el cajero ve los pedidos pero no los números ni la configuración', async () => {
   const lc = await fetch(`${VENTRA}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'CAJERO', password: VENTRA_PASS }) }).then((r) => r.json());
   const h = { Authorization: `Bearer ${lc.accessToken}` };
@@ -320,6 +343,7 @@ await t('caja: desvincular deja la clave sin efecto en GO', async () => {
   assert.strictEqual(r.body.linked, false);
   const keys = await db.collection('ventra_keys').where('comercioId', '==', CID).get();
   assert.strictEqual(keys.size, 0);
+  assert.ok(!((await db.doc(`comercios/${CID}`).get()).data().managerIds || []).includes(`ventra_${CID}`), 'la caja ya no entra al panel');
 });
 
 console.log(`\n${ok} bien, ${bad} con falla`);

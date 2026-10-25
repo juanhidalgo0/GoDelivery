@@ -14,12 +14,16 @@
 
 const crypto = require("crypto");
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 const { applyShopping, isShopperCommerce, shopperMaxTotal, MISSING_HIDE_MS } = require("./shopper");
 
 const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
 const LINK_CODE = /^[A-Z0-9]{8}$/;
 const MAX_UPSERTS = 200;
 const ORDER_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+const PANEL_CODE_MS = 2 * 60 * 1000;
+/** La cuenta de GO con la que la caja entra al panel de su comercio (solo a ese) */
+const panelUid = (comercioId) => `ventra_${comercioId}`;
 
 class BridgeError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -83,9 +87,61 @@ async function unlink(db, { comercioId }) {
   const batch = db.batch();
   if (s.exists && s.data().keyHash) batch.delete(db.collection("ventra_keys").doc(s.data().keyHash));
   batch.delete(storeRef);
-  batch.update(db.collection("comercios").doc(comercioId), { ventraLinked: false });
+  // La caja deja de entrar al panel del comercio
+  batch.update(db.collection("comercios").doc(comercioId), { ventraLinked: false, managerIds: FieldValue.arrayRemove(panelUid(comercioId)) });
   await batch.commit();
+  await getAuth().revokeRefreshTokens(panelUid(comercioId)).catch(() => {});
   return { ok: true };
+}
+
+/**
+ * La caja pide entrar al panel de su comercio en GO (logo, portada, datos, horarios y todo lo
+ * demás del modo comercio). La cuenta de la caja tiene acceso solo a ese comercio (managerIds,
+ * como un empleado). Devuelve un código de un solo uso que vence en 2 minutos: la caja abre la
+ * app con ese código y la app lo cambia por la sesión (panelLogin). Así no viaja ninguna clave.
+ */
+async function panelLink(db, { comercioId, comercio }) {
+  const uid = panelUid(comercioId);
+  const auth = getAuth();
+  const displayName = clean(`Caja Ventra · ${comercio.name || "Comercio"}`, 80);
+  try {
+    await auth.getUser(uid);
+  } catch (err) {
+    if (err.code !== "auth/user-not-found") throw err;
+    await auth.createUser({ uid, displayName });
+  }
+  await db.collection("users").doc(uid).set({
+    displayName, email: "", role: "comercio", isComercio: true, ventraPanel: true, comercioId,
+    createdAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  if (!(comercio.managerIds || []).includes(uid)) {
+    await db.collection("comercios").doc(comercioId).update({ managerIds: FieldValue.arrayUnion(uid) });
+  }
+  const code = crypto.randomBytes(18).toString("base64url");
+  await db.collection("ventra_panel_codes").doc(sha256(code)).set({
+    comercioId, uid, expiresAt: Timestamp.fromMillis(Date.now() + PANEL_CODE_MS), createdAt: FieldValue.serverTimestamp(),
+  });
+  return { code, comercioId, expiresInMs: PANEL_CODE_MS };
+}
+
+/** La app cambia el código de un solo uso por una sesión de la cuenta de la caja */
+async function panelLogin(db, body) {
+  const code = String(body.code || "");
+  if (!/^[A-Za-z0-9_-]{20,40}$/.test(code)) throw new BridgeError(400, "Link inválido");
+  const ref = db.collection("ventra_panel_codes").doc(sha256(code));
+  const data = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new BridgeError(404, "El link ya se usó o no existe. Abrilo de nuevo desde Ventra.");
+    const d = snap.data();
+    tx.delete(ref);
+    if (ms(d.expiresAt) < Date.now()) throw new BridgeError(410, "El link venció. Abrilo de nuevo desde Ventra.");
+    return d;
+  });
+  // Si mientras tanto se desvinculó, la caja ya no entra
+  const c = await db.collection("comercios").doc(data.comercioId).get();
+  if (!c.exists || !(c.data().managerIds || []).includes(data.uid)) throw new BridgeError(403, "La caja ya no está vinculada con este comercio");
+  const token = await getAuth().createCustomToken(data.uid, { ventraPanel: data.comercioId });
+  return { token, comercioId: data.comercioId };
 }
 
 function parseDataUrl(dataUrl) {
@@ -297,12 +353,14 @@ async function handle(db, storage, req, res, logger) {
   const body = req.body || {};
   try {
     if (body.action === "link") return res.status(200).json(await link(db, body));
+    if (body.action === "panelLogin") return res.status(200).json(await panelLogin(db, body));
     const store = await storeOf(db, req.get("x-ventra-key") || body.key);
     switch (body.action) {
       case "status": return res.status(200).json({ store: storeSummary(store.comercioId, store.comercio) });
       case "catalog": return res.status(200).json(await catalog(db, storage, store, body));
       case "orders": return res.status(200).json(await orders(db, store, body));
       case "unlink": return res.status(200).json(await unlink(db, store));
+      case "panelLink": return res.status(200).json(await panelLink(db, store));
       default: return res.status(400).json({ error: "Acción inválida" });
     }
   } catch (err) {

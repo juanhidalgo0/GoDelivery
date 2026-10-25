@@ -214,6 +214,10 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
+    // Códigos de un solo uso para que la caja entre al panel de su comercio (panelLink/panelLogin)
+    match /ventra_panel_codes/{hash} {
+      allow read, write: if false;
+    }
 
     // Invitaciones a un comercio para un correo que todavía no entró a GO. Las crea y las
     // aplica el servidor (functions/commerce-access.js); el invitado solo ve las suyas.
