@@ -721,8 +721,14 @@ function renderCartContent(content) {
               ${(() => {
                 // "Compra el repartidor": se paga al recibir y lo que falta no se cobra
                 if (!shopperCommerces[comercioId]) return '';
-                return `<div style="margin:12px 16px 0; padding:10px 12px; border-radius:12px; background:var(--color-bg-secondary); border:1px solid var(--color-border-light); font-size:12.5px; line-height:1.45; color:var(--color-text-secondary);">
-                  <b style="color:var(--color-text-primary);">Lo compra el repartidor en el local.</b> Pagás al recibir, en efectivo o por transferencia. Si algo no hay, no lo pagás.
+                return `<div class="cart-shopper">
+                  <div class="cart-shopper-title">${icon('shoppingBag', 16)} Así funciona este pedido</div>
+                  <ol>
+                    <li><b>El repartidor lo compra</b> en el mostrador del local.</li>
+                    <li><b>Si algo falta</b>, te avisa antes y no lo pagás.</li>
+                    <li><b>Pagás al recibir</b>, en efectivo o por transferencia.</li>
+                  </ol>
+                  <p>Los precios son los del local y pueden variar un poco: pagás lo que te cobren ahí.</p>
                 </div>`;
               })()}
               ${group.items.map(item => {

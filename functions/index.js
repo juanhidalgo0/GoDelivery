@@ -5455,6 +5455,8 @@ exports.expireWhatsAppQuotes = onSchedule("every 2 minutes", async () => {
 exports.ventraBridge = onRequest({ maxInstances: 10, timeoutSeconds: 120, memory: "512MiB" }, (req, res) =>
   ventraBridge.handle(db, admin.storage(), req, res, logger));
 
+// Las fotos grandes (functions/hd-images.js) las busca el puente al recibir productos (ventra-bridge.js)
+
 // "Compra el repartidor": el repartidor carga lo que encontró, lo que faltó y el ticket
 exports.shopperCheckout = onRequest({ cors: true, maxInstances: 15 }, async (req, res) => {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");

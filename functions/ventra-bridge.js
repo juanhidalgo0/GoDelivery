@@ -16,6 +16,7 @@ const crypto = require("crypto");
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 const { applyShopping, isShopperCommerce, MISSING_HIDE_MS } = require("./shopper");
+const hdImages = require("./hd-images");
 
 const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
 const LINK_CODE = /^[A-Z0-9]{8}$/;
@@ -167,6 +168,19 @@ async function uploadImage(storage, comercioId, ventraId, dataUrl) {
 const clean = (s, n) => String(s ?? "").trim().slice(0, n);
 
 /**
+ * Palabras para buscar en la tienda (las mismas que arma src/utils/search-keys.js): cada palabra del
+ * nombre sin tildes, desde sus 2 primeras letras hasta 10 ("coc", "coca"…), más el código de barras.
+ * La tienda busca con array-contains: con miles de productos no hace falta bajarlos todos.
+ */
+function searchKeys(name, barcode) {
+  const words = String(name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9ñ]+/).filter((w) => w.length >= 2);
+  const keys = new Set();
+  for (const w of words.slice(0, 12)) for (let i = 2; i <= Math.min(w.length, 10); i++) keys.add(w.slice(0, i));
+  if (barcode) keys.add(String(barcode));
+  return [...keys].slice(0, 120);
+}
+
+/**
  * Productos de Ventra → comercios/{id}/products. upserts: [{ ventraId, barcode, name, description,
  * price, category, image (data: o https), stock (número o null), available }]. syncStock: si es
  * false, todo figura disponible (sin stock). deletes: ventraIds que dejan de publicarse.
@@ -237,6 +251,7 @@ async function catalog(db, storage, { comercioId }, body) {
   };
 
   const now = Date.now();
+  const hdTodo = [];
   let written = 0;
   const errors = [];
   let batch = db.batch();
@@ -266,9 +281,16 @@ async function catalog(db, storage, { comercioId }, body) {
     const hiddenInGo = prev.hiddenInGo === true;
     // Si en Ventra no tiene rubro, queda el que le pusieron en GO (no se le borra)
     const ventraCategory = await categoryId(u.category);
+    const sold = Number(u.sold);
+    const pairs = Array.isArray(u.pairs) ? u.pairs.map((x) => clean(x, 80)).filter(Boolean).slice(0, 6) : null;
     const data = {
       name: keepName ? prev.name : name,
       ventraName,
+      searchKeys: searchKeys(keepName ? prev.name : name, clean(u.barcode, 40)),
+      // Unidades vendidas en la caja en los últimos 90 días: "Lo más vendido" de la tienda
+      ...(Number.isFinite(sold) ? { popularity: Math.max(0, Math.round(sold)) } : {}),
+      // Lo que más se compra junto en los tickets de la caja (ventraIds): "Combiná con…"
+      ...(pairs ? { pairsVentra: pairs } : {}),
       price: Math.round(price * 100) / 100,
       barcode: clean(u.barcode, 40),
       description: clean(u.description, 500),
@@ -287,6 +309,7 @@ async function catalog(db, storage, { comercioId }, body) {
     batch.set(ref, data, { merge: true });
     pending++; written++;
     if (pending >= 400) await flush();
+    if (!prev.imageHd && !prev.imageHdTriedAt && data.isAvailable && hdImages.isEan(data.barcode)) hdTodo.push({ ref, barcode: data.barcode });
   }
   for (const id of deletes) {
     const d = byVentra.get(id);
@@ -296,6 +319,19 @@ async function catalog(db, storage, { comercioId }, body) {
     if (pending >= 400) await flush();
   }
   await flush();
+
+  // Fotos grandes (hd-images.js) de lo que llegó y todavía no se buscó: hasta 8 por publicación y
+  // 12 segundos, de a 3 (la caja espera hasta 60 s); lo que no entra se busca en la próxima publicación
+  const hdStart = Date.now();
+  const hdQueue = hdTodo.slice(0, 8);
+  await Promise.all([0, 1, 2].map(async () => {
+    while (hdQueue.length && Date.now() - hdStart < 12000) {
+      const job = hdQueue.shift();
+      try {
+        await job.ref.update(await hdImages.hdFieldsFor(storage.bucket(), comercioId, job.ref.id, { barcode: job.barcode }));
+      } catch (e) { /* sin foto grande: queda la de la caja */ }
+    }
+  }));
 
   // Publicación completa: lo de Ventra que ya no se publica se oculta
   let hidden = 0;
@@ -476,4 +512,4 @@ async function restoreMissing(db) {
   return restored;
 }
 
-module.exports = { handle, shopperCheckout, restoreMissing, BridgeError, storeSummary, sha256 };
+module.exports = { handle, shopperCheckout, restoreMissing, BridgeError, storeSummary, sha256, searchKeys };

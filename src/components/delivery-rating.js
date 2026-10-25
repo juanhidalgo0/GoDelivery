@@ -11,6 +11,17 @@ import { formatPrice } from '../utils/format.js';
  * Show a rating modal for a delivered order
  * @param {Object} order - The completed order object
  */
+// Después del repartidor, una sola vez por pedido: ¿qué te pareció el comercio?
+// (la tienda ya no muestra "Puntuar" arriba: se califica cuando hubo un pedido)
+function askStoreRating(order) {
+  if (!order.comercioId) return;
+  const key = `gd_store_rating_asked_${order.id}`;
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch (e) { return; }
+  setTimeout(() => {
+    import('../pages/comercio.js').then((m) => m.openRatingModal({ id: order.comercioId, name: order.comercioName || 'el comercio' })).catch(() => {});
+  }, 450);
+}
+
 export function showDeliveryRating(order) {
   if (!order) return;
 
@@ -193,6 +204,7 @@ export function showDeliveryRating(order) {
   modalContent.querySelector('#rating-skip-btn')?.addEventListener('click', () => {
     localStorage.setItem(`gd_dismissed_points_modal_${order.id}`, 'true');
     closeModal();
+    askStoreRating(order);
   });
 
   // Submit click listener
@@ -241,6 +253,7 @@ export function showDeliveryRating(order) {
       localStorage.setItem(`gd_dismissed_points_modal_${order.id}`, 'true');
       closeModal();
       showToast('¡Gracias por tu puntuación!', 'success');
+      askStoreRating(order);
     } catch (err) {
       console.error('Error submitting rating:', err);
       

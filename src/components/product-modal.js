@@ -3,6 +3,7 @@ import { showModal, closeModal } from './modal.js';
 import { icon } from '../utils/icons.js';
 import { escapeHtml } from '../utils/escape.js';
 import { formatPrice } from '../utils/format.js';
+import { displayName } from '../utils/product-name.js';
 import { addToCart, isProductFavorite, toggleProductFavorite, getState } from '../state.js';
 import { showToast } from './toast.js';
 import { renderNavbar } from './navbar.js';
@@ -55,10 +56,10 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
   let commerceBanner = '';
   let localCommerceProducts = [];
 
-  import('firebase/firestore').then(async ({ doc, getDoc, collection, getDocs }) => {
+  import('firebase/firestore').then(async ({ doc, getDoc, collection, getDocs, query, where, limit, documentId }) => {
     try {
       const { db } = await import('../firebase.js');
-      
+
       const logoPromise = getDoc(doc(db, 'comercios', comercioId)).then(snap => {
         if (snap.exists()) {
           const cData = snap.data();
@@ -67,8 +68,23 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
         }
       });
 
-      const productsPromise = getDocs(collection(db, 'comercios', comercioId, 'products')).then(snap => {
-        localCommerceProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Antes se bajaban todos los productos del comercio en cada ficha (miles en los kioscos de Ventra).
+      // Ahora: lo que la tienda ya tiene cargado, el producto al día, lo que incluye si es combo y lo que
+      // más se compra junto con él (pairsVentra)
+      const mode = getState().currentComercioMode;
+      const loaded = mode && mode.id === comercioId ? (getState().currentProducts || []) : [];
+      const pairs = Array.isArray(product.pairsVentra) ? product.pairsVentra.slice(0, 10) : [];
+      const comboIds = (product.comboItems || []).map(x => x.productId).filter(Boolean).slice(0, 10);
+      const productsPromise = Promise.all([
+        getDoc(doc(db, 'comercios', comercioId, 'products', product.id)).catch(() => null),
+        loaded.length ? null : getDocs(query(collection(db, 'comercios', comercioId, 'products'), limit(60))).catch(() => null),
+        pairs.length ? getDocs(query(collection(db, 'comercios', comercioId, 'products'), where('ventraId', 'in', pairs))).catch(() => null) : null,
+        comboIds.length ? getDocs(query(collection(db, 'comercios', comercioId, 'products'), where(documentId(), 'in', comboIds))).catch(() => null) : null,
+      ]).then(([self, some, pairSnap, comboSnap]) => {
+        const byId = new Map(loaded.map(p => [p.id, p]));
+        [some, pairSnap, comboSnap].forEach(s => (s?.docs || []).forEach(d => byId.set(d.id, { id: d.id, ...d.data() })));
+        if (self && self.exists()) byId.set(self.id, { id: self.id, ...self.data() });
+        localCommerceProducts = [...byId.values()];
       });
 
       await Promise.all([logoPromise, productsPromise]);
@@ -183,11 +199,22 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     const end = document.activeElement ? document.activeElement.selectionEnd : null;
 
     const freshProduct = localCommerceProducts.find(p => p.id === product.id);
-    const initialImage = (product?.image || product?.imageUrl || '').trim();
-    const freshImage = (freshProduct?.image || freshProduct?.imageUrl || '').trim();
+    // imageHd: la foto grande que GO busca por código de barras (la de la caja es de 300 px)
+    const initialImage = (product?.imageHd || product?.image || product?.imageUrl || '').trim();
+    const freshImage = (freshProduct?.imageHd || freshProduct?.image || freshProduct?.imageUrl || '').trim();
     const productImage = freshImage !== '' ? freshImage : initialImage;
     const activeProduct = freshProduct ? { ...product, ...freshProduct, image: productImage } : { ...product, image: productImage };
     const displayBannerImage = productImage || commerceBanner;
+    // Combos sin foto grande propia: las fotos grandes de lo que incluye, una al lado de la otra
+    const comboParts = activeProduct.isCombo && !activeProduct.imageHd && Array.isArray(activeProduct.comboItems)
+      ? activeProduct.comboItems.map(x => { const q = localCommerceProducts.find(p => p.id === x.productId); return { src: (q && (q.imageHd || q.image)) || x.image, qty: Number(x.qty) || 1 }; }).filter(x => x.src)
+      : [];
+    // "Ahorrás": con los precios de hoy de lo que incluye (el guardado solo si falta alguno)
+    const liveParts = (activeProduct.comboItems || []).map(x => { const q = localCommerceProducts.find(p => p.id === x.productId); return q ? (Number(q.price) || 0) * (Number(x.qty) || 1) : null; });
+    const comboRegular = liveParts.length && liveParts.every(v => v !== null) ? liveParts.reduce((t, v) => t + v, 0) : (Number(activeProduct.comboRegularPrice) || 0);
+    const comboHero = comboParts.length >= 2
+      ? `<div class="pm-combo-hero">${comboParts.slice(0, 3).map(x => `<div><img src="${escapeHtml(x.src)}" alt="" />${x.qty > 1 ? `<b>x${x.qty}</b>` : ''}</div>`).join('<span>+</span>')}</div>`
+      : '';
 
     const activeOffers = getState().activeOffers || [];
     const offer = activeOffers.find(o => o.active && o.comercioId === comercioId && o.productIds && o.productIds.includes(activeProduct.id));
@@ -195,13 +222,15 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     const discountPercent = (offer && offer.type === 'percentage') ? (offer.value || 0) : 0;
     const baseDiscountedPrice = discountPercent > 0 ? activeProduct.price * (1 - discountPercent / 100) : activeProduct.price;
 
-    let allProducts = getState().currentProducts || [];
-    if (allProducts.length === 0 || allProducts[0].comercioId !== comercioId) {
-      allProducts = localCommerceProducts;
-    }
+    const allProducts = localCommerceProducts;
     const combos = activeProduct.frequentCombos || {};
+    // Lo que más se compra junto en la caja (Ventra), en ese orden; si no hay, por rubro como antes
+    const pairOrder = Array.isArray(activeProduct.pairsVentra) ? activeProduct.pairsVentra : [];
+    // Sin repetir lo que ya trae el combo
+    const inCombo = new Set((activeProduct.comboItems || []).map(x => x.productId));
+    const paired = pairOrder.map(v => allProducts.find(p => p.ventraId === v)).filter(p => p && p.id !== activeProduct.id && !inCombo.has(p.id) && p.isAvailable !== false);
 
-    const suggested = allProducts
+    const suggested = paired.length ? paired.slice(0, 4) : allProducts
       .filter(p => p.id !== activeProduct.id && p.isAvailable !== false)
       .sort((a, b) => {
         const comboA = combos[a.id] || 0;
@@ -287,8 +316,8 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       <button class="pm-close-btn" id="pm-modal-close">${icon('close', 20)}</button>
 
       ${displayBannerImage ? `
-        <div class="pm-banner" style="flex-shrink: 0;">
-          <img src="${displayBannerImage}" alt="${activeProduct.name}" />
+        <div class="pm-banner${productImage ? ' is-product' : ''}${comboHero ? ' is-combo' : ''}" style="flex-shrink: 0;">
+          ${comboHero || `<img src="${escapeHtml(displayBannerImage)}" alt="" />`}
           <div class="pm-banner-overlay"></div>
           <button class="pm-heart-btn" id="pm-modal-heart" title="Me gusta">${icon('heart', 20, isFav ? 'fav-active' : '')}</button>
           ${productImage ? `<button class="pm-zoom-btn" id="pm-modal-zoom" title="Ampliar imagen">${icon('search', 18)}</button>` : ''}
@@ -325,7 +354,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           </div>
         ` : ''}
         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; width: 100%;">
-          <h2 style="font-family: var(--go-font); font-size: 20px; font-weight: 800; margin: 0; line-height: 1.2; flex: 1;">${escapeHtml(product.name)}</h2>
+          <h2 style="font-family: var(--go-font); font-size: 20px; font-weight: 800; margin: 0; line-height: 1.2; flex: 1;">${escapeHtml(displayName(product.name))}</h2>
           ${offer ? `
             <div style="display:flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; text-align: right;">
               <span style="font-family:var(--font-display); font-size:20px; font-weight:900; color:var(--color-primary);">${formatPrice(baseDiscountedPrice)}${kgSuffix}</span>
@@ -336,6 +365,14 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           `}
         </div>
         ${product.description ? `<p style="font-size: 13.5px; color: var(--color-text-secondary); line-height: 1.45; margin: 2px 0 0 0;">${escapeHtml(product.description)}</p>` : ''}
+        ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
+          <div class="pm-combo">
+            <div class="pm-combo-head"><b>Incluye</b>${comboRegular > activeProduct.price ? `<span>Ahorrás ${formatPrice(comboRegular - activeProduct.price)}</span>` : ''}</div>
+            ${product.comboItems.map((it) => `<div class="pm-combo-item">
+              <img src="${escapeHtml((localCommerceProducts.find(p => p.id === it.productId) || {}).imageHd || it.image || '/logo.png')}" alt="" loading="lazy" />
+              <span>${escapeHtml(displayName(it.name))}</span><b>x${Number(it.qty) || 1}</b>
+            </div>`).join('')}
+          </div>` : ''}
         ${byWeight ? `<div class="pm-weight-note">${(() => {
           const mode = getState().currentComercioMode;
           // Lo compra el repartidor: él carga lo que pesó lo que le dieron en el local
@@ -530,13 +567,13 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
                   <div class="pm-suggested-row" data-suggested-id="${item.id}" style="display: flex; align-items: center; justify-content: space-between; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all 0.2s; gap: 10px;">
                     <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
                       <div style="position: relative; width: 42px; height: 42px; border-radius: 8px; overflow: hidden; background: #ffffff; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.05);">
-                        <img src="${item.image || '/logo.png'}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;" />
+                        ${(item.imageHd || item.image) ? `<img src="${escapeHtml(item.imageHd || item.image)}" alt="" style="width: 100%; height: 100%; object-fit: contain; padding: 3px; box-sizing: border-box;" />` : `<span style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:var(--go-text-3);">${icon('shoppingBag', 18)}</span>`}
                         ${hasItemOffer ? `
                           <div style="position: absolute; top: 0; left: 0; background: var(--color-primary); color: white; font-size: 7px; font-weight: 900; padding: 1px 3px; border-radius: 0 0 4px 0; font-family: var(--font-display);">${hasItemOffer.type === 'percentage' ? `${hasItemOffer.value}%` : '2x1'}</div>
                         ` : ''}
                       </div>
                       <div style="font-size: 12.5px; font-weight: 750; color: var(--color-text); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;">
-                        ${item.name}
+                        ${escapeHtml(displayName(item.name))}
                       </div>
                     </div>
                     <div style="font-size: 12.5px; font-weight: 900; color: var(--color-primary); text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">

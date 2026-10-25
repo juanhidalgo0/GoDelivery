@@ -33,6 +33,11 @@ export async function renderComercioPromos() {
     <div class="cp-page" id="cp-promos">
       <h2 class="cp-h2" style="margin-top:4px">¿Qué querés hacer?</h2>
       <div class="cp-list">
+        <button class="cp-item" type="button" data-new="combo">
+          <span class="cp-item-icon is-red">${icon('gift', 20)}</span>
+          <span class="cp-grow"><span class="cp-item-title">Armar un combo</span><span class="cp-item-sub" style="display:block">Fernet + Coca, vino + gaseosa… Elegís qué incluye y se ve primero en tu tienda.</span></span>
+          <span class="cp-chev">${icon('chevronRight', 18)}</span>
+        </button>
         <button class="cp-item" type="button" data-new="offer">
           <span class="cp-item-icon is-red">${icon('percent', 20)}</span>
           <span class="cp-grow"><span class="cp-item-title">Descuento en productos</span><span class="cp-item-sub" style="display:block">2x1 o un % menos en los que elijas. Se ve en la app.</span></span>
@@ -57,6 +62,7 @@ export async function renderComercioPromos() {
   const listEl = root.querySelector('#cp-promos-list');
   let offers = [];
   let coupons = [];
+  let combos = [];
 
   const load = async () => {
     try {
@@ -65,6 +71,7 @@ export async function renderComercioPromos() {
         getDocs(query(collection(db, 'coupons'), where('ownerId', '==', comercioId))),
       ]);
       offers = oSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      combos = await import('./combos.js').then(m => m.loadCombos(comercioId)).catch(() => []);
       coupons = cSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       paint();
     } catch (e) {
@@ -74,7 +81,7 @@ export async function renderComercioPromos() {
   };
 
   const paint = () => {
-    if (!offers.length && !coupons.length) {
+    if (!offers.length && !coupons.length && !combos.length) {
       listEl.innerHTML = cpEmpty('percent', 'Todavía no tenés promos', 'Un 2x1 los días flojos o un cupón para tus clientes ayudan a vender más.');
       return;
     }
@@ -100,19 +107,46 @@ export async function renderComercioPromos() {
         ${st.key === 'on' || st.key === 'off' ? `<button type="button" class="cp-switch" role="switch" aria-label="Activar cupón" aria-checked="${st.key === 'on'}" data-toggle-coupon="${esc(c.id)}"></button>` : ''}
       </div>`;
     };
+    const comboRow = (c) => {
+      const on = c.isAvailable !== false && c.hiddenInGo !== true;
+      const img = c.image || (c.comboItems || []).find(x => x.image)?.image || '';
+      return `
+      <div class="cp-item" style="cursor:default">
+        ${img ? `<img src="${esc(img)}" alt="" style="width:42px;height:42px;border-radius:12px;object-fit:contain;background:#fff;border:1px solid var(--go-line);flex-shrink:0" />` : `<span class="cp-item-icon is-red">${icon('gift', 20)}</span>`}
+        <button type="button" class="cp-grow" data-edit-combo="${esc(c.id)}" style="background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit">
+          <span class="cp-item-title">${esc(c.name || 'Combo')}</span>
+          <span class="cp-item-sub" style="display:block">$${Number(c.price || 0).toLocaleString('es-AR')} · incluye ${(c.comboItems || []).length} producto${(c.comboItems || []).length === 1 ? '' : 's'}</span>
+        </button>
+        <button type="button" class="cp-switch" role="switch" aria-label="Mostrar combo" aria-checked="${on}" data-toggle-combo="${esc(c.id)}"></button>
+      </div>`;
+    };
     listEl.innerHTML = `
+      ${combos.length ? `<div class="cp-list">${combos.map(comboRow).join('')}</div>` : ''}
       ${offers.length ? `<div class="cp-list">${offers.map(offerRow).join('')}</div>` : ''}
       ${coupons.length ? `<div class="cp-list">${coupons.sort((a, b) => (couponState(a).key === 'on' ? -1 : 1) - (couponState(b).key === 'on' ? -1 : 1)).map(couponRow).join('')}</div>` : ''}
       <p class="cp-small" style="text-align:center">Tocá una promo para editarla o borrarla.</p>`;
   };
 
   root.addEventListener('click', async (e) => {
-    const t = e.target.closest('[data-new],[data-toggle-offer],[data-toggle-coupon],[data-edit-offer],[data-coupon]');
+    const t = e.target.closest('[data-new],[data-toggle-offer],[data-toggle-coupon],[data-edit-offer],[data-coupon],[data-edit-combo],[data-toggle-combo]');
     if (!t) return;
     const d = t.dataset;
     const name = getPanelComercio()?.name || '';
 
-    if (d.new === 'offer') {
+    if (d.new === 'combo' || d.editCombo) {
+      const { openComboEditor } = await import('./combos.js');
+      openComboEditor(comercioId, getPanelComercio(), d.editCombo ? combos.find(x => x.id === d.editCombo) : null, load);
+    } else if (d.toggleCombo) {
+      const c = combos.find(x => x.id === d.toggleCombo);
+      const next = !(c.isAvailable !== false && c.hiddenInGo !== true);
+      t.setAttribute('aria-checked', String(next));
+      try {
+        // hiddenInGo: aunque la caja lo vuelva a mandar, queda oculto hasta que lo prendas acá
+        await updateDoc(doc(db, 'comercios', comercioId, 'products', c.id), { isAvailable: next, hiddenInGo: !next });
+        c.isAvailable = next; c.hiddenInGo = !next;
+        showToast(next ? 'Combo a la venta' : 'Combo oculto', next ? 'success' : 'info');
+      } catch (err) { t.setAttribute('aria-checked', String(!next)); showToast('No se pudo cambiar. Probá de nuevo.', 'error'); }
+    } else if (d.new === 'offer') {
       const { openOfferEditorFor } = await import('./offers.js');
       openOfferEditorFor(comercioId, name, null, load);
     } else if (d.new === 'coupon') {
