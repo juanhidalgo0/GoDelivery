@@ -6,6 +6,7 @@ import { goServiceHeader } from '../components/service-screen.js';
 import { formatPrice } from '../utils/format.js';
 import { openProductModal } from '../components/product-modal.js';
 import { isShopOpen } from '../utils/format.js';
+import { productsByIds } from '../utils/catalog-reads.js';
 
 let allOffersWithProducts = [];
 let allCategories = [];
@@ -93,14 +94,12 @@ async function loadPageData(silent = false) {
   }
 
   try {
-    const { collectionGroup } = await import('firebase/firestore');
-
-    // 1. Fetch categories, comercios, active offers, and ALL products in parallel!
-    const [catSnap, comSnap, offersSnap, productsSnap] = await Promise.all([
+    // 1. Categorías, comercios y ofertas activas. Los productos, después: solo los que están en alguna oferta
+    // (antes se bajaban todos los de todos los comercios, más de 10.000 lecturas por visita)
+    const [catSnap, comSnap, offersSnap] = await Promise.all([
       getDocs(collection(db, 'platformCategories')),
       getDocs(query(collection(db, 'comercios'))),
-      getDocs(query(collection(db, 'offers'), where('active', '==', true))),
-      getDocs(collectionGroup(db, 'products'))
+      getDocs(query(collection(db, 'offers'), where('active', '==', true)))
     ]);
 
     allCategories = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => c.isActive !== false);
@@ -127,11 +126,13 @@ async function loadPageData(silent = false) {
     const validOffers = rawOffers.filter(o => activeComerciosMap.has(o.comercioId));
 
     // Create lookup map for products: key = `${comercioId}:${productId}`
-    const productsMap = new Map(productsSnap.docs.map(docSnap => {
-      const pathParts = docSnap.ref.path.split('/');
-      const comercioId = pathParts[1];
-      return [`${comercioId}:${docSnap.id}`, { id: docSnap.id, comercioId, ...docSnap.data() }];
+    const idsByComercio = new Map();
+    validOffers.forEach(o => (o.productIds || []).forEach(pId => {
+      if (!idsByComercio.has(o.comercioId)) idsByComercio.set(o.comercioId, []);
+      idsByComercio.get(o.comercioId).push(pId);
     }));
+    const offerProducts = (await Promise.all([...idsByComercio].map(([cid, ids]) => productsByIds(cid, ids).catch(() => [])))).flat();
+    const productsMap = new Map(offerProducts.map(p => [`${p.comercioId}:${p.id}`, p]));
 
     // 4. Resolve details for each product in-memory (0 network overhead!)
     allOffersWithProducts = [];

@@ -6,7 +6,7 @@
 //   /settings/accesos    → dueño y personas con acceso (components/commerce-team.js)
 //   /settings/avanzado   → zona peligrosa
 import { db } from '../../firebase.js';
-import { doc, updateDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, collection, getDocs, writeBatch, getCountFromServer } from 'firebase/firestore';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
 import { escapeHtml as esc } from '../../utils/escape.js';
@@ -41,7 +41,8 @@ async function renderHub(comercioId) {
 
   let productCount = null;
   let hasPin = null;
-  getDocs(collection(db, 'comercios', comercioId, 'products')).then(s => { productCount = s.size; paint(); }).catch(() => {});
+  // Contar sin bajarlos (1 lectura cada 1.000 productos en vez de una por producto)
+  getCountFromServer(collection(db, 'comercios', comercioId, 'products')).then(s => { productCount = s.data().count; paint(); }).catch(() => {});
   getCommercePin(comercioId, getPanelComercio()).then(p => { hasPin = !!p; paint(); }).catch(() => {});
 
   const paint = () => {

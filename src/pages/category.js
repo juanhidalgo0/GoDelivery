@@ -1,5 +1,6 @@
 import { db } from '../firebase.js';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, collectionGroup, getDocs, query, where } from 'firebase/firestore';
+import { isBigCatalog, loadSmallCatalogs, searchBigCatalogs, searchKeyOf, topOfBigCatalogs } from '../utils/catalog-reads.js';
 import { escapeHtml } from '../utils/escape.js';
 import { goStoreCard } from '../components/go-ui.js';
 import { icon, categoryIcon } from '../utils/icons.js';
@@ -124,28 +125,26 @@ export async function renderCategoryPage(categoryName, content) {
     };
     comercios.sort((a, b) => seedHash(a.id + '-' + hourSeed) - seedHash(b.id + '-' + hourSeed));
 
-    // Los productos de todos los comercios (miles con un kiosco): solo los usan el buscador y las vistas de productos.
-    // Antes se bajaban siempre y la lista de comercios no aparecía hasta terminar; ahora se piden al buscar
+    // Productos sin bajar catálogos enteros (Kiosco Paulos tiene miles): los comercios chicos enteros y, de
+    // los grandes, solo lo necesario. "Solo En App" lee únicamente los marcados; "Destacados" suma los más
+    // vendidos de los grandes; el buscador pide a los grandes solo lo que tiene la palabra (bigSearch).
+    // Se piden recién al buscar o en las vistas de productos: la lista de comercios no los espera
     let allProducts = [];
     let productsLoad = null;
     const loadProducts = () => productsLoad || (productsLoad = (async () => {
       try {
-        const promises = comercios.map(async (c) => {
-          const pSnap = await getDocs(collection(db, 'comercios', c.id, 'products'));
-          return pSnap.docs.map(d => ({
-            id: d.id,
-            comercioId: c.id,
-            comercioName: c.name,
-            ...d.data()
-          }));
-        });
-        const results = await Promise.all(promises);
-        allProducts = results.flat().filter(p => p.isActive !== false);
-
+        let list;
         if (categoryName === 'Solo En App') {
-          allProducts = allProducts.filter(p => p.onlyInApp === true);
+          const ids = new Set(comercios.map(c => c.id));
+          const snap = await getDocsOptimized(query(collectionGroup(db, 'products'), where('onlyInApp', '==', true)), 'category_only_in_app', 10 * 60 * 1000);
+          list = (snap.docs || []).map(d => ({ id: d.id, comercioId: d.ref.path.split('/')[1], ...d.data() })).filter(p => ids.has(p.comercioId));
+          const names = new Map(comercios.map(c => [c.id, c.name]));
+          list.forEach(p => { p.comercioName = names.get(p.comercioId); });
+        } else {
+          list = await loadSmallCatalogs(comercios, 'category');
+          if (isSpecialProductsView) list = list.concat(await topOfBigCatalogs(comercios, 24));
         }
-
+        allProducts = list.filter(p => p.isActive !== false);
         if (isSpecialProductsView) {
           allProducts = allProducts.sort(() => 0.5 - Math.random());
         }
@@ -153,6 +152,18 @@ export async function renderCategoryPage(categoryName, content) {
         console.warn('Error fetching products for category:', err);
       }
     })());
+    const bigSearch = new Map();
+    const bigSearchFor = (text) => {
+      const key = searchKeyOf(text);
+      if (!key || !comercios.some(isBigCatalog)) return [];
+      if (bigSearch.has(key)) return bigSearch.get(key);
+      bigSearch.set(key, []);
+      searchBigCatalogs(comercios, text, 30).then(list => {
+        bigSearch.set(key, list.filter(p => p.isActive !== false));
+        if (searchKeyOf(searchInput?.value || '') === key) triggerFilterAndRender();
+      }).catch(() => {});
+      return [];
+    };
     if (isSpecialProductsView) await loadProducts();
 
     let currentFilters = {
@@ -422,8 +433,8 @@ export async function renderCategoryPage(categoryName, content) {
         filteredComs = comercios.filter(c => 
           c.name.toLowerCase().includes(s) || (c.description || '').toLowerCase().includes(s)
         );
-        filteredProds = allProducts.filter(p => 
-          p.name.toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s)
+        filteredProds = allProducts.concat(bigSearchFor(s).filter(p => !allProducts.some(q => q.id === p.id && q.comercioId === p.comercioId))).filter(p => 
+          (p.name || '').toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s)
         );
       }
       renderList(filteredComs, filteredProds, s || (isSpecialProductsView ? 'show_products_only' : ''));

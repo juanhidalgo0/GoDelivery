@@ -2,16 +2,17 @@
 // Stores show at once; products join as soon as they arrive. A light index is kept on the
 // phone so the next search is instant, and it refreshes in the background.
 import { db } from '../firebase.js';
-import { collection, getDocs, query, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { formatPrice } from '../utils/format.js';
 import { withTimeout } from '../utils/firestore-cache.js';
 import { escapeHtml } from '../utils/escape.js';
+import { isBigCatalog, loadSmallCatalogs, searchBigCatalogs, searchKeyOf } from '../utils/catalog-reads.js';
 
 const COMERCIOS_TIMEOUT_MS = 8000;
-const PRODUCTS_TIMEOUT_MS = 25000; // a big catalog can take a while on mobile data
 const SEARCH_DATA_TTL_MS = 5 * 60 * 1000;
-const INDEX_KEY = 'gd_search_index_v1';
+// v2: el v1 guardaba también los miles de productos de los catálogos grandes
+const INDEX_KEY = 'gd_search_index_v2';
 // El índice viejo se usa igual mientras se actualiza por detrás (antes a las 6 h se tiraba y la
 // primera búsqueda del día esperaba la descarga entera)
 const INDEX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -25,6 +26,11 @@ let productsPromise = null;
 let productsFailed = false;
 let selectedIndex = -1;
 let onDataChange = null;
+// Catálogos grandes (Paulos): no se bajan enteros; por cada palabra buscada se piden solo los que la tienen
+const bigResults = new Map();
+const bigPending = new Set();
+// Lo que guarda cada comercio para el buscador (ventraLinked y fulfillmentMode dicen si su catálogo es grande)
+const slimComercio = (c) => ({ id: c.id, name: c.name, category: c.category, logo: c.logo, ventraLinked: c.ventraLinked === true, fulfillmentMode: c.fulfillmentMode || null });
 
 // Accent- and case-insensitive: "cafe" finds "Café".
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -32,6 +38,7 @@ const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toL
 // ── Local index (only what the list shows) ──
 (function hydrateFromIndex() {
   try {
+    localStorage.removeItem('gd_search_index_v1');
     const raw = localStorage.getItem(INDEX_KEY);
     if (!raw) return;
     const idx = JSON.parse(raw);
@@ -48,7 +55,7 @@ function seedFromHome() {
   try {
     const list = JSON.parse(localStorage.getItem('gd_cached_comercios') || '[]');
     if (Array.isArray(list)) {
-      allComercios = list.filter(c => c && c.id && c.isActive !== false).map(c => ({ id: c.id, name: c.name, category: c.category, logo: c.logo }));
+      allComercios = list.filter(c => c && c.id && c.isActive !== false).map(slimComercio);
     }
   } catch (e) {}
 }
@@ -60,8 +67,9 @@ function saveIndex() {
   try {
     localStorage.setItem(INDEX_KEY, JSON.stringify({
       t: Date.now(),
-      comercios: allComercios.map(c => ({ id: c.id, name: c.name, category: c.category, logo: c.logo })),
-      products: allProducts.map(p => ({ id: p.id, name: p.name, category: p.category, price: p.price, image: p.image, comercioId: p.comercioId, comercioName: p.comercioName })),
+      comercios: allComercios.map(slimComercio),
+      // Las fotos guardadas como texto (data:…) no van: con ellas el índice pasaba los 10 MB
+      products: allProducts.map(p => ({ id: p.id, name: p.name, category: p.category, price: p.price, image: String(p.image || '').startsWith('data:') ? '' : p.image, comercioId: p.comercioId, comercioName: p.comercioName })),
     }));
   } catch (e) {
     // Quota exceeded on a huge catalog: search still works from memory.
@@ -77,7 +85,7 @@ function loadComercios() {
       allComercios = comSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(c => c.isActive !== false)
-        .map(c => ({ id: c.id, name: c.name, category: c.category, logo: c.logo }));
+        .map(slimComercio);
       comerciosLoadedAt = Date.now();
     } catch (e) {
       // Sin red o lento al abrir la app: se sigue con los del inicio y se reintenta en la próxima letra
@@ -96,32 +104,12 @@ function loadProducts() {
     // Sin comercios no hay con qué cruzar los productos: antes se descartaban todos y quedaba
     // "No encontramos nada" por 5 minutos
     if (!allComercios.length) { productsFailed = true; onDataChange?.(); return; }
-    const byId = new Map(allComercios.map(c => [c.id, c]));
-    const toItem = (d, comercioId) => {
-      const data = d.data();
-      const comercio = byId.get(comercioId);
-      if (!comercio || data.isAvailable === false || !data.name) return null;
-      return { id: d.id, name: data.name, category: data.category, price: data.price, image: data.image, comercioId, comercioName: comercio.name };
-    };
-    let fresh;
-    try {
-      const prodSnap = await withTimeout(getDocs(collectionGroup(db, 'products')), PRODUCTS_TIMEOUT_MS, 'search_products_group');
-      fresh = prodSnap.docs
-        .filter(d => d.ref.path.startsWith('comercios/'))
-        .map(d => toItem(d, d.ref.path.split('/')[1]))
-        .filter(Boolean);
-    } catch (err) {
-      console.warn('[Search] Product group query failed, loading per store', err);
-      const results = await Promise.all(allComercios.map(async (c) => {
-        try {
-          const pSnap = await withTimeout(getDocs(collection(db, 'comercios', c.id, 'products')), PRODUCTS_TIMEOUT_MS, `search_products_${c.id}`);
-          return pSnap.docs.map(d => toItem(d, c.id)).filter(Boolean);
-        } catch (e) {
-          return [];
-        }
-      }));
-      fresh = results.flat();
-    }
+    // Solo con la lista recién bajada (trae qué catálogos son grandes): si no, Paulos se bajaría entero
+    if (!comerciosLoadedAt) { productsFailed = true; onDataChange?.(); return; }
+    const toItem = (p) => (p.isAvailable === false || !p.name) ? null
+      : { id: p.id, name: p.name, category: p.category, price: p.price, image: p.image, comercioId: p.comercioId, comercioName: p.comercioName };
+    // Los catálogos chicos enteros (cada uno queda guardado 30 min en el celular); los grandes, al buscar
+    const fresh = (await loadSmallCatalogs(allComercios, 'search')).map(toItem).filter(Boolean);
     // Todo falló (cada comercio devolvió vacío): se queda con lo que tenía y se reintenta después
     if (!fresh.length && allProducts.length) return;
     allProducts = fresh;
@@ -241,15 +229,33 @@ function highlightText(text, rawQuery) {
   return `${escapeHtml(text.substring(0, index))}<span class="suggestion-highlight">${escapeHtml(text.substring(index, index + q.length))}</span>${escapeHtml(text.substring(index + q.length))}`;
 }
 
+// Lo que tienen los catálogos grandes para lo buscado (se pide una vez por palabra y se redibuja al llegar)
+function bigFor(searchTerm) {
+  const key = searchKeyOf(searchTerm);
+  if (!key || !comerciosLoadedAt || !allComercios.some(isBigCatalog)) return [];
+  if (bigResults.has(key)) return bigResults.get(key);
+  if (!bigPending.has(key)) {
+    bigPending.add(key);
+    searchBigCatalogs(allComercios, searchTerm, 20)
+      .then((list) => {
+        bigResults.set(key, list.filter((p) => p.isAvailable !== false && p.name)
+          .map((p) => ({ id: p.id, name: p.name, category: p.category, price: p.price, image: p.imageHd || p.image, comercioId: p.comercioId, comercioName: p.comercioName })));
+      })
+      .catch(() => bigResults.set(key, []))
+      .finally(() => { bigPending.delete(key); onDataChange?.(); });
+  }
+  return [];
+}
+
 function renderSuggestions(searchTerm, container) {
   const q = norm(searchTerm);
   const filteredComercios = allComercios.filter(c => norm(c.name).includes(q) || norm(c.category).includes(q)).slice(0, 4);
-  const filteredProducts = allProducts
+  const filteredProducts = allProducts.concat(bigFor(searchTerm))
     .filter(p => norm(p.name).includes(q) || norm(p.category).includes(q))
     // Names that start with the query first
     .sort((a, b) => (norm(a.name).startsWith(q) ? 0 : 1) - (norm(b.name).startsWith(q) ? 0 : 1))
     .slice(0, 6);
-  const productsPending = !productsLoadedAt && allProducts.length === 0 && !productsFailed;
+  const productsPending = (!productsLoadedAt && allProducts.length === 0 && !productsFailed) || bigPending.has(searchKeyOf(searchTerm));
 
   let html;
   if (filteredComercios.length === 0 && filteredProducts.length === 0) {

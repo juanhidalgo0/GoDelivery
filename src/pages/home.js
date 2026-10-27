@@ -1679,13 +1679,18 @@ async function renderRecurrentOrders(user, container) {
           const { clearCart, addToCart, setState } = await import('../state.js');
           const { showToast } = await import('../components/toast.js');
           const { AudioManager } = await import('../utils/audio-manager.js');
-          const { getDocs, collection } = await import('firebase/firestore');
+          const { getDocs, collection, query, where, limit } = await import('firebase/firestore');
+          const { productsByIds } = await import('../utils/catalog-reads.js');
 
           AudioManager.hapticLight();
           
-          // Fetch products from the commerce to resolve correct IDs (backward compatibility)
-          const productsSnap = await getDocs(collection(db, 'comercios', selectedOrder.comercioId, 'products'));
-          const commerceProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Solo los productos del pedido (antes se bajaba el comercio entero: miles de lecturas en un kiosco):
+          // por id y, los que no aparecen así (pedidos viejos), por nombre
+          const items = selectedOrder.items || [];
+          const commerceProducts = await productsByIds(selectedOrder.comercioId, items.map(it => it.productId || it.id));
+          const missingNames = [...new Set(items.filter(it => it.name && !commerceProducts.some(p => p.id === (it.productId || it.id))).map(it => it.name))].slice(0, 15);
+          const byName = await Promise.all(missingNames.map(name => getDocs(query(collection(db, 'comercios', selectedOrder.comercioId, 'products'), where('name', '==', name), limit(1))).catch(() => null)));
+          byName.forEach(snap => snap && snap.docs.forEach(d => commerceProducts.push({ id: d.id, ...d.data() })));
 
           // 1. Clear cart
           clearCart();
