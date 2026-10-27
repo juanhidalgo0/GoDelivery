@@ -868,6 +868,14 @@ export function renderOrderTracking(orderId, content, inModal = false, isDriverV
     // Dynamically retrieve real commerce logo and name from Firestore if needed
     if (order.comercioId && !order.isFavor && !order.isTrip) {
       if (!window.commerceCache) window.commerceCache = {};
+      // Al instante con los comercios que la app ya tiene guardados (el que se acaba de pedir está ahí)
+      if (!window.commerceCache[order.comercioId]) {
+        try {
+          const list = JSON.parse(localStorage.getItem('gd_cached_comercios') || '[]');
+          const c = Array.isArray(list) ? list.find(x => x && x.id === order.comercioId) : null;
+          if (c && c.logo) window.commerceCache[order.comercioId] = { logo: c.logo, name: c.name || order.comercioName || 'Comercio' };
+        } catch (e) { /* sin almacenamiento */ }
+      }
       if (window.commerceCache[order.comercioId]) {
         order.comercioRealLogo = window.commerceCache[order.comercioId].logo;
         order.comercioRealName = window.commerceCache[order.comercioId].name;
@@ -1244,7 +1252,11 @@ function updateUI(order, isDriverViewOverride = false) {
     serviceFee: Number(serviceFee) || 0,
     total: Number(totalAmount) || 0,
     modifiedAt: order.modifiedAt?.toMillis ? order.modifiedAt.toMillis() : (order.modifiedAt || ''),
-    shop: order.isShopper ? `${order.shopPending !== false}|${order.shopMissingCount || 0}|${order.shopReplacedCount || 0}` : ''
+    shop: order.isShopper ? `${order.shopPending !== false}|${order.shopMissingCount || 0}|${order.shopReplacedCount || 0}` : '',
+    // El logo y el nombre del comercio llegan después (se buscan aparte): sin esto la pantalla no se redibujaba
+    // y el pedido recién hecho quedaba sin logo hasta salir y volver a entrar
+    shopLogo: order.comercioRealLogo || order.comercioLogo || '',
+    shopName: order.comercioRealName || ''
   });
 
   if (container.dataset.lastTrackingFingerprint === trackingFingerprint) {
