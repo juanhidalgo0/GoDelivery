@@ -110,85 +110,80 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
     });
   }
 
-  // Load global flavors if checked
+  // Sabores (heladerías): al instante con los que la tienda ya tiene en memoria; después se confirman con la base
+  // (producto y comercio en paralelo, con tope de tiempo). Antes eran 3 lecturas seguidas sin tope y, si una
+  // tardaba, la ficha quedaba en "Cargando sabores" para siempre.
   const isUsingFlavors = product.useGlobalFlavors === true || product.useGlobalFlavors === 'true' || (product.allowedFlavors && product.allowedFlavors.length > 0);
-  let flavorsLoading = isUsingFlavors;
   let globalFlavorsGroup = null;
+  let flavorsFailed = false;
 
-  if (isUsingFlavors) {
-    import('firebase/firestore').then(async ({ doc, getDoc }) => {
-      try {
-        const { db } = await import('../firebase.js');
-        
-        let targetProduct = product;
-        try {
-          const prodSnap = await getDoc(doc(db, 'comercios', comercioId, 'products', product.id));
-          if (prodSnap.exists()) {
-            targetProduct = { id: prodSnap.id, ...prodSnap.data() };
-          }
-        } catch (e) {
-          console.error('Error fetching fresh product doc:', e);
-        }
-
-        let productCategoryName = '';
-        if (targetProduct.categoryId) {
-          try {
-            const catSnap = await getDoc(doc(db, 'comercios', comercioId, 'categories', targetProduct.categoryId));
-            if (catSnap.exists()) {
-              productCategoryName = (catSnap.data().name || '').toLowerCase();
-            }
-          } catch (e) {
-            console.error('Error fetching category name for flavor filtering:', e);
-          }
-        }
-
-        const snap = await getDoc(doc(db, 'comercios', comercioId));
-        if (snap.exists()) {
-          const data = snap.data();
-          const rawList = data.sabores || [];
-          
-          let filteredRawList = rawList.filter(f => {
-            // Discard paused or explicitly inactive flavors
-            if (f.active === false || f.status === 'inactive' || f.isPaused === true) return false;
-            // Los que el comercio marcó que no hay hoy (llave apagada en Sabores = stock 0)
-            if (f.isAvailable === true && f.stock !== undefined && f.stock !== null && f.stock !== '' && Number(f.stock) <= 0) return false;
-            return true;
-          });
-
-          // If product specifies allowedFlavors, filter to them ONLY IF they span multiple categories or represent full selection
-          const activeAllowed = targetProduct.allowedFlavors || product.allowedFlavors;
-          if (activeAllowed && Array.isArray(activeAllowed) && activeAllowed.length > 0) {
-            const normAllowed = activeAllowed.map(n => String(n).trim().toLowerCase());
-            const allowedItems = filteredRawList.filter(f => normAllowed.includes(String(f.name).trim().toLowerCase()));
-            
-            const allowedCats = new Set(allowedItems.map(f => (f.category && String(f.category).trim() !== '') ? String(f.category).trim().toLowerCase() : 'helados'));
-
-            if (allowedCats.size > 1 || allowedItems.length >= filteredRawList.length) {
-              filteredRawList = allowedItems;
-            }
-          }
-
-          const list = filteredRawList.map(f => ({
-            name: f.name,
-            category: (f.category && String(f.category).trim() !== '') ? String(f.category).trim() : 'Helados y Variedades'
-          }));
-          
-          globalFlavorsGroup = {
-            name: 'Seleccioná tus sabores',
-            multi: true,
-            required: true,
-            maxSelections: targetProduct.maxSelections || product.maxSelections || 4,
-            options: list.sort((a, b) => a.name.localeCompare(b.name))
-          };
-        }
-      } catch (err) {
-        console.error('Error fetching global flavors:', err);
-      } finally {
-        flavorsLoading = false;
-        render();
-      }
+  const buildFlavorsGroup = (rawList, targetProduct) => {
+    let filteredRawList = (rawList || []).filter(f => {
+      // Discard paused or explicitly inactive flavors
+      if (!f || f.active === false || f.status === 'inactive' || f.isPaused === true) return false;
+      // Los que el comercio marcó que no hay hoy (llave apagada en Sabores = stock 0)
+      if (f.isAvailable === true && f.stock !== undefined && f.stock !== null && f.stock !== '' && Number(f.stock) <= 0) return false;
+      return true;
     });
+
+    // If product specifies allowedFlavors, filter to them ONLY IF they span multiple categories or represent full selection
+    const activeAllowed = targetProduct.allowedFlavors || product.allowedFlavors;
+    if (activeAllowed && Array.isArray(activeAllowed) && activeAllowed.length > 0) {
+      const normAllowed = activeAllowed.map(n => String(n).trim().toLowerCase());
+      const allowedItems = filteredRawList.filter(f => normAllowed.includes(String(f.name).trim().toLowerCase()));
+
+      const allowedCats = new Set(allowedItems.map(f => (f.category && String(f.category).trim() !== '') ? String(f.category).trim().toLowerCase() : 'helados'));
+
+      if (allowedCats.size > 1 || allowedItems.length >= filteredRawList.length) {
+        filteredRawList = allowedItems;
+      }
+    }
+
+    const list = filteredRawList.map(f => ({
+      name: f.name,
+      category: (f.category && String(f.category).trim() !== '') ? String(f.category).trim() : 'Helados y Variedades'
+    }));
+
+    return {
+      name: 'Seleccioná tus sabores',
+      multi: true,
+      required: true,
+      maxSelections: targetProduct.maxSelections || product.maxSelections || 4,
+      options: list.sort((a, b) => a.name.localeCompare(b.name))
+    };
+  };
+
+  const cachedMode = getState().currentComercioMode;
+  if (isUsingFlavors && cachedMode && cachedMode.id === comercioId && Array.isArray(cachedMode.sabores)) {
+    globalFlavorsGroup = buildFlavorsGroup(cachedMode.sabores, product);
   }
+  let flavorsLoading = isUsingFlavors && !globalFlavorsGroup;
+
+  const loadFlavors = () => import('firebase/firestore').then(async ({ doc, getDoc }) => {
+    let changed = false;
+    try {
+      const { db } = await import('../firebase.js');
+      const { withTimeout } = await import('../utils/firestore-cache.js');
+      const [prodSnap, comSnap] = await withTimeout(Promise.all([
+        getDoc(doc(db, 'comercios', comercioId, 'products', product.id)).catch(() => null),
+        getDoc(doc(db, 'comercios', comercioId)),
+      ]), 8000, 'product_modal_flavors');
+      const targetProduct = prodSnap && prodSnap.exists() ? { id: prodSnap.id, ...prodSnap.data() } : product;
+      if (comSnap.exists()) {
+        const fresh = buildFlavorsGroup(comSnap.data().sabores || [], targetProduct);
+        // Solo se redibuja si cambió algo (no mueve lo que el cliente ya está eligiendo)
+        if (JSON.stringify(fresh) !== JSON.stringify(globalFlavorsGroup)) { globalFlavorsGroup = fresh; changed = true; }
+      }
+      flavorsFailed = false;
+    } catch (err) {
+      console.error('Error fetching global flavors:', err);
+      if (!globalFlavorsGroup) { flavorsFailed = true; changed = true; }
+    } finally {
+      if (flavorsLoading) { flavorsLoading = false; changed = true; }
+      if (changed) render();
+    }
+  });
+  if (isUsingFlavors) loadFlavors();
 
   const render = () => {
     const scrollEl = modalContent.querySelector('.pm-scrollable-body');
@@ -393,6 +388,12 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
       <!-- DYNAMIC SCROLLABLE BODY (ONLY FLAVOR LIST SCROLLS) -->
       <div class="pm-scrollable-body" style="flex:1; height:100%; min-height:0; overflow-y:scroll; -webkit-overflow-scrolling:touch; touch-action:pan-y; overscroll-behavior-y:contain; background: var(--color-bg-secondary);">
         <div class="pm-content" style="display: flex; flex-direction: column; min-height: 100%; box-sizing: border-box; padding: 8px 0 10px 0; touch-action: pan-y;">
+        ${flavorsFailed && !globalFlavorsGroup && !flavorsLoading ? `
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 20px; gap:10px; text-align:center;">
+            <span style="font-size: 13px; font-weight: 700; color: var(--color-text-secondary);">No pudimos cargar los sabores.</span>
+            <button type="button" id="pm-flavors-retry" class="btn btn-primary" style="padding:8px 18px; border-radius:12px; font-weight:800;">Reintentar</button>
+          </div>
+        ` : ''}
         ${flavorsLoading ? `
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 20px; gap:12px;">
             <div style="border: 3px solid var(--color-border-light); border-top: 3px solid var(--color-primary); border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite;"></div>
@@ -753,6 +754,8 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
 
     // Close button
     modalContent.querySelector('#pm-modal-close').onclick = closeModal;
+    const retryFlavors = modalContent.querySelector('#pm-flavors-retry');
+    if (retryFlavors) retryFlavors.onclick = () => { flavorsFailed = false; flavorsLoading = true; render(); loadFlavors(); };
 
     // Heart (Favorite) button
     modalContent.querySelector('#pm-modal-heart').onclick = async (e) => {

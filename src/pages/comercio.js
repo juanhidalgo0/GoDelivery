@@ -266,7 +266,8 @@ export async function renderComercio(content, isDirectMode = false) {
   const storeCtx = (data) => ({ comercio, ...data, products: [...(data.products || [])], isDirect, comercioId: resolvedComercioId, onRate: (c) => openRatingModal(c), onShare: (c) => shareStoreLink(c) });
   let marketView = null;
   // La ficha del producto lo usa para explicar quién pesa (el comercio o el repartidor)
-  setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '' });
+  // sabores: la ficha de un helado los muestra al instante con estos, sin esperar a la base
+  setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '', sabores: Array.isArray(comercio.sabores) ? comercio.sabores : null });
   try {
     safeStorage.setItem('gd_last_visited_comercio', JSON.stringify({ id: comercio.id, name: comercio.name || 'Comercio' }));
   } catch (e) {}
@@ -284,6 +285,7 @@ export async function renderComercio(content, isDirectMode = false) {
         const prevPaused = currentComercio?.isPaused;
         const freshData = snap.data();
         comercio = { id: snap.id, ...freshData };
+        setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '', sabores: Array.isArray(comercio.sabores) ? comercio.sabores : null });
         
         // Update DOM elements in real time (solo los de esta tienda)
         const logoImg = content.querySelector('.comercio-detail-logo');
