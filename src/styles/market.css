@@ -181,7 +181,10 @@
 
 /* index.css pone content-visibility: auto a todas las imágenes: con position absolute y lazy no se
    dibujaban (las fotos de rubros y promos quedaban en blanco). Igual que en tienda.css */
-.mk-page img, .mk-pairs img { content-visibility: visible; }
+.mk-page img, .mk-pairs img, .mk-rubros img { content-visibility: visible; }
+/* Y a todos los botones (button { content-visibility: auto; contain-intrinsic-size: 120px }): los que estaban fuera de
+   pantalla medían 120px hasta dibujarse. Las filas de la hoja "Categorías" saltaban al subir la hoja (parpadeo) */
+.mk-page button, .mk-pairs button, .mk-rubros button { content-visibility: visible; contain-intrinsic-size: none; }
 
 /* La barra se redibuja dentro de #mk-bar-slot: el contenedor no cuenta, así la barra queda fija
    respecto de toda la página (si no, "sticky" solo vale dentro de un contenedor de su mismo alto) */
@@ -353,3 +356,11 @@
 .mk-closed-note { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; padding: 11px 13px; border-radius: 14px; background: var(--go-paper-2); font-size: 13px; line-height: 1.4; color: var(--go-text-2); }
 .mk-closed-note > svg { flex-shrink: 0; margin-top: 1px; color: var(--go-text-3); }
 .mk-closed-note b { color: var(--go-text); }
+
+/* Catálogo online (#/tienda/): WhatsApp, cómo llegar y el pie de GO */
+.mk-links { display: flex; gap: 8px; }
+.mk-link { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 38px; border-radius: 12px; border: 1px solid var(--go-line); background: var(--go-paper); color: var(--go-text); font: 700 13px var(--go-font); text-decoration: none; }
+.mk-link.is-wa { background: #25d366; border-color: #25d366; color: #fff; }
+.mk-foot { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px 8px; text-align: center; font-size: 12px; color: var(--go-text-3); }
+.mk-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--go-text-2); font-weight: 700; text-decoration: none; }
+.mk-go { padding: 2px 6px; border-radius: 6px; background: var(--go-green); color: #fff; font-weight: 900; font-size: 11px; }

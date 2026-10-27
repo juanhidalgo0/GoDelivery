@@ -1,5 +1,5 @@
 // GoDelivery — Tienda tipo mercado (kioscos, almacenes y comercios de Ventra con miles de productos).
-// Los restaurantes siguen con la tienda de comercio.js. Acá: portada con rubros, "Lo más vendido",
+// Los restaurantes usan la misma, con los platos en lista (también en el catálogo online). Acá: portada con rubros, "Lo más vendido",
 // "Volver a pedir", una fila por rubro; tarjetas con foto arriba y "– 2 +"; buscador que busca en todo
 // el catálogo (searchKeys, sin bajar miles de productos) y "Combiná con…" al agregar.
 import { db } from '../firebase.js';
@@ -207,6 +207,24 @@ export function mountMarket(content, ctx) {
     const has = comercio.ratingAverage > 0 && comercio.ratingCount > 0;
     return `<button class="mk-rate" id="mk-rate" aria-label="${has ? 'Ver o dejar tu puntaje' : 'Puntuar este comercio'}">${icon('star', 13, '', '#f59e0b')}${has ? `${comercio.ratingAverage.toFixed(1)} <small>(${comercio.ratingCount})</small>` : '<small>Puntuar</small>'}</button>`;
   }
+  // Catálogo online (el link que comparte el comercio): escribirle por WhatsApp y cómo llegar
+  function directLinksHtml() {
+    const phone = String(comercio.whatsapp || comercio.phone || '').replace(/\D/g, '');
+    const wa = phone ? (phone.startsWith('54') ? phone : `549${phone}`) : '';
+    const maps = comercio.coords?.lat
+      ? `https://www.google.com/maps/search/?api=1&query=${comercio.coords.lat},${comercio.coords.lng}`
+      : (comercio.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(comercio.address)}` : '');
+    if (!wa && !maps) return '';
+    return `<div class="mk-links">
+      ${wa ? `<a class="mk-link is-wa" href="https://wa.me/${wa}?text=${encodeURIComponent(`¡Hola ${comercio.name}! Te escribo desde tu catálogo online.`)}" target="_blank" rel="noopener noreferrer">${icon('whatsapp', 16)}WhatsApp</a>` : ''}
+      ${maps ? `<a class="mk-link" href="${esc(maps)}" target="_blank" rel="noopener noreferrer">${icon('mapPin', 16)}Cómo llegar</a>` : ''}
+    </div>`;
+  }
+  const footHtml = () => `<footer class="mk-foot">
+      <a href="https://godelivery-magdalena.web.app/descargar.html" target="_blank" rel="noopener noreferrer"><span class="mk-go">GO!</span>Pedidos online con GO! Delivery</a>
+      <span>Magdalena · pedí a domicilio o retirá en el local</span>
+    </footer>`;
+
   function headerHtml() {
     const street = comercio.address ? String(comercio.address).split(',')[0] : '';
     const kicker = [comercio.category, street].filter(Boolean).map((x) => esc(x)).join(' · ');
@@ -214,7 +232,7 @@ export function mountMarket(content, ctx) {
     return `
       <div class="mk-hero">
         ${comercio.banner ? `<img id="comercio-banner-img" src="${esc(comercio.banner)}" alt="" decoding="async" />` : ''}
-        ${isDirect ? '' : `<button class="mk-back" id="mk-back" aria-label="Volver">${icon('back', 20)}</button>`}
+        ${isDirect ? `<button class="mk-back" id="mk-share" aria-label="Compartir">${icon('share', 18)}</button>` : `<button class="mk-back" id="mk-back" aria-label="Volver">${icon('back', 20)}</button>`}
         <button class="mk-fav${isFavStore() ? ' is-on' : ''}" id="mk-fav" aria-label="Guardar en favoritos" aria-pressed="${isFavStore()}">${icon('heart', 19)}</button>
       </div>
       <div class="mk-head comercio-info">
@@ -231,6 +249,7 @@ export function mountMarket(content, ctx) {
             <span class="mk-fact" id="comercio-status-badge">${statusText()}</span>
             <span class="mk-fact" id="mk-fee"${fee ? '' : ' hidden'}>${fee}</span>
           </div>
+          ${isDirect ? directLinksHtml() : ''}
         </div>
         <div id="comercio-pause-banner" class="mk-paused" style="display:${comercio.isPaused ? 'flex' : 'none'}">${icon('pause', 16)} El comercio pausó los pedidos por un rato.</div>
         ${!comercio.isPaused && !isOpenNow() ? `<div class="mk-closed-note">${icon('clock', 16)}<span><b>Ahora está cerrado.</b> Podés mirar ${menu ? 'el menú' : 'los productos'} y pedir cuando abra${opensAtText(comercio) ? ` (${esc(opensAtText(comercio))})` : ''}.</span></div>` : ''}
@@ -442,7 +461,7 @@ export function mountMarket(content, ctx) {
   }
 
   // ─── dibujar
-  content.innerHTML = `<div class="mk-page${isDirect ? ' is-direct' : ''}">${headerHtml()}<div id="mk-bar-slot">${barHtml()}</div><main class="mk-main" id="mk-main"></main><div class="mk-pairs" id="mk-pairs" hidden></div></div>`;
+  content.innerHTML = `<div class="mk-page${isDirect ? ' is-direct' : ''}">${headerHtml()}<div id="mk-bar-slot">${barHtml()}</div><main class="mk-main" id="mk-main"></main>${isDirect ? footHtml() : ''}<div class="mk-pairs" id="mk-pairs" hidden></div></div>`;
   const page = content.querySelector('.mk-page');
   const main = page.querySelector('#mk-main');
 
@@ -503,14 +522,14 @@ export function mountMarket(content, ctx) {
     }, { replace });
     if (view.type === 'cat') loadCategory(view.id);
     render();
-    if (scroll) scrollToMain();
+    if (scroll) scrollToMain(view.type !== 'home');
     const chip = page.querySelector('#mk-chips .is-on');
     if (chip) chip.parentElement.scrollTo({ left: chip.offsetLeft - 40, behavior: 'smooth' });
   }
   function openSub(sub) {
     navTo(() => { view = { ...view, sub }; });
     renderMain();
-    scrollToMain();
+    scrollToMain(true);
   }
 
   // ─── subcategorías: bajar a su sección y marcar la que se está viendo
@@ -565,12 +584,14 @@ export function mountMarket(content, ctx) {
     return null;
   }
   const scrollTopNow = () => { const s = scroller(); return s ? s.scrollTop : window.scrollY; };
-  function scrollToMain() {
+  // Deja el principio de la lista justo debajo de la barra. Sin force solo sube (al buscar o volver a Inicio); con
+  // force (al elegir una categoría) también baja, así los botones de categorías quedan arriba
+  function scrollToMain(force = false) {
     const bar = page.querySelector('#mk-bar');
     const s = scroller();
     const base = s ? s.getBoundingClientRect().top : 0;
     const top = main.getBoundingClientRect().top - base + scrollTopNow() - (bar?.offsetHeight || 0) - 8;
-    if (scrollTopNow() > top) (s || window).scrollTo({ top, behavior: 'smooth' });
+    if (scrollTopNow() > top || (force && Math.abs(scrollTopNow() - top) > 2)) (s || window).scrollTo({ top, behavior: 'smooth' });
   }
 
   // Flechas de las filas en PC (con el mouse no se puede deslizar de costado)
@@ -726,6 +747,7 @@ export function mountMarket(content, ctx) {
   page.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('#mk-back')) { e.preventDefault(); goBack(); return; }
+    if (t.closest('#mk-share')) { if (ctx.onShare) ctx.onShare(comercio); return; }
     if (t.closest('#mk-fav')) { toggleFavStore(); return; }
     if (t.closest('#mk-rate')) { if (ctx.onRate) ctx.onRate(comercio); return; }
     const scrollBtn = t.closest('[data-scroll]');

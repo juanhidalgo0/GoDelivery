@@ -261,10 +261,9 @@ export async function renderComercio(content, isDirectMode = false) {
   const resolvedComercioId = comercio.id;
   // Kioscos, almacenes y comercios de Ventra: tienda tipo mercado (comercio-market.js)
   const isMarket = isMarketStore(comercio);
-  // En la app, restaurantes y demás también usan esa tienda (con los platos en lista). El catálogo online de un
-  // restaurante (#/tienda/) sigue con su diseño propio.
-  const useStore = isMarket || !isDirect;
-  const storeCtx = (data) => ({ comercio, ...data, products: [...(data.products || [])], isDirect, comercioId: resolvedComercioId, onRate: (c) => openRatingModal(c) });
+  // Restaurantes y demás también usan esa tienda (con los platos en lista), en la app y en el catálogo online (#/tienda/)
+  const useStore = true;
+  const storeCtx = (data) => ({ comercio, ...data, products: [...(data.products || [])], isDirect, comercioId: resolvedComercioId, onRate: (c) => openRatingModal(c), onShare: (c) => shareStoreLink(c) });
   let marketView = null;
   // La ficha del producto lo usa para explicar quién pesa (el comercio o el repartidor)
   setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '' });
