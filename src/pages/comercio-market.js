@@ -479,28 +479,25 @@ export function mountMarket(content, ctx) {
   function renderMain() { main.innerHTML = mainHtml(); updateArrows(); }
   const render = () => { renderBar(); renderMain(); if (menu) requestAnimationFrame(spySub); };
 
-  // ─── historial: cada categoría, "Ver todo" o búsqueda es un paso que el "atrás" deshace sin salir de la tienda.
-  // Cada paso guarda dónde estaba la pantalla (y), así al volver queda en el mismo lugar.
+  // ─── historial: la tienda ocupa un solo paso. Elegir una categoría, "Ver todo" o buscar reemplaza ese paso (no
+  // agrega otro), así el "atrás" sale de la tienda a la página anterior en vez de recorrer las categorías.
+  // El paso guarda la vista y dónde estaba la pantalla (y) para volver a la tienda tal como quedó.
   const sameAs = (v, q) => JSON.stringify(v) === JSON.stringify(view) && (q || '') === searchText;
   const saveScroll = () => { try { history.replaceState({ ...(history.state || {}), y: scrollTopNow() }, ''); } catch (e) { /* sin historial */ } };
-  function navTo(change, { replace = false } = {}) {
-    if (!replace) saveScroll();
+  function navTo(change) {
     change();
-    const s = history.state || {};
-    if (!replace && s.mkNav === comercioId && sameAs(s.v, s.q)) return;
-    if (!replace && !s.mkNav && sameAs({ type: 'home' }, '')) return;
-    const next = { mkNav: comercioId, v: view, q: searchText, y: null };
-    try { replace ? history.replaceState(next, '') : history.pushState(next, ''); } catch (e) { /* sin historial */ }
+    try { history.replaceState({ ...(history.state || {}), mkNav: comercioId, v: view, q: searchText, y: null }, ''); } catch (e) { /* sin historial */ }
   }
   function restoreScroll(y) {
     requestAnimationFrame(() => { if (y == null) scrollToMain(); else (scroller() || window).scrollTo({ top: y }); });
   }
   function onNavPop(e) {
     const s = e.state || {};
-    // La hoja de categorías y los modales atienden su propio paso
-    if (s.mkRubros || s.isModalId || (s.mkNav && s.mkNav !== comercioId)) return;
-    const v = s.mkNav ? s.v : { type: 'home' };
-    const q = s.mkNav ? (s.q || '') : '';
+    // La hoja de categorías y los modales atienden su propio paso; un paso que no es de esta tienda es que se está
+    // saliendo (no se redibuja Inicio antes de irse)
+    if (s.mkRubros || s.isModalId || s.mkNav !== comercioId) return;
+    const v = s.v || { type: 'home' };
+    const q = s.q || '';
     if (sameAs(v, q)) return;
     view = v; searchText = q; searchOpen = !!q;
     hideSuggest();
@@ -511,7 +508,7 @@ export function mountMarket(content, ctx) {
   }
   window.addEventListener('popstate', onNavPop);
 
-  function go(target, { scroll = true, sub = '', replace = false } = {}) {
+  function go(target, { scroll = true, sub = '' } = {}) {
     // Menú: una categoría no es otra pantalla, es bajar hasta su sección (desde la hoja de categorías, por ejemplo)
     if (menu && target.startsWith('cat:')) { jumpTo(target.slice(4)); return; }
     navTo(() => {
@@ -519,7 +516,7 @@ export function mountMarket(content, ctx) {
       if (target === 'home') view = { type: 'home' };
       else if (target === 'best' || target === 'offers' || target === 'favs') view = { type: target };
       else if (target.startsWith('cat:')) view = { type: 'cat', id: target.slice(4), sub };
-    }, { replace });
+    });
     if (view.type === 'cat') loadCategory(view.id);
     render();
     if (scroll) scrollToMain(view.type !== 'home');
@@ -830,45 +827,42 @@ export function mountMarket(content, ctx) {
     const input = el.querySelector('input');
     const list = el.querySelector('.mk-rubros-list');
     input.addEventListener('input', () => { list.innerHTML = rubrosListHtml(norm(input.value.trim())); list.scrollTop = 0; });
-    // El botón "atrás" del celular cierra la hoja y no la tienda. Al elegir algo, el paso de la hoja pasa a ser el de
-    // lo elegido (replace): si se volviera atrás y después se agregara el paso, el "atrás" pendiente se lo comería.
+    // El botón "atrás" del celular cierra la hoja y no la tienda (la hoja agrega su propio paso)
     const onPop = () => closeRubros(true);
     saveScroll();
     window.history.pushState({ mkRubros: true }, '');
     window.addEventListener('popstate', onPop);
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-close]')) { closeRubros(); return; }
+      // Al elegir, la hoja se cierra con su "atrás" y lo elegido se aplica después, sobre el paso de la tienda
       if (e.target.closest('[data-find]')) {
         const q = input.value.trim();
-        closeRubros(true);
-        navTo(() => { searchOpen = true; searchText = q; }, { replace: true });
-        render(); scrollToMain(); runSearch();
+        closeRubros(false, () => {
+          navTo(() => { searchOpen = true; searchText = q; });
+          render(); scrollToMain(); runSearch();
+        });
         return;
       }
       const row = e.target.closest('[data-go]');
       if (!row) return;
-      if (menu) {
-        // Menú: bajar a la sección. Si había que volver al menú (desde Ofertas o una búsqueda), ese es el paso de la hoja
-        const away = view.type !== 'home' || !!searchText;
-        closeRubros(away);
-        if (away) { navTo(() => { view = { type: 'home' }; searchText = ''; searchOpen = false; }, { replace: true }); render(); }
-        jumpTo(row.dataset.go.slice(4));
-        return;
-      }
-      closeRubros(true);
-      go(row.dataset.go, { sub: row.dataset.subAfter || '', replace: true });
+      if (menu) { closeRubros(false, () => jumpTo(row.dataset.go.slice(4))); return; }
+      closeRubros(false, () => go(row.dataset.go, { sub: row.dataset.subAfter || '' }));
     });
     const onKey = (e) => { if (e.key === 'Escape') closeRubros(); };
     document.addEventListener('keydown', onKey);
     rubros = { el, onPop, onKey };
   }
-  function closeRubros(fromPop = false) {
+  // then: lo que se eligió en la hoja, que corre cuando el "atrás" de la hoja ya volvió al paso de la tienda
+  function closeRubros(fromPop = false, then = null) {
     if (!rubros) return;
     const { el, onPop, onKey } = rubros;
     rubros = null;
     window.removeEventListener('popstate', onPop);
     document.removeEventListener('keydown', onKey);
-    if (!fromPop && window.history.state?.mkRubros) window.history.back();
+    if (!fromPop && window.history.state?.mkRubros) {
+      if (then) window.addEventListener('popstate', () => setTimeout(then, 0), { once: true });
+      window.history.back();
+    } else if (then) then();
     el.classList.remove('is-open');
     setTimeout(() => el.remove(), 240);
   }
@@ -907,10 +901,8 @@ export function mountMarket(content, ctx) {
       + (pop.length ? `<b>Lo que más se busca</b><div>${pop.map((c) => `<button class="mk-chip is-small" data-go="cat:${esc(c.parentCategoryId || c.id)}" data-sub-after="${c.parentCategoryId ? esc(c.id) : ''}">${esc(c.name)}</button>`).join('')}</div>` : '');
     box.hidden = false;
   }
-  // Escribir: el primer carácter abre un paso en el historial (el "atrás" vuelve a donde estaba); lo demás lo actualiza
   function setSearch(text) {
-    const was = searchText;
-    navTo(() => { searchText = text; }, { replace: !!was || !text });
+    navTo(() => { searchText = text; });
   }
   function hideSuggest() { const box = page.querySelector('#mk-suggest'); if (box) box.hidden = true; }
 
@@ -925,11 +917,9 @@ export function mountMarket(content, ctx) {
     page.querySelector('#mk-search-cancel').addEventListener('click', (e) => {
       e.preventDefault();
       hideSuggest();
-      // Si la búsqueda abrió un paso, "Cancelar" es lo mismo que "atrás": vuelve a donde estaba
-      if (searchText && history.state?.mkNav === comercioId && history.state.q) { history.back(); return; }
       const had = !!searchText;
-      searchOpen = false; searchText = '';
-      if (had) render(); else page.querySelector('#mk-bar').classList.remove('is-searching');
+      searchOpen = false;
+      if (had) { navTo(() => { searchText = ''; }); render(); } else page.querySelector('#mk-bar').classList.remove('is-searching');
     });
     const input = page.querySelector('#mk-search');
     const clear = page.querySelector('#mk-search-clear');

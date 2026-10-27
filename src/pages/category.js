@@ -124,31 +124,36 @@ export async function renderCategoryPage(categoryName, content) {
     };
     comercios.sort((a, b) => seedHash(a.id + '-' + hourSeed) - seedHash(b.id + '-' + hourSeed));
 
-    // Fetch all products of these comercios in parallel
+    // Los productos de todos los comercios (miles con un kiosco): solo los usan el buscador y las vistas de productos.
+    // Antes se bajaban siempre y la lista de comercios no aparecía hasta terminar; ahora se piden al buscar
     let allProducts = [];
-    try {
-      const promises = comercios.map(async (c) => {
-        const pSnap = await getDocs(collection(db, 'comercios', c.id, 'products'));
-        return pSnap.docs.map(d => ({
-          id: d.id,
-          comercioId: c.id,
-          comercioName: c.name,
-          ...d.data()
-        }));
-      });
-      const results = await Promise.all(promises);
-      allProducts = results.flat().filter(p => p.isActive !== false);
+    let productsLoad = null;
+    const loadProducts = () => productsLoad || (productsLoad = (async () => {
+      try {
+        const promises = comercios.map(async (c) => {
+          const pSnap = await getDocs(collection(db, 'comercios', c.id, 'products'));
+          return pSnap.docs.map(d => ({
+            id: d.id,
+            comercioId: c.id,
+            comercioName: c.name,
+            ...d.data()
+          }));
+        });
+        const results = await Promise.all(promises);
+        allProducts = results.flat().filter(p => p.isActive !== false);
 
-      if (categoryName === 'Solo En App') {
-        allProducts = allProducts.filter(p => p.onlyInApp === true);
-      }
+        if (categoryName === 'Solo En App') {
+          allProducts = allProducts.filter(p => p.onlyInApp === true);
+        }
 
-      if (isSpecialProductsView) {
-        allProducts = allProducts.sort(() => 0.5 - Math.random());
+        if (isSpecialProductsView) {
+          allProducts = allProducts.sort(() => 0.5 - Math.random());
+        }
+      } catch (err) {
+        console.warn('Error fetching products for category:', err);
       }
-    } catch (err) {
-      console.warn('Error fetching products for category:', err);
-    }
+    })());
+    if (isSpecialProductsView) await loadProducts();
 
     let currentFilters = {
       openOnly: false,
@@ -408,6 +413,8 @@ export async function renderCategoryPage(categoryName, content) {
 
     const triggerFilterAndRender = () => {
       const s = (searchInput?.value || '').toLowerCase().trim();
+      // Primera búsqueda: los comercios ya, los productos cuando lleguen
+      if (s && !productsLoad) loadProducts().then(() => { if ((searchInput?.value || '').trim()) triggerFilterAndRender(); });
       let filteredComs = comercios;
       let filteredProds = isSpecialProductsView ? allProducts : [];
 
