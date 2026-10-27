@@ -2407,17 +2407,21 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         }
       }
 
-      // "Compra el repartidor": el pedido se paga al recibirlo (efectivo o transferencia) y no
-      // entra lo agotado
+      // Lo pausado o agotado no entra en ningún comercio: la tienda muestra el menú guardado en el
+      // teléfono mientras se actualiza, así que un producto recién pausado puede llegar al carrito
+      for (const [cId, g] of commerceEntries) {
+        for (const item of g.items) {
+          const pData = productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path].data();
+          if (pData.isAvailable === false) throw new Error(`"${pData.name}" no está disponible ahora en ${g.comercioName}.`);
+        }
+      }
+
+      // "Compra el repartidor": el pedido se paga al recibirlo (efectivo o transferencia)
       for (const [cId, g] of commerceEntries) {
         const cData = commerceDataMap[cId];
         if (!shopper.isShopperCommerce(cData)) continue;
         if (shopper.isOnlinePayment(paymentMethod)) {
           throw new Error(`En ${g.comercioName} el pedido lo compra el repartidor: pagalo en efectivo o por transferencia al recibirlo.`);
-        }
-        for (const item of g.items) {
-          const pData = productDocsMap[db.collection("comercios").doc(cId).collection("products").doc(item.product.id).path].data();
-          if (pData.isAvailable === false) throw new Error(`"${pData.name}" no está disponible ahora en ${g.comercioName}.`);
         }
       }
 

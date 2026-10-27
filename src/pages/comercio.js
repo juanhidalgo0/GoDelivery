@@ -39,10 +39,93 @@ let currentComercio = null;
 let currentActiveOrder = null;
 const memoryCommerceCache = new Map();
 
+// El menú guardado se muestra aunque sea viejo y se actualiza por detrás (antes se tiraba a las 4 h
+// y la tienda quedaba en gris esperando al servidor). Más de una semana ya no vale la pena.
+const MENU_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const PREVIEW_PRODUCTS = 30;
+
+// Cargas del menú en curso: la precarga (al tocar la tarjeta) y la página usan la misma
+const menuLoads = new Map();
+
+// Si la tanda llegó al tope (comercios con miles de productos ocultos, como los de Ventra), se
+// piden aparte los que están a la venta: si no, los publicados podían quedar afuera de la tanda
+async function withAvailable(comercioId, list, max, catId) {
+  if (list.length < max) return list;
+  const filters = [where('isAvailable', '==', true), ...(catId ? [where('categoryId', '==', catId)] : [])];
+  const snap = await getDocsOptimized(
+    query(collection(db, 'comercios', comercioId, 'products'), ...filters, limit(max)),
+    `comercio_products_${comercioId}_avail_${catId || 'all'}`,
+    2 * 60 * 1000
+  ).catch(() => ({ docs: [] }));
+  const seen = new Set(list.map(p => p.id));
+  return [...list, ...(snap.docs || []).filter(d => !seen.has(d.id)).map(d => ({ id: d.id, ...d.data() }))];
+}
+
+function loadMenu(comercioId) {
+  const running = menuLoads.get(comercioId);
+  if (running) return running;
+  // getDocsOptimized nunca falla: ante un error devuelve una respuesta vacía marcada con error
+  const catsP = getDocsOptimized(
+    query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order')),
+    `comercio_categories_${comercioId}`,
+    2 * 60 * 1000
+  );
+  const offersP = getDocsOptimized(
+    query(collection(db, 'offers'), where('comercioId', '==', comercioId), where('active', '==', true)),
+    `comercio_offers_${comercioId}`,
+    5 * 60 * 1000
+  );
+  const prodsP = getDocsOptimized(
+    // 100 silently hid the rest of bigger menus. 2 min cache instead of 15 so a product the
+    // commerce just paused or ran out of doesn't keep showing as available.
+    query(collection(db, 'comercios', comercioId, 'products'), limit(400)),
+    `comercio_products_${comercioId}_cat_all`,
+    2 * 60 * 1000
+  );
+  const entry = { catsP, offersP, result: null };
+  entry.full = (async () => {
+    const [catsSnap, offersSnap, prodSnap] = await Promise.all([catsP, offersP, prodsP]);
+    const categories = (catsSnap.docs || []).map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false);
+    const activeOffers = (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+    const products = await withAvailable(comercioId, (prodSnap.docs || []).map(d => ({ id: d.id, ...d.data() })), 400, null);
+    const snaps = [catsSnap, offersSnap, prodSnap];
+    entry.result = {
+      categories, activeOffers, products,
+      hadLoadError: snaps.some(s => s?.error),
+      // El motivo va en el mensaje: si es un timeout o falta de red, el detector lo marca como red
+      reasons: [...new Set(snaps.map(s => s?.reason).filter(Boolean))].join(' | ')
+    };
+    return entry.result;
+  })();
+  menuLoads.set(comercioId, entry);
+  // Pasado un rato se vuelve a pedir (lo pausado o agotado tiene que llegar)
+  entry.full.finally(() => setTimeout(() => { if (menuLoads.get(comercioId) === entry) menuLoads.delete(comercioId); }, 30000));
+  return entry;
+}
+
+/** Empieza a cargar la tienda antes de entrar (al apoyar el dedo en la tarjeta). */
+export function prefetchComercio(comercioId) {
+  if (!comercioId || memoryCommerceCache.has(comercioId) || menuLoads.has(comercioId)) return;
+  loadMenu(comercioId);
+}
+
+const productSkeletonHtml = () => Array(4).fill(`
+  <div class="product-card skeleton-card" style="display:flex; justify-content:space-between; gap:16px; padding:16px;">
+    <div style="flex:1;">
+      <div class="skeleton skeleton-title" style="width:80%; height:16px; margin-bottom:8px;"></div>
+      <div class="skeleton skeleton-text" style="width:40%; height:12px;"></div>
+    </div>
+    <div class="skeleton" style="width:110px; height:110px; border-radius:14px;"></div>
+  </div>
+`).join('');
+
 export async function renderComercio(content, isDirectMode = false) {
   if (!content) {
     content = document.getElementById('overlay-render-target') || document.getElementById('app-content');
   }
+  // Marca de esta visita: lo que llega tarde de otra tienda no se dibuja encima
+  const renderToken = {};
+  content._comercioRender = renderToken;
   const params = getRouteParams();
   let comercioId = params.id;
   if (!comercioId) {
@@ -275,17 +358,18 @@ export async function renderComercio(content, isDirectMode = false) {
   // Proactive fee calculation
   import('./cart.js').then(m => m.calculateAllFees && m.calculateAllFees(resolvedComercioId));
 
-  let cachedData = memoryCommerceCache.get(resolvedComercioId) || null;
+  const menuLoad = loadMenu(resolvedComercioId);
+  // La precarga ya terminó: se dibuja con eso, sin pasar por el gris
+  let cachedData = memoryCommerceCache.get(resolvedComercioId)
+    || (menuLoad.result && !menuLoad.result.hadLoadError ? { comercio, ...menuLoad.result } : null);
   if (!cachedData) {
     try {
       const rawCache = localStorage.getItem(`gd_comercio_cache_${resolvedComercioId}`);
       if (rawCache) {
         const parsed = JSON.parse(rawCache);
-        if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < 14400000)) {
+        if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < MENU_CACHE_MAX_AGE_MS)) {
           cachedData = parsed.data;
           memoryCommerceCache.set(resolvedComercioId, cachedData);
-        } else {
-          console.log('[Cache] Menu cache expired (4 hours limit) or invalid');
         }
       }
     } catch (err) {
@@ -323,102 +407,40 @@ export async function renderComercio(content, isDirectMode = false) {
       }
     } catch (e) {}
   } else {
-    // Skeleton (only if no cache)
-    content.innerHTML = `
-      <div class="comercio-page">
-        <div class="comercio-header skeleton" style="height:200px;"></div>
-        <div class="comercio-info">
-          <div class="comercio-info-card">
-            <div style="display:flex; gap:16px; align-items:center; margin-bottom:16px;">
-              <div class="skeleton skeleton-circle" style="width:64px; height:64px;"></div>
-              <div style="flex:1;">
-                <div class="skeleton skeleton-title" style="width:60%; height:24px;"></div>
-                <div class="skeleton skeleton-text" style="width:30%; height:16px;"></div>
-              </div>
-            </div>
-            <div class="skeleton skeleton-text" style="width:100%; height:14px; margin-bottom:8px;"></div>
-            <div class="skeleton skeleton-text" style="width:80%; height:14px;"></div>
-          </div>
-        </div>
-        <div class="comercio-products">
-          <div class="products-grid" style="padding:16px;">
-            ${Array(4).fill(`
-              <div class="product-card skeleton-card">
-                <div class="skeleton" style="width:100%; aspect-ratio:1; border-radius:12px;"></div>
-                <div class="product-card-info">
-                  <div class="skeleton skeleton-title" style="width:80%; height:16px; margin-top:8px;"></div>
-                  <div class="skeleton skeleton-text" style="width:40%; height:12px; margin-top:8px;"></div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-    `;
+    // Primera vez: cabecera al instante y gris solo donde van los productos
+    const paintPartial = (categories, products, activeOffers) => {
+      renderPage(content, comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory, isDirect);
+      const grid = content.querySelector('#comercio-products');
+      if (grid && !products.length) grid.innerHTML = productSkeletonHtml();
+    };
+    paintPartial([], [], []);
+    // Una tanda chica para llenar la pantalla mientras llega el menú entero
+    Promise.all([
+      menuLoad.catsP,
+      menuLoad.offersP,
+      withTimeout(getDocs(query(collection(db, 'comercios', resolvedComercioId, 'products'), where('isAvailable', '==', true), limit(PREVIEW_PRODUCTS))), 8000, 'comercio_preview')
+    ]).then(([catsSnap, offersSnap, prevSnap]) => {
+      if (menuLoad.result || content._comercioRender !== renderToken) return;
+      paintPartial(
+        (catsSnap.docs || []).map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false),
+        prevSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }))
+      );
+    }).catch(() => {});
   }
 
   try {
-    let catsSnap = null;
-    let offersSnap = null;
-    let initialProdSnap = null;
+    const menu = await menuLoad.full;
+    const { categories, activeOffers, hadLoadError } = menu;
+    // Copia propia: las categorías que se abren después le suman productos
+    let products = [...menu.products];
 
-    const [catsRes, offersRes, prodsRes] = await Promise.allSettled([
-      getDocsOptimized(
-        query(collection(db, 'comercios', resolvedComercioId, 'categories'), orderBy('order')),
-        `comercio_categories_${resolvedComercioId}`,
-        2 * 60 * 1000
-      ),
-      getDocsOptimized(
-        query(collection(db, 'offers'), where('comercioId', '==', resolvedComercioId), where('active', '==', true)),
-        `comercio_offers_${resolvedComercioId}`,
-        5 * 60 * 1000
-      ),
-      getDocsOptimized(
-        // 100 silently hid the rest of bigger menus. 2 min cache instead of 15 so a product the
-        // commerce just paused or ran out of doesn't keep showing as available.
-        query(collection(db, 'comercios', resolvedComercioId, 'products'), limit(400)),
-        `comercio_products_${resolvedComercioId}_cat_all`,
-        2 * 60 * 1000
-      )
-    ]);
-
-    // getDocsOptimized already retries via cache internally and never throws
-    // (it resolves to an { error: true } empty snapshot on failure), so a
-    // second sequential getDocs() here would only double the wait time for
-    // no benefit. We just track whether any of them errored, to inform the
-    // user instead of silently rendering an empty menu.
-    catsSnap = catsRes.status === 'fulfilled' ? catsRes.value : { docs: [], error: true };
-    offersSnap = offersRes.status === 'fulfilled' ? offersRes.value : { docs: [], error: true };
-    initialProdSnap = prodsRes.status === 'fulfilled' ? prodsRes.value : { docs: [], error: true };
-
-    const hadLoadError = Boolean(catsSnap?.error || offersSnap?.error || initialProdSnap?.error);
-
-    const categories = (catsSnap.docs || []).map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false);
-    const activeOffers = (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
-    let products = (initialProdSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
-
-    // Si la tanda llegó al tope (comercios con miles de productos ocultos, como los de Ventra), se
-    // piden aparte los que están a la venta: si no, los publicados podían quedar afuera de la tanda
-    products = await withAvailable(products, 400, null);
     if (hadLoadError && products.length === 0 && categories.length === 0 && !cachedData) {
-      // El motivo va en el mensaje: si es un timeout o falta de red, el detector lo marca como red
-      const reasons = [...new Set([catsSnap, offersSnap, initialProdSnap].map(x => x?.reason).filter(Boolean))].join(' | ');
-      throw new Error(`Failed to load comercio menu data (categories/products query error)${reasons ? `: ${reasons}` : ''}`);
+      throw new Error(`Failed to load comercio menu data (categories/products query error)${menu.reasons ? `: ${menu.reasons}` : ''}`);
     }
 
     // Helper to load products for a specific category dynamically
     const loadCategoryProducts = async (catId) => {
-    async function withAvailable(list, max, catId) {
-      if (list.length < max) return list;
-      const filters = [where('isAvailable', '==', true), ...(catId ? [where('categoryId', '==', catId)] : [])];
-      const snap = await getDocsOptimized(
-        query(collection(db, 'comercios', resolvedComercioId, 'products'), ...filters, limit(max)),
-        `comercio_products_${resolvedComercioId}_avail_${catId || 'all'}`,
-        2 * 60 * 1000
-      ).catch(() => ({ docs: [] }));
-      const seen = new Set(list.map(p => p.id));
-      return [...list, ...(snap.docs || []).filter(d => !seen.has(d.id)).map(d => ({ id: d.id, ...d.data() }))];
-    }
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
       if (catId === 'all') {
@@ -447,8 +469,8 @@ export async function renderComercio(content, isDirectMode = false) {
       try {
         const prodsSnap = await getDocsOptimized(q, cacheKey, 2 * 60 * 1000);
         const list = (prodsSnap.docs || []).map(d => ({ id: d.id, ...d.data() }));
-        if (catId === 'all') return withAvailable(list, 400, null);
-        if (catId !== 'discounts' && catId !== 'favorites') return withAvailable(list, 300, catId);
+        if (catId === 'all') return withAvailable(resolvedComercioId, list, 400, null);
+        if (catId !== 'discounts' && catId !== 'favorites') return withAvailable(resolvedComercioId, list, 300, catId);
         return list;
       } catch (err) {
         try {
@@ -460,13 +482,16 @@ export async function renderComercio(content, isDirectMode = false) {
       }
     };
 
-    // Store in memory & localStorage for next instant load
+    // Store in memory & localStorage for next instant load. Con un error de red no se pisa lo
+    // guardado: el menú guardado ahora dura una semana y quedaría vacío todo ese tiempo
     const cachePayload = { comercio, categories, products, activeOffers };
-    memoryCommerceCache.set(resolvedComercioId, cachePayload);
-    safeStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify({
-      timestamp: Date.now(),
-      data: cachePayload
-    }));
+    if (!hadLoadError) {
+      memoryCommerceCache.set(resolvedComercioId, cachePayload);
+      safeStorage.setItem(`gd_comercio_cache_${resolvedComercioId}`, JSON.stringify({
+        timestamp: Date.now(),
+        data: cachePayload
+      }));
+    }
 
     setState('activeOffers', activeOffers);
     setState('currentProducts', products);
@@ -1149,7 +1174,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
 
       <!-- Banner Layer -->
       <div class="comercio-header" style="position: relative; height: 50vw; max-height: 250px; margin-top: calc(-56px - max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px))); overflow: hidden;">
-        ${comercio.banner ? `<img id="comercio-banner-img" src="${comercio.banner}" alt="${comercio.name}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover; will-change: transform;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
+        ${comercio.banner ? `<img id="comercio-banner-img" src="${comercio.banner}" alt="${comercio.name}" fetchpriority="high" decoding="async" style="width: 100%; height: 100%; object-fit: cover; will-change: transform;" />` : `<div style="width:100%;height:100%;background:var(--color-primary-light);display:flex;align-items:center;justify-content:center;color:var(--color-primary);">${icon('store', 60)}</div>`}
         <div class="comercio-header-overlay" style="position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%);"></div>
       </div>
     
@@ -1171,7 +1196,7 @@ function renderPage(targetContent, comercio, categories, products, activeCategor
           
           <div style="display: flex; align-items: center; gap: 14px;">
             ${comercio.logo
-              ? `<img src="${escapeHtml(comercio.logo)}" alt="" loading="lazy" decoding="async" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 2px 8px rgba(11,11,12,0.12); background: white; flex-shrink: 0;" />`
+              ? `<img src="${escapeHtml(comercio.logo)}" alt="" fetchpriority="high" decoding="async" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 4px solid var(--color-surface); margin-top: -48px; box-shadow: 0 2px 8px rgba(11,11,12,0.12); background: white; flex-shrink: 0;" />`
               : `<div style="width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--color-surface); margin-top: -48px; display:flex;align-items:center;justify-content:center;background:var(--go-paper-2); box-shadow: 0 2px 8px rgba(11,11,12,0.12); flex-shrink: 0;">${icon('store', 28)}</div>`
             }
             <div style="display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-top: 4px;">
@@ -1959,7 +1984,8 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
   }
 
   allFilteredProducts = filtered;
-  displayedCount = 100;
+  // Lo que entra en pantalla y un poco más: el resto se suma al bajar
+  displayedCount = 30;
 
   const renderBatch = (startIndex, count) => {
     const batch = allFilteredProducts.slice(startIndex, startIndex + count);

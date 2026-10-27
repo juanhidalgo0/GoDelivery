@@ -1568,6 +1568,15 @@ function scheduleIdlePrefetch() {
   } else {
     window.addEventListener('load', () => setTimeout(prefetchHighTrafficModules, 1800), { once: true });
   }
+
+  // La tienda empieza a cargar apenas se apoya el dedo en su tarjeta (del inicio, el buscador o
+  // los carruseles): entre el toque y la página nueva se ganan unos cientos de milisegundos
+  document.addEventListener('pointerdown', (e) => {
+    const link = e.target.closest?.('a[href^="#/comercio/"]');
+    if (!link) return;
+    const id = decodeURIComponent(link.getAttribute('href').slice('#/comercio/'.length).split(/[?#/]/)[0] || '');
+    if (id) import('./pages/comercio.js').then(m => m.prefetchComercio(id)).catch(() => {});
+  }, { passive: true, capture: true });
 }
 
 // Start

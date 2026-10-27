@@ -416,8 +416,10 @@ export async function renderHome(content) {
   }
 
   // Safety Fallback Timer for iPhone / slow WebKit connections (never leave skeleton frozen > 300ms)
+  // Con la lista vacía no se apaga: mostraba "No hay comercios" (y la búsqueda no encontraba nada)
+  // antes de que llegaran; lo apagan la respuesta del servidor o su error
   const homeSafetyTimer = setTimeout(() => {
-    if (isLoadingComercios) {
+    if (isLoadingComercios && comercios.length > 0) {
       console.log('[Home Safety Timer] Forcing isLoadingComercios = false to prevent skeleton freeze on iOS');
       isLoadingComercios = false;
       doActualHomeRender();
@@ -448,6 +450,10 @@ export async function renderHome(content) {
     }
   }).catch((err) => {
     console.warn('[Parallel getDocs comercios warning]', err);
+    if (!listenerDelivered && isLoadingComercios) {
+      isLoadingComercios = false;
+      doActualHomeRender();
+    }
   });
   }, 1500);
 
@@ -455,10 +461,12 @@ export async function renderHome(content) {
   let lastComerciosSignature = '';
   try {
     unsubComercios = onSnapshot(comerciosQuery, (comSnap) => {
-      listenerDelivered = true;
-      clearTimeout(homeSafetyTimer);
       const isFromCache = comSnap.metadata.fromCache;
       const newComercios = shownOnHome(comSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      // Una copia local vacía no es una respuesta: sin esto la primera vez se veía "No hay comercios"
+      if (isFromCache && newComercios.length === 0 && comercios.length === 0) return;
+      listenerDelivered = true;
+      clearTimeout(homeSafetyTimer);
 
       if (newComercios.length > 0 || !isFromCache) {
         comercios = newComercios;
@@ -1273,11 +1281,10 @@ async function renderComercios(comercios, category, search, filters) {
   }
 
   if (search) {
-    const s = search.toLowerCase();
-    filtered = filtered.filter(c =>
-      (c.name || '').toLowerCase().includes(s) ||
-      (c.category || '').toLowerCase().includes(s)
-    );
+    // Sin acentos ni mayúsculas: "heladeria" encuentra "Heladería"
+    const norm = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const s = norm(search.trim());
+    filtered = filtered.filter(c => norm(c.name).includes(s) || norm(c.category).includes(s));
   }
 
   if (filters) {

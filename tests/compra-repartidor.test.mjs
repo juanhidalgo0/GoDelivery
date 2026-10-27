@@ -236,6 +236,12 @@ await t('pedido a un comercio común: sigue esperando que el comercio confirme',
   await sleep(2500);
   assert.ok(!(await db.doc(`orders/${id}`).get()).data().queueTargetDriverId, 'no se ofrece a repartidores antes de estar listo');
 });
+await t('comercio común: lo pausado no se puede pedir (la tienda puede mostrar el menú guardado)', async () => {
+  await db.doc(`comercios/${PIZZA}/products/fuga`).set({ name: 'Fugazzeta', price: 9500, isAvailable: false, stockMode: 'unlimited' });
+  const r = await order(PIZZA, [item(PIZZA, 'fuga', 'Fugazzeta', 1, 9500)]);
+  assert.notStrictEqual(r.status, 200, JSON.stringify(r.body));
+  assert.match(r.body.error || '', /no está disponible/);
+});
 
 // ─── Compra ───
 const checkout = (who, body) => post('shopperCheckout', { orderId: ORDER_ID, ...body }, { Authorization: `Bearer ${who.token}` });

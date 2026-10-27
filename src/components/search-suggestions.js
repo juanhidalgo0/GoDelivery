@@ -12,7 +12,9 @@ const COMERCIOS_TIMEOUT_MS = 8000;
 const PRODUCTS_TIMEOUT_MS = 25000; // a big catalog can take a while on mobile data
 const SEARCH_DATA_TTL_MS = 5 * 60 * 1000;
 const INDEX_KEY = 'gd_search_index_v1';
-const INDEX_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+// El índice viejo se usa igual mientras se actualiza por detrás (antes a las 6 h se tiraba y la
+// primera búsqueda del día esperaba la descarga entera)
+const INDEX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 let allComercios = [];
 let allProducts = [];
@@ -20,6 +22,7 @@ let comerciosLoadedAt = 0;
 let productsLoadedAt = 0;
 let comerciosPromise = null;
 let productsPromise = null;
+let productsFailed = false;
 let selectedIndex = -1;
 let onDataChange = null;
 
@@ -38,7 +41,22 @@ const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toL
   } catch (e) {}
 })();
 
+// Los comercios que el inicio ya tiene guardados: así se encuentran desde la primera letra,
+// sin esperar a que el buscador baje los suyos
+function seedFromHome() {
+  if (allComercios.length) return;
+  try {
+    const list = JSON.parse(localStorage.getItem('gd_cached_comercios') || '[]');
+    if (Array.isArray(list)) {
+      allComercios = list.filter(c => c && c.id && c.isActive !== false).map(c => ({ id: c.id, name: c.name, category: c.category, logo: c.logo }));
+    }
+  } catch (e) {}
+}
+seedFromHome();
+
 function saveIndex() {
+  // Una descarga fallida no pisa un índice bueno con uno vacío
+  if (!allComercios.length || !allProducts.length) return;
   try {
     localStorage.setItem(INDEX_KEY, JSON.stringify({
       t: Date.now(),
@@ -62,7 +80,9 @@ function loadComercios() {
         .map(c => ({ id: c.id, name: c.name, category: c.category, logo: c.logo }));
       comerciosLoadedAt = Date.now();
     } catch (e) {
+      // Sin red o lento al abrir la app: se sigue con los del inicio y se reintenta en la próxima letra
       console.warn('[Search] Could not load stores:', e);
+      seedFromHome();
     }
   })().finally(() => { comerciosPromise = null; });
   return comerciosPromise;
@@ -73,6 +93,9 @@ function loadProducts() {
   if (productsPromise) return productsPromise;
   productsPromise = (async () => {
     await loadComercios();
+    // Sin comercios no hay con qué cruzar los productos: antes se descartaban todos y quedaba
+    // "No encontramos nada" por 5 minutos
+    if (!allComercios.length) { productsFailed = true; onDataChange?.(); return; }
     const byId = new Map(allComercios.map(c => [c.id, c]));
     const toItem = (d, comercioId) => {
       const data = d.data();
@@ -80,9 +103,10 @@ function loadProducts() {
       if (!comercio || data.isAvailable === false || !data.name) return null;
       return { id: d.id, name: data.name, category: data.category, price: data.price, image: data.image, comercioId, comercioName: comercio.name };
     };
+    let fresh;
     try {
       const prodSnap = await withTimeout(getDocs(collectionGroup(db, 'products')), PRODUCTS_TIMEOUT_MS, 'search_products_group');
-      allProducts = prodSnap.docs
+      fresh = prodSnap.docs
         .filter(d => d.ref.path.startsWith('comercios/'))
         .map(d => toItem(d, d.ref.path.split('/')[1]))
         .filter(Boolean);
@@ -96,8 +120,12 @@ function loadProducts() {
           return [];
         }
       }));
-      allProducts = results.flat();
+      fresh = results.flat();
     }
+    // Todo falló (cada comercio devolvió vacío): se queda con lo que tenía y se reintenta después
+    if (!fresh.length && allProducts.length) return;
+    allProducts = fresh;
+    productsFailed = false;
     productsLoadedAt = Date.now();
     saveIndex();
     onDataChange?.();
@@ -178,6 +206,8 @@ export function initSearchSuggestions() {
       suggestionsContainer.classList.remove('active');
       return;
     }
+    // Si la descarga falló al abrir la app, se reintenta (no hace nada si ya está al día)
+    warmUp();
     // A short pause between keystrokes, so the list doesn't redraw on every letter.
     typingTimer = setTimeout(show, 90);
   });
@@ -219,13 +249,15 @@ function renderSuggestions(searchTerm, container) {
     // Names that start with the query first
     .sort((a, b) => (norm(a.name).startsWith(q) ? 0 : 1) - (norm(b.name).startsWith(q) ? 0 : 1))
     .slice(0, 6);
-  const productsPending = !productsLoadedAt && allProducts.length === 0;
+  const productsPending = !productsLoadedAt && allProducts.length === 0 && !productsFailed;
 
   let html;
   if (filteredComercios.length === 0 && filteredProducts.length === 0) {
     html = productsPending
       ? `<div class="search-suggestion-empty">Buscando…</div>`
-      : `<div class="search-suggestion-empty">No encontramos nada con "${escapeHtml(searchTerm)}"</div>`;
+      : (productsFailed && allProducts.length === 0
+        ? `<div class="search-suggestion-empty">No pudimos buscar ahora. Revisá la conexión y probá de nuevo.</div>`
+        : `<div class="search-suggestion-empty">No encontramos nada con "${escapeHtml(searchTerm)}"</div>`);
   } else {
     html = `
       ${filteredComercios.length > 0 ? `

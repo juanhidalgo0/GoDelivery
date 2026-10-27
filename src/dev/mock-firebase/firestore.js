@@ -69,6 +69,7 @@ export const where = (field, op, value) => ({ kind: 'where', field, op, value })
 export const orderBy = (field, dir = 'asc') => ({ kind: 'orderBy', field, dir });
 export const limit = (n) => ({ kind: 'limit', n });
 export const startAfter = () => ({ kind: 'noop' });
+export const documentId = () => '__name__';
 export const or = (...filters) => ({ kind: 'or', filters });
 export function query(ref, ...cons) { return { type: 'query', ref, cons }; }
 
@@ -118,10 +119,13 @@ function runQuery(q) {
   return { docs, size: docs.length, empty: !docs.length, forEach: (fn) => docs.forEach(fn), docChanges: () => docs.map(d => ({ type: 'added', doc: d })), metadata: { hasPendingWrites: false, fromCache: false } };
 }
 
-export async function getDoc(ref) { return snapOf(ref.path); }
+// Red lenta simulada: localStorage gd_mock_latency = ms (por defecto, instantáneo)
+const latency = () => { try { return Number(localStorage.getItem('gd_mock_latency')) || 0; } catch (e) { return 0; } };
+const later = (fn) => { const ms = latency(); return ms ? new Promise(r => setTimeout(() => r(fn()), ms)) : Promise.resolve(fn()); };
+export async function getDoc(ref) { return later(() => snapOf(ref.path)); }
 export const getDocFromServer = getDoc;
 export const getDocFromCache = getDoc;
-export async function getDocs(q) { return runQuery(q); }
+export async function getDocs(q) { return later(() => runQuery(q)); }
 export const getDocsFromServer = getDocs;
 export const getDocsFromCache = getDocs;
 export async function getCountFromServer(q) { const r = runQuery(q); return { data: () => ({ count: r.size }) }; }
@@ -174,12 +178,12 @@ export function onSnapshot(ref, a, b) {
   if (ref.type === 'doc') {
     if (!docSubs.has(ref.path)) docSubs.set(ref.path, new Set());
     docSubs.get(ref.path).add(cb);
-    setTimeout(() => cb(snapOf(ref.path)), 0);
+    setTimeout(() => cb(snapOf(ref.path)), latency());
     return () => docSubs.get(ref.path)?.delete(cb);
   }
   const sub = { q: ref, cb };
   querySubs.add(sub);
-  setTimeout(() => cb(runQuery(ref)), 0);
+  setTimeout(() => cb(runQuery(ref)), latency());
   return () => querySubs.delete(sub);
 }
 
