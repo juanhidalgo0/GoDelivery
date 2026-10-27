@@ -553,9 +553,12 @@ export function mountMarket(content, ctx) {
     const s = scroller();
     const base = s ? s.getBoundingClientRect().top : 0;
     const el = id && main.querySelector(`[data-sec="${CSS.escape(id)}"]`);
-    const top = el
+    const bar = page.querySelector('#mk-bar');
+    let top = el
       ? el.getBoundingClientRect().top - base + scrollTopNow() - stickyHeight() - 4
-      : main.getBoundingClientRect().top - base + scrollTopNow() - (page.querySelector('#mk-bar')?.offsetHeight || 0) - 8;
+      : main.getBoundingClientRect().top - base + scrollTopNow() - (bar?.offsetHeight || 0);
+    // Siempre hasta que la barra se pegue arriba (logo y lupa), también para la primera sección
+    if (bar && !bar.classList.contains('is-stuck')) top = Math.max(top, bar.getBoundingClientRect().top - base + scrollTopNow());
     markSub(id);
     // Mientras baja no se remarca cada sección que pasa
     clearTimeout(jumping);
@@ -587,7 +590,9 @@ export function mountMarket(content, ctx) {
     const bar = page.querySelector('#mk-bar');
     const s = scroller();
     const base = s ? s.getBoundingClientRect().top : 0;
-    const top = main.getBoundingClientRect().top - base + scrollTopNow() - (bar?.offsetHeight || 0) - 8;
+    // Con force, la barra llega justo arriba de todo y se achica (logo y lupa): la lista queda pegada debajo. Con
+    // 8px de aire la barra quedaba un poco más abajo, sin pegarse, y seguía grande con el buscador entero
+    const top = main.getBoundingClientRect().top - base + scrollTopNow() - (bar?.offsetHeight || 0) - (force ? 0 : 8);
     if (scrollTopNow() > top || (force && Math.abs(scrollTopNow() - top) > 2)) (s || window).scrollTo({ top, behavior: 'smooth' });
   }
 
@@ -798,7 +803,8 @@ export function mountMarket(content, ctx) {
     sorted.forEach((t) => {
       const subs = subsOf(t.id);
       const img = topImage(t);
-      const pic = img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : icon('grid', 18);
+      // Sin lazy: la hoja está oculta hasta que se abre y las fotos tienen que estar listas para entonces
+      const pic = img ? `<img src="${esc(img)}" alt="" decoding="async" />` : icon('grid', 18);
       if (!q || norm(t.name).includes(q)) {
         const hint = subs.slice(0, 4).map((s) => s.name).join(', ') + (subs.length > 4 ? '…' : '');
         rows.push(`<button class="mk-rubro" data-go="cat:${esc(t.id)}"><span class="mk-rubro-pic">${pic}</span><span class="mk-rubro-txt"><b>${esc(t.name)}</b>${hint ? `<small>${esc(hint)}</small>` : ''}</span>${icon('chevronRight', 16)}</button>`);
@@ -809,30 +815,29 @@ export function mountMarket(content, ctx) {
     });
     return rows.join('') || `<div class="mk-rubros-empty">Ninguna categoría se llama así.<button class="mk-chip is-small" data-find>${icon('search', 13)} Buscarlo entre los productos</button></div>`;
   }
-  function openRubros() {
-    if (rubros) return;
+  // La hoja queda armada (oculta) desde que carga la tienda y abrir solo la hace subir: crearla al tocar, con sus
+  // fotos, hacía parpadear la pantalla en el celular (capa nueva sobre el panel de la tienda)
+  let sheet = null;
+  function buildSheet() {
+    if (sheet) return sheet;
     const el = document.createElement('div');
     el.className = 'mk-rubros';
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
     el.setAttribute('aria-label', 'Categorías');
+    el.setAttribute('aria-hidden', 'true');
     el.innerHTML = `<div class="mk-rubros-bg" data-close></div>
       <div class="mk-rubros-card">
-        <header><span class="mk-rubros-handle" aria-hidden="true"></span><h2>Categorías <small>${visibleTops().length}</small></h2><button class="mk-rubros-x" data-close aria-label="Cerrar">${icon('close', 16)}</button></header>
+        <header><span class="mk-rubros-handle" aria-hidden="true"></span><h2>Categorías <small></small></h2><button class="mk-rubros-x" data-close aria-label="Cerrar">${icon('close', 16)}</button></header>
         <label class="mk-search">${icon('search', 17)}<input type="search" placeholder="Buscar una categoría (ej. gaseosas)" autocomplete="off" /></label>
-        <div class="mk-rubros-list">${rubrosListHtml('')}</div>
+        <div class="mk-rubros-list"></div>
       </div>`;
     document.body.appendChild(el);
-    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('is-open')));
     const input = el.querySelector('input');
     const list = el.querySelector('.mk-rubros-list');
     input.addEventListener('input', () => { list.innerHTML = rubrosListHtml(norm(input.value.trim())); list.scrollTop = 0; });
-    // El botón "atrás" del celular cierra la hoja y no la tienda (la hoja agrega su propio paso)
-    const onPop = () => closeRubros(true);
-    saveScroll();
-    window.history.pushState({ mkRubros: true }, '');
-    window.addEventListener('popstate', onPop);
     el.addEventListener('click', (e) => {
+      if (!rubros) return;
       if (e.target.closest('[data-close]')) { closeRubros(); return; }
       // Al elegir, la hoja se cierra con su "atrás" y lo elegido se aplica después, sobre el paso de la tienda
       if (e.target.closest('[data-find]')) {
@@ -848,6 +853,30 @@ export function mountMarket(content, ctx) {
       if (menu) { closeRubros(false, () => jumpTo(row.dataset.go.slice(4))); return; }
       closeRubros(false, () => go(row.dataset.go, { sub: row.dataset.subAfter || '' }));
     });
+    sheet = { el, input, list, html: '' };
+    fillSheet();
+    return sheet;
+  }
+  // La lista al día (los rubros llegan o cambian con los datos nuevos); no se toca si no cambió
+  function fillSheet() {
+    if (!sheet || rubros) return;
+    const html = rubrosListHtml('');
+    sheet.el.querySelector('h2 small').textContent = visibleTops().length;
+    if (sheet.input.value) sheet.input.value = '';
+    if (html !== sheet.html) { sheet.list.innerHTML = html; sheet.html = html; }
+    sheet.list.scrollTop = 0;
+  }
+  function openRubros() {
+    if (rubros) return;
+    const { el } = buildSheet();
+    fillSheet();
+    el.setAttribute('aria-hidden', 'false');
+    el.classList.add('is-open');
+    // El botón "atrás" del celular cierra la hoja y no la tienda (la hoja agrega su propio paso)
+    const onPop = () => closeRubros(true);
+    saveScroll();
+    window.history.pushState({ mkRubros: true }, '');
+    window.addEventListener('popstate', onPop);
     const onKey = (e) => { if (e.key === 'Escape') closeRubros(); };
     document.addEventListener('keydown', onKey);
     rubros = { el, onPop, onKey };
@@ -864,7 +893,7 @@ export function mountMarket(content, ctx) {
       window.history.back();
     } else if (then) then();
     el.classList.remove('is-open');
-    setTimeout(() => el.remove(), 240);
+    el.setAttribute('aria-hidden', 'true');
   }
 
   // ─── buscador
@@ -1015,6 +1044,8 @@ export function mountMarket(content, ctx) {
   loadCombos();
   loadTopSellers();
   loadReorder();
+  // La hoja "Categorías" se arma apenas se acomoda la tienda, así al tocarla ya está lista
+  const sheetTimer = setTimeout(() => { if (manyTops()) buildSheet(); }, 1200);
 
   return {
     /** Datos nuevos (de la base, después de la carga rápida desde el caché) */
@@ -1026,11 +1057,14 @@ export function mountMarket(content, ctx) {
       merge((next.products || []).map((p) => ({ id: p.id, data: () => p })));
       best = bestThreshold();
       render();
+      fillSheet();
     },
     cleanup() {
       unsubCart();
       unsubFees();
       closeRubros(true);
+      if (sheet) sheet.el.remove();
+      clearTimeout(sheetTimer);
       window.removeEventListener('popstate', onNavPop);
       clearTimeout(jumping);
       document.removeEventListener('scroll', onScroll, { capture: true });
