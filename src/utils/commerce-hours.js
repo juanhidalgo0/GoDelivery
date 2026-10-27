@@ -39,6 +39,64 @@ export function isComercioOpenNow(c = {}) {
 }
 
 const minutes = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + m; };
+const hhmm = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+const WEEK_MIN = 7 * 1440;
+
+// Abierto en ese día y minuto (mismas reglas que isOpenByWeeklySchedule: el minuto de cierre
+// cuenta como abierto y un turno que pasa la medianoche sigue el día siguiente)
+function openAt(weekly, day, t) {
+  const inSlot = (s, overnightOnly) => {
+    const o = minutes(s.open), c = minutes(s.close);
+    if (overnightOnly) return c < o && t <= c;
+    return c < o ? t >= o : t >= o && t <= c;
+  };
+  return weekly[day].some(s => inSlot(s, false)) || weekly[(day + 6) % 7].some(s => inSlot(s, true));
+}
+
+/**
+ * Cuándo cierra de verdad, siguiendo los minutos abiertos aunque crucen la medianoche o varios
+ * días (un kiosco abierto de corrido el fin de semana cierra el lunes, no "a las 23:59").
+ * Devuelve "las 02:00" / "el lunes 02:00", o null si no cierra en toda la semana.
+ */
+export function closesAtText(c = {}) {
+  const weekly = getWeeklySchedule(c);
+  const now = getArgentinaTime();
+  const day = now.getDay();
+  const t = now.getHours() * 60 + now.getMinutes();
+  let i = 0;
+  while (i < WEEK_MIN && openAt(weekly, (day + Math.floor((t + i + 1) / 1440)) % 7, (t + i + 1) % 1440)) i++;
+  if (i >= WEEK_MIN) return null;
+  const end = t + i;
+  const daysAhead = Math.floor(end / 1440);
+  const time = hhmm(end % 1440);
+  // Desde cuándo está abierto sin cortar: si lleva más de un día (fin de semana de corrido), se
+  // nombra el día aunque cierre esta madrugada ("el lunes 02:00" también el domingo a la noche)
+  let since = 0;
+  while (since < WEEK_MIN && openAt(weekly, (day + 7 * 2 + Math.floor((t - since - 1) / 1440)) % 7, ((t - since - 1) % 1440 + 1440) % 1440)) since++;
+  const longStretch = since + i >= 1440;
+  // Hoy, o la madrugada de mañana (cierra a las 02:00): alcanza con la hora
+  if (daysAhead === 0 || (!longStretch && daysAhead === 1 && end % 1440 < 12 * 60)) return `las ${time}`;
+  return `el ${DAY_NAMES[(day + daysAhead) % 7].toLowerCase()} ${time}`;
+}
+
+/** Cuándo vuelve a abrir: "hoy 06:00" / "mañana 06:00" / "el lunes 06:00", o null sin horario. */
+export function opensAtText(c = {}) {
+  const weekly = getWeeklySchedule(c);
+  const now = getArgentinaTime();
+  const day = now.getDay();
+  const t = now.getHours() * 60 + now.getMinutes();
+  for (let i = 1; i <= WEEK_MIN; i++) {
+    const d = (day + Math.floor((t + i) / 1440)) % 7;
+    if (openAt(weekly, d, (t + i) % 1440)) {
+      const daysAhead = Math.floor((t + i) / 1440);
+      const time = hhmm((t + i) % 1440);
+      if (daysAhead === 0) return `hoy ${time}`;
+      if (daysAhead === 1) return `mañana ${time}`;
+      return `el ${DAY_NAMES[d].toLowerCase()} ${time}`;
+    }
+  }
+  return null;
+}
 
 export function formatSlots(slots = []) {
   if (!slots.length) return 'Cerrado';
@@ -55,12 +113,8 @@ export function scheduleStatusLine(c = {}) {
   const t = now.getHours() * 60 + now.getMinutes();
 
   if (isComercioOpenNow(c)) {
-    const running = [...weekly[day], ...weekly[(day + 6) % 7].filter(s => minutes(s.close) < minutes(s.open))]
-      .find(s => {
-        const o = minutes(s.open), cl = minutes(s.close);
-        return cl < o ? (t >= o || t <= cl) : (t >= o && t <= cl);
-      });
-    return running ? `Cierra ${running.close}` : 'Abierto';
+    const until = closesAtText(c);
+    return until ? `Cierra ${until.replace(/^las /, '')}` : 'Abierto las 24 horas';
   }
   const later = weekly[day].map(s => s.open).filter(o => minutes(o) > t).sort((a, b) => minutes(a) - minutes(b))[0];
   if (later) return `Abre hoy ${later}`;

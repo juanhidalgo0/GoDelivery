@@ -4,9 +4,10 @@
 // el catálogo (searchKeys, sin bajar miles de productos) y "Combiná con…" al agregar.
 import { db } from '../firebase.js';
 import { collection, query, where, limit, orderBy, documentId } from 'firebase/firestore';
-import { addToCart, updateCartQty, getState, setState, subscribe } from '../state.js';
+import { addToCart, updateCartQty, getState, setState, subscribe, isProductFavorite, toggleProductFavorite } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { formatPrice, isShopOpen } from '../utils/format.js';
+import { closesAtText, opensAtText } from '../utils/commerce-hours.js';
 import { showToast } from '../components/toast.js';
 import { renderNavbar, updateGlobalCartFAB } from '../components/navbar.js';
 import { openProductModal } from '../components/product-modal.js';
@@ -24,6 +25,10 @@ const NOT_COLD = ['jugos en polvo'];
 const HIDE_IN_TOP = ['cigarrillos', 'tabacos', 'medicamentos'];
 const BIG_CATALOG = 400;
 const PAGE = 60;
+// Con más rubros que esto, Inicio y la barra muestran solo los que más venden; el resto, en la hoja "Categorías"
+const FEW_TOPS = 8;
+const FEATURED = { chips: 6, tiles: 7, rails: 5 };
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 /** Tiendas que se muestran como mercado: las que arma el repartidor, las de Ventra y los rubros de kiosco */
 export function isMarketStore(comercio) {
@@ -33,7 +38,7 @@ export function isMarketStore(comercio) {
   return cats.some((c) => MARKET_CATEGORIES.includes(c));
 }
 
-const isAvailable = (p) => p.isAvailable !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0);
+const inStock = (p) => p.isAvailable !== false && !(p.stockMode === 'limited' && (p.stockQuantity || 0) <= 0);
 const needsModal = (p) => (p.optionsGroups && p.optionsGroups.length > 0) || p.useGlobalFlavors === true || isSoldByWeight(p);
 const toMs = (t) => (t && t.toMillis ? t.toMillis() : (t ? new Date(t).getTime() : 0));
 
@@ -64,6 +69,19 @@ export function mountMarket(content, ctx) {
   let categories = ctx.categories;
   let offers = ctx.activeOffers || [];
   const products = ctx.products;
+  // Restaurantes y demás comercios que no son mercado: la misma tienda (tarjeta, barra, buscador, "atrás"), pero los
+  // platos en lista con su descripción y todas las categorías una debajo de otra
+  const menu = !isMarketStore(comercio);
+  let loaded = products.length > 0;
+  // Sin stock de ningún sabor (heladerías): no se ofrece
+  function flavorsOut(p) {
+    if (!p.useGlobalFlavors) return false;
+    const all = comercio.sabores || [];
+    const list = p.allowedFlavors && p.allowedFlavors.length ? all.filter((f) => p.allowedFlavors.includes(f.name)) : all;
+    if (list.some((f) => !f.isAvailable || f.stock === undefined || f.stock === null || f.stock === '')) return false;
+    return list.reduce((t, f) => t + (f.stock || 0), 0) <= 0;
+  }
+  const isAvailable = (p) => inStock(p) && !flavorsOut(p);
   const byId = new Map();
   const index = () => { products.forEach((p) => byId.set(p.id, p)); };
   index();
@@ -83,6 +101,24 @@ export function mountMarket(content, ctx) {
   const subName = (p) => { const c = catById(p.categoryId); return c && c.parentCategoryId ? String(c.name).toLowerCase() : ''; };
   // Los rubros apagados ya vienen filtrados: los que quedan tienen productos aunque no estén cargados
   const visibleTops = () => tops();
+  const isPromoTop = (t) => String(t.name).toLowerCase() === 'promos';
+  const manyTops = () => visibleTops().length > FEW_TOPS;
+  // Por ventas: la suma de lo vendido de lo cargado (loadTopSellers ya trae los 120 de arriba); empate, el orden del comercio
+  function rankedTops() {
+    const score = new Map();
+    products.forEach((p) => { const t = isAvailable(p) && topOf(p.categoryId); if (t) score.set(t.id, (score.get(t.id) || 0) + (p.popularity || 0)); });
+    return visibleTops().map((t, i) => ({ t, i, s: score.get(t.id) || 0 })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.t);
+  }
+  // Los que se destacan: con pocos rubros, todos en su orden; con muchos, los que más venden (sin cigarrillos)
+  function featuredTops(n) {
+    if (!manyTops()) return visibleTops().filter((t) => !isPromoTop(t));
+    return rankedTops().filter((t) => !isPromoTop(t) && !HIDE_IN_TOP.includes(String(t.name).toLowerCase())).slice(0, n);
+  }
+  // La foto elegida para el rubro (t.image); si no, la del más vendido con foto grande
+  function topImage(t) {
+    const inTop = products.filter((p) => isAvailable(p) && topOf(p.categoryId)?.id === t.id).sort(byPopularity);
+    return t.image || photo(inTop.find((p) => p.imageHd) || inTop.find((p) => p.image) || {});
+  }
 
   const offerOf = (p) => offers.find((o) => Array.isArray(o.productIds) && o.productIds.includes(p.id));
   const priceOf = (p) => { const o = offerOf(p); return o && o.type === 'percentage' ? p.price * (1 - (o.value || 0) / 100) : p.price; };
@@ -112,8 +148,11 @@ export function mountMarket(content, ctx) {
     return (out.length ? `<div class="mk-tags">${out.join('')}</div>` : '') + cold;
   }
 
+  // Cerrado o en pausa: sin "+" (tocarlo solo daba un aviso que pasaba desapercibido); el aviso va debajo de la tarjeta
+  const canOrder = () => !comercio.isPaused && isOpenNow();
   function stepperHtml(p) {
     if (!isAvailable(p)) return '<span class="mk-out">Agotado</span>';
+    if (!canOrder() && !qtyOf(p)) return '';
     const q = qtyOf(p);
     if (!q) return `<button class="mk-add" data-act="add" aria-label="Agregar">${icon('plus', 18)}</button>`;
     return `<div class="mk-step"><button data-act="dec" aria-label="Sacar uno">${q === 1 ? icon('trash', 15) : icon('minus', 16)}</button><span>${q}</span><button data-act="inc" aria-label="Agregar otro">${icon('plus', 16)}</button></div>`;
@@ -130,6 +169,7 @@ export function mountMarket(content, ctx) {
       </div>
       <div class="mk-price">${formatPrice(price)}${isSoldByWeight(p) ? '<small> /kg</small>' : ''}${o ? `<s>${formatPrice(p.price)}</s>` : ''}</div>
       <div class="mk-name">${esc(displayName(p.name))}</div>
+      ${!mini && Number(p.transferSurcharge) > 0 ? `<div class="mk-surcharge">Con transferencia ${formatPrice(Math.round(price * (1 + Number(p.transferSurcharge) / 100)))}</div>` : ''}
     </article>`;
   }
 
@@ -145,37 +185,74 @@ export function mountMarket(content, ctx) {
 
   function statusText() {
     if (comercio.isPaused) return '<b class="is-paused">Pausado por un rato</b>';
-    const open = isOpenNow();
-    const sch = Array.isArray(comercio.schedules) && comercio.schedules[0] ? comercio.schedules[0] : comercio.schedule;
-    const hours = sch && sch.open && sch.close ? `${sch.open} a ${sch.close}` : '';
-    return open ? `<b class="is-open">Abierto</b>${hours ? ` · hasta las ${esc(sch.close)}` : ''}` : `<b class="is-closed">Cerrado</b>${hours ? ` · abre ${esc(hours)}` : ''}`;
+    // Del horario por día y siguiendo los minutos abiertos: antes leía solo el primer turno viejo y
+    // un kiosco abierto de corrido el fin de semana decía "hasta las 23:59"
+    if (isOpenNow()) {
+      const until = closesAtText(comercio);
+      return `<b class="is-open">Abierto</b> · ${until ? `hasta ${esc(until)}` : 'las 24 horas'}`;
+    }
+    const opens = opensAtText(comercio);
+    return `<b class="is-closed">Cerrado</b>${opens ? ` · abre ${esc(opens)}` : ''}`;
   }
 
+  // La tarjeta del comercio, igual en todas las tiendas: rubro · calle, nombre con su puntaje, descripción y
+  // una fila con el estado y el envío. El corazón guarda el comercio en favoritos.
+  const isFavStore = () => isProductFavorite(comercioId);
+  function feeText() {
+    const fee = (getState().dynamicDeliveryFees || {})[comercioId];
+    if (typeof fee !== 'number' || !(fee >= 0)) return '';
+    return `${icon('bike', 14)} ${fee === 0 ? 'Envío gratis' : `Envío ${formatPrice(fee)}`}`;
+  }
+  function ratingHtml() {
+    const has = comercio.ratingAverage > 0 && comercio.ratingCount > 0;
+    return `<button class="mk-rate" id="mk-rate" aria-label="${has ? 'Ver o dejar tu puntaje' : 'Puntuar este comercio'}">${icon('star', 13, '', '#f59e0b')}${has ? `${comercio.ratingAverage.toFixed(1)} <small>(${comercio.ratingCount})</small>` : '<small>Puntuar</small>'}</button>`;
+  }
   function headerHtml() {
-    const rating = comercio.ratingAverage > 0 && comercio.ratingCount > 0
-      ? `<span class="mk-rating">${icon('star', 13, '', '#f59e0b')} ${comercio.ratingAverage.toFixed(1)} <small>(${comercio.ratingCount})</small></span>` : '';
+    const street = comercio.address ? String(comercio.address).split(',')[0] : '';
+    const kicker = [comercio.category, street].filter(Boolean).map((x) => esc(x)).join(' · ');
+    const fee = feeText();
     return `
       <div class="mk-hero">
         ${comercio.banner ? `<img id="comercio-banner-img" src="${esc(comercio.banner)}" alt="" decoding="async" />` : ''}
         ${isDirect ? '' : `<button class="mk-back" id="mk-back" aria-label="Volver">${icon('back', 20)}</button>`}
+        <button class="mk-fav${isFavStore() ? ' is-on' : ''}" id="mk-fav" aria-label="Guardar en favoritos" aria-pressed="${isFavStore()}">${icon('heart', 19)}</button>
       </div>
       <div class="mk-head comercio-info">
         <div class="mk-head-card">
-          ${comercio.logo ? `<img class="mk-logo" src="${esc(comercio.logo)}" alt="" />` : `<div class="mk-logo">${icon('store', 26)}</div>`}
-          <div class="mk-head-text">
-            <h1>${esc(comercio.name)}</h1>
-            <div class="mk-meta"><span id="comercio-status-badge">${statusText()}</span>${rating}${comercio.address ? `<span>${icon('mapPin', 13)} ${esc(comercio.address)}</span>` : ''}</div>
+          <div class="mk-head-main">
+            ${comercio.logo ? `<img class="mk-logo" src="${esc(comercio.logo)}" alt="" />` : `<div class="mk-logo">${icon('store', 26)}</div>`}
+            <div class="mk-head-text">
+              ${kicker ? `<span class="mk-kicker">${kicker}</span>` : ''}
+              <div class="mk-title-row"><h1>${esc(comercio.name)}</h1>${ratingHtml()}</div>
+              ${comercio.description ? `<p class="mk-desc comercio-description">${esc(comercio.description)}</p>` : ''}
+            </div>
+          </div>
+          <div class="mk-facts">
+            <span class="mk-fact" id="comercio-status-badge">${statusText()}</span>
+            <span class="mk-fact" id="mk-fee"${fee ? '' : ' hidden'}>${fee}</span>
           </div>
         </div>
         <div id="comercio-pause-banner" class="mk-paused" style="display:${comercio.isPaused ? 'flex' : 'none'}">${icon('pause', 16)} El comercio pausó los pedidos por un rato.</div>
+        ${!comercio.isPaused && !isOpenNow() ? `<div class="mk-closed-note">${icon('clock', 16)}<span><b>Ahora está cerrado.</b> Podés mirar ${menu ? 'el menú' : 'los productos'} y pedir cuando abra${opensAtText(comercio) ? ` (${esc(opensAtText(comercio))})` : ''}.</span></div>` : ''}
       </div>`;
   }
 
   function barHtml() {
     const active = view.type === 'cat' ? view.id : (view.type === 'home' ? 'home' : '');
-    const chips = [`<button class="mk-chip${active === 'home' ? ' is-on' : ''}" data-go="home">Inicio</button>`]
-      .concat(offers.length ? [`<button class="mk-chip${view.type === 'offers' ? ' is-on' : ''}" data-go="offers">${icon('percent', 13)} Ofertas</button>`] : [])
-      .concat(visibleTops().map((t) => `<button class="mk-chip${active === t.id ? ' is-on' : ''}" data-go="cat:${esc(t.id)}">${esc(t.name)}</button>`));
+    // Con muchos rubros: "Categorías" primero (abre la hoja con todos) y después solo los que más venden, más el que se está viendo
+    let shown = visibleTops();
+    if (manyTops()) {
+      shown = featuredTops(FEATURED.chips);
+      const cur = active && catById(active);
+      if (cur && !shown.includes(cur)) shown = [cur, ...shown];
+    }
+    const offersChip = offers.length ? [`<button class="mk-chip${view.type === 'offers' ? ' is-on' : ''}" data-go="offers">${icon('percent', 13)} Ofertas</button>`] : [];
+    const favsChip = products.some((p) => isProductFavorite(p.id)) ? [`<button class="mk-chip${view.type === 'favs' ? ' is-on' : ''}" data-go="favs">${icon('heart', 13)} Favoritos</button>`] : [];
+    // Menú: todas las categorías en una página; el chip baja a la suya y se marca solo al deslizar
+    const chips = menu
+      ? offersChip.concat(favsChip, (manyTops() ? featuredTops(FEATURED.chips) : visibleTops()).filter((t) => groupOf(t).length).map((t) => `<button class="mk-chip" data-jump="${esc(t.id)}">${esc(t.name)}</button>`))
+      : [`<button class="mk-chip${active === 'home' ? ' is-on' : ''}" data-go="home">Inicio</button>`]
+        .concat(offersChip, favsChip, shown.map((t) => `<button class="mk-chip${active === t.id ? ' is-on' : ''}" data-go="cat:${esc(t.id)}">${esc(t.name)}</button>`));
     return `
       <div class="mk-bar${searchOpen || searchText ? ' is-searching' : ''}" id="mk-bar">
         <div class="mk-bar-top">
@@ -188,10 +265,13 @@ export function mountMarket(content, ctx) {
             <button id="mk-search-clear" aria-label="Borrar" style="display:${searchText ? 'flex' : 'none'}">${icon('close', 15)}</button></label>
           <button class="mk-cancel" id="mk-search-cancel">Cancelar</button>
         </div>
-        <div class="mk-row-wrap is-chips">
-          <button class="mk-arrow is-left" data-scroll="-1" aria-label="Anteriores">${icon('chevronLeft', 16)}</button>
-          <div class="mk-chips mk-row" id="mk-chips">${chips.join('')}</div>
-          <button class="mk-arrow is-right" data-scroll="1" aria-label="Siguientes">${icon('chevronRight', 16)}</button>
+        <div class="mk-chipbar${manyTops() ? ' has-rubros' : ''}">
+          ${manyTops() ? `<button class="mk-chip is-rubros" data-rubros aria-label="Ver todas las categorías">${icon('grid', 14)}<span>Categorías</span></button>` : ''}
+          <div class="mk-row-wrap is-chips">
+            <button class="mk-arrow is-left" data-scroll="-1" aria-label="Anteriores">${icon('chevronLeft', 16)}</button>
+            <div class="mk-chips mk-row" id="mk-chips">${chips.join('')}</div>
+            <button class="mk-arrow is-right" data-scroll="1" aria-label="Siguientes">${icon('chevronRight', 16)}</button>
+          </div>
         </div>
         <div class="mk-suggest" id="mk-suggest" hidden></div>
       </div>`;
@@ -227,7 +307,7 @@ export function mountMarket(content, ctx) {
   function promosHtml() {
     const list = combos();
     if (!list.length) return '';
-    return `<section class="mk-rail mk-promos"><header><h2>Promos del kiosco</h2></header>
+    return `<section class="mk-rail mk-promos"><header><h2>${menu ? 'Promos' : 'Promos del kiosco'}</h2></header>
       <div class="mk-row-wrap">
         <button class="mk-arrow is-left" data-scroll="-1" aria-label="Anteriores">${icon('chevronLeft', 18)}</button>
         <div class="mk-row">${list.map(comboCardHtml).join('')}</div>
@@ -236,15 +316,13 @@ export function mountMarket(content, ctx) {
   }
 
   function homeHtml() {
-    const tiles = visibleTops().filter((t) => String(t.name).toLowerCase() !== 'promos').map((t) => {
-      // La foto elegida para el rubro (t.image); si no, la del más vendido con foto grande
-      const inTop = products.filter((p) => isAvailable(p) && topOf(p.categoryId)?.id === t.id).sort(byPopularity);
-      const sample = t.image || photo(inTop.find((p) => p.imageHd) || inTop.find((p) => p.image) || {});
+    const tiles = featuredTops(FEATURED.tiles).map((t) => {
+      const sample = topImage(t);
       return `<button class="mk-tile" data-go="cat:${esc(t.id)}">${sample ? `<img src="${esc(sample)}" alt="" loading="lazy" />` : `<span>${icon('grid', 22)}</span>`}<b>${esc(t.name)}</b></button>`;
-    }).join('');
+    }).join('') + (manyTops() ? `<button class="mk-tile is-all" data-rubros><span>${icon('grid', 22)}<small>${visibleTops().length}</small></span><b>Ver todas</b></button>` : '');
     const again = reorderIds.map((id) => byId.get(id)).filter((p) => p && isAvailable(p));
     const promos = combos().length ? [] : products.filter((p) => isAvailable(p) && (/^(promo|combo)\b/i.test(p.name || '') || /combo|promo/i.test(topOf(p.categoryId)?.name || ''))).sort(byPopularity).slice(0, 16);
-    const rails = visibleTops().filter((t) => String(t.name).toLowerCase() !== 'promos').map((t) => {
+    const rails = featuredTops(FEATURED.rails).map((t) => {
       const list = products.filter((p) => isAvailable(p) && topOf(p.categoryId)?.id === t.id).sort(byPopularity).slice(0, 14);
       return railHtml(`cat:${t.id}`, esc(t.name), list, `cat:${t.id}`);
     }).join('');
@@ -256,11 +334,56 @@ export function mountMarket(content, ctx) {
       ${railHtml('offers', 'Ofertas', offerList, 'offers')}
       ${railHtml('best', 'Lo más vendido', topSellers(), 'best')}
       ${railHtml('promos', 'Combos y promos', promos, '')}
-      ${rails}`;
+      ${rails}
+      ${manyTops() ? `<button class="mk-more-btn is-rubros" data-rubros>${icon('grid', 16)} Ver las ${visibleTops().length} categorías</button>` : ''}`;
+  }
+
+  // Fila del menú: nombre, descripción y precio a la izquierda; la foto con el "+" a la derecha
+  function rowHtml(p) {
+    const o = offerOf(p);
+    const price = priceOf(p);
+    const img = photo(p);
+    return `<article class="mk-card mk-item${img ? '' : ' is-noimg'}${isAvailable(p) ? '' : ' is-out'}" data-pid="${esc(p.id)}">
+      <div class="mk-item-text">
+        <h3>${esc(p.name)}</h3>
+        ${p.description ? `<p>${esc(p.description)}</p>` : ''}
+        <div class="mk-item-price">${formatPrice(price)}${isSoldByWeight(p) ? '<small> /kg</small>' : ''}${o ? `<s>${formatPrice(p.price)}</s><span class="mk-tag is-offer">${o.type === 'percentage' ? `${o.value}% OFF` : esc(o.label || 'Oferta')}</span>` : ''}</div>
+      </div>
+      <div class="mk-item-img">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" />` : ''}<div class="mk-cta">${stepperHtml(p)}</div></div>
+    </article>`;
+  }
+  const byMenuOrder = (a, b) => (a.order ?? 9999) - (b.order ?? 9999) || String(a.name).localeCompare(String(b.name));
+  // Lo de una categoría y sus subcategorías
+  const groupOf = (t) => products.filter((p) => isAvailable(p) && topOf(p.categoryId)?.id === t.id);
+  function menuHtml() {
+    if (!loaded) return `<div class="mk-list is-skeleton">${'<div class="mk-item-skel"><span></span><span></span><span></span><i></i></div>'.repeat(5)}</div>`;
+    const again = reorderIds.map((id) => byId.get(id)).filter((p) => p && isAvailable(p));
+    const top = topSellers(10);
+    const sections = visibleTops().map((t) => {
+      const items = groupOf(t);
+      if (!items.length) return '';
+      const own = items.filter((p) => p.categoryId === t.id).sort(byMenuOrder);
+      const subs = subsOf(t.id).map((sc) => ({ sc, list: items.filter((p) => p.categoryId === sc.id).sort(byMenuOrder) })).filter((x) => x.list.length);
+      return `<section class="mk-section mk-menu-sec" data-sec="${esc(t.id)}"><header><h2>${esc(t.name)}</h2></header>
+        ${own.length ? `<div class="mk-list">${own.map(rowHtml).join('')}</div>` : ''}
+        ${subs.map((x) => `<h3 class="mk-subhead">${esc(x.sc.name)}</h3><div class="mk-list">${x.list.map(rowHtml).join('')}</div>`).join('')}
+      </section>`;
+    }).join('');
+    const known = new Set(visibleTops().map((t) => t.id));
+    const rest = products.filter((p) => isAvailable(p) && !known.has(topOf(p.categoryId)?.id)).sort(byMenuOrder);
+    return `
+      ${promosHtml()}
+      ${railHtml('again', 'Volver a pedir', again, '')}
+      ${top.length >= 3 ? railHtml('best', 'Lo más pedido', top, '') : ''}
+      ${sections}
+      ${rest.length ? `<section class="mk-section mk-menu-sec"><header><h2>${sections ? 'Otros' : 'Menú'}</h2></header><div class="mk-list">${rest.map(rowHtml).join('')}</div></section>` : ''}
+      ${!sections && !rest.length ? '<div class="mk-empty">Este comercio todavía no cargó productos.</div>' : ''}`;
   }
 
   function gridHtml(list, key) {
     const shown = list.slice(0, (gridLimits[key] || PAGE));
+    if (menu) return `<div class="mk-list">${shown.map(rowHtml).join('')}</div>
+      ${list.length > shown.length ? `<button class="mk-more-btn" data-more="${esc(key)}">Ver más (${list.length - shown.length})</button>` : ''}`;
     return `<div class="mk-grid">${shown.map((p) => cardHtml(p)).join('')}</div>
       ${list.length > shown.length ? `<button class="mk-more-btn" data-more="${esc(key)}">Ver más (${list.length - shown.length})</button>` : ''}`;
   }
@@ -271,10 +394,12 @@ export function mountMarket(content, ctx) {
     if (!top) return '';
     const subs = subsOf(top.id);
     const inTop = (p) => topOf(p.categoryId)?.id === top.id && isAvailable(p);
+    // Con todas las secciones a la vista, los chips bajan a cada una (y se marcan solos al deslizar); con una sola, filtran
+    const attr = view.sub ? 'data-sub' : 'data-jump';
     const subChips = subs.length ? `<div class="mk-row-wrap is-chips is-sub">
       <button class="mk-arrow is-left" data-scroll="-1" aria-label="Anteriores">${icon('chevronLeft', 16)}</button>
-      <div class="mk-subchips mk-row">${[`<button class="mk-chip is-small${!view.sub ? ' is-on' : ''}" data-sub="">Todo</button>`]
-      .concat(subs.filter((s) => products.some((p) => p.categoryId === s.id && isAvailable(p))).map((s) => `<button class="mk-chip is-small${view.sub === s.id ? ' is-on' : ''}" data-sub="${esc(s.id)}">${esc(s.name)}</button>`)).join('')}</div>
+      <div class="mk-subchips mk-row">${[`<button class="mk-chip is-small${!view.sub ? ' is-on' : ''}" ${attr}="">Todo</button>`]
+      .concat(subs.filter((s) => products.some((p) => p.categoryId === s.id && isAvailable(p))).map((s) => `<button class="mk-chip is-small${view.sub === s.id ? ' is-on' : ''}" ${attr}="${esc(s.id)}">${esc(s.name)}</button>`)).join('')}</div>
       <button class="mk-arrow is-right" data-scroll="1" aria-label="Siguientes">${icon('chevronRight', 16)}</button>
     </div>` : '';
     const loading = !loadedCats.has(top.id) ? '<div class="mk-loading"><span></span>Cargando productos…</div>' : '';
@@ -286,17 +411,18 @@ export function mountMarket(content, ctx) {
       body = subs.map((s) => {
         const list = products.filter((p) => p.categoryId === s.id && isAvailable(p)).sort(byPopularity);
         if (!list.length) return '';
-        return `<section class="mk-section"><header><h3>${esc(s.name)}</h3>${list.length > 10 ? `<button class="mk-more" data-sub="${esc(s.id)}">Ver ${list.length} ${icon('chevronRight', 14)}</button>` : ''}</header>${gridHtml(list.slice(0, 10), `peek:${s.id}`)}</section>`;
+        return `<section class="mk-section" data-sec="${esc(s.id)}"><header><h3>${esc(s.name)}</h3>${list.length > 10 ? `<button class="mk-more" data-sub="${esc(s.id)}">Ver ${list.length} ${icon('chevronRight', 14)}</button>` : ''}</header>${gridHtml(list.slice(0, 10), `peek:${s.id}`)}</section>`;
       }).join('') + (own.length ? `<section class="mk-section"><header><h3>Otros</h3></header>${gridHtml(own, `own:${top.id}`)}</section>` : '');
     } else {
       body = gridHtml(products.filter(inTop).sort(byPopularity), `cat:${top.id}`);
     }
-    return `<div class="mk-title"><h2>${esc(top.name)}</h2></div>${subChips}${loading}${body || (loading ? '' : '<div class="mk-empty">Todavía no hay productos en este rubro.</div>')}`;
+    return `<div class="mk-title"><h2>${esc(top.name)}</h2></div>${subChips}${loading}${body || (loading ? '' : '<div class="mk-empty">Todavía no hay productos en esta categoría.</div>')}`;
   }
 
   function searchHtml() {
     const tokens = searchTokens(searchText);
-    const list = products.filter((p) => isAvailable(p) && matches(p.name, tokens, p.barcode)).sort(byPopularity);
+    // En el menú también cuenta lo que dice el plato ("milanesa con papas")
+    const list = products.filter((p) => isAvailable(p) && matches(menu ? `${p.name} ${p.description || ''}` : p.name, tokens, p.barcode)).sort(byPopularity);
     return `<div class="mk-title"><h2>Resultados para “${esc(searchText)}”</h2></div>
       ${searching ? '<div class="mk-loading"><span></span>Buscando en todo el kiosco…</div>' : ''}
       ${list.length ? gridHtml(list, `q:${searchText}`) : (searching ? '' : `<div class="mk-empty"><b>No encontramos “${esc(searchText)}”.</b>Probá con otra palabra o la marca.</div>`)}`;
@@ -311,7 +437,8 @@ export function mountMarket(content, ctx) {
     if (view.type === 'cat') return categoryHtml();
     if (view.type === 'best') return listHtml('Lo más vendido', topSellers(200), 'best');
     if (view.type === 'offers') return listHtml('Ofertas', products.filter((p) => isAvailable(p) && offerOf(p)), 'offers');
-    return homeHtml();
+    if (view.type === 'favs') return listHtml('Tus favoritos', products.filter((p) => isAvailable(p) && isProductFavorite(p.id)), 'favs');
+    return menu ? menuHtml() : homeHtml();
   }
 
   // ─── dibujar
@@ -331,17 +458,103 @@ export function mountMarket(content, ctx) {
     updateArrows();
   }
   function renderMain() { main.innerHTML = mainHtml(); updateArrows(); }
-  const render = () => { renderBar(); renderMain(); };
+  const render = () => { renderBar(); renderMain(); if (menu) requestAnimationFrame(spySub); };
 
-  function go(target, { scroll = true } = {}) {
-    searchText = '';
-    if (target === 'home') view = { type: 'home' };
-    else if (target === 'best' || target === 'offers') view = { type: target };
-    else if (target.startsWith('cat:')) { view = { type: 'cat', id: target.slice(4), sub: '' }; loadCategory(view.id); }
+  // ─── historial: cada categoría, "Ver todo" o búsqueda es un paso que el "atrás" deshace sin salir de la tienda.
+  // Cada paso guarda dónde estaba la pantalla (y), así al volver queda en el mismo lugar.
+  const sameAs = (v, q) => JSON.stringify(v) === JSON.stringify(view) && (q || '') === searchText;
+  const saveScroll = () => { try { history.replaceState({ ...(history.state || {}), y: scrollTopNow() }, ''); } catch (e) { /* sin historial */ } };
+  function navTo(change, { replace = false } = {}) {
+    if (!replace) saveScroll();
+    change();
+    const s = history.state || {};
+    if (!replace && s.mkNav === comercioId && sameAs(s.v, s.q)) return;
+    if (!replace && !s.mkNav && sameAs({ type: 'home' }, '')) return;
+    const next = { mkNav: comercioId, v: view, q: searchText, y: null };
+    try { replace ? history.replaceState(next, '') : history.pushState(next, ''); } catch (e) { /* sin historial */ }
+  }
+  function restoreScroll(y) {
+    requestAnimationFrame(() => { if (y == null) scrollToMain(); else (scroller() || window).scrollTo({ top: y }); });
+  }
+  function onNavPop(e) {
+    const s = e.state || {};
+    // La hoja de categorías y los modales atienden su propio paso
+    if (s.mkRubros || s.isModalId || (s.mkNav && s.mkNav !== comercioId)) return;
+    const v = s.mkNav ? s.v : { type: 'home' };
+    const q = s.mkNav ? (s.q || '') : '';
+    if (sameAs(v, q)) return;
+    view = v; searchText = q; searchOpen = !!q;
+    hideSuggest();
+    if (view.type === 'cat') loadCategory(view.id);
+    render();
+    if (searchText) runSearch();
+    restoreScroll(s.y);
+  }
+  window.addEventListener('popstate', onNavPop);
+
+  function go(target, { scroll = true, sub = '', replace = false } = {}) {
+    // Menú: una categoría no es otra pantalla, es bajar hasta su sección (desde la hoja de categorías, por ejemplo)
+    if (menu && target.startsWith('cat:')) { jumpTo(target.slice(4)); return; }
+    navTo(() => {
+      searchText = '';
+      if (target === 'home') view = { type: 'home' };
+      else if (target === 'best' || target === 'offers' || target === 'favs') view = { type: target };
+      else if (target.startsWith('cat:')) view = { type: 'cat', id: target.slice(4), sub };
+    }, { replace });
+    if (view.type === 'cat') loadCategory(view.id);
     render();
     if (scroll) scrollToMain();
     const chip = page.querySelector('#mk-chips .is-on');
     if (chip) chip.parentElement.scrollTo({ left: chip.offsetLeft - 40, behavior: 'smooth' });
+  }
+  function openSub(sub) {
+    navTo(() => { view = { ...view, sub }; });
+    renderMain();
+    scrollToMain();
+  }
+
+  // ─── subcategorías: bajar a su sección y marcar la que se está viendo
+  // (en el menú de un restaurante, lo mismo con las categorías de la barra)
+  const stickyHeight = () => (page.querySelector('#mk-bar')?.offsetHeight || 0) + (main.querySelector('.is-sub')?.offsetHeight || 0);
+  const jumpRow = () => (menu ? page.querySelector('#mk-chips') : main.querySelector('.mk-subchips'));
+  function markSub(id) {
+    const row = jumpRow();
+    if (!row) return;
+    const on = row.querySelector(`[data-jump="${CSS.escape(id)}"]`);
+    if (on && on.classList.contains('is-on')) return;
+    row.querySelectorAll('[data-jump].is-on').forEach((b) => b.classList.remove('is-on'));
+    if (!on) return;
+    on.classList.add('is-on');
+    row.scrollTo({ left: on.offsetLeft - 40, behavior: 'smooth' });
+  }
+  let jumping = null;
+  function jumpTo(id) {
+    // Desde Ofertas, Favoritos o una búsqueda: primero el menú entero, después la sección
+    if (menu && (view.type !== 'home' || searchText)) {
+      navTo(() => { view = { type: 'home' }; searchText = ''; searchOpen = false; });
+      render();
+    }
+    const s = scroller();
+    const base = s ? s.getBoundingClientRect().top : 0;
+    const el = id && main.querySelector(`[data-sec="${CSS.escape(id)}"]`);
+    const top = el
+      ? el.getBoundingClientRect().top - base + scrollTopNow() - stickyHeight() - 4
+      : main.getBoundingClientRect().top - base + scrollTopNow() - (page.querySelector('#mk-bar')?.offsetHeight || 0) - 8;
+    markSub(id);
+    // Mientras baja no se remarca cada sección que pasa
+    clearTimeout(jumping);
+    jumping = setTimeout(() => { jumping = null; }, 700);
+    (s || window).scrollTo({ top, behavior: 'smooth' });
+  }
+  function spySub() {
+    if (jumping || searchText || (menu ? view.type !== 'home' : (view.type !== 'cat' || view.sub))) return;
+    const secs = main.querySelectorAll('[data-sec]');
+    if (!secs.length) return;
+    const s = scroller();
+    const line = (s ? s.getBoundingClientRect().top : 0) + stickyHeight() + 16;
+    let cur = '';
+    secs.forEach((el) => { if (el.getBoundingClientRect().top <= line) cur = el.dataset.sec; });
+    markSub(cur);
   }
   // La tienda se abre dentro de un panel que hace su propio scroll (#app-overlay); en la tienda directa, la ventana
   function scroller() {
@@ -496,6 +709,7 @@ export function mountMarket(content, ctx) {
     if (!canBuy()) return;
     if (needsModal(p)) { openProductModal(p, comercioId, comercio.name, isOpenNow()); return; }
     if (navigator.vibrate) navigator.vibrate(12);
+    if (searchText) saveRecent(searchText);
     addToCart(p, comercioId, comercio.name, 1);
     afterCartChange();
     if (isAdult(p)) {
@@ -512,6 +726,8 @@ export function mountMarket(content, ctx) {
   page.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('#mk-back')) { e.preventDefault(); goBack(); return; }
+    if (t.closest('#mk-fav')) { toggleFavStore(); return; }
+    if (t.closest('#mk-rate')) { if (ctx.onRate) ctx.onRate(comercio); return; }
     const scrollBtn = t.closest('[data-scroll]');
     if (scrollBtn) {
       const row = scrollBtn.parentElement.querySelector('.mk-row');
@@ -519,11 +735,14 @@ export function mountMarket(content, ctx) {
       return;
     }
     if (t.closest('[data-act="close-pairs"]')) { hidePairs(); return; }
+    if (t.closest('[data-rubros]')) { hideSuggest(); openRubros(); return; }
     if (t.closest('#mk-suggest')) return; // las sugerencias se atienden al apretar (mousedown)
     const goBtn = t.closest('[data-go]');
     if (goBtn) { hideSuggest(); go(goBtn.dataset.go); return; }
+    const jumpBtn = t.closest('[data-jump]');
+    if (jumpBtn) { jumpTo(jumpBtn.dataset.jump); return; }
     const subBtn = t.closest('[data-sub]');
-    if (subBtn) { view = { ...view, sub: subBtn.dataset.sub }; renderMain(); scrollToMain(); return; }
+    if (subBtn) { openSub(subBtn.dataset.sub); return; }
     const moreBtn = t.closest('[data-more]');
     if (moreBtn) { const k = moreBtn.dataset.more; gridLimits[k] = (gridLimits[k] || PAGE) + PAGE * 2; renderMain(); return; }
     const card = t.closest('.mk-card');
@@ -540,6 +759,7 @@ export function mountMarket(content, ctx) {
       return;
     }
     if (!isAvailable(p)) return;
+    if (searchText) saveRecent(searchText);
     openProductModal(p, comercioId, comercio.name, isOpenNow());
   });
 
@@ -549,6 +769,86 @@ export function mountMarket(content, ctx) {
       window.history.back();
       setTimeout(() => { if (window.location.hash === before) window.location.hash = '#/'; }, 400);
     } else window.location.hash = '#/';
+  }
+
+  // ─── hoja "Categorías": todos, de la A a la Z, con buscador que también encuentra subrubros
+  let rubros = null;
+  function rubrosListHtml(q) {
+    const sorted = visibleTops().slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'));
+    const rows = [];
+    sorted.forEach((t) => {
+      const subs = subsOf(t.id);
+      const img = topImage(t);
+      const pic = img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : icon('grid', 18);
+      if (!q || norm(t.name).includes(q)) {
+        const hint = subs.slice(0, 4).map((s) => s.name).join(', ') + (subs.length > 4 ? '…' : '');
+        rows.push(`<button class="mk-rubro" data-go="cat:${esc(t.id)}"><span class="mk-rubro-pic">${pic}</span><span class="mk-rubro-txt"><b>${esc(t.name)}</b>${hint ? `<small>${esc(hint)}</small>` : ''}</span>${icon('chevronRight', 16)}</button>`);
+      }
+      if (q) subs.filter((s) => norm(s.name).includes(q)).forEach((s) => {
+        rows.push(`<button class="mk-rubro" data-go="cat:${esc(t.id)}" data-sub-after="${esc(s.id)}"><span class="mk-rubro-pic">${pic}</span><span class="mk-rubro-txt"><b>${esc(s.name)}</b><small>en ${esc(t.name)}</small></span>${icon('chevronRight', 16)}</button>`);
+      });
+    });
+    return rows.join('') || `<div class="mk-rubros-empty">Ninguna categoría se llama así.<button class="mk-chip is-small" data-find>${icon('search', 13)} Buscarlo entre los productos</button></div>`;
+  }
+  function openRubros() {
+    if (rubros) return;
+    const el = document.createElement('div');
+    el.className = 'mk-rubros';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'Categorías');
+    el.innerHTML = `<div class="mk-rubros-bg" data-close></div>
+      <div class="mk-rubros-card">
+        <header><span class="mk-rubros-handle" aria-hidden="true"></span><h2>Categorías <small>${visibleTops().length}</small></h2><button class="mk-rubros-x" data-close aria-label="Cerrar">${icon('close', 16)}</button></header>
+        <label class="mk-search">${icon('search', 17)}<input type="search" placeholder="Buscar una categoría (ej. gaseosas)" autocomplete="off" /></label>
+        <div class="mk-rubros-list">${rubrosListHtml('')}</div>
+      </div>`;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('is-open')));
+    const input = el.querySelector('input');
+    const list = el.querySelector('.mk-rubros-list');
+    input.addEventListener('input', () => { list.innerHTML = rubrosListHtml(norm(input.value.trim())); list.scrollTop = 0; });
+    // El botón "atrás" del celular cierra la hoja y no la tienda. Al elegir algo, el paso de la hoja pasa a ser el de
+    // lo elegido (replace): si se volviera atrás y después se agregara el paso, el "atrás" pendiente se lo comería.
+    const onPop = () => closeRubros(true);
+    saveScroll();
+    window.history.pushState({ mkRubros: true }, '');
+    window.addEventListener('popstate', onPop);
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-close]')) { closeRubros(); return; }
+      if (e.target.closest('[data-find]')) {
+        const q = input.value.trim();
+        closeRubros(true);
+        navTo(() => { searchOpen = true; searchText = q; }, { replace: true });
+        render(); scrollToMain(); runSearch();
+        return;
+      }
+      const row = e.target.closest('[data-go]');
+      if (!row) return;
+      if (menu) {
+        // Menú: bajar a la sección. Si había que volver al menú (desde Ofertas o una búsqueda), ese es el paso de la hoja
+        const away = view.type !== 'home' || !!searchText;
+        closeRubros(away);
+        if (away) { navTo(() => { view = { type: 'home' }; searchText = ''; searchOpen = false; }, { replace: true }); render(); }
+        jumpTo(row.dataset.go.slice(4));
+        return;
+      }
+      closeRubros(true);
+      go(row.dataset.go, { sub: row.dataset.subAfter || '', replace: true });
+    });
+    const onKey = (e) => { if (e.key === 'Escape') closeRubros(); };
+    document.addEventListener('keydown', onKey);
+    rubros = { el, onPop, onKey };
+  }
+  function closeRubros(fromPop = false) {
+    if (!rubros) return;
+    const { el, onPop, onKey } = rubros;
+    rubros = null;
+    window.removeEventListener('popstate', onPop);
+    document.removeEventListener('keydown', onKey);
+    if (!fromPop && window.history.state?.mkRubros) window.history.back();
+    el.classList.remove('is-open');
+    setTimeout(() => el.remove(), 240);
   }
 
   // ─── buscador
@@ -562,13 +862,33 @@ export function mountMarket(content, ctx) {
     });
     return [...score].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id]) => catById(id)).filter(Boolean);
   }
+  // Las últimas búsquedas de esta persona en este comercio (en su celular): en un kiosco se compra casi siempre lo mismo
+  const RECENT_KEY = `gd_mk_recent_${comercioId}`;
+  function recentSearches() {
+    try { return (JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') || []).filter((x) => typeof x === 'string').slice(0, 5); } catch (e) { return []; }
+  }
+  function saveRecent(text) {
+    const q = String(text || '').trim();
+    if (q.length < 2) return;
+    const n = norm(q);
+    // "fer" y después "fernet": queda solo "fernet"
+    const list = [q, ...recentSearches().filter((x) => { const m = norm(x); return m !== n && !n.startsWith(m); })].slice(0, 5);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (e) { /* sin almacenamiento */ }
+  }
   function showSuggest() {
     const box = page.querySelector('#mk-suggest');
     if (!box || searchText) return;
+    const recent = recentSearches();
     const pop = popularSearches();
-    if (!pop.length) return;
-    box.innerHTML = `<b>Lo que más se busca</b><div>${pop.map((c) => `<button class="mk-chip is-small" data-go="cat:${esc(c.parentCategoryId || c.id)}" data-sub-after="${c.parentCategoryId ? esc(c.id) : ''}">${esc(c.name)}</button>`).join('')}</div>`;
+    if (!pop.length && !recent.length) { box.hidden = true; return; }
+    box.innerHTML = (recent.length ? `<b>Tus búsquedas<button data-clear-recent>Borrar</button></b><div>${recent.map((q) => `<button class="mk-chip is-small is-recent" data-recent="${esc(q)}">${icon('clock', 13)} ${esc(q)}</button>`).join('')}</div>` : '')
+      + (pop.length ? `<b>Lo que más se busca</b><div>${pop.map((c) => `<button class="mk-chip is-small" data-go="cat:${esc(c.parentCategoryId || c.id)}" data-sub-after="${c.parentCategoryId ? esc(c.id) : ''}">${esc(c.name)}</button>`).join('')}</div>` : '');
     box.hidden = false;
+  }
+  // Escribir: el primer carácter abre un paso en el historial (el "atrás" vuelve a donde estaba); lo demás lo actualiza
+  function setSearch(text) {
+    const was = searchText;
+    navTo(() => { searchText = text; }, { replace: !!was || !text });
   }
   function hideSuggest() { const box = page.querySelector('#mk-suggest'); if (box) box.hidden = true; }
 
@@ -582,32 +902,54 @@ export function mountMarket(content, ctx) {
     });
     page.querySelector('#mk-search-cancel').addEventListener('click', (e) => {
       e.preventDefault();
+      hideSuggest();
+      // Si la búsqueda abrió un paso, "Cancelar" es lo mismo que "atrás": vuelve a donde estaba
+      if (searchText && history.state?.mkNav === comercioId && history.state.q) { history.back(); return; }
       const had = !!searchText;
       searchOpen = false; searchText = '';
-      hideSuggest();
       if (had) render(); else page.querySelector('#mk-bar').classList.remove('is-searching');
     });
     const input = page.querySelector('#mk-search');
     const clear = page.querySelector('#mk-search-clear');
     input.addEventListener('focus', showSuggest);
-    input.addEventListener('blur', () => setTimeout(hideSuggest, 200));
+    input.addEventListener('blur', () => { if (searchText.length >= 3) saveRecent(searchText); setTimeout(hideSuggest, 200); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveRecent(searchText); input.blur(); } });
     input.addEventListener('input', () => {
-      searchText = input.value.trim();
+      setSearch(input.value.trim());
       clear.style.display = searchText ? 'flex' : 'none';
       if (searchText) hideSuggest(); else showSuggest();
       clearTimeout(debounce);
       debounce = setTimeout(() => { if (searchText) { scrollToMain(); runSearch(); } else renderMain(); }, 220);
     });
-    clear.addEventListener('click', (e) => { e.preventDefault(); input.value = ''; searchText = ''; clear.style.display = 'none'; renderMain(); input.focus(); });
+    clear.addEventListener('click', (e) => { e.preventDefault(); input.value = ''; setSearch(''); clear.style.display = 'none'; renderMain(); input.focus(); showSuggest(); });
   }
   // Las sugerencias llevan al subrubro, no solo al rubro
   page.addEventListener('mousedown', (e) => {
+    if (e.target.closest('#mk-suggest [data-clear-recent]')) {
+      e.preventDefault();
+      try { localStorage.removeItem(RECENT_KEY); } catch (err) { /* sin almacenamiento */ }
+      showSuggest();
+      return;
+    }
+    const r = e.target.closest('#mk-suggest [data-recent]');
+    if (r) {
+      e.preventDefault();
+      const input = page.querySelector('#mk-search');
+      input.value = r.dataset.recent;
+      setSearch(r.dataset.recent);
+      saveRecent(r.dataset.recent);
+      page.querySelector('#mk-search-clear').style.display = 'flex';
+      hideSuggest();
+      input.blur();
+      scrollToMain();
+      runSearch();
+      return;
+    }
     const b = e.target.closest('#mk-suggest [data-sub-after]');
     if (!b) return;
     e.preventDefault();
     hideSuggest();
-    go(b.dataset.go);
-    if (b.dataset.subAfter) { view = { ...view, sub: b.dataset.subAfter }; renderMain(); }
+    go(b.dataset.go, { sub: b.dataset.subAfter || '' });
   });
 
   // Barra fija: al bajar se achica (solo el nombre, el buscador y los rubros)
@@ -616,11 +958,32 @@ export function mountMarket(content, ctx) {
     if (!bar) return;
     const s = scroller();
     bar.classList.toggle('is-stuck', bar.getBoundingClientRect().top <= (s ? s.getBoundingClientRect().top : 0) + 1);
+    // Las subcategorías quedan pegadas debajo de la barra
+    page.style.setProperty('--mk-bar-h', `${bar.offsetHeight}px`);
+    spySub();
   };
   // capture: también el scroll del panel donde se abre la tienda
   document.addEventListener('scroll', onScroll, { passive: true, capture: true });
 
   // Cantidades al día en las tarjetas cuando cambia el carrito (también desde la ficha o el carrito)
+  async function toggleFavStore() {
+    const btn = page.querySelector('#mk-fav');
+    const on = !isFavStore();
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-pressed', String(on));
+    if (navigator.vibrate) navigator.vibrate(10);
+    await toggleProductFavorite(comercioId);
+    showToast(on ? `Guardaste ${comercio.name} en favoritos` : 'Lo sacaste de favoritos', 'success');
+  }
+  // El costo de envío llega después (cart.js lo calcula con la dirección)
+  const unsubFees = subscribe('dynamicDeliveryFees', () => {
+    const el = page.querySelector('#mk-fee');
+    if (!el) return;
+    const t = feeText();
+    el.innerHTML = t;
+    el.hidden = !t;
+  });
+
   const unsubCart = subscribe('cart', () => {
     page.querySelectorAll('.mk-card').forEach((card) => {
       const p = byId.get(card.dataset.pid);
@@ -629,7 +992,14 @@ export function mountMarket(content, ctx) {
     });
   });
 
+  // Volviendo a la tienda (del carrito, por ejemplo): la categoría o búsqueda en la que estaba, en el mismo lugar
+  const back = history.state;
+  if (back && back.mkNav === comercioId && back.v) {
+    view = back.v; searchText = back.q || ''; searchOpen = !!searchText;
+    if (view.type === 'cat') loadCategory(view.id);
+  }
   render();
+  if (back && back.mkNav === comercioId) { if (searchText) runSearch(); if (back.y != null) restoreScroll(back.y); }
   loadCombos();
   loadTopSellers();
   loadReorder();
@@ -637,6 +1007,7 @@ export function mountMarket(content, ctx) {
   return {
     /** Datos nuevos (de la base, después de la carga rápida desde el caché) */
     update(next) {
+      loaded = true;
       comercio = next.comercio || comercio;
       categories = next.categories || categories;
       offers = next.activeOffers || offers;
@@ -646,6 +1017,10 @@ export function mountMarket(content, ctx) {
     },
     cleanup() {
       unsubCart();
+      unsubFees();
+      closeRubros(true);
+      window.removeEventListener('popstate', onNavPop);
+      clearTimeout(jumping);
       document.removeEventListener('scroll', onScroll, { capture: true });
       clearTimeout(pairsTimer);
     },

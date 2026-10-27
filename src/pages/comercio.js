@@ -34,6 +34,9 @@ import { createSlug, getStoreUrl } from '../utils/slug.js';
 import { getArgentinaTime, hasWeeklySchedule } from '../utils/format.js';
 import '../styles/tienda.css';
 import { storeInitials } from '../utils/store-initials.js';
+import { isSoldByWeight } from '../utils/weight.js';
+import { isMarketStore, mountMarket } from './comercio-market.js';
+import { closesAtText } from '../utils/commerce-hours.js';
 
 let currentComercio = null;
 let currentActiveOrder = null;
@@ -126,6 +129,8 @@ export async function renderComercio(content, isDirectMode = false) {
   // Marca de esta visita: lo que llega tarde de otra tienda no se dibuja encima
   const renderToken = {};
   content._comercioRender = renderToken;
+  // ¿Sigue en pantalla esta visita? (otra tienda reemplaza el contenido o lo saca del documento)
+  const stillHere = () => content.isConnected && content._comercioRender === renderToken;
   const params = getRouteParams();
   let comercioId = params.id;
   if (!comercioId) {
@@ -254,6 +259,13 @@ export async function renderComercio(content, isDirectMode = false) {
 
   currentComercio = comercio;
   const resolvedComercioId = comercio.id;
+  // Kioscos, almacenes y comercios de Ventra: tienda tipo mercado (comercio-market.js)
+  const isMarket = isMarketStore(comercio);
+  // En la app, restaurantes y demás también usan esa tienda (con los platos en lista). El catálogo online de un
+  // restaurante (#/tienda/) sigue con su diseño propio.
+  const useStore = isMarket || !isDirect;
+  const storeCtx = (data) => ({ comercio, ...data, products: [...(data.products || [])], isDirect, comercioId: resolvedComercioId, onRate: (c) => openRatingModal(c) });
+  let marketView = null;
   // La ficha del producto lo usa para explicar quién pesa (el comercio o el repartidor)
   setState('currentComercioMode', { id: comercio.id, fulfillmentMode: comercio.fulfillmentMode || null, category: comercio.category || '' });
   try {
@@ -266,25 +278,28 @@ export async function renderComercio(content, isDirectMode = false) {
     const { onSnapshot, doc: firestoreDoc } = await import('firebase/firestore');
     const docRef = firestoreDoc(db, 'comercios', resolvedComercioId);
     unsubComercios = onSnapshot(docRef, (snap) => {
+      // Si ya se salió de esta tienda (o se fue antes de que terminara de cargar y nadie llamó al cleanup), se
+      // apaga sola: si no, cada cambio de este comercio pisaba el banner y el nombre de la tienda que esté abierta
+      if (!stillHere()) { if (unsubComercios) unsubComercios(); return; }
       if (snap.exists()) {
         const prevPaused = currentComercio?.isPaused;
         const freshData = snap.data();
         comercio = { id: snap.id, ...freshData };
         
-        // Update DOM elements in real time
-        const logoImg = document.querySelector('.comercio-detail-logo');
+        // Update DOM elements in real time (solo los de esta tienda)
+        const logoImg = content.querySelector('.comercio-detail-logo');
         if (logoImg && logoImg.tagName === 'IMG') logoImg.src = comercio.logo || '/logo.png';
-        const bannerImg = document.getElementById('comercio-banner-img') || document.querySelector('.comercio-header img');
-        if (bannerImg && bannerImg.tagName === 'IMG') bannerImg.src = comercio.banner || '/logo.png';
-        const nameEl = document.querySelector('.comercio-info-text h1');
+        const bannerImg = content.querySelector('#comercio-banner-img') || content.querySelector('.comercio-header img');
+        if (bannerImg && bannerImg.tagName === 'IMG' && comercio.banner) bannerImg.src = comercio.banner;
+        const nameEl = content.querySelector('.comercio-info-text h1');
         if (nameEl) nameEl.textContent = comercio.name;
-        const descEl = document.querySelector('.comercio-description');
+        const descEl = content.querySelector('.comercio-description');
         if (descEl) descEl.textContent = comercio.description || '';
 
         // Real-time isPaused update: update badge + pause banner + product buttons
         if (freshData.isPaused !== prevPaused) {
           // Update open/closed badge
-          const statusBadge = document.getElementById('comercio-status-badge');
+          const statusBadge = content.querySelector('#comercio-status-badge');
           if (statusBadge) {
             const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
             const badgeText = comercio.isPaused ? 'Pausado' : (isOpen ? 'Abierto' : 'Cerrado');
@@ -298,14 +313,14 @@ export async function renderComercio(content, isDirectMode = false) {
             }
           }
           // Show/hide paused banner
-          const pauseBanner = document.getElementById('comercio-pause-banner');
+          const pauseBanner = content.querySelector('#comercio-pause-banner');
           if (pauseBanner) pauseBanner.style.display = comercio.isPaused ? 'flex' : 'none';
           // Disable/enable all add-to-cart buttons
-          document.querySelectorAll('.product-card-add').forEach(btn => {
+          content.querySelectorAll('.product-card-add').forEach(btn => {
             btn.style.display = comercio.isPaused ? 'none' : '';
           });
           // Show/hide paused pill on product cards
-          document.querySelectorAll('.product-paused-pill').forEach(el => {
+          content.querySelectorAll('.product-paused-pill').forEach(el => {
             el.style.display = comercio.isPaused ? '' : 'none';
           });
         }
@@ -338,6 +353,7 @@ export async function renderComercio(content, isDirectMode = false) {
         where('status', 'in', ['pending', 'confirmed', 'accepted', 'preparing', 'ready', 'picked_up', 'at_door', 'delivering'])
       );
       unsubActiveOrders = onSnapshot(qOrders, (snap) => {
+        if (!stillHere()) { if (unsubActiveOrders) unsubActiveOrders(); return; }
         const activeOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
           .sort((a, b) => {
             const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (new Date(a.createdAt || 0).getTime());
@@ -389,7 +405,8 @@ export async function renderComercio(content, isDirectMode = false) {
     const { categories, products, activeOffers } = cachedData;
     setState('activeOffers', activeOffers);
     setState('currentProducts', products);
-    renderPage(content, comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory, isDirect);
+    if (useStore) marketView = mountMarket(content, storeCtx({ categories, products, activeOffers }));
+    else renderPage(content, comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory, isDirect);
     
     // Trigger deep-link product modal if parameter exists in URL
     try {
@@ -406,6 +423,24 @@ export async function renderComercio(content, isDirectMode = false) {
         }
       }
     } catch (e) {}
+  } else if (isMarket) {
+    // Primera vez: la cabecera ya está (viene del inicio) y el mercado trae solo sus más vendidos
+    marketView = mountMarket(content, storeCtx({ categories: [], products: [], activeOffers: [] }));
+  } else if (useStore) {
+    // Restaurante, primera vez: tarjeta y barra al instante, el menú en gris hasta que llega una tanda
+    marketView = mountMarket(content, storeCtx({ categories: [], products: [], activeOffers: [] }));
+    Promise.all([
+      menuLoad.catsP,
+      menuLoad.offersP,
+      withTimeout(getDocs(query(collection(db, 'comercios', resolvedComercioId, 'products'), where('isAvailable', '==', true), limit(PREVIEW_PRODUCTS))), 8000, 'comercio_preview')
+    ]).then(([catsSnap, offersSnap, prevSnap]) => {
+      if (menuLoad.result || !stillHere() || !marketView) return;
+      marketView.update({
+        categories: (catsSnap.docs || []).map(d => ({ id: d.id, ...d.data() })).filter(c => c.isActive !== false),
+        products: prevSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        activeOffers: (offersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }))
+      });
+    }).catch(() => {});
   } else {
     // Primera vez: cabecera al instante y gris solo donde van los productos
     const paintPartial = (categories, products, activeOffers) => {
@@ -438,8 +473,6 @@ export async function renderComercio(content, isDirectMode = false) {
     if (hadLoadError && products.length === 0 && categories.length === 0 && !cachedData) {
       throw new Error(`Failed to load comercio menu data (categories/products query error)${menu.reasons ? `: ${menu.reasons}` : ''}`);
     }
-
-    // Helper to load products for a specific category dynamically
     const loadCategoryProducts = async (catId) => {
       let q;
       let cacheKey = `comercio_products_${resolvedComercioId}_cat_${catId}`;
@@ -518,7 +551,11 @@ export async function renderComercio(content, isDirectMode = false) {
       }
     }
 
-    if (shouldRender) {
+    if (useStore) {
+      // Sin productos también: así el menú deja el gris y dice que no hay nada
+      if (marketView) { if (shouldRender || !products.length) marketView.update({ comercio, categories, products, activeOffers }); }
+      else marketView = mountMarket(content, storeCtx({ categories, products, activeOffers }));
+    } else if (shouldRender) {
       renderPage(content, comercio, categories, products, activeCategory, activeOffers, activeSort, activeBrand, activeSubCategory, isDirect);
     }
 
@@ -690,6 +727,25 @@ export async function renderComercio(content, isDirectMode = false) {
       renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
     });
 
+    // Con catálogos grandes (los de Ventra tienen miles) la primera tanda trae solo una parte: al
+    // buscar se piden una vez todos los que están a la venta, si no la búsqueda no encuentra el resto
+    let allAvailableLoad = null;
+    const loadAllAvailable = () => {
+      if (products.length < 400) return Promise.resolve();
+      if (!allAvailableLoad) {
+        allAvailableLoad = getDocsOptimized(
+          query(collection(db, 'comercios', resolvedComercioId, 'products'), where('isAvailable', '==', true)),
+          `comercio_products_${resolvedComercioId}_avail_every`,
+          2 * 60 * 1000
+        ).then((snap) => {
+          const seen = new Set(products.map(p => p.id));
+          (snap.docs || []).forEach(d => { if (!seen.has(d.id)) products.push({ id: d.id, ...d.data() }); });
+          setState('currentProducts', products);
+        }).catch(() => { allAvailableLoad = null; });
+      }
+      return allAvailableLoad;
+    };
+
     // Search input handler
     let comercioSearchDebounceTimer = null;
     const searchInput = content.querySelector('#comercio-product-search') || document.getElementById('comercio-product-search');
@@ -700,7 +756,8 @@ export async function renderComercio(content, isDirectMode = false) {
         clearBtn.style.display = activeSearch ? 'flex' : 'none';
       }
       if (comercioSearchDebounceTimer) clearTimeout(comercioSearchDebounceTimer);
-      comercioSearchDebounceTimer = setTimeout(() => {
+      comercioSearchDebounceTimer = setTimeout(async () => {
+        if (activeSearch) await loadAllAvailable();
         const isOpen = isShopOpen(comercio.schedules || (comercio.schedule ? [comercio.schedule] : []), comercio.daysOpen, comercio.weeklySchedule);
         renderProducts(products, activeCategory, activeOffers, activeSort, activeSearch, resolvedComercioId, isOpen, activeBrand, activeSubCategory, categories, currentComercio?.isPaused === true);
       }, 120);
@@ -733,7 +790,8 @@ export async function renderComercio(content, isDirectMode = false) {
         if (!product || card.classList.contains('product-unavailable')) return;
 
         // If quick-add button clicked AND product has no required options/extras
-        const hasOptions = (product.optionsGroups && product.optionsGroups.length > 0) || product.useGlobalFlavors === true;
+        // Por peso también abre la ficha: ahí se elige cuánto
+        const hasOptions = (product.optionsGroups && product.optionsGroups.length > 0) || product.useGlobalFlavors === true || isSoldByWeight(product);
 
         if (addBtn && !hasOptions) {
           e.preventDefault();
@@ -825,6 +883,7 @@ export async function renderComercio(content, isDirectMode = false) {
   return {
     cleanup: () => {
       unsub();
+      if (marketView) marketView.cleanup();
       if (unsubComercios) unsubComercios();
       if (unsubActiveOrders) unsubActiveOrders();
       if (window._comercioScrollHandler) {
@@ -1462,8 +1521,10 @@ function statusLine(comercio, isOpen) {
   const t = now.getHours() * 60 + now.getMinutes();
   const mins = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + m; };
   if (isOpen) {
-    const cur = (slots || []).find(s => { const o = mins(s.open), c = mins(s.close); return c < o ? (t >= o || t <= c) : (t >= o && t <= c); });
-    return cur ? `Abierto · hasta ${cur.close}` : 'Abierto ahora';
+    if (!slots) return 'Abierto ahora';
+    // Sigue de corrido aunque cruce días: "hasta el lunes 02:00", no "hasta 23:59"
+    const until = closesAtText(comercio);
+    return until ? `Abierto · hasta ${until.replace(/^las /, '')}` : 'Abierto las 24 horas';
   }
   if (!slots) return 'Cerrado ahora';
   const next = slots.map(s => s.open).filter(o => mins(o) > t).sort((a, b) => mins(a) - mins(b))[0];
@@ -1688,7 +1749,7 @@ function directProductCard(p, offer, isOpen, isPaused, isUnavailable) {
         <div class="tnd-p-name">${esc(p.name)}</div>
         ${p.description ? `<div class="tnd-p-desc">${esc(p.description)}</div>` : ''}
         <div class="tnd-p-foot">
-          <span class="tnd-p-price ${tag ? 'is-offer' : ''}">${formatPrice(price)}</span>
+          <span class="tnd-p-price ${tag ? 'is-offer' : ''}">${formatPrice(price)}${isSoldByWeight(p) ? ' /kg' : ''}</span>
           ${was ? `<span class="tnd-p-was">${formatPrice(was)}</span>` : ''}
           ${tag ? `<span class="tnd-p-tag">${tag}</span>` : ''}
           ${p.image ? '' : action}
@@ -1698,7 +1759,7 @@ function directProductCard(p, offer, isOpen, isPaused, isUnavailable) {
     </article>`;
 }
 
-async function openRatingModal(comercio) {
+export async function openRatingModal(comercio) {
   const user = getState().user;
   if (!user) {
     showToast('Debes iniciar sesión para calificar este comercio', 'warning');
@@ -1784,16 +1845,8 @@ async function openRatingModal(comercio) {
         createdAt: serverTimestamp()
       });
 
-      // Recalculate
-      const reviewsSnap = await getDocs(query(collection(db, 'reviews'), where('comercioId', '==', comercio.id)));
-      const reviews = reviewsSnap.docs.map(d => d.data());
-      const ratingCount = reviews.length;
-      const ratingAverage = reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / ratingCount;
-
-      await updateDoc(doc(db, 'comercios', comercio.id), {
-        ratingAverage,
-        ratingCount
-      });
+      // El promedio del comercio lo recalcula el servidor (onReviewWritten): la app del cliente
+      // no puede escribirlo y antes eso hacía fallar todo el envío.
 
       showToast('¡Muchas gracias por tu calificación!', 'success');
       closeModal();
@@ -2032,11 +2085,11 @@ function renderProducts(products, categoryId, activeOffers = [], sortBy = 'defau
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
               ${offer ? `
                 <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
-                  <span style="font-family:var(--font-display); font-size:16px; font-weight:900; color:var(--color-primary);">${formatPrice(offer.type === 'percentage' ? p.price * (1 - (offer.value || 0) / 100) : p.price)}</span>
+                  <span style="font-family:var(--font-display); font-size:16px; font-weight:900; color:var(--color-primary);">${formatPrice(offer.type === 'percentage' ? p.price * (1 - (offer.value || 0) / 100) : p.price)}${isSoldByWeight(p) ? ' /kg' : ''}</span>
                   <span style="font-size:12px; color:var(--color-text-tertiary); text-decoration:line-through; font-weight:700;">${formatPrice(p.price)}</span>
                 </div>
               ` : `
-                <span style="font-family:var(--font-display); font-size:16px; font-weight:900; color:var(--color-text);">${formatPrice(p.price)}</span>
+                <span style="font-family:var(--font-display); font-size:16px; font-weight:900; color:var(--color-text);">${formatPrice(p.price)}${isSoldByWeight(p) ? ' /kg' : ''}</span>
               `}
             </div>
           </div>
