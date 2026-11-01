@@ -8,7 +8,34 @@ import { setDeliveryAddress, getState, setState } from '../state.js';
 import { showToast } from './toast.js';
 import { loadGoogleMaps } from '../utils/geo.js';
 
+// What stops the customer from confirming an address goes in a dialog they have to close: a toast
+// is easy to miss over the map, and it looked as if the button simply didn't work.
+function showAddressProblem(title, message, focusEl = null) {
+  if (document.querySelector('.address-problem-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'address-problem-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:25000001; display:flex; align-items:center; justify-content:center; padding:20px;';
+  overlay.innerHTML = `
+    <div role="alertdialog" aria-modal="true" style="background:var(--color-bg, #ffffff); border-radius:24px; padding:24px 20px; max-width:380px; width:100%; box-sizing:border-box; text-align:center; display:flex; flex-direction:column; gap:14px; box-shadow:0 20px 45px rgba(0,0,0,0.3);">
+      <div style="width:52px; height:52px; border-radius:50%; background:rgba(225, 29, 72, 0.1); color:#E11D48; display:flex; align-items:center; justify-content:center; margin:0 auto;">${icon('mapPin', 26)}</div>
+      <h3 style="margin:0; font-size:18px; font-weight:900; color:var(--color-text-primary, #0f172a); font-family:var(--font-display, sans-serif);">${title}</h3>
+      <p style="margin:0; font-size:14px; line-height:1.4; font-weight:500; color:var(--color-text-secondary, #64748b);">${message}</p>
+      <button type="button" class="address-problem-ok" style="width:100%; height:48px; border-radius:14px; background:#E11D48; color:white; border:none; font-weight:850; font-size:14.5px; cursor:pointer;">Entendido</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.address-problem-ok').onclick = () => {
+    overlay.remove();
+    if (focusEl) focusEl.focus();
+  };
+}
+
+let lastPromptOpenedAt = 0;
+
 export function showAddressPrompt(onSuccess, config = {}) {
+  // A double tap opened two copies with the same ids, and the buttons of the one on top didn't work.
+  if (Date.now() - lastPromptOpenedAt < 700) return;
+  lastPromptOpenedAt = Date.now();
+
   const isGeneric = config.mode === 'pick' || config.skipDetails === true;
   // Encabezado: por defecto es la entrega de un pedido; Viajes pasa el suyo
   const HEAD_EYEBROW = config.eyebrow || 'Entrega';
@@ -20,7 +47,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
   // State
   let googleMap;
   let geocoder;
-  let selectedCoords = config.editAddress ? config.editAddress.coords : (getState().deliveryCoords || { lat: -35.0811, lng: -57.6508 });
+  let selectedCoords = config.editAddress ? config.editAddress.coords : (getState().deliveryCoords || { lat: -35.0811, lng: -57.5146 }); // centro de Magdalena
   let searchTimeout = null;
   let lastGeocodedAddress = '';
   let lastKnownUserPos = null;
@@ -29,6 +56,9 @@ export function showAddressPrompt(onSuccess, config = {}) {
   let isManualAddress = false;
   let isPreciseLocation = false;
   let isUserDraggingMap = false;
+  // Where a "street only" suggestion dropped the pin: that spot can be kilometres from the house,
+  // so it can't be confirmed until the pin moves away from it.
+  let streetOnlyOrigin = config.fixPin ? config.fixPin.coords : null;
   let selectedTag = 'Casa';
 
   // Preload Google Maps in background immediately on prompt open
@@ -40,16 +70,68 @@ export function showAddressPrompt(onSuccess, config = {}) {
     if (!newAddress) return;
     const addrText = document.getElementById('current-selected-address-text');
     if (addrText) {
-      const oldAddr = addrText.textContent.trim();
-      if (oldAddr && oldAddr !== 'Cargando dirección...' && oldAddr !== 'Cargando...' && oldAddr !== newAddress) {
-        const refInput = document.getElementById('address-reference-input');
-        if (refInput) {
-          refInput.value = '';
-          refInput.style.borderColor = 'var(--color-border)';
-        }
-      }
       addrText.textContent = newAddress;
     }
+  };
+
+  // ── Número de casa, when the customer picked a street with no number ──
+  // The street as picked, and the number already looked up (so the same one isn't paid for twice).
+  let numberStreet = '';
+  let lookedUpNumber = '';
+  let numberLookup = Promise.resolve();
+
+  const showNumberRow = (address) => {
+    numberStreet = address ? address.replace(/,\s*Magdalena\s*$/i, '').trim() : '';
+    lookedUpNumber = '';
+    isManualAddress = false;
+    const row = document.getElementById('address-number-row');
+    if (row) row.style.display = numberStreet ? 'flex' : 'none';
+    const input = document.getElementById('address-number-input');
+    const noNumber = document.getElementById('address-no-number');
+    if (input) { input.value = ''; input.disabled = false; }
+    if (noNumber) noNumber.checked = false;
+  };
+
+  // With a number Google knows, the pin jumps to the house. If it doesn't know it, the number stays
+  // in the address for the driver and the customer still has to place the pin by hand.
+  const applyHouseNumber = () => {
+    const input = document.getElementById('address-number-input');
+    const number = input ? input.value.trim() : '';
+    if (!numberStreet || !/^\d{1,5}[a-zA-Z]?$/.test(number)) return Promise.resolve();
+    // Leaving the field already started this lookup when they tap confirm: wait for that same one.
+    if (number === lookedUpNumber) return numberLookup;
+    lookedUpNumber = number;
+    numberLookup = lookUpHouseNumber(number, input);
+    return numberLookup;
+  };
+
+  const lookUpHouseNumber = async (number, input) => {
+    const refValue = document.getElementById('address-reference-input')?.value;
+    lastGeocodedAddress = `${numberStreet} ${number}, Magdalena`;
+    updateSelectedAddress(lastGeocodedAddress);
+    const refInput = document.getElementById('address-reference-input');
+    if (refInput && refValue) refInput.value = refValue;
+    isManualAddress = true; // moving the pin afterwards must not rewrite the number they typed
+
+    const near = streetOnlyOrigin || selectedCoords;
+    const { geocodeHouseNumber } = await import('../utils/geo.js');
+    const point = await geocodeHouseNumber(numberStreet, number, near);
+    if (input && input.value.trim() !== number) return; // they kept typing
+    if (!point) {
+      showAddressProblem('No encontramos esa altura', 'Guardamos el número, pero el mapa no lo conoce. Mové el mapa hasta que el pin quede en tu puerta y confirmá de nuevo.');
+      return;
+    }
+    streetOnlyOrigin = null;
+    selectedCoords = point;
+    isUserDraggingMap = false;
+    disableGeocodingTemporarily(2000);
+    if (typeof googleMap?.panTo === 'function') {
+      googleMap.panTo({ lat: point.lat, lng: point.lng });
+      googleMap.setZoom(18);
+    } else if (typeof googleMap?.easeTo === 'function') {
+      googleMap.easeTo({ center: [point.lng, point.lat], zoom: 18 });
+    }
+    showToast('Listo: revisá que el pin esté en tu puerta', 'success');
   };
 
   const disableGeocodingTemporarily = (ms = 1500) => {
@@ -173,7 +255,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
            <!-- Slide 2: Mapa y confirmación de detalles -->
            <div id="address-map-step" style="width: 50%; height: 100%; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
              <!-- Map Area (Center Pin + Floating GPS Button 🎯) -->
-             <div id="address-map-container" style="flex: 1; min-height: 220px; position: relative; background: var(--color-bg-secondary);">
+             <div id="address-map-container" style="flex: 1 0 170px; min-height: 170px; position: relative; background: var(--color-bg-secondary);">
                <div id="address-map-picker" style="width: 100%; height: 100%;"></div>
                 
                 <!-- Center Marker Teardrop with Dynamic Floating Shadow -->
@@ -224,7 +306,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
              </div>
 
              <!-- Bottom Details Panel -->
-             <div id="address-bottom-panel" style="flex-shrink: 0; padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 8px))); background: var(--color-bg); z-index: 20; border-top: 1px solid var(--color-border-light); box-shadow: 0 -4px 16px rgba(0,0,0,0.04); width:100%; box-sizing:border-box;">
+             <div id="address-bottom-panel" style="flex: 0 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 16px calc(12px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 8px))); background: var(--color-bg); z-index: 20; border-top: 1px solid var(--color-border-light); box-shadow: 0 -4px 16px rgba(0,0,0,0.04); width:100%; box-sizing:border-box;">
                <!-- Dirección seleccionada -->
                <div id="current-selected-address-container" style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px; background: var(--color-bg-secondary); padding: 8px 12px; border-radius: 12px; border: 1.5px solid var(--color-border-light);">
                  <div style="color: var(--color-primary); margin-top: 2px; flex-shrink: 0;">${icon('mapPin', 16)}</div>
@@ -238,6 +320,13 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
                <!-- Stacked Inputs: Piso/Dpto + Referencia (Perfect Alignment & Full Width) -->
                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; width: 100%;">
+                 <!-- Solo cuando eligió una calle sin altura -->
+                 <div id="address-number-row" style="display: none; align-items: center; gap: 10px; width: 100%;">
+                   <input type="text" id="address-number-input" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="Número de casa" style="flex: 1; min-width: 0; height: 46px; padding: 0 14px; border-radius: 12px; border: 1.5px solid var(--color-primary); background: var(--color-surface); font-size: 14px; font-weight: 700; outline: none; color: var(--color-text-primary); box-sizing: border-box;" />
+                   <label style="display: flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 12.5px; font-weight: 700; color: var(--color-text-secondary); cursor: pointer;">
+                     <input type="checkbox" id="address-no-number" style="width: 18px; height: 18px; accent-color: var(--color-primary);" /> No tiene número
+                   </label>
+                 </div>
                  <input type="text" id="address-apt-input" placeholder="Piso / Departamento / Oficina (Opcional)" style="width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1.5px solid var(--color-border); background: var(--color-surface); font-size: 13px; font-weight: 600; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-sizing: border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'" />
                  <input type="text" id="address-reference-input" placeholder="${config.optionalReference ? 'Referencia / Indicaciones (Opcional)' : 'Referencia / Instrucciones de entrega (Obligatorio)'}" style="width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1.5px solid var(--color-border); background: var(--color-surface); font-size: 13px; font-weight: 600; outline: none; color: var(--color-text-primary); transition: all 0.2s; box-sizing: border-box;" onfocus="this.style.borderColor='var(--color-primary)'" onblur="this.style.borderColor='var(--color-border)'" value="${getState().addressNotes || ''}" />
                </div>
@@ -546,10 +635,20 @@ export function showAddressPrompt(onSuccess, config = {}) {
       };
     }
 
-    document.getElementById('confirm-location-btn').onclick = () => {
+    document.getElementById('confirm-location-btn').onclick = async () => {
+      // Typed the number and tapped confirm directly: look it up before deciding anything
+      await applyHouseNumber();
       const address = lastGeocodedAddress || document.getElementById('address-search-input')?.value;
       if (!address || address.includes('Cargando')) {
-        showToast('Elegí una ubicación válida en el mapa o escribila en el buscador', 'warning');
+        showAddressProblem('Ubicá tu puerta en el mapa', 'Mové el mapa hasta que el pin quede en tu puerta, o volvé atrás y escribí la dirección.');
+        return;
+      }
+
+      if (streetOnlyOrigin && Math.hypot((selectedCoords.lat - streetOnlyOrigin.lat) * 111000, (selectedCoords.lng - streetOnlyOrigin.lng) * 91000) < 15) {
+        const numberInput = document.getElementById('address-number-input');
+        const answered = document.getElementById('address-no-number')?.checked || numberInput?.value.trim();
+        if (answered) showAddressProblem('Ubicá tu puerta en el mapa', 'Mové el mapa hasta que el pin quede en tu puerta y confirmá de nuevo.');
+        else showAddressProblem('Falta el número de casa', 'Escribí el número de casa o marcá "No tiene número". También podés mover el mapa hasta tu puerta.', numberInput);
         return;
       }
 
@@ -565,9 +664,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
           void refInput.offsetWidth;
           refInput.classList.add('shake-anim');
           refInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          refInput.focus();
         }
-        showToast('Por favor, ingresá una referencia (Ej: Frente a la plaza, timbre blanco)', 'warning');
+        showAddressProblem('Falta la referencia', 'Escribí algo que ayude al repartidor a encontrarte. Por ejemplo: frente a la plaza, timbre blanco.', refInput);
         return;
       }
 
@@ -581,8 +679,11 @@ export function showAddressPrompt(onSuccess, config = {}) {
             return;
           }
           if (!config.editAddress) {
-            import('../state.js').then(({ saveUserAddress }) => {
-              saveUserAddress(selectedTag, address, finalNotes, selectedCoords);
+            import('../state.js').then(({ saveUserAddress, updateUserAddress }) => {
+              // Fixing the pin of a saved address replaces it: a second copy would keep the wrong pin one tap away.
+              const fixed = config.fixPin && (getState().savedAddresses || []).find(a => a.coords?.lat === config.fixPin.coords.lat && a.coords?.lng === config.fixPin.coords.lng);
+              if (fixed) updateUserAddress(fixed.id, fixed.name, address, finalNotes, selectedCoords);
+              else saveUserAddress(selectedTag, address, finalNotes, selectedCoords);
             }).catch(e => console.warn('Could not save user address to list:', e));
           }
           setDeliveryAddress(address, finalNotes, selectedCoords, '');
@@ -731,7 +832,8 @@ export function showAddressPrompt(onSuccess, config = {}) {
           });
 
           let display = `${street} ${streetNumber}`.trim();
-          if (!display) display = gResult.formatted_address.split(',')[0];
+          // Without a street Google answers a plus code ("WG83+3R"): the name already chosen says more.
+          if (!display) display = lastGeocodedAddress || gResult.formatted_address.split(',')[0];
           if (neighborhood && !display.includes(neighborhood)) display += ` (${neighborhood})`;
 
           lastGeocodedAddress = display;
@@ -942,7 +1044,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
     suggestionsBox.style.flexDirection = 'column';
     
     let html = suggestions.map((s, idx) => `
-      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="width:100%; box-sizing:border-box; padding:12px 14px; display:flex; flex-direction:row; align-items:center; gap:12px; cursor:pointer; ${idx < suggestions.length - 1 ? 'border-bottom:1px solid var(--color-border-light);' : ''} background:transparent; transition:background 0.15s ease;">
+      <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" data-street="${s.isStreet ? '1' : ''}" style="width:100%; box-sizing:border-box; padding:12px 14px; display:flex; flex-direction:row; align-items:center; gap:12px; cursor:pointer; ${idx < suggestions.length - 1 ? 'border-bottom:1px solid var(--color-border-light);' : ''} background:transparent; transition:background 0.15s ease;">
         <div style="width:34px; height:34px; border-radius:50%; background:rgba(225, 29, 72, 0.09); color:#E11D48; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
           ${icon('mapPin', 16)}
         </div>
@@ -972,7 +1074,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
           const coords = await geocodePlaceId(item.dataset.placeid);
           item.style.opacity = '';
           if (!coords) {
-            showToast('No pudimos ubicar esa dirección, probá marcarla en el mapa', 'error');
+            showAddressProblem('No pudimos ubicar esa dirección', 'Probá con otra búsqueda o marcala en el mapa.');
             return;
           }
           lat = coords.lat;
@@ -982,6 +1084,12 @@ export function showAddressPrompt(onSuccess, config = {}) {
 
         isUserDraggingMap = false;
         selectedCoords = { lat, lng };
+        streetOnlyOrigin = item.dataset.street ? { lat, lng } : null;
+        showNumberRow(item.dataset.street ? addr : '');
+        // Another address: the previous one's reference doesn't apply. Moving the pin keeps it, because
+        // it's the same house (it used to erase what they had just typed).
+        const refInput = document.getElementById('address-reference-input');
+        if (refInput) refInput.value = '';
         lastGeocodedAddress = addr;
         updateSelectedAddress(addr);
         
@@ -1001,7 +1109,7 @@ export function showAddressPrompt(onSuccess, config = {}) {
   showModal({
     title: '',
     hideHeader: true,
-    height: '80vh',
+    height: '92vh',
     content: modalContent,
     onOpen: () => {
       // Bind Step Navigation Buttons
@@ -1010,6 +1118,9 @@ export function showAddressPrompt(onSuccess, config = {}) {
         openMapBtn.onclick = (e) => {
           e.preventDefault();
           showMapView();
+          // Say what's under the pin right away: it used to read "Cargando dirección..." until the
+          // map was moved, and confirming without moving it failed.
+          if (!lastGeocodedAddress) setTimeout(() => reverseGeocode(selectedCoords.lat, selectedCoords.lng), 300);
         };
       }
 
@@ -1046,6 +1157,33 @@ export function showAddressPrompt(onSuccess, config = {}) {
           btn.classList.add('active');
           selectedTag = btn.dataset.tag;
         };
+      });
+
+      if (config.fixPin) {
+        lastGeocodedAddress = config.fixPin.address;
+        updateSelectedAddress(config.fixPin.address);
+        const refInput = document.getElementById('address-reference-input');
+        if (refInput) refInput.value = config.fixPin.notes || '';
+        showNumberRow(config.fixPin.address);
+        showMapView(config.fixPin.coords);
+      }
+
+      const numberInput = document.getElementById('address-number-input');
+      const noNumberBox = document.getElementById('address-no-number');
+      if (numberInput) numberInput.addEventListener('change', applyHouseNumber);
+      if (noNumberBox) noNumberBox.addEventListener('change', () => {
+        if (numberInput) {
+          numberInput.disabled = noNumberBox.checked;
+          if (noNumberBox.checked) numberInput.value = '';
+        }
+        // They said which street it is: moving the pin must not rename it to the nearest numbered house
+        isManualAddress = noNumberBox.checked;
+        if (noNumberBox.checked) {
+          lookedUpNumber = '';
+          lastGeocodedAddress = `${numberStreet}, Magdalena`;
+          updateSelectedAddress(lastGeocodedAddress);
+          showToast('Mové el mapa hasta que el pin quede en tu puerta', 'info');
+        }
       });
 
       // Bind drag to close event for unified header!
@@ -1297,7 +1435,7 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
 
     if (!notes) {
       notesInput.style.borderColor = '#EF4444';
-      showToast('Por favor, ingresá una referencia de ubicación (Instrucciones para el repartidor)', 'warning');
+      showAddressProblem('Falta la referencia', 'Escribí algo que ayude al repartidor a encontrarte.', notesInput);
       hasError = true;
     }
 
@@ -1327,6 +1465,17 @@ export function showAddressDetails(address, coords, onSuccess, config = {}) {
     showToast(config.editAddress ? '¡Dirección actualizada!' : '¡Dirección configurada!', 'success');
     if (onSuccess) onSuccess(address, finalNotes, coords);
   };
+}
+
+// Addresses saved before the pin became mandatory (a street with no number and a pin nobody moved)
+// go back to the map once before ordering. Returns true when the map was opened.
+export async function askToFixStreetOnlyPin({ address, notes, coords }, onFixed, beforeOpen) {
+  const { isStreetOnlyLocation } = await import('../utils/geo.js');
+  if (!await isStreetOnlyLocation(address, coords)) return false;
+  if (beforeOpen) beforeOpen();
+  showToast('Tu dirección no tiene altura: mové el mapa hasta que el pin quede en tu puerta', 'warning');
+  showAddressPrompt(onFixed, { skipDetails: true, fixPin: { address, notes, coords } });
+  return true;
 }
 
 export function ensureAddress(onSuccess) {

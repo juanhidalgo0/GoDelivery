@@ -210,7 +210,7 @@ async function loadKioskPaulosData() {
                   </div>
 
                   <div style="font-size:12px; color:var(--color-text-secondary); font-weight:600; background:var(--color-bg-secondary); padding:8px 10px; border-radius:10px; border:1px solid var(--color-border-light);">
-                    📦 <span style="font-weight:700; color:var(--color-text-primary);">Detalle:</span> ${o.details || (o.stores && o.stores[0]?.details) || 'Compra Maxikiosco Paulos'}
+                    📦 <span style="font-weight:700; color:var(--color-text-primary);">Detalle:</span> ${o.details || (o.stores && o.stores[0]?.details) || (Array.isArray(o.items) && o.items.length ? o.items.filter(i => i.shopStatus !== 'missing').map(i => `${Number(i.qty) || 1}× ${String(i.name || '').replace(/[<>&"]/g, '')}`).join(', ') : '') || 'Compra Maxikiosco Paulos'}
                   </div>
 
                   <div style="display:flex; align-items:center; justify-content:space-between; padding-top:6px; border-top:1px dashed var(--color-border-light); font-size:12px; font-weight:800;">

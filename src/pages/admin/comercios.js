@@ -1,5 +1,5 @@
 import { db } from '../../firebase.js';
-import { collection, getDocs, getDoc, setDoc, doc, updateDoc, deleteDoc, query, where, orderBy, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, getDoc, setDoc, doc, updateDoc, deleteDoc, query, where, orderBy, Timestamp, serverTimestamp, getAggregateFromServer, sum } from 'firebase/firestore';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
@@ -98,11 +98,29 @@ export async function renderAdminComercios() {
       }
     });
   };
-  import('./commerce-fixes.js').then(m => m.scanCommerceFixes()).then(r => {
+  // Corre después de mostrar la lista y con los comercios ya leídos (antes bajaba todos los pedidos al abrir)
+  const scanFixes = () => import('./commerce-fixes.js').then(m => m.scanCommerceFixes(allComercios)).then(r => {
     fixes = r;
     const card = document.getElementById('commerce-fixes-card');
     if (card) { card.innerHTML = renderFixesCard(); bindFixesCard(); }
   }).catch(err => console.warn('No se pudieron revisar los arreglos pendientes:', err));
+
+  // Ventas de cada comercio: una suma en el servidor por comercio, sin bajar los pedidos
+  const salesMap = {};
+  const salesText = (id) => salesMap[id] == null ? '…' : salesMap[id] === false ? '—' : formatPrice(salesMap[id]);
+  const loadSales = () => Promise.all(allComercios.map(async (c) => {
+    try {
+      const agg = await getAggregateFromServer(
+        query(collection(db, 'orders'), where('comercioId', '==', c.id), where('status', 'in', ['delivered', 'completed'])),
+        { total: sum('total') });
+      salesMap[c.id] = Number(agg.data().total) || 0;
+    } catch (err) {
+      salesMap[c.id] = false;
+      console.warn('Ventas de', c.name, err?.code || err);
+    }
+    const el = document.querySelector(`[data-sales-for="${c.id}"]`);
+    if (el) el.textContent = salesText(c.id);
+  }));
   let searchQuery = '';
   let filterStatus = 'all';
 
@@ -121,19 +139,15 @@ export async function renderAdminComercios() {
     activeComercios.forEach(c => {
       comercioStatsMap[c.id] = {
         unsettledOrders: [],
-        unsettledCommission: 0,
-        totalSales: 0,
-        ordersCount: 0
+        unsettledCommission: 0
       };
     });
 
+    // allOrders trae solo pedidos con comisión (las ventas salen de loadSales)
     allOrders.forEach(o => {
       if (o.status === 'cancelled') return;
       const cId = o.comercioId;
       if (!cId || !comercioStatsMap[cId]) return;
-
-      comercioStatsMap[cId].ordersCount++;
-      comercioStatsMap[cId].totalSales += Number(o.total || 0);
 
       // Pagada (desde Comisiones) o condonada (comercios gratis) ya no es deuda
       if (!o.isSettled && !['paid', 'waived'].includes(o.commissionStatus)) {
@@ -215,7 +229,7 @@ export async function renderAdminComercios() {
             <p style="margin-top:12px; font-weight:700;">No se encontraron comercios con los criterios de búsqueda.</p>
           </div>
         ` : filtered.map(c => {
-          const stats = comercioStatsMap[c.id] || { unsettledCommission: 0, unsettledOrders: [], totalSales: 0 };
+          const stats = comercioStatsMap[c.id] || { unsettledCommission: 0, unsettledOrders: [] };
           const debt = stats.unsettledCommission;
           const isPendingApproval = c.approvedByAdmin === false;
           const isClean = debt <= 0;
@@ -264,7 +278,7 @@ export async function renderAdminComercios() {
                 </div>
                 <div style="text-align:right;">
                   <div style="font-size:10px; font-weight:800; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em;">Ventas Totales</div>
-                  <div style="font-size:14px; font-weight:800; color:var(--color-text-secondary); margin-top:2px;">${formatPrice(stats.totalSales)}</div>
+                  <div data-sales-for="${c.id}" style="font-size:14px; font-weight:800; color:var(--color-text-secondary); margin-top:2px;">${salesText(c.id)}</div>
                 </div>
               </div>
 
@@ -312,7 +326,7 @@ export async function renderAdminComercios() {
         if (!comercio) return;
         const phone = (comercio.phone || comercio.whatsapp || '').replace(/\D/g, '');
         if (!phone) {
-          showToast('El comercio no tiene número de teléfono registrado.', 'error');
+          showToast('El comercio no tiene número de teléfono registrado.', 'warning');
           return;
         }
         const stats = comercioStatsMap[cId] || { unsettledCommission: 0 };
@@ -348,18 +362,24 @@ Por favor, enviá el comprobante de transferencia por este medio una vez realiza
     });
   };
 
+  let firstLoad = true;
   const refreshData = async () => {
     try {
+      // Solo pedidos con comisión: "isSettled != true" traía casi todos los pedidos de la historia
       const [comerciosSnap, ordersSnap] = await Promise.all([
         getDocs(collection(db, 'comercios')),
-        getDocs(query(collection(db, 'orders'), where('isSettled', '!=', true)))
+        getDocs(query(collection(db, 'orders'), where('commissionAmount', '>', 0)))
       ]);
       allComercios = comerciosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       allComercios.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       allOrders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderComerciosList();
+      loadSales();
+      if (firstLoad) { firstLoad = false; scanFixes(); }
     } catch (err) {
       console.error('Error loading comercios data:', err);
+      const body = document.getElementById('comercios-panel-body');
+      if (body && !allComercios.length) body.innerHTML = '<div style="text-align:center; padding:40px 16px; color:var(--color-text-secondary); font-weight:700;">No se pudieron cargar los comercios. Revisá la conexión y volvé a entrar.</div>';
     }
   };
 

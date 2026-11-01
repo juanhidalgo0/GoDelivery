@@ -2005,6 +2005,14 @@ div[aria-label*="Términos"] {
     max-width: 500px;
     margin-bottom: 24px !important;
   }
+
+  /* Rubros de un comercio: en PC no se puede deslizar con el mouse, así que se ven todos en varias filas */
+  #comercio-categories.tab-pills,
+  #comercio-subcategories.tab-pills {
+    max-width: none;
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
 }
 
 /* ============================================
@@ -2196,4 +2204,123 @@ body.is-delivery-mode.driver-light-mode #driver-fullscreen-map {
   cursor: grab;
   z-index: 10;
   transition: transform 0.05s linear;
+}
+/* Carrito: cómo funciona un pedido que compra el repartidor (cart.js) */
+.cart-shopper { margin: 12px 16px 2px; padding: 12px 14px; border-radius: 16px; background: var(--go-paper); border: 1px solid var(--go-line); color: var(--go-text-2); font-size: 12.5px; line-height: 1.45; }
+.cart-shopper-title { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 13px; color: var(--go-text); margin-bottom: 6px; }
+.cart-shopper ol { margin: 0; padding: 0; list-style: none; counter-reset: cs; display: flex; flex-direction: column; gap: 5px; }
+.cart-shopper li { counter-increment: cs; display: flex; gap: 8px; align-items: flex-start; }
+.cart-shopper li::before { content: counter(cs); width: 18px; height: 18px; border-radius: 50%; background: var(--go-ink); color: var(--go-on-ink); font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+.cart-shopper b { color: var(--go-text); }
+.cart-shopper p { margin: 8px 0 0; font-size: 12px; color: var(--go-text-3); }
+
+/* Carrito: recargo por transferencia del comercio (cart.js) */
+.cart-surcharge { display: flex; justify-content: space-between; gap: 10px; margin: 2px 0 4px; padding: 6px 9px; border-radius: 9px; background: rgba(245,158,11,.10); color: #92400e; font-size: 11.5px; font-weight: 600; line-height: 1.35; }
+.cart-surcharge.is-on { font-size: 12px; }
+.cart-surcharge b { font-weight: 800; white-space: nowrap; }
+
+/* Fila de botones rápidos del repartidor: en un celular angosto "Auto-aceptar" no entra entero
+   y quedaba una letra cortada; se ve solo el rayo (de color si está activo) y el interruptor.
+   Va al final del archivo: más arriba, desde la línea ~880, todo queda dentro de un
+   @media (min-width: 1024px) que no se cierra donde debería y no aplica en el celular. */
+@media (max-width: 439px) { .driver-auto-label { display: none; } }
+@media (max-width: 374px) { .driver-auto-label-compact { display: none; } }
+
+/* ============================================
+   Colores del repartidor en el celular
+   Las variables --driver-* (las usan Ganancias, Historial, Perfil, Ayuda, Desglose, Cargar monto,
+   chat con soporte...) y los colores claros de las ventanas emergentes. Son copia de reglas de la
+   sección "Driver Mode" de más arriba, que por una llave perdida en .category-card-small:hover
+   quedaron dentro de @media (min-width: 1024px) y solo aplican en PC. El resto de esa sección
+   queda apagado en el celular a propósito: las reglas de posición, scroll y capas, y los colores
+   viejos de la tarjeta, la barra de arriba y los botones, que hoy traen sus propios colores.
+   ============================================ */
+body.is-delivery-mode:not(.driver-light-mode) {
+  --driver-text-primary: #ffffff;
+  --driver-text-primary-soft: #f8fafc;
+  --driver-text-secondary: #94a3b8;
+  --driver-text-secondary-b: #94a3b8;
+  --driver-text-secondary-inverted: #64748b;
+  --driver-text-label: #cbd5e1;
+  --driver-text-tertiary: #cbd5e1;
+  --driver-accent-text: #fb7185;
+  --driver-success-text: #4ade80;
+  --driver-bg-panel: #090d16;
+  --driver-bg-panel-b: #1e293b;
+  --driver-bg-elevated: #0f172a;
+  --driver-fill-subtle: rgba(255, 255, 255, 0.08);
+  --driver-fill-subtle-b: rgba(255, 255, 255, 0.06);
+  --driver-fill-faint: rgba(255, 255, 255, 0.04);
+  --driver-fill-faint-b: rgba(255, 255, 255, 0.03);
+  --driver-border: rgba(255, 255, 255, 0.08);
+  --driver-border-b: rgba(255, 255, 255, 0.1);
+  --driver-border-c: rgba(255, 255, 255, 0.12);
+  --driver-border-soft: rgba(255, 255, 255, 0.1);
+  --driver-border-strong: rgba(255, 255, 255, 0.15);
+  --driver-hairline: rgba(255, 255, 255, 0.06);
+}
+body.is-delivery-mode.driver-light-mode {
+  --driver-text-primary: #0f172a;
+  --driver-text-primary-soft: #0f172a;
+  --driver-text-secondary: #64748b;
+  --driver-text-secondary-b: #475569;
+  --driver-text-secondary-inverted: #94a3b8;
+  --driver-text-label: #475569;
+  --driver-text-tertiary: #334155;
+  --driver-accent-text: #e11d48;
+  --driver-success-text: #166534;
+  --driver-bg-panel: #ffffff;
+  --driver-bg-panel-b: #ffffff;
+  --driver-bg-elevated: #ffffff;
+  --driver-fill-subtle: #f1f5f9;
+  --driver-fill-subtle-b: #f1f5f9;
+  --driver-fill-faint: #f8fafc;
+  --driver-fill-faint-b: #f8fafc;
+  --driver-border: #e2e8f0;
+  --driver-border-b: #e2e8f0;
+  --driver-border-c: #cbd5e1;
+  --driver-border-soft: #cbd5e1;
+  --driver-border-strong: #cbd5e1;
+  --driver-hairline: rgba(0, 0, 0, 0.05);
+}
+body.is-delivery-mode.driver-light-mode .modal,
+body.is-delivery-mode.driver-light-mode .modal-dialog {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 -12px 60px rgba(0, 0, 0, 0.15) !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-header {
+  background: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-header h3,
+body.is-delivery-mode.driver-light-mode .modal-title {
+  color: #0f172a !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-body {
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-body p {
+  color: #334155 !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-footer {
+  background: #f8fafc !important;
+  border-top: 1px solid #e2e8f0 !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-handle {
+  background: #94a3b8 !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-close {
+  color: #64748b !important;
+}
+body.is-delivery-mode.driver-light-mode .modal-close:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+body.is-delivery-mode.driver-light-mode .modal .btn-ghost {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
 }

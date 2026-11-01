@@ -48,13 +48,18 @@ export async function findUserByEmail(email) {
 }
 
 // Usuarios que pidieron dar de alta un comercio con un nombre parecido: los dueños más probables.
-export async function findOwnerCandidates(comercioName) {
+// Se puede pasar la lista ya leída (loadOwnerApplicants) para revisar muchos comercios con una sola consulta.
+export async function loadOwnerApplicants() {
+  const snap = await getDocs(query(collection(db, 'users'), where('commerceStatus', 'in', ['pending', 'approved', 'rejected'])));
+  return snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+}
+
+export async function findOwnerCandidates(comercioName, applicants = null) {
   const target = norm(comercioName);
   if (!target) return [];
-  const snap = await getDocs(query(collection(db, 'users'), where('commerceStatus', 'in', ['pending', 'approved', 'rejected'])));
+  const users = applicants || await loadOwnerApplicants();
   const words = target.split(' ').filter(w => w.length > 2);
-  return snap.docs
-    .map(d => ({ uid: d.id, ...d.data() }))
+  return users
     .map(u => {
       const app = norm(u.commerceApplication?.name);
       const score = !app ? 0 : app === target ? 3 : (app.includes(target) || target.includes(app)) ? 2 : words.some(w => app.includes(w)) ? 1 : 0;

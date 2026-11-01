@@ -66,10 +66,21 @@ const LEGACY_GOOGLE_CANCELLED = Symbol('legacy-google-cancelled');
  * @returns {Promise<string|symbol|null>} idToken, LEGACY_GOOGLE_CANCELLED, o null si no se pudo.
  */
 async function getLegacyGooglePlugin() {
+  // Solo si el APK lo trae (los anteriores al build 65). En los nuevos no existe: antes se pedía
+  // igual y, como la función es async, la promesa se "resolvía" con el proxy del plugin; Capacitor
+  // contesta ".then" con "plugin is not implemented" y la promesa no terminaba nunca. El login de
+  // Google quedaba colgado en "Iniciando sesión..." sin mostrar por qué había fallado el plugin
+  // nuevo (Admin → Errores, 10-10-2026: "GoogleAuth" plugin is not implemented on android).
+  if (!window.Capacitor?.isPluginAvailable?.('GoogleAuth')) return null;
   // registerPlugin habla directo con el plugin nativo ya registrado en el APK viejo,
   // así no hace falta reinstalar la dependencia de codetrix que ya sacamos del package.json.
   const { registerPlugin } = await import('@capacitor/core');
-  return registerPlugin('GoogleAuth');
+  const plugin = registerPlugin('GoogleAuth');
+  // Nunca devolver el proxy mismo desde una función async (ver arriba): un objeto común que delega
+  return {
+    initialize: (opts) => plugin.initialize(opts),
+    signIn: () => plugin.signIn(),
+  };
 }
 
 // NOTA: no llamamos a GoogleAuth.signOut() en este plugin, ni al entrar ni al salir. La llamada
@@ -80,6 +91,7 @@ async function getLegacyGooglePlugin() {
 async function signInWithLegacyGooglePlugin() {
   try {
     const GoogleAuth = await getLegacyGooglePlugin();
+    if (!GoogleAuth) return null; // APK nuevo: no hay plugin viejo, se muestra el error del nuevo
 
     const isIos = window.Capacitor?.getPlatform
       ? window.Capacitor.getPlatform() === 'ios'
@@ -217,8 +229,19 @@ export async function signInWithGoogle() {
   }
 }
 
+// En la app de Android el plugin de Apple necesita un redirectUrl (un servidor que reciba la
+// respuesta de Apple y vuelva a la app) que no tenemos, y el WebView no puede abrir el popup:
+// siempre fallaba con "redirectUrl must be provided" (Admin → Errores, 16-10-2026). Ahí no se ofrece.
+export function isAppleSignInAvailable() {
+  return window.Capacitor?.getPlatform?.() !== 'android';
+}
+
 // Sign in with Apple
 export async function signInWithApple() {
+  if (!isAppleSignInAvailable()) {
+    showToast('En Android iniciá sesión con Google', 'info');
+    return null;
+  }
   try {
     const isNativeApp = window.Capacitor?.isNativePlatform ? window.Capacitor.isNativePlatform() : ((window.Capacitor && window.Capacitor.isNative) || (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web'));
     if (isNativeApp) {
@@ -262,6 +285,12 @@ export async function signInWithApple() {
         const errStr = (nativeErr?.message || nativeErr?.code || String(nativeErr)).toLowerCase();
         if (errStr.includes('cancel') || errStr.includes('canceled') || errStr.includes('cancelled') || nativeErr?.code === '1001' || nativeErr?.code === 'SIGN_IN_CANCELED') {
           showToast('Inicio de sesión cancelado', 'info');
+          return null;
+        }
+        // 1000 (AuthorizationError.unknown): el iPhone no tiene una cuenta de Apple iniciada o el
+        // usuario cerró la hoja. No es un error de la app.
+        if (errStr.includes('error 1000') || nativeErr?.code === '1000') {
+          showToast('No se pudo usar tu cuenta de Apple. Revisá que tengas tu Apple ID iniciado en Ajustes o entrá con Google.', 'warning');
           return null;
         }
         if (errStr.includes('operation-not-allowed') || nativeErr?.code === 'auth/operation-not-allowed') {
@@ -365,7 +394,22 @@ export async function signOut() {
 }
 
 // Ensure user document exists in Firestore
-async function ensureUserDoc(user) {
+// Al registrarse, el botón de Google/Apple, el cambio de sesión (initAuth) y la escucha del perfil
+// llamaban a esto a la vez: los tres veían "no existe" y creaban el usuario, cada uno con otro
+// clientId. El primero ganaba y las reglas rechazaban a los otros (no se puede cambiar clientId),
+// así que el botón mostraba "No se pudo iniciar sesión con Google (permission-denied)" aunque la
+// persona ya había entrado (Admin → Errores, 11-10-2026). Ahora una sola alta por usuario a la vez.
+const ensureUserDocInFlight = new Map();
+function ensureUserDoc(user) {
+  if (!user?.uid) return Promise.resolve();
+  const running = ensureUserDocInFlight.get(user.uid);
+  if (running) return running;
+  const p = ensureUserDocOnce(user).finally(() => ensureUserDocInFlight.delete(user.uid));
+  ensureUserDocInFlight.set(user.uid, p);
+  return p;
+}
+
+async function ensureUserDocOnce(user) {
   const userRef = doc(db, 'users', user.uid);
   const userSnap = await getDoc(userRef);
 
@@ -421,7 +465,16 @@ async function ensureUserDoc(user) {
       userData.deliveryId = 'DL-TEST';
     }
 
-    await setDoc(userRef, userData);
+    try {
+      await setDoc(userRef, userData);
+    } catch (createErr) {
+      // Si otro dispositivo o pestaña lo creó justo antes, la escritura se rechaza (sería pisar
+      // su clientId): el usuario ya existe y está bien, se usan sus datos.
+      const again = await getDoc(userRef).catch(() => null);
+      if (!again?.exists()) throw createErr;
+      setState('user', { uid: user.uid, ...again.data() });
+      return;
+    }
 
     if (isFirst) {
       showToast('🎉 ¡Sos el Administrador!', 'success');
@@ -597,6 +650,14 @@ export function initAuth(callback) {
                 userData.lastAddress.coords || null,
                 userData.lastAddress.houseNumber || ''
               );
+            }
+
+            // A driver corrected the pin (functions/pin-correction.js): this device still has the old one.
+            const pinFix = userData.pinCorrection;
+            const localCoords = getState().deliveryCoords;
+            if (pinFix && localCoords && localCoords.lat === pinFix.from?.lat && localCoords.lng === pinFix.from?.lng) {
+              const s = getState();
+              setDeliveryAddress(s.deliveryAddress, s.addressNotes, pinFix.to, s.houseNumber);
             }
           } else {
             console.warn('Auth: [onSnapshot] User document not found in Firestore yet, initializing profile data...');

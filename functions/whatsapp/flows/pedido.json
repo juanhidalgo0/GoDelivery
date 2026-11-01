@@ -1,0 +1,137 @@
+{
+  "version": "7.1",
+  "screens": [
+    {
+      "id": "PEDIDO",
+      "title": "Completar pedido",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "summary": { "type": "string", "__example__": "**Almacén Don José**: 2 cocas de 1,5 L\n**Farmacia Pasteur**: un ibuprofeno" },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "description": { "type": "string" } }
+          },
+          "__example__": [
+            { "id": "a_0", "title": "Calle 7 N° 123", "description": "Timbre 2B" },
+            { "id": "gps", "title": "📍 Mandar mi ubicación", "description": "Te la pido por el chat (envío exacto)" },
+            { "id": "new", "title": "✍️ Escribir otra", "description": "Calle, número y entre calles" }
+          ]
+        },
+        "init_address": { "type": "string", "__example__": "a_0" },
+        "show_tip": { "type": "boolean", "__example__": true }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Image",
+            "src": "__GO_HEADER__",
+            "height": 136,
+            "scale-type": "cover",
+            "alt-text": "GO! Delivery: último paso, entrega y pago"
+          },
+          { "type": "TextSubheading", "text": "🧾 Tu pedido" },
+          { "type": "TextBody", "markdown": true, "text": "${data.summary}" },
+          { "type": "TextSubheading", "text": "📍 Entrega" },
+          {
+            "type": "Dropdown",
+            "name": "address",
+            "label": "Dirección",
+            "required": true,
+            "init-value": "${data.init_address}",
+            "data-source": "${data.addresses}"
+          },
+          {
+            "type": "If",
+            "condition": "${form.address} == 'new'",
+            "then": [
+              {
+                "type": "TextInput",
+                "name": "new_address",
+                "label": "Calle y número",
+                "helper-text": "Ej: Calle 12 N° 345, entre 7 y 8",
+                "required": true,
+                "max-chars": 200
+              }
+            ]
+          },
+          {
+            "type": "TextArea",
+            "name": "notes",
+            "label": "Datos para ubicarte",
+            "helper-text": "Piso, depto, timbre, color de la casa",
+            "required": false,
+            "max-length": 200
+          },
+          { "type": "TextSubheading", "text": "💳 Pago" },
+          {
+            "type": "RadioButtonsGroup",
+            "name": "pay",
+            "label": "Forma de pago",
+            "required": true,
+                        "data-source": [
+              { "id": "efectivo", "title": "💵 Efectivo", "description": "Le pagás al cadete cuando llega" },
+              { "id": "transferencia", "title": "🏦 Transferencia", "description": "Al alias del cadete, cuando llega" }
+            ]
+          },
+          {
+            "type": "If",
+            "condition": "${data.show_tip}",
+            "then": [
+              { "type": "TextSubheading", "text": "💛 Propina" },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "tip",
+                "label": "¿Le dejás algo al cadete?",
+                "description": "Es opcional y va entera para él",
+                "required": false,
+                "init-value": "0",
+                "data-source": [
+                  { "id": "0", "title": "Sin propina" },
+                  { "id": "300", "title": "$300" },
+                  { "id": "500", "title": "$500" },
+                  { "id": "700", "title": "$700" },
+                  { "id": "other", "title": "Otro monto", "description": "Escribí cuánto le querés dejar" }
+                ]
+              },
+              {
+                "type": "If",
+                "condition": "${form.tip} == 'other'",
+                "then": [
+                  {
+                    "type": "TextInput",
+                    "name": "tip_other",
+                    "label": "Monto de la propina",
+                    "input-type": "number",
+                    "helper-text": "En pesos, sin el signo $ (ej: 1000)",
+                    "required": true,
+                    "max-chars": 6
+                  }
+                ]
+              }
+            ]
+          },
+          { "type": "TextCaption", "text": "Antes de confirmar ves el resumen con el precio final." },
+          {
+            "type": "Footer",
+            "label": "Ver resumen y precio",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "address": "${form.address}",
+                "new_address": "${form.new_address}",
+                "notes": "${form.notes}",
+                "pay": "${form.pay}",
+                "tip": "${form.tip}",
+                "tip_other": "${form.tip_other}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

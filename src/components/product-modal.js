@@ -360,6 +360,7 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           `}
         </div>
         ${product.description ? `<p style="font-size: 13.5px; color: var(--color-text-secondary); line-height: 1.45; margin: 2px 0 0 0;">${escapeHtml(product.description)}</p>` : ''}
+        ${Number(activeProduct.transferSurcharge) > 0 ? `<div class="pm-surcharge">${icon('info', 14)}<span>Precio en efectivo. <b>Con transferencia: ${formatPrice(Math.round(baseDiscountedPrice * (1 + Number(activeProduct.transferSurcharge) / 100)))}</b> (+${Number(activeProduct.transferSurcharge)}%), lo cobra así el kiosco.</span></div>` : ''}
         ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
           <div class="pm-combo">
             <div class="pm-combo-head"><b>Incluye</b>${comboRegular > activeProduct.price ? `<span>Ahorrás ${formatPrice(comboRegular - activeProduct.price)}</span>` : ''}</div>
@@ -552,38 +553,28 @@ export function openProductModal(product, comercioId, comercioName, isCommerceOp
           <input type="text" id="pm-product-notes" value="${productNotes}" placeholder="${escapeHtml(nc.placeholder)}" style="width: 100%; border: 1.5px solid var(--color-border-light); background: var(--color-bg-secondary); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; font-weight: 600; color: var(--color-text); outline: none; box-sizing: border-box; transition: border-color 0.2s;" />
         </div>` : ''; })()}
 
-        <!-- Sugeridos / Similares Section (At bottom of body, above footer) -->
+        <!-- Combina con: tira horizontal debajo de lo anterior (antes iba pegada al fondo con una franja vacía arriba) -->
         ${suggested.length > 0 ? `
-          <div class="pm-suggested-section" style="margin-top: auto !important; padding: 14px 16px; background: var(--color-surface); border-top: 1px solid var(--color-border-light); margin-bottom: 0px;">
-            <h3 style="font-family: var(--font-display); font-size: 13px; font-weight: 850; color: var(--color-text); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-              Otras personas lo combinan con:
-            </h3>
-            <div class="pm-suggested-list" style="display: flex; flex-direction: column; gap: 8px;">
+          <div class="pm-suggested-section">
+            <h3 class="pm-suggested-title">Combina con</h3>
+            <div class="pm-suggested-list">
               ${suggested.map(item => {
                 const hasItemOffer = activeOffers.find(o => o.active && o.productIds && o.productIds.includes(item.id));
                 const itemDiscountPercent = (hasItemOffer && hasItemOffer.type === 'percentage') ? (hasItemOffer.value || 0) : 0;
                 const itemFinalPrice = itemDiscountPercent > 0 ? item.price * (1 - itemDiscountPercent / 100) : item.price;
-                
+
                 return `
-                  <div class="pm-suggested-row" data-suggested-id="${item.id}" style="display: flex; align-items: center; justify-content: space-between; background: var(--color-bg-secondary); border: 1px solid var(--color-border-light); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all 0.2s; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
-                      <div style="position: relative; width: 42px; height: 42px; border-radius: 8px; overflow: hidden; background: #ffffff; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.05);">
-                        ${(item.imageHd || item.image) ? `<img src="${escapeHtml(item.imageHd || item.image)}" alt="" style="width: 100%; height: 100%; object-fit: contain; padding: 3px; box-sizing: border-box;" />` : `<span style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:var(--go-text-3);">${icon('shoppingBag', 18)}</span>`}
-                        ${hasItemOffer ? `
-                          <div style="position: absolute; top: 0; left: 0; background: var(--color-primary); color: white; font-size: 7px; font-weight: 900; padding: 1px 3px; border-radius: 0 0 4px 0; font-family: var(--font-display);">${hasItemOffer.type === 'percentage' ? `${hasItemOffer.value}%` : '2x1'}</div>
-                        ` : ''}
-                      </div>
-                      <div style="font-size: 12.5px; font-weight: 750; color: var(--color-text); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;">
-                        ${escapeHtml(displayName(item.name))}
-                      </div>
-                    </div>
-                    <div style="font-size: 12.5px; font-weight: 900; color: var(--color-primary); text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">
-                      <span>${formatPrice(itemFinalPrice)}${isSoldByWeight(item) ? ' /kg' : ''}</span>
-                      ${hasItemOffer ? `
-                        <span style="font-size: 9.5px; color: var(--color-text-tertiary); text-decoration: line-through; font-weight: 700;">${formatPrice(item.price)}</span>
-                      ` : ''}
-                    </div>
-                  </div>
+                  <button type="button" class="pm-suggested-row" data-suggested-id="${item.id}">
+                    <span class="pm-suggested-img">
+                      ${(item.imageHd || item.image) ? `<img src="${escapeHtml(item.imageHd || item.image)}" alt="" loading="lazy" />` : icon('shoppingBag', 22)}
+                      ${hasItemOffer ? `<span class="pm-suggested-tag">${hasItemOffer.type === 'percentage' ? `${hasItemOffer.value}%` : '2x1'}</span>` : ''}
+                    </span>
+                    <span class="pm-suggested-name">${escapeHtml(displayName(item.name))}</span>
+                    <span class="pm-suggested-price">
+                      <b>${formatPrice(itemFinalPrice)}${isSoldByWeight(item) ? ' /kg' : ''}</b>
+                      ${hasItemOffer && itemDiscountPercent > 0 ? `<s>${formatPrice(item.price)}</s>` : ''}
+                    </span>
+                  </button>
                 `;
               }).join('')}
             </div>

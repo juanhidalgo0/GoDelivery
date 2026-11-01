@@ -6,8 +6,9 @@ import { sendLocalNotification } from '../utils/notifications.js';
 import { setBanner, clearBanner } from './banner-manager.js';
 import { icon } from '../utils/icons.js';
 import { AudioManager } from '../utils/audio-manager.js';
+import { isChatParty } from '../utils/chat-access.js';
 
-const MSG_SOUND = '/assets/sounds/message.mp3';
+const MSG_SOUND = '/assets/sounds/message.wav';
 let audioUnlocked = false;
 
 let activeListeners = [];
@@ -30,18 +31,23 @@ export function initChatNotifier() {
     }
   }, { once: true });
 
-  // Listen to recent active chats where the user is a participant (prevent memory leaks)
+  // The chat screen is a separate download: fetch it now so the first tap doesn't wait for it.
+  setTimeout(() => import('./chat.js').catch(() => {}), 3000);
+
+  // The most recent chats. With no order, the limit took any 30: drivers kept listening to chats
+  // of old orders, and a new chat could be left out and never notify.
   const chatsQ = query(
-    collection(db, 'chats'), 
+    collection(db, 'chats'),
     where('participants', 'array-contains', user.uid),
-    limit(30)
+    orderBy('lastMessageAt', 'desc'),
+    limit(15)
   );
   const chatsUnsub = onSnapshot(chatsQ, (snap) => {
     snap.docs.forEach(chatDoc => {
       const chat = { id: chatDoc.id, ...chatDoc.data() };
       listenToChat(chat.id, user.uid, chat);
     });
-  });
+  }, (err) => console.warn('[ChatNotifier] Chat list listener error:', err?.code || err));
   activeListeners.push(chatsUnsub);
 }
 
@@ -78,27 +84,11 @@ function listenToChat(chatId, userId, chatData) {
           order = { id: orderSnap.id, ...orderSnap.data() };
           
           // If order is completed, delivered or cancelled, do NOT count as unread
-          if (order.status === 'completed' || order.status === 'delivered' || order.status === 'cancelled') {
-            unreadCounts[chatId] = 0;
-            notifyUnreadChange();
-            return;
-          }
-
-          // Verify if userId is an actual party to this order
-          // Orders don't carry the shop owner's uid: the owner counts as a party when the chat
-          // lists them (chat.js adds them to shop chats, never to the private client-driver one).
-          const me = getState().user || {};
-          const isShopOwnerHere = chatData.type !== 'client-delivery' &&
-                                  (chatData.participants || []).includes(userId) &&
-                                  (me.role === 'comercio' || me.isComercio === true);
-          const isActualParty = order.userId === userId ||
-                                order.driverId === userId ||
-                                order.comercioId === userId ||
-                                order.comercioOwnerId === userId ||
-                                isShopOwnerHere;
-
-          if (!isActualParty) {
-            // User is only an auditor/admin inspecting this chat. Do NOT count unread!
+          // Finished, or not this person's chat (an admin auditing, a driver reassigned): nothing
+          // to count and nothing to keep listening to.
+          const finished = order.status === 'completed' || order.status === 'delivered' || order.status === 'cancelled';
+          if (finished || !isChatParty(chatData.type || splitChatId(chatId).type, order, getState().user)) {
+            unsub();
             unreadCounts[chatId] = 0;
             notifyUnreadChange();
             return;
@@ -164,7 +154,7 @@ function listenToChat(chatId, userId, chatData) {
     isInitialLoad = false;
     unreadCounts[chatId] = unread;
     notifyUnreadChange();
-  });
+  }, (err) => console.warn('[ChatNotifier] Messages listener error:', chatId, err?.code || err));
   activeListeners.push(unsub);
 }
 

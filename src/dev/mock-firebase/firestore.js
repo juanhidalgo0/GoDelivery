@@ -129,6 +129,16 @@ export async function getDocs(q) { return later(() => runQuery(q)); }
 export const getDocsFromServer = getDocs;
 export const getDocsFromCache = getDocs;
 export async function getCountFromServer(q) { const r = runQuery(q); return { data: () => ({ count: r.size }) }; }
+export const sum = (field) => ({ kind: 'sum', field });
+export const count = () => ({ kind: 'count' });
+export async function getAggregateFromServer(q, spec) {
+  return later(() => {
+    const docs = runQuery(q).docs.map(d => d.data());
+    const out = {};
+    for (const [k, a] of Object.entries(spec)) out[k] = a.kind === 'sum' ? docs.reduce((t, d) => t + (Number(d[a.field]) || 0), 0) : docs.length;
+    return { data: () => out };
+  });
+}
 
 // ── Escrituras ──
 function notify(path) {

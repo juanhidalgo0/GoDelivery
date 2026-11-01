@@ -11,6 +11,9 @@ export function onAuthStateChanged(_auth, cb) { authListeners.add(cb); setTimeou
 export class GoogleAuthProvider { addScope() {} setCustomParameters() {} static credential() { return {}; } }
 export class OAuthProvider { constructor() {} addScope() {} setCustomParameters() {} credential() { return {}; } }
 export const browserLocalPersistence = {};
+export const inMemoryPersistence = {};
+export const initializeAuth = () => getAuth();
+export const signInWithCustomToken = async () => ({ user: mockUser() });
 export const setPersistence = async () => {};
 export const connectAuthEmulator = () => {};
 const noAuth = async () => { throw new Error('Vista previa: sin inicio de sesión real'); };
@@ -27,10 +30,12 @@ export const updateProfile = async () => {};
 export const getStorage = () => ({});
 export const connectStorageEmulator = () => {};
 export const ref = (_s, path) => ({ fullPath: path });
-export const uploadBytes = async () => ({});
+// Lo subido queda en memoria: getDownloadURL devuelve ese archivo (el video del sorteo se puede ver)
+const uploaded = new Map();
+export const uploadBytes = async (r, data) => { if (r?.fullPath && data instanceof Blob) uploaded.set(r.fullPath, URL.createObjectURL(data)); return {}; };
 export const uploadBytesResumable = () => ({ on: () => {}, then: (f) => f({}) });
 export const uploadString = async () => ({});
-export const getDownloadURL = async () => '/logo.png';
+export const getDownloadURL = async (r) => uploaded.get(r?.fullPath) || '/logo.png';
 export const deleteObject = async () => {};
 
 // ── messaging ──

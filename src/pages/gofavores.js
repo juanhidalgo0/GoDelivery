@@ -8,8 +8,8 @@ import { showToast } from '../components/toast.js';
 import { icon } from '../utils/icons.js';
 import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn, isAdmin } from '../auth.js';
-import { showAddressPrompt } from '../components/address-modal.js';
-import { getDistance, calculateDynamicFee } from '../utils/geo.js';
+import { showAddressPrompt, askToFixStreetOnlyPin } from '../components/address-modal.js';
+import { getDistance, calculateDynamicFee, calculateEncomiendaFee } from '../utils/geo.js';
 import { suggestPlaces, resolvePlaceByName, placeCategory, nearestCategoryOf, nearestLabel, categoryLabel, mandadoStoresOf, getPlaces, normalizePlaceName } from '../utils/mandado-places.js';
 import { loadMandadoPlaces } from '../utils/mandado-places-store.js';
 import { goServiceHeader, goServiceHint, bindServiceHint, goServiceEmpty, closeServiceScreen, showGoInfoSheet } from '../components/service-screen.js';
@@ -425,6 +425,17 @@ export function showServiceInfoModal(service) {
   if (info) showGoInfoSheet(info);
 }
 
+// The server's and the network's messages are technical ("Token inválido o expirado"): the
+// customer gets what happened and what to do, in a dialog they can't miss.
+function showOrderError(err) {
+  const raw = String(err?.message || '');
+  let message = raw;
+  if (/token|autenticad|no autorizado/i.test(raw)) message = 'Tu sesión venció. Cerrá sesión, volvé a entrar e intentá de nuevo.';
+  else if (/failed to fetch|network|load failed|conexi[oó]n|timeout/i.test(raw)) message = 'No pudimos conectarnos. Revisá tu internet y fijate en "Mis pedidos" antes de volver a intentarlo.';
+  else if (!raw || /internal|unexpected|undefined|null/i.test(raw)) message = 'No pudimos crear tu pedido. Probá de nuevo en un momento.';
+  showWarningModal(message.replace(/</g, '&lt;'));
+}
+
 function showWarningModal(message) {
   const alertEl = document.createElement('div');
   alertEl.innerHTML = `
@@ -443,7 +454,7 @@ function showWarningModal(message) {
 }
 
 export async function showMandadoForm(targetContainer = null) {
-  const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
+  const { geocodeAddress, getDistance } = await import('../utils/geo.js');
   const user = getState().user;
   const currentAddress = '';
 
@@ -669,8 +680,8 @@ export async function showMandadoForm(targetContainer = null) {
     if (pickupData && deliveryData) {
       try {
         const dist = await getDistance(pickupData.coords.lat, pickupData.coords.lng, deliveryData.coords.lat, deliveryData.coords.lng);
-        calculatedFee = calculateDynamicFee(dist);
-        
+        calculatedFee = calculateEncomiendaFee(dist);
+
         const config = getState().servicesAppFeeConfig?.gofavor || { type: 'percentage', value: 1.2 };
         if (config.type === 'fixed') {
           appFee = config.value;
@@ -793,19 +804,21 @@ export async function showMandadoForm(targetContainer = null) {
     }, { mode: 'pick' });
   };
 
+  const applyDelivery = (addr, notes, coords) => {
+    deliveryData = { address: addr, coords };
+    deliveryText.textContent = addr;
+    updateDetailsFieldsState();
+
+    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+    if (deliveryDetailsInput && notes) {
+      deliveryDetailsInput.value = notes;
+    }
+
+    updateCost();
+  };
+
   deliveryBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      deliveryData = { address: addr, coords };
-      deliveryText.textContent = addr;
-      updateDetailsFieldsState();
-      
-      const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
-      if (deliveryDetailsInput && notes) {
-        deliveryDetailsInput.value = notes;
-      }
-      
-      updateCost();
-    }, { mode: 'pick' });
+    showAddressPrompt(applyDelivery, { mode: 'pick' });
   };
 
   modalEl.querySelector('#confirm-favor-btn').onclick = async () => {
@@ -838,6 +851,7 @@ export async function showMandadoForm(targetContainer = null) {
       showWarningModal('Por favor, ingresa los detalles del paquete o encomienda a enviar');
       return;
     }
+    if (await askToFixStreetOnlyPin({ ...deliveryData, notes: deliveryDetails }, applyDelivery)) return;
 
     if (calculatedFee === 0) {
       await updateCost();
@@ -886,7 +900,7 @@ export async function showMandadoForm(targetContainer = null) {
           }, 150);
         } catch (e) {
           console.error('Error creating Mandado favor:', e);
-          showToast('Error al crear favor: ' + e.message, 'error');
+          setTimeout(() => showOrderError(e), 300);
         }
       }
     });
@@ -1611,7 +1625,8 @@ export async function showCompraForm(targetContainer = null) {
       const q = input.value.trim();
       if (q.length < 2) { hide(); return; }
       const opts = [];
-      const cat = placeCategory(q);
+      // Solo si escribió el rubro y nada más: con "carnicería san" ya está nombrando una en particular
+      const cat = nearestCategoryOf(q);
       if (cat) opts.push({ name: nearestLabel(cat), nearest: cat, sub: `El repartidor elige la ${categoryLabel(cat)} más cerca de tu casa` });
       suggestPlaces(q).forEach(p => opts.push({ name: p.name, lat: p.lat, lng: p.lng, sub: p.address || (p.source === 'comercio' ? 'Comercio de GoDelivery' : 'Ubicación conocida por los repartidores') }));
       if (!opts.length) { hide(); return; }
@@ -1776,18 +1791,20 @@ export async function showCompraForm(targetContainer = null) {
   };
 
 
+  const applyDelivery = (addr, notes, coords) => {
+    deliveryData = { address: addr, coords };
+    deliveryText.textContent = addr;
+
+    const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
+    if (deliveryDetailsInput && notes) {
+      deliveryDetailsInput.value = notes;
+    }
+
+    updateCost();
+  };
+
   deliveryBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      deliveryData = { address: addr, coords };
-      deliveryText.textContent = addr;
-      
-      const deliveryDetailsInput = modalEl.querySelector('#delivery-details');
-      if (deliveryDetailsInput && notes) {
-        deliveryDetailsInput.value = notes;
-      }
-      
-      updateCost();
-    }, { mode: 'pick' });
+    showAddressPrompt(applyDelivery, { mode: 'pick' });
   };
 
   if (deliveryData?.coords) updateCost();
@@ -1820,6 +1837,8 @@ export async function showCompraForm(targetContainer = null) {
       showWarningModal('Por favor, selecciona un método de pago del envío (Efectivo o Transferencia)');
       return;
     }
+
+    if (deliveryData && await askToFixStreetOnlyPin({ ...deliveryData, notes: deliveryDetails }, applyDelivery)) return;
 
     if (calculatedDistFee === 0) await updateCost();
 
@@ -1893,7 +1912,7 @@ export async function showCompraForm(targetContainer = null) {
           setTimeout(() => { location.hash = `#/pedido/${orderId}`; }, 150);
         } catch (e) {
           console.error('Error creating Compra favor:', e);
-          showToast('Error al crear favor: ' + e.message, 'error');
+          setTimeout(() => showOrderError(e), 300);
         }
       }
     });
@@ -2152,21 +2171,23 @@ export async function showGoCashForm(targetContainer = null) {
     updateCost();
   }
 
-  deliveryBtn.onclick = () => {
-    showAddressPrompt((addr, notes, coords) => {
-      deliveryData = { address: addr, coords };
-      deliveryText.textContent = addr;
-      
-      const deliveryDetailsInput = modalEl.querySelector('#gocash-delivery-details');
-      if (deliveryDetailsInput && notes) {
-        deliveryDetailsInput.value = notes;
-      }
-      
-      updateCost();
-    }, { mode: 'pick' });
+  const applyDelivery = (addr, notes, coords) => {
+    deliveryData = { address: addr, coords };
+    deliveryText.textContent = addr;
+
+    const deliveryDetailsInput = modalEl.querySelector('#gocash-delivery-details');
+    if (deliveryDetailsInput && notes) {
+      deliveryDetailsInput.value = notes;
+    }
+
+    updateCost();
   };
 
-  modalEl.querySelector('#gocash-step-1-next-btn').onclick = () => {
+  deliveryBtn.onclick = () => {
+    showAddressPrompt(applyDelivery, { mode: 'pick' });
+  };
+
+  modalEl.querySelector('#gocash-step-1-next-btn').onclick = async () => {
     const amount = parseFloat(amountInput.value);
     if (isNaN(amount) || amount <= 0) {
       showToast('Ingresá un monto a cambiar válido', 'warning');
@@ -2191,6 +2212,7 @@ export async function showGoCashForm(targetContainer = null) {
       showWarningModal('Por favor, selecciona un tipo de operación para Go Cash');
       return;
     }
+    if (await askToFixStreetOnlyPin({ ...deliveryData, notes: deliveryDetails }, applyDelivery)) return;
 
     modalEl.querySelector('#gocash-step-1-container').style.display = 'none';
     modalEl.querySelector('#gocash-step-2-container').style.display = 'flex';
@@ -2256,7 +2278,7 @@ export async function showGoCashForm(targetContainer = null) {
           }, 150);
         } catch (e) {
           console.error('Error creating Go Cash order:', e);
-          showToast('Error al crear pedido Go Cash: ' + e.message, 'error');
+          setTimeout(() => showOrderError(e), 300);
         }
       }
     });

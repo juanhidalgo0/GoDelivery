@@ -461,7 +461,7 @@ export function mountMarket(content, ctx) {
   }
 
   // ─── dibujar
-  content.innerHTML = `<div class="mk-page${isDirect ? ' is-direct' : ''}">${headerHtml()}<div id="mk-bar-slot">${barHtml()}</div><main class="mk-main" id="mk-main"></main>${isDirect ? footHtml() : ''}<div class="mk-pairs" id="mk-pairs" hidden></div></div>`;
+  content.innerHTML = `<div class="mk-page${isDirect ? ' is-direct' : ''}">${headerHtml()}<div id="mk-bar-slot">${barHtml()}</div><main class="mk-main" id="mk-main"></main>${isDirect ? footHtml() : ''}<div class="mk-pairs-dock"><div class="mk-pairs" id="mk-pairs" hidden></div></div></div>`;
   const page = content.querySelector('.mk-page');
   const main = page.querySelector('#mk-main');
 
@@ -704,7 +704,7 @@ export function mountMarket(content, ctx) {
     list = list.filter((x) => isAvailable(x) && qtyOf(x) === 0).sort((a, b) => ids.indexOf(a.ventraId) - ids.indexOf(b.ventraId)).slice(0, 4);
     if (!list.length) return;
     const box = page.querySelector('#mk-pairs');
-    box.innerHTML = `<div class="mk-pairs-head"><b>Combiná con ${esc(displayName(p.name))}</b><button data-act="close-pairs" aria-label="Cerrar">${icon('close', 16)}</button></div>
+    box.innerHTML = `<div class="mk-pairs-head"><div><b>Combiná con</b><span>${esc(displayName(p.name))}</span></div><button data-act="close-pairs" aria-label="Cerrar">${icon('close', 16)}</button></div>
       <div class="mk-row">${list.map((x) => cardHtml(x, true)).join('')}</div>`;
     box.hidden = false;
     requestAnimationFrame(() => box.classList.add('is-on'));

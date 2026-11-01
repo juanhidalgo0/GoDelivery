@@ -659,9 +659,140 @@ export function renderAdminSorteoEditor(container) {
       `;
     });
     
-    html += `</div></div>`;
+    html += `</div></div><div id="story-video-box"></div>`;
     el.innerHTML = html;
     el.style.display = 'block';
+    renderStoryVideo(el.querySelector('#story-video-box'));
+  }
+
+  // ---------------------------------------------------------------- video para stories
+  // Se genera solo (en este dispositivo) cuando el sorteo ya salió y no tiene video, se guarda en
+  // Storage y queda en el sorteo (storyVideo). Si se vuelve a sortear, se genera uno nuevo.
+  const story = { generatingFor: null, progress: 0, error: '', localUrl: null };
+
+  function drawnKeyOf(d) {
+    const ms = d?.drawnAt?.toMillis?.() || (d?.drawnAt?.seconds ? d.drawnAt.seconds * 1000 : 0);
+    return String(ms || 'sin-fecha');
+  }
+
+  async function renderStoryVideo(box) {
+    if (!box || !currentData || currentData.status !== 'drawn' || !currentData.winners?.length) return;
+    const { canRenderGiveawayVideo } = await import('../../utils/giveaway-video.js');
+    const key = drawnKeyOf(currentData);
+    const saved = currentData.storyVideo;
+    const upToDate = saved?.url && saved.forDrawnAt === key;
+    const canRender = canRenderGiveawayVideo();
+
+    let body;
+    if (story.generatingFor === key) {
+      body = `
+        <div style="font-size:13px; color:#334155; margin-bottom:10px;">Generando el video… dejá esta pantalla abierta (tarda lo que dura el video, unos 30 segundos).</div>
+        <div style="height:10px; border-radius:6px; background:#e2e8f0; overflow:hidden;"><div id="story-progress" style="height:100%; width:${Math.round(story.progress * 100)}%; background:#e11d48; transition:width .3s;"></div></div>`;
+    } else if (upToDate) {
+      body = `
+        <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+          <video src="${esc(saved.url)}#t=12" controls playsinline preload="metadata" style="width:200px; aspect-ratio:9/16; border-radius:16px; background:#000;"></video>
+          <div style="display:flex; flex-direction:column; gap:8px; flex:1; min-width:160px;">
+            <button class="btn-draw" id="story-download" style="margin:0;">Descargar video</button>
+            ${navigator.canShare ? '<button class="btn-draw" id="story-share" style="margin:0; background:#0b0b0c;">Compartir (Instagram, WhatsApp…)</button>' : ''}
+            <button id="story-regen" style="background:none; border:none; color:#64748b; font-size:13px; text-decoration:underline; cursor:pointer; text-align:left; padding:4px 0;">Volver a generar</button>
+            <div style="font-size:12px; color:#64748b;">Vertical 1080×1920, listo para stories. ${saved.ext === 'webm' ? 'Este navegador lo grabó en WebM: si Instagram no lo acepta, generalo desde Chrome actualizado.' : ''}</div>
+          </div>
+        </div>`;
+    } else if (!canRender) {
+      body = `<div style="font-size:13px; color:#b45309;">Este navegador no puede grabar el video. Abrí este sorteo desde Chrome (PC o Android) y se genera solo.</div>`;
+    } else {
+      body = `
+        ${story.error ? `<div style="font-size:13px; color:#b91c1c; margin-bottom:10px;">No se pudo generar: ${esc(story.error)}</div>` : ''}
+        <button class="btn-draw" id="story-generate" style="margin:0;">Generar video para stories</button>`;
+    }
+    box.innerHTML = `
+      <div class="editor-section">
+        <div class="editor-title">🎬 Video del sorteo para stories</div>
+        ${body}
+      </div>`;
+
+    box.querySelector('#story-generate')?.addEventListener('click', () => generateStoryVideo());
+    box.querySelector('#story-regen')?.addEventListener('click', () => generateStoryVideo());
+    box.querySelector('#story-download')?.addEventListener('click', () => downloadStoryVideo(saved));
+    box.querySelector('#story-share')?.addEventListener('click', () => shareStoryVideo(saved));
+
+    // Recién sorteado y sin video: se genera solo, una vez
+    if (!upToDate && canRender && !story.generatingFor && !story.error) generateStoryVideo();
+  }
+
+  async function generateStoryVideo() {
+    if (story.generatingFor) return;
+    const key = drawnKeyOf(currentData);
+    story.generatingFor = key;
+    story.progress = 0;
+    story.error = '';
+    const box = () => container.querySelector('#story-video-box');
+    renderStoryVideo(box());
+    try {
+      const { renderGiveawayVideo } = await import('../../utils/giveaway-video.js');
+      const snapshot = { ...currentData };
+      const { blob, mime, ext } = await renderGiveawayVideo(snapshot, {
+        onProgress: (p) => {
+          story.progress = p;
+          const bar = container.querySelector('#story-progress');
+          if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+        },
+      });
+      const { storage } = await import('../../firebase.js');
+      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      const path = `giveaways/${id}/stories-${key}.${ext}`;
+      const fileRef = ref(storage, path);
+      await uploadBytes(fileRef, blob, { contentType: mime });
+      const url = await getDownloadURL(fileRef);
+      await updateDoc(doc(db, 'giveaways', id), {
+        storyVideo: { url, path, mime, ext, forDrawnAt: key, size: blob.size, createdAt: serverTimestamp() },
+      });
+      showToast('Video del sorteo listo y guardado', 'success');
+    } catch (err) {
+      console.error('[Sorteo] No se pudo generar el video:', err);
+      story.error = err?.message || String(err);
+      showToast('No se pudo generar el video del sorteo', 'error');
+    } finally {
+      story.generatingFor = null;
+      renderStoryVideo(box());
+    }
+  }
+
+  async function storyVideoFile(saved) {
+    const res = await fetch(saved.url);
+    if (!res.ok) throw new Error(`No se pudo bajar el video (${res.status})`);
+    const blob = await res.blob();
+    const name = `sorteo-go-${(currentData.title || 'go').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.${saved.ext || 'mp4'}`;
+    return new File([blob], name, { type: saved.mime || blob.type });
+  }
+
+  async function downloadStoryVideo(saved) {
+    try {
+      const file = await storyVideoFile(saved);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(file);
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    } catch (err) {
+      // Sin poder bajarlo (o en la app nativa): se abre el video y se guarda desde ahí
+      window.open(saved.url, '_blank');
+    }
+  }
+
+  async function shareStoryVideo(saved) {
+    try {
+      const file = await storyVideoFile(saved);
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: currentData.title || 'Sorteo GO!' });
+      } else {
+        await downloadStoryVideo(saved);
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') downloadStoryVideo(saved);
+    }
   }
 
   function attachListeners() {

@@ -208,7 +208,7 @@ export function initNavbar() {
     if (unreadMarketplaceChatsUnsub) { unreadMarketplaceChatsUnsub(); unreadMarketplaceChatsUnsub = null; }
 
     if (user) {
-      const { collection, query, where, onSnapshot, or } = await import('firebase/firestore');
+      const { collection, query, where, onSnapshot, or, Timestamp } = await import('firebase/firestore');
       const { db } = await import('../firebase.js');
       const { setState: stateSetState } = await import('../state.js');
 
@@ -249,9 +249,12 @@ export function initNavbar() {
         updateCount();
       }, (err) => console.warn('User support unread listener failed:', err));
 
-      // 2. Order chats unread
-      const q = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid));
-      unreadUserChatsUnsub = onSnapshot(q, async (snap) => {
+      // 2. Order chats unread. Solo los chats con mensajes de la última semana: los de pedidos
+      // viejos no cuentan y hay cadetes/comercios con cientos (se leían todos en cada apertura)
+      const allChatsQ = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid));
+      const recentChatsQ = query(collection(db, 'chats'), where('participants', 'array-contains', user.uid),
+        where('lastMessageAt', '>=', Timestamp.fromMillis(Date.now() - 7 * 24 * 60 * 60 * 1000)));
+      const onChats = async (snap) => {
         let count = 0;
         for (const d of snap.docs) {
           const data = d.data();
@@ -281,7 +284,13 @@ export function initNavbar() {
         }
         unreadChats = count;
         updateCount();
-      }, (err) => console.warn('User chats unread listener failed:', err));
+      };
+      // Sin el índice (recién publicado, todavía armándose) vuelve a la consulta de antes
+      unreadUserChatsUnsub = onSnapshot(recentChatsQ, onChats, (err) => {
+        console.warn('User chats unread listener failed:', err);
+        if (err?.code !== 'failed-precondition' || !getState().user) return;
+        unreadUserChatsUnsub = onSnapshot(allChatsQ, onChats, (e) => console.warn('User chats unread listener failed:', e));
+      });
 
       // 3. Marketplace chats unread
       const qMarket = query(

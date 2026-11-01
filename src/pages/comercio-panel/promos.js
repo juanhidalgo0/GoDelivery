@@ -2,7 +2,7 @@
 // Arriba "¿Qué querés hacer?" y abajo las promos que ya tenés, con su interruptor.
 // (La publicidad paga todavía no está habilitada para los comercios.)
 import { db } from '../../firebase.js';
-import { collection, getDocs, query, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { getRouteParams } from '../../router.js';
 import { icon } from '../../utils/icons.js';
 import { escapeHtml as esc } from '../../utils/escape.js';
@@ -142,7 +142,7 @@ export async function renderComercioPromos() {
       t.setAttribute('aria-checked', String(next));
       try {
         // hiddenInGo: aunque la caja lo vuelva a mandar, queda oculto hasta que lo prendas acá
-        await updateDoc(doc(db, 'comercios', comercioId, 'products', c.id), { isAvailable: next, hiddenInGo: !next });
+        await updateDoc(doc(db, 'comercios', comercioId, 'products', c.id), { isAvailable: next, hiddenInGo: !next, updatedAt: serverTimestamp() });
         c.isAvailable = next; c.hiddenInGo = !next;
         showToast(next ? 'Combo a la venta' : 'Combo oculto', next ? 'success' : 'info');
       } catch (err) { t.setAttribute('aria-checked', String(!next)); showToast('No se pudo cambiar. Probá de nuevo.', 'error'); }

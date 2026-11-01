@@ -1,10 +1,11 @@
 // Recorrido por calles reales sobre el mapa renderizado (src/map-roads.json): camino más corto entre dos
 // puntos (px CSS del mapa). Exporta src/map-route.json y una vista previa en captures/route.png.
-// Uso: node route.mjs x0 y0 x1 y1
+// Uso: node route.mjs x0 y0 x1 y1 [nombre]   (nombre: src/<nombre>.json, por defecto map-route)
 import fs from 'node:fs';
 import { Jimp } from 'jimp';
 
-const [x0, y0, x1, y1] = process.argv.slice(2).map(Number);
+const [x0, y0, x1, y1] = process.argv.slice(2, 6).map(Number);
+const OUT = process.argv[6] || 'map-route';
 const { roads, dpr } = JSON.parse(fs.readFileSync('src/map-roads.json', 'utf8'));
 const TOL = 2.5;
 const nodes = [];                       // [x, y]
@@ -61,7 +62,7 @@ const clean = path.filter((p, i) => {
   return cross / Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.8;
 });
 const len = clean.reduce((acc, p, i) => acc + (i ? Math.hypot(p[0] - clean[i - 1][0], p[1] - clean[i - 1][1]) : 0), 0);
-fs.writeFileSync('src/map-route.json', JSON.stringify({ dpr, pts: clean.map(([x, y]) => [+(x * dpr).toFixed(1), +(y * dpr).toFixed(1)]) }));
+fs.writeFileSync(`src/${OUT}.json`, JSON.stringify({ dpr, pts: clean.map(([x, y]) => [+(x * dpr).toFixed(1), +(y * dpr).toFixed(1)]) }));
 console.log(`recorrido: ${clean.length} puntos, ${Math.round(len)} px CSS (~${Math.round(len * 1.6)} m)`);
 
 const im = await Jimp.read('public/img/map-dark.png');
@@ -74,4 +75,4 @@ for (let i = 1; i < clean.length; i++) {
   }
 }
 im.resize({ w: 675, h: 1200 });
-await im.write('captures/route.png');
+await im.write(`captures/${OUT}.png`);

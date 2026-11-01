@@ -84,6 +84,10 @@ body.cp-open #comercio-mute-alarm-pill { display: none !important; }
 @keyframes cp-ring { 50% { background: var(--go-red-press); } }
 /* Sonido bloqueado por el navegador (PC sin un clic todavía): aviso tranquilo, no alarma */
 .cp-alarm.is-sound { background: #b45309; animation: none; }
+/* Dispositivo sin avisos de pedidos (permiso no dado o bloqueado): fija hasta que se arregle */
+.cp-alarm.is-push { background: var(--go-ink, #111); animation: none; text-align: left; }
+.cp-push-steps { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 10px; font: 600 15px/1.4 var(--go-font); }
+.cp-push-steps b { font-weight: 800; }
 
 /* ---------- Contenido ---------- */
 .cp-body {

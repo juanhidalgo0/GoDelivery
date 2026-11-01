@@ -2,6 +2,7 @@ import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot } from 'fir
 import { db } from './firebase.js';
 import { AudioManager } from './utils/audio-manager.js';
 import { functionUrl } from './utils/functions-url.js';
+import { isSoldByWeight, stepPrice } from './utils/weight.js';
 
 const listeners = new Map();
 
@@ -32,6 +33,7 @@ const state = {
   deliveryFixedThresholdKm: 0,
   deliveryFixedThresholdPrice: 0,
   deliveryDistanceRules: [],
+  encomiendaPricing: null, // Tarifa propia de encomiendas; sin activar usan la del delivery general
   tripBasePrice: 1500,
   tripPricePerKm: 300,
   tripMinPrice: 1500,
@@ -136,6 +138,7 @@ export async function initSettings() {
         state.deliveryFixedThresholdKm = data.deliveryFixedThresholdKm !== undefined ? data.deliveryFixedThresholdKm : 0;
         state.deliveryFixedThresholdPrice = data.deliveryFixedThresholdPrice !== undefined ? data.deliveryFixedThresholdPrice : 0;
         state.deliveryDistanceRules = data.deliveryDistanceRules || [];
+        state.encomiendaPricing = data.encomiendaPricing || null;
         state.tripBasePrice = data.tripBasePrice !== undefined ? data.tripBasePrice : 1500;
         state.tripPricePerKm = data.tripPricePerKm !== undefined ? data.tripPricePerKm : 300;
         state.tripMinPrice = data.tripMinPrice !== undefined ? data.tripMinPrice : 1500;
@@ -153,6 +156,8 @@ export async function initSettings() {
         state.useDarkBrandTheme = data.useDarkBrandTheme || false;
         state.favorPurchaseFee = data.favorPurchaseFee !== undefined ? data.favorPurchaseFee : 800;
         state.maintenanceMode = data.maintenanceMode !== undefined ? data.maintenanceMode : false;
+        // Interruptor de emergencia: deja repartir desde el navegador (components/driver-app-gate.js)
+        state.allowWebDrivers = data.allowWebDrivers === true;
         state.maintenanceMessage = data.maintenanceMessage || 'La aplicación se encuentra en mantenimiento temporal para realizar mejoras. Volvemos en unos minutos.';
         state.maintenanceAllowedEmails = data.maintenanceAllowedEmails || [];
         state.servicesAppFeeConfig = data.servicesAppFeeConfig || {
@@ -193,7 +198,7 @@ export async function initSettings() {
 
         const keys = [
           'deliveryCost', 'deliveryBasePrice', 'deliveryPricePerKm', 'deliveryMinPrice',
-          'deliveryExtraStopFee', 'deliveryRainSurcharge', 'deliveryFixedThresholdKm', 'deliveryFixedThresholdPrice', 'deliveryDistanceRules',
+          'deliveryExtraStopFee', 'deliveryRainSurcharge', 'deliveryFixedThresholdKm', 'deliveryFixedThresholdPrice', 'deliveryDistanceRules', 'encomiendaPricing',
           'tripBasePrice', 'tripPricePerKm',
           'tripMinPrice', 'commissionRate', 'appUsageFeeRate', 'pointsPerDollar',
           'dollarPerPoint', 'referralPoints', 'weeklyChallenges', 'whatsappPayments',
@@ -414,14 +419,24 @@ export function getItemUnitPrice(item) {
     if (!o || o === replaceOption) return sum;
     return sum + Math.max(0, Number(o.price) || 0) * (Number(o.qty) || 1);
   }, 0);
-  return base + extras;
+  // Por peso: base y opciones son por kilo, y la unidad del carrito es un paso (250 g, …)
+  return isSoldByWeight(item?.product) ? stepPrice(base + extras, item.product) : base + extras;
 }
 
-export function getCartTotal() {
+// Transferencia ("mercadopago" en la app): algunos productos tienen recargo del comercio (p. ej.
+// cigarrillos +10% en los kioscos de Ventra). Mismo cálculo que functions/index.js withTransferSurcharge.
+export const isTransferPayment = (method) => /mercadopago|transfer/i.test(String(method || ''));
+export function withTransferSurcharge(price, product, method) {
+  const pct = Number(product?.transferSurcharge) || 0;
+  return isTransferPayment(method) && pct > 0 ? Math.round(price * (1 + pct / 100)) : price;
+}
+
+/** Total de productos del carrito; con paymentMethod suma los recargos por transferencia */
+export function getCartTotal(paymentMethod = null) {
   const activeOffers = state.activeOffers || [];
   return state.cart.reduce((sum, item) => {
-    const basePrice = getItemUnitPrice(item);
-    
+    const basePrice = withTransferSurcharge(getItemUnitPrice(item), item.product, paymentMethod);
+
     // Find active offer
     const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
     if (offer) {
@@ -465,7 +480,10 @@ export async function refreshCartProducts({ force = false } = {}) {
     if (!fresh.has(key)) return true;
     const latest = fresh.get(key);
     const soldOut = latest && latest.stockMode === 'limited' && !latest.useGlobalFlavors && (Number(latest.stockQuantity) || 0) <= 0;
-    if (!latest || latest.isAvailable === false || soldOut) {
+    // Pasó a venderse por peso (o dejó de), o cambió el paso: la cantidad ya no significa lo mismo
+    const weightChanged = latest && (isSoldByWeight(latest) !== isSoldByWeight(item.product) ||
+      (isSoldByWeight(latest) && Number(latest.weightStep) !== Number(item.product.weightStep)));
+    if (!latest || latest.isAvailable === false || soldOut || weightChanged) {
       result.removed.push(item.product?.name || 'Un producto');
       touched = true;
       return false;
@@ -486,7 +504,8 @@ export async function refreshCartProducts({ force = false } = {}) {
 }
 
 export function getCartCount() {
-  return state.cart.reduce((sum, item) => sum + item.qty, 0);
+  // Un corte por peso es un producto, no sus pasos de 250 g
+  return state.cart.reduce((sum, item) => sum + (isSoldByWeight(item.product) ? 1 : item.qty), 0);
 }
 
 export function getCartByComercio() {

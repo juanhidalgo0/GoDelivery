@@ -508,6 +508,8 @@ export async function loadRecentSessionsList(uid) {
 
 export async function showSessionsHistoryModal(driverId) {
   const { getDocs, collection, query, where, orderBy } = await import('firebase/firestore');
+  // Faltaba: el historial de sesiones no abría ("Can't find variable: showModal", 12-10-2026)
+  const { showModal } = await import('../../components/modal.js');
   
   const content = document.createElement('div');
   content.style.cssText = 'padding:20px; background:var(--color-bg); min-height:60dvh; display:flex; flex-direction:column; gap:16px;';

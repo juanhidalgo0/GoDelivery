@@ -1,6 +1,6 @@
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import {
-  doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, query, orderBy,
+  doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, query, orderBy, where,
   serverTimestamp, arrayUnion, increment,
 } from 'firebase/firestore';
 import fs from 'fs';
@@ -144,6 +144,54 @@ console.log('soporte');
   await check('comercio abre el soporte del comercio (todavía no existe)', getDoc(doc(d, 'support_chats/pizza')));
   await check('admin contesta', updateDoc(doc(as('jefe'), 'support_chats/driver_cadete'), { messages: arrayUnion({ sender: 'admin', text: 'ok' }) }));
   await check('otro NO escribe en el ticket del cadete', assertFails(updateDoc(doc(as('vecino'), 'support_chats/driver_cadete'), { messages: arrayUnion({ sender: 'user', text: 'x' }) })));
+}
+
+console.log('cada chat es sólo de sus dos partes');
+{
+  await env.withSecurityRulesDisabled(async ctx => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'users/encargado'), { role: 'user' });
+    await setDoc(doc(db, 'comercios/pizza'), { name: 'La Pizzeria', ownerId: 'dueno', managerIds: ['encargado'] });
+    await setDoc(doc(db, 'orders/aislado'), { userId: 'cliente', comercioId: 'pizza', status: 'on_the_way', driverId: 'cadete' });
+    for (const t of ['client-commerce', 'client-delivery', 'commerce-delivery']) {
+      // El caso real: el cadete ya figuraba en participants del chat cliente↔comercio.
+      await setDoc(doc(db, `chats/aislado_${t}`), { orderId: 'aislado', type: t, participants: ['cliente', 'cadete', 'dueno', 'cadete2'] });
+      await setDoc(doc(db, `chats/aislado_${t}/messages/m1`), { senderId: 'cliente', text: 'privado' });
+    }
+  });
+  const puede = {
+    'client-commerce': ['cliente', 'dueno', 'encargado'],
+    'client-delivery': ['cliente', 'cadete'],
+    'commerce-delivery': ['cadete', 'dueno', 'encargado'],
+  };
+  for (const [t, si] of Object.entries(puede)) {
+    for (const uid of ['cliente', 'cadete', 'cadete2', 'dueno', 'encargado', 'vecino']) {
+      const db = as(uid);
+      const msgs = collection(db, `chats/aislado_${t}/messages`);
+      if (si.includes(uid)) {
+        await check(`${uid} lee ${t}`, getDocs(msgs));
+        await check(`${uid} escribe en ${t}`, addDoc(msgs, { senderId: uid, text: 'hola' }));
+      } else {
+        await check(`${uid} NO lee ${t}`, assertFails(getDocs(msgs)));
+        await check(`${uid} NO abre el doc de ${t}`, assertFails(getDoc(doc(db, `chats/aislado_${t}`))));
+        await check(`${uid} NO escribe en ${t}`, assertFails(addDoc(msgs, { senderId: uid, text: 'x' })));
+        await check(`${uid} NO se suma a ${t}`, assertFails(setDoc(doc(db, `chats/aislado_${t}`), { participants: arrayUnion(uid) }, { merge: true })));
+      }
+    }
+  }
+  await check('NO se crea un chat de un pedido ajeno anotándose en participants',
+    assertFails(setDoc(doc(as('vecino'), 'chats/nuevo_client-commerce'), { orderId: 'nuevo', type: 'client-commerce', participants: ['vecino'] })));
+  await check('NO se deja un mensaje en un chat ajeno que todavía no existe',
+    assertFails(addDoc(collection(as('vecino'), 'chats/nuevo_client-delivery/messages'), { senderId: 'vecino', text: 'x' })));
+  await check('el cadete NO abre el cliente↔comercio de un pedido suyo que todavía no existe',
+    assertFails(getDocs(collection(as('cadete'), 'chats/nuevo_client-commerce/messages'))));
+  await check('otro cadete NO lee los mensajes internos del pedido', assertFails(getDocs(collection(as('cadete2'), 'orders/aislado/messages'))));
+  await check('el cadete asignado escribe los mensajes internos', addDoc(collection(as('cadete'), 'orders/aislado/messages'), { text: 'llegué' }));
+  await check('el cadete lista sus chats', getDocs(query(collection(as('cadete'), 'chats'), where('participants', 'array-contains', 'cadete'))));
+  await check('nadie lista chats sin filtrar por sí mismo', assertFails(getDocs(collection(as('cadete'), 'chats'))));
+  await env.withSecurityRulesDisabled(ctx => updateDoc(doc(ctx.firestore(), 'orders/aislado'), { driverId: 'cadete2' }));
+  await check('reasignado: el cadete anterior NO lee más', assertFails(getDocs(collection(as('cadete'), 'chats/aislado_client-delivery/messages'))));
+  await check('reasignado: el cadete nuevo lee', getDocs(collection(as('cadete2'), 'chats/aislado_client-delivery/messages')));
 }
 
 console.log('admin y ajenos');

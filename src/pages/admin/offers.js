@@ -1,6 +1,7 @@
 // GoDelivery — Admin Offers Management
 import { db } from '../../firebase.js';
 import { collection, getDocs, doc, deleteDoc, updateDoc, addDoc, serverTimestamp, query, where, onSnapshot } from 'firebase/firestore';
+import { loadPanelCatalog } from '../../utils/panel-catalog.js';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
@@ -441,8 +442,7 @@ async function openOfferEditor(existingOffer = null) {
     // Trigger loading products
     productsContainer.innerHTML = '<div class="spinner-mini" style="margin:40px auto;"></div>';
     try {
-      const pSnap = await getDocs(collection(db, 'comercios', cid, 'products'));
-      activeProducts = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      activeProducts = await loadPanelCatalog(cid);
       
       const catsSnap = await getDocs(collection(db, 'comercios', cid, 'categories'));
       categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));

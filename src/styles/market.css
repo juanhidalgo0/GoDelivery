@@ -109,10 +109,15 @@
 .mk-name { font-size: 13px; line-height: 1.3; color: var(--go-text-2); padding: 0 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ── "Combiná con…" */
-.mk-pairs { position: fixed; z-index: 120; left: 10px; right: 10px; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); max-width: 560px; margin: 0 auto; background: var(--go-card); border: 1px solid var(--go-line); border-radius: 20px; box-shadow: 0 12px 40px rgba(11,11,12,.22); padding: 12px 0 8px; transform: translateY(20px); opacity: 0; transition: transform .25s, opacity .25s; }
+/* La tienda se abre dentro de #app-overlay, que tiene transform y es el que scrollea: ahí "fixed" se mueve con el
+   scroll y el cartel aparecía en el medio. Sticky de alto cero lo deja abajo sin ocupar lugar. */
+.mk-pairs-dock { position: sticky; z-index: 120; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); height: 0; }
+.mk-pairs { position: absolute; left: 10px; right: 10px; bottom: 0; max-width: 560px; margin: 0 auto; background: var(--go-card); border: 1px solid var(--go-line); border-radius: 20px; box-shadow: 0 12px 40px rgba(11,11,12,.22); padding: 12px 0 8px; transform: translateY(20px); opacity: 0; transition: transform .25s, opacity .25s; }
 .mk-pairs.is-on { transform: none; opacity: 1; }
 .mk-pairs-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 14px 8px; font-size: 14px; }
-.mk-pairs-head b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mk-pairs-head > div { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mk-pairs-head b { font-size: 14px; }
+.mk-pairs-head span { font-size: 12.5px; color: var(--go-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mk-pairs-head button { border: 0; background: var(--go-paper-2); color: var(--go-text-2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .mk-card.is-mini { width: 104px; flex-shrink: 0; }
 .mk-card.is-mini .mk-price { font-size: 13.5px; }

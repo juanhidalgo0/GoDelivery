@@ -7,6 +7,7 @@ import { showModal, closeModal, showConfirm } from '../components/modal.js';
 import { isLoggedIn } from '../auth.js';
 import { renderNavbar } from '../components/navbar.js';
 import { icon } from '../utils/icons.js';
+import { displayName } from '../utils/product-name.js';
 import { escapeHtml } from '../utils/escape.js';
 import { isShopperCommerce } from '../utils/shopper.js';
 
@@ -43,6 +44,12 @@ let selectedDeliveryType = 'delivery';
 let isDirectStoreCart = false;
 let currentCartContainer = null;
 
+async function askToFixStreetOnlyPin(onFixed, beforeOpen) {
+  const { deliveryAddress, addressNotes, deliveryCoords } = getState();
+  const m = await import('../components/address-modal.js');
+  return m.askToFixStreetOnlyPin({ address: deliveryAddress, notes: addressNotes, coords: deliveryCoords }, onFixed, beforeOpen);
+}
+
 function getActiveCartContainer() {
   const hash = window.location.hash || '';
   const isCartRoute = hash === '#/cart' || hash.startsWith('#/cart?') || hash.includes('/cart');
@@ -59,6 +66,12 @@ function getActiveCartContainer() {
     if (overlayContent) return overlayContent;
   }
   return document.getElementById('page-cart');
+}
+
+/** Los productos del carrito con recargo por transferencia, para nombrarlos en el resumen */
+function surchargeNames() {
+  const names = getState().cart.filter(i => Number(i.product?.transferSurcharge) > 0).map(i => displayName(i.product.name));
+  return names.length > 2 ? `${names.slice(0, 2).join(', ')} y otros` : names.join(', ');
 }
 
 function escapeHtmlAttr(str) {
@@ -111,13 +124,13 @@ export async function renderCart(content, isDirectMode = false) {
     setState('isRaining', false);
   }
 
+  // Las ofertas llegan por detrás: antes se esperaban antes de dibujar y el carrito quedaba en
+  // blanco hasta que el servidor contestaba (hasta 8 s con mala señal)
+  let offersReady = Promise.resolve();
   if (!isPreview) {
-    try {
-      const oSnap = await getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 60000);
-      setState({ activeOffers: oSnap.docs.map(d => ({ id: d.id, ...d.data() })) });
-    } catch (e) {
-      console.error('Error loading offers', e);
-    }
+    offersReady = getDocsOptimized(query(collection(db, 'offers'), where('active', '==', true)), 'activeOffers', 60000)
+      .then((oSnap) => { if (!oSnap.error) setState({ activeOffers: oSnap.docs.map(d => ({ id: d.id, ...d.data() })) }); })
+      .catch((e) => console.error('Error loading offers', e));
   }
 
 
@@ -179,20 +192,8 @@ export async function renderCart(content, isDirectMode = false) {
       }
     });
     
-    const totalProducts = cart.reduce((sum, item) => {
-      const basePrice = getItemUnitPrice(item);
-      const originalTotal = basePrice * item.qty;
-      let finalTotal = originalTotal;
-      const offer = activeOffers.find(o => o.active && o.comercioId === item.comercioId && o.productIds && o.productIds.includes(item.product.id));
-      if (offer) {
-        if (offer.type === '2x1') {
-          finalTotal = basePrice * Math.ceil(item.qty / 2);
-        } else if (offer.type === 'percentage') {
-          finalTotal = originalTotal * ((100 - offer.value) / 100);
-        }
-      }
-      return sum + finalTotal;
-    }, 0);
+    // Misma cuenta que el resumen y el servidor (con recargo si paga con transferencia)
+    const totalProducts = getCartTotal(selectedPaymentMethod);
     
     const dynamicFees = state.dynamicDeliveryFees || {};
     const commerceEntries = [...new Set(cart.map(i => i.comercioId))];
@@ -347,6 +348,7 @@ export async function renderCart(content, isDirectMode = false) {
   };
 
   triggerRender();
+  offersReady.then(triggerRender);
 
   const unsubCart = subscribe('cart', () => {
     calculateAllFees();
@@ -444,7 +446,10 @@ export async function calculateAllFees(proactiveCommerceId = null) {
   }
 
   const dynamicFees = state.dynamicDeliveryFees || {};
-  const needsFeeCalculation = comercioIds.some(cid => dynamicFees[cid] === undefined);
+  // También sin distancia: el envío y la distancia se guardan aparte en el teléfono y, si quedaba
+  // solo el envío, el carrito mostraba "Calculando..." al lado del comercio para siempre
+  const knownDistances = state.dynamicDistances || {};
+  const needsFeeCalculation = comercioIds.some(cid => dynamicFees[cid] === undefined || typeof knownDistances[cid] !== 'number');
   if (!needsFeeCalculation) return;
 
   const { geocodeAddress, getDistance, calculateDynamicFee } = await import('../utils/geo.js');
@@ -492,14 +497,15 @@ export async function calculateAllFees(proactiveCommerceId = null) {
   }
 
   if (changed) {
-    setState('dynamicDeliveryFees', newFees);
-    if (Object.keys(newDistances).length > 0) {
-      const mergedDistances = { ...state.dynamicDistances, ...newDistances };
-      setState('dynamicDistances', mergedDistances);
-
-      localStorage.setItem('gd-cached-fees', JSON.stringify(newFees));
+    // Se suman a los que ya había: antes se reemplazaban y otro comercio del carrito perdía su envío
+    const mergedFees = { ...(getState().dynamicDeliveryFees || {}), ...newFees };
+    const mergedDistances = { ...(getState().dynamicDistances || {}), ...newDistances };
+    setState('dynamicDeliveryFees', mergedFees);
+    setState('dynamicDistances', mergedDistances);
+    try {
+      localStorage.setItem('gd-cached-fees', JSON.stringify(mergedFees));
       localStorage.setItem('gd-cached-distances', JSON.stringify(mergedDistances));
-    }
+    } catch (e) { /* sin espacio: queda en memoria */ }
   }
 }
 
@@ -561,7 +567,7 @@ function renderCartContent(content) {
   }
 
   const cart = getState().cart;
-  const total = getCartTotal();
+  const total = getCartTotal(selectedPaymentMethod);
   const count = getCartCount();
 
   if (cart.length === 0) {
@@ -711,7 +717,7 @@ function renderCartContent(content) {
                 <div style="display:flex; align-items:center; gap:8px;">
                   ${getState().dynamicDeliveryFees[comercioId] !== undefined ? `
                     <span style="font-size:10px; color:var(--color-text-tertiary); font-weight:600; background:var(--color-bg-secondary); padding:2px 8px; border-radius:6px; border:1px solid var(--color-border-light);">
-                      ${getState().dynamicDistances?.[comercioId] ? `${getState().dynamicDistances[comercioId].toFixed(1)} km` : 'Calculando...'}
+                      ${typeof getState().dynamicDistances?.[comercioId] === 'number' ? `${getState().dynamicDistances[comercioId].toFixed(1)} km` : 'Calculando...'}
                     </span>
                   ` : ''}
                   <span style="font-size:11px; font-weight:700; color:var(--go-text-2); background:var(--color-surface); border:1px solid var(--go-line); padding:3px 8px; border-radius:8px;">${group.items.length} ${group.items.length === 1 ? 'producto' : 'productos'}</span>
@@ -879,7 +885,7 @@ function renderCartContent(content) {
           if (commerceEntries.length === 0) return '';
 
           const isMulti = commerceEntries.length > 1;
-          const totalProducts = getCartTotal();
+          const totalProducts = getCartTotal(selectedPaymentMethod);
 
           const dynamicFees = getState().dynamicDeliveryFees;
           const commerceIds = Object.keys(grouped);
@@ -1018,6 +1024,14 @@ function renderCartContent(content) {
                   <span>Subtotal ${isMulti ? `(${commerceEntries.length} comercios)` : ''}</span>
                   <span id="cart-summary-subtotal" style="color:var(--color-text-primary); font-weight:600;">${formatPrice(totalProducts)}</span>
                 </div>
+                ${(() => {
+                  // Recargo por transferencia del comercio (cigarrillos en los kioscos): a la vista antes de pagar
+                  const extra = getCartTotal('mercadopago') - getCartTotal('efectivo');
+                  if (extra <= 0) return '';
+                  return selectedPaymentMethod === 'mercadopago'
+                    ? `<div class="cart-surcharge is-on"><span>Recargo por transferencia (${escapeHtml(surchargeNames())})</span><b>+${formatPrice(extra)}</b></div>`
+                    : `<div class="cart-surcharge"><span>Con transferencia pagarías ${formatPrice(extra)} más (${escapeHtml(surchargeNames())})</span></div>`;
+                })()}
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--color-text-secondary); font-size:12px; align-items:center;">
                   <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                     <span>${isTakeaway ? 'Retiro en el local' : `Envío ${isMulti ? '(Múltiple)' : ''}`}</span>
@@ -1185,6 +1199,8 @@ function renderCartContent(content) {
   content.querySelectorAll('input[name="payment-method"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       selectedPaymentMethod = e.target.value;
+      // Con productos con recargo por transferencia, cambia el total: se redibuja el resumen
+      if (getCartTotal('mercadopago') !== getCartTotal('efectivo')) { renderCartContent(content); return; }
       const btn = document.getElementById('global-checkout-btn');
       if (!btn) return;
       const isMulti = Object.keys(getCartByComercio()).length > 1;
@@ -1389,7 +1405,7 @@ function showFeeDetails() {
     `;
   }
 
-  const totalProducts = getCartTotal();
+  const totalProducts = getCartTotal(selectedPaymentMethod);
   const appUsageFee = Math.ceil((totalProducts * (state.appUsageFeeRate ?? 0.05)) / 10) * 10;
   if (appUsageFee > 0) {
     html += `
@@ -1586,7 +1602,7 @@ function openGoPointsModal() {
 
   // Calculate maximum redeemable points
   const grouped = getCartByComercio();
-  const totalProducts = getCartTotal();
+  const totalProducts = getCartTotal(selectedPaymentMethod);
   const dynamicFees = state.dynamicDeliveryFees || {};
   const commerceIds = Object.keys(grouped);
   const allFeesReady = commerceIds.every(cid => dynamicFees[cid] !== undefined);
@@ -1911,7 +1927,7 @@ function openCouponModal() {
           }
           applicableTotal = baseDeliveryFeeCalc + nightSurcharge;
         } else {
-          const totalProducts = getCartTotal();
+          const totalProducts = getCartTotal(selectedPaymentMethod);
           let targetProductsTotal = totalProducts;
           if (cData.ownerId && cData.ownerId !== 'admin') {
             const merchantId = cData.ownerId;
@@ -2129,7 +2145,7 @@ async function openCheckoutConfirmationModal() {
   // Using module-level selectedIsScheduled, selectedSchedDate, selectedSchedTime
 
   // Recalculate fees and pricing exactly matching cart UI
-  const totalProducts = getCartTotal();
+  const totalProducts = getCartTotal(selectedPaymentMethod);
   const dynamicFees = state.dynamicDeliveryFees || {};
   
   const selectedTip = isTakeaway ? 0 : (state.selectedTip || 0);
@@ -2692,8 +2708,10 @@ async function openCheckoutConfirmationModal() {
   });
 
   // Handle Change Address
+  // Con retiro en el local no hay dirección ni botón: sin este chequeo el cuadro no abría y el
+  // pedido para retirar no se podía confirmar
   const changeAddressBtn = modalContent.querySelector('#confirm-change-address-btn');
-  changeAddressBtn.onclick = () => {
+  if (changeAddressBtn) changeAddressBtn.onclick = () => {
     // Close the confirmation modal first
     close();
     
@@ -2765,6 +2783,7 @@ async function openCheckoutConfirmationModal() {
         }, { skipDetails: true }));
         return;
       }
+      if (await askToFixStreetOnlyPin(() => openCheckoutConfirmationModal(), close)) return;
     }
     submitBtn.disabled = true;
     cancelBtn.disabled = true;
@@ -3101,6 +3120,7 @@ async function handleCartClick(e) {
         }, { skipDetails: true }));
         return;
       }
+      if (await askToFixStreetOnlyPin(() => checkoutBtn.click())) return;
     }
 
     if (!user.phone || user.phone.trim() === '' || !user.phoneVerified) {

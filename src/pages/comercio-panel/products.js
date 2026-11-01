@@ -1,7 +1,8 @@
 // GoDelivery — Comercio Products Management
 import { db } from '../../firebase.js';
 import { canManageCommerce } from '../../utils/my-commerces.js';
-import { collection, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, orderBy, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { loadPanelCatalog } from '../../utils/panel-catalog.js';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { formatPrice } from '../../utils/format.js';
@@ -83,8 +84,8 @@ export async function renderComercioProducts() {
     isSyncAllowed = !comercioData.ventraLinked && (comercioId === '6R8ikb9wsjUCQuOANOMHuAZZxss2' || canManageCommerce(comercioData, user.uid));
 
 
-    const prodsSnap = await getDocs(collection(db, 'comercios', comercioId, 'products'));
-    products = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Catálogos grandes: solo lo que cambió desde la última vez (utils/panel-catalog.js)
+    products = await loadPanelCatalog(comercioId);
 
     // Sanitize: Limit onlyInApp products to maximum 3 per commerce
     const appOnlyProds = products.filter(p => p.onlyInApp === true);
@@ -98,7 +99,7 @@ export async function renderComercioProducts() {
       for (const p of excessProds) {
         p.onlyInApp = false;
         try {
-          await updateDoc(doc(db, 'comercios', comercioId, 'products', p.id), { onlyInApp: false });
+          await updateDoc(doc(db, 'comercios', comercioId, 'products', p.id), { onlyInApp: false, updatedAt: serverTimestamp() });
         } catch (errSanitize) {
           console.warn('Error sanitizing excess onlyInApp product:', p.id, errSanitize);
         }
@@ -319,7 +320,7 @@ export async function renderComercioProducts() {
         const newAvail = product.isAvailable === false;
         try {
           // Producto de Ventra: ocultarlo acá queda firme (Ventra no lo vuelve a mostrar)
-          await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), { isAvailable: newAvail, ...(product.source === 'ventra' ? { hiddenInGo: !newAvail } : {}) });
+          await updateDoc(doc(db, 'comercios', comercioId, 'products', product.id), { isAvailable: newAvail, ...(product.source === 'ventra' ? { hiddenInGo: !newAvail } : {}), updatedAt: serverTimestamp() });
           product.isAvailable = newAvail;
           renderCategoriesFilter(categories);
           // Solo esa tarjeta: redibujar la lista la volvía a la primera tanda y la pantalla saltaba arriba
@@ -478,7 +479,7 @@ export async function renderComercioProducts() {
                   createdAt: new Date()
                 };
 
-                batch.set(newRef, productData);
+                batch.set(newRef, { ...productData, updatedAt: serverTimestamp() });
                 batchProducts.push({ id: newRef.id, ...productData });
                 count++;
               }
@@ -1645,10 +1646,10 @@ function showProductModal(product, categories, comercioId, onSave, onCategoryAdd
 
       const doSaveCloud = async () => {
         if (product) {
-          await updateDoc(productRef, productData);
+          await updateDoc(productRef, { ...productData, updatedAt: serverTimestamp() });
           onSave({ id: product.id, ...productData });
         } else {
-          await setDoc(productRef, productData);
+          await setDoc(productRef, { ...productData, updatedAt: serverTimestamp() });
           firestoreDocId = productRef.id;
           onSave({ id: productRef.id, ...productData });
         }
@@ -1940,7 +1941,7 @@ function showBulkPriceIncreaseModal(products, categories, comercioId, onComplete
         newPrice = Math.max(0, Math.round(newPrice));
 
         const prodRef = doc(db, 'comercios', comercioId, 'products', prod.id);
-        batch.update(prodRef, { price: newPrice });
+        batch.update(prodRef, { price: newPrice, updatedAt: serverTimestamp() });
 
         prod.price = newPrice;
       }

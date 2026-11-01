@@ -1,5 +1,6 @@
 import { db } from '../../firebase.js';
 import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, serverTimestamp, addDoc, getDocs, orderBy, setDoc, limit, Timestamp } from 'firebase/firestore';
+import { loadPanelCatalog } from '../../utils/panel-catalog.js';
 import { getState } from '../../state.js';
 import { getRouteParams } from '../../router.js';
 import { isAdmin } from '../../auth.js';
@@ -10,7 +11,8 @@ import { showConfirm, showModal, closeModal } from '../../components/modal.js';
 import { getUnreadCount, onUnreadChange } from '../../components/chat-notifier.js';
 import { openChat } from '../../components/chat.js';
 import { enterCommercePanel, getPanelComercio, cpEmpty, cpSkeleton } from './shell.js';
-import { askPrepAndAccept, askReasonAndCancel, markReady, completeOrder } from './order-actions.js';
+import { askPrepAndAccept, askReasonAndCancel, markReady, completeOrder, askWeights } from './order-actions.js';
+import { isWeighedItem, itemWeightLabel, orderHasWeighedItems } from '../../utils/weight.js';
 
 let ordersUnsub = null;
 const clientUserCache = {};
@@ -139,7 +141,8 @@ export async function renderComercioOrders(manualId = null) {
       const opts = Array.isArray(it.options) && it.options.length
         ? `<div class="cp-small" style="margin-left:22px">${esc(it.options.map(op => op?.name || op?.label || op).filter(Boolean).join(', '))}</div>` : '';
       const note = it.notes ? `<div class="cp-small" style="margin-left:22px; color:#b45309">“${esc(it.notes)}”</div>` : '';
-      return `<div><b>${it.qty || it.quantity || 1}×</b> ${esc(it.name)}</div>${opts}${note}`;
+      const qty = isWeighedItem(it) ? itemWeightLabel(it) : `${it.qty || it.quantity || 1}×`;
+      return `<div><b>${qty}</b> ${esc(it.name)}</div>${opts}${note}`;
     }).join('');
     const more = items.length > 5 ? `<div class="cp-small">+ ${items.length - 5} productos más</div>` : '';
     return shown + more;
@@ -178,6 +181,7 @@ export async function renderComercioOrders(manualId = null) {
       (o.source === 'catalogo_whatsapp' || o.isDirectOrder) ? `<span class="cp-tag is-green">${icon('whatsapp', 12)} Tu catálogo</span>` : '',
       o.isManual ? '<span class="cp-tag">Manual</span>' : '',
       o.isModified ? '<span class="cp-tag is-amber">Modificado</span>' : '',
+      orderHasWeighedItems(o) ? (o.weighPending === false ? '<span class="cp-tag is-green">Pesado</span>' : '<span class="cp-tag is-amber">Por peso · falta pesar</span>') : '',
     ].filter(Boolean).join('');
 
     let progress = '';
@@ -200,7 +204,7 @@ export async function renderComercioOrders(manualId = null) {
         ${o.notes ? `<div class="cp-order-note">${icon('info', 14)} ${esc(o.notes)}</div>` : ''}
         <div class="cp-order-meta">${tags}</div>
         <div class="cp-order-foot">
-          <span class="cp-grow">${isCadeteriaOrder(o) ? 'Costo del envío' : 'Productos'} <span class="cp-money">${formatPrice(productsTotal(o))}</span></span>
+          <span class="cp-grow">${isCadeteriaOrder(o) ? 'Costo del envío' : (o.weighPending ? 'Estimado' : 'Productos')} <span class="cp-money">${formatPrice(productsTotal(o))}</span></span>
           ${isCadeteriaOrder(o) ? '' : `<button type="button" class="cp-btn is-sm" data-do="chat" data-id="${o.id}" style="position:relative">
             ${icon('chatBubble', 16)} Chat
             ${unread > 0 ? `<span class="cp-badge" style="top:-6px; left:auto; right:-6px">${unread}</span>` : ''}
@@ -320,6 +324,7 @@ export async function renderComercioOrders(manualId = null) {
     } else if (d.do === 'reject') {
       await askReasonAndCancel(o);
     } else if (d.do === 'ready') {
+      if (orderHasWeighedItems(o) && !(await askWeights(o))) return;
       try { navigator.vibrate?.(30); } catch (err) {}
       state.pendingReady.set(o.id, setTimeout(() => { commitReady(o.id); render(); }, READY_UNDO_MS));
       showUndo(o);
@@ -513,7 +518,7 @@ function showOrderDetailModal(initialOrder) {
             <div class="detail-items-list-premium">
               ${o.items?.map(i => `
                 <div class="detail-item-premium">
-                  <div class="item-qty-badge">${i.qty}x</div>
+                  <div class="item-qty-badge">${isWeighedItem(i) ? itemWeightLabel(i) : `${i.qty}x`}</div>
                   <div class="item-name" style="text-align: left;">
                     <div>${i.name}</div>
                     ${i.options && i.options.length > 0 ? `
@@ -574,7 +579,7 @@ function showOrderDetailModal(initialOrder) {
         <div class="price-summary-card-premium">
           <div class="collapsible-summary-rows" id="order-collapsible-summary-rows" style="display: none;"></div>
           <div class="summary-row total-row">
-            <span>Total Productos (A Cobrar)</span>
+            <span>${o.weighPending ? 'Total Productos (estimado, falta pesar)' : 'Total Productos (A Cobrar)'}</span>
             <span class="total-amount">${formatPrice(o.subtotal || o.total - (o.deliveryCost || 0) - (o.appUsageFee || 0))}</span>
           </div>
           ${isTakeaway ? `
@@ -692,6 +697,7 @@ function showOrderDetailModal(initialOrder) {
       if (await askReasonAndCancel(o)) closeDetail();
     });
     modalEl.querySelector('.ready-order-btn')?.addEventListener('click', async () => {
+      if (orderHasWeighedItems(o) && !(await askWeights(o))) return;
       await markReady(o);
       closeDetail();
       showToast(`Pedido #${o.orderId || ''} listo`, 'success');
@@ -879,8 +885,8 @@ function showModifyOrderModal(order) {
   modalEl.className = "modify-order-modal-container";
 
   // Async load in the background
-  getDocs(collection(db, 'comercios', commerceId, 'products')).then(prodsSnap => {
-    allProducts = prodsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  loadPanelCatalog(commerceId).then(prods => {
+    allProducts = prods;
     return getDocs(query(collection(db, 'comercios', commerceId, 'categories'), orderBy('order')));
   }).then(catsSnap => {
     categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1126,6 +1132,9 @@ async function showNewManualOrderModal(comercioId) {
 
   // Tracking state variables for resolved address coordinates and costs
   let selectedCoords = null;
+  // Dónde dejó el pin una sugerencia de calle sin altura: hasta que se mueva de ahí no vale, aunque el
+  // mapa detecte un número al abrir (es el de ese punto, no el de la casa).
+  let streetOnlyPin = null;
   let selectedAddress = '';
   let deliveryCost = 0;
   let estimatedDistance = 0;
@@ -1359,7 +1368,7 @@ async function showNewManualOrderModal(comercioId) {
         }
 
         suggestionsDropdown.innerHTML = suggestions.map(s => `
-          <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" style="padding: 12px 16px; font-size: 13px; font-weight: 700; color: var(--color-text-primary, #1e293b); cursor: pointer; border-bottom: 1px solid var(--color-border-light, #e2e8f0); background: var(--color-surface, #ffffff); transition: background 0.2s;">
+          <div class="suggestion-item" data-lat="${s.lat || ''}" data-lng="${s.lng || ''}" data-placeid="${s.placeId || ''}" data-addr="${s.address}" data-street="${s.isStreet ? '1' : ''}" style="padding: 12px 16px; font-size: 13px; font-weight: 700; color: var(--color-text-primary, #1e293b); cursor: pointer; border-bottom: 1px solid var(--color-border-light, #e2e8f0); background: var(--color-surface, #ffffff); transition: background 0.2s;">
             ${s.address}
           </div>
         `).join('');
@@ -1386,6 +1395,7 @@ async function showNewManualOrderModal(comercioId) {
                   const { geocodePlaceId } = await import('../../utils/geo.js');
                   const coords = await geocodePlaceId(placeId);
                   if (coords) {
+                    streetOnlyPin = item.dataset.street ? { lat: coords.lat, lng: coords.lng } : null;
                     selectLocation({ lat: coords.lat, lng: coords.lng }, addr);
                   } else {
                     console.error('Failed to geocode suggestion place ID');
@@ -1395,6 +1405,7 @@ async function showNewManualOrderModal(comercioId) {
                 }
               }
             } else {
+              streetOnlyPin = item.dataset.street ? { lat, lng } : null;
               selectLocation({ lat, lng }, addr);
             }
           };
@@ -1497,6 +1508,14 @@ async function showNewManualOrderModal(comercioId) {
       showToast('Por favor selecciona la dirección mediante el buscador o el mapa (obligatorio)', 'warning');
       return;
     }
+    // Una calle sin altura es un punto cualquiera de la calle: el cadete iría ahí.
+    const { isStreetOnlyLocation } = await import('../../utils/geo.js');
+    const pinNotMoved = streetOnlyPin && Math.hypot((selectedCoords.lat - streetOnlyPin.lat) * 111000, (selectedCoords.lng - streetOnlyPin.lng) * 91000) < 15;
+    if (pinNotMoved || await isStreetOnlyLocation(selectedAddress, selectedCoords)) {
+      showToast('Falta la altura: escribila en el buscador o marcá la puerta del cliente en el mapa', 'warning');
+      mapBtn.click();
+      return;
+    }
     if (isNaN(subtotal) || subtotal <= 0) {
       showToast('Por favor ingresa un precio de productos válido mayor a 0', 'warning');
       return;
@@ -1530,7 +1549,8 @@ async function showNewManualOrderModal(comercioId) {
           const commissionAmount = 0;
 
           const orderData = {
-            orderId: Math.floor(1000 + Math.random() * 9000),
+            // Range of their own: with 1000-9999 they repeated the numbers of regular orders (2233...)
+            orderId: Math.floor(90000 + Math.random() * 10000),
             comercioId,
             comercioName: comData.name,
             comercioCoords: comData.coords || null,
@@ -1845,7 +1865,7 @@ function getOrderStyles() {
     .detail-items-list-premium::-webkit-scrollbar-track { background:rgba(0,0,0,0.03); border-radius:6px; margin-bottom:6px; }
     .detail-items-list-premium::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.15); border-radius:6px; }
     .detail-item-premium { display:flex; align-items:center; gap:10px; background:var(--color-bg-secondary); padding:8px 12px; border-radius:12px; border:1px solid var(--color-border-light); flex-shrink:0; }
-    .item-qty-badge { background:var(--color-primary); color:white; font-weight:900; font-size:11px; width:24px; height:24px; border-radius:6px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 6px rgba(var(--color-primary-rgb), 0.2); }
+    .item-qty-badge { background:var(--color-primary); color:white; font-weight:900; font-size:11px; min-width:24px; padding:0 5px; white-space:nowrap; height:24px; border-radius:6px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 6px rgba(var(--color-primary-rgb), 0.2); }
     .item-name { flex:1; font-weight:600; font-size:13px; color:var(--color-text); }
     .item-price { font-weight:800; font-size:13px; color:var(--color-text); }
 

@@ -1,6 +1,7 @@
 // Menú → Categorías: agregar, renombrar, ordenar (como aparecen en la tienda), ocultar y borrar.
 import { db } from '../../firebase.js';
 import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
+import { loadPanelCatalog } from '../../utils/panel-catalog.js';
 import { getRouteParams } from '../../router.js';
 import { showToast } from '../../components/toast.js';
 import { icon } from '../../utils/icons.js';
@@ -29,13 +30,13 @@ export async function renderComercioCategories() {
 
   const load = async () => {
     try {
-      const [cSnap, pSnap] = await Promise.all([
+      const [cSnap, prods] = await Promise.all([
         getDocs(query(collection(db, 'comercios', comercioId, 'categories'), orderBy('order'))),
-        getDocs(collection(db, 'comercios', comercioId, 'products')),
+        loadPanelCatalog(comercioId),
       ]);
       cats = cSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       countBy = {};
-      pSnap.docs.forEach(d => { const c = d.data().categoryId; if (c) countBy[c] = (countBy[c] || 0) + 1; });
+      prods.forEach(p => { const c = p.categoryId; if (c) countBy[c] = (countBy[c] || 0) + 1; });
       paint();
     } catch (e) {
       console.error('Categorías:', e);

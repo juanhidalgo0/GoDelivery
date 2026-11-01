@@ -246,6 +246,7 @@ export function openComboEditor(comercioId, comercio, existing = null, onSaved =
         const categoryId = await promosCategoryId(comercioId);
         const comboItems = items.map((x) => ({ productId: x.productId, name: x.name, qty: Number(x.qty) || 1, image: x.image || '', price: Number(x.price) || 0 }));
         const common = {
+          updatedAt: serverTimestamp(),
           isCombo: true, comboItems, comboRegularPrice: regular(), categoryId, updatedAt: serverTimestamp(),
           ...(image ? { image } : {}),
           description: `Incluye: ${comboItems.map((x) => `${x.qty > 1 ? `${x.qty} ` : ''}${displayName(x.name)}`).join(' + ')}`,

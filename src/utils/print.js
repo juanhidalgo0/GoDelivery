@@ -1,3 +1,5 @@
+import { isWeighedItem, itemWeightLabel } from './weight.js';
+
 export function printComanda(order) {
   const formatP = (num) => '$' + (num || 0).toLocaleString('es-AR');
   const d = order.createdAt ? (order.createdAt.toDate ? order.createdAt.toDate() : new Date(order.createdAt)) : new Date();
@@ -63,7 +65,7 @@ export function printComanda(order) {
             ${(order.items || []).map(i => `
               <div class="item" style="display:flex; flex-direction:column; margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between; width:100%;">
-                  <div class="item-qty">${i.qty}x</div>
+                  <div class="item-qty">${isWeighedItem(i) ? itemWeightLabel(i) : `${i.qty}x`}</div>
                   <div class="item-name">${i.name}</div>
                   <div class="item-price">${formatP(i.price * i.qty)}</div>
                 </div>

@@ -6,7 +6,8 @@
 // queda en el log.
 const logger = require("firebase-functions/logger");
 const { FieldValue } = require("firebase-admin/firestore");
-const { money } = require("./bot");
+const { money, FOOTER } = require("./bot");
+const { trackingUrl } = require("./tracking");
 
 // Sin respuesta del comercio en este tiempo, se le ofrece al cliente un mandado
 const QUOTE_WAIT_MS = 10 * 60 * 1000;
@@ -21,9 +22,18 @@ function createNotify({ db, sender, orders, push }) {
   }
 
   // ── Pedidos ──
+  // Apagados por defecto: cada aviso es un mensaje que Meta cobra pasados los 1.000 gratis del mes.
+  // El cliente sigue todo en el link de la confirmación. Se prenden con settings/whatsapp_bot { notify: true }.
+  async function notifyEnabled() {
+    const snap = await db.collection("settings").doc("whatsapp_bot").get().catch(() => null);
+    return !!(snap && snap.exists && snap.data().notify === true);
+  }
+
   async function onOrderChange(before, after) {
     const to = after.waPhone;
     if (!to) return;
+    const changed = (!before.driverId && after.driverId) || before.status !== after.status || (!before.isAtDoor && after.isAtDoor);
+    if (!changed || !(await notifyEnabled())) return;
     const num = after.orderId ? `#${after.orderId}` : "";
     const isCadeteria = after.isCommerceCadeteria === true;
     const msgs = [];
@@ -33,6 +43,8 @@ function createNotify({ db, sender, orders, push }) {
       if (isCadeteria) msgs.push(`🛵 *${who}* va para tu local (${num}).`);
       else if (after.isFavor) msgs.push(`🛵 *${who}* tomó tu pedido ${num} y ya se puso en marcha.`);
       else msgs.push(`🛵 *${who}* va a buscar tu pedido ${num} a ${after.comercioName || "el comercio"}.`);
+      // El seguimiento va como botón de link, sin la URL larga en el texto
+      if (!isCadeteria && after.trackingToken) msgs[msgs.length - 1] = { text: msgs[msgs.length - 1], link: { title: "📍 Ver en el mapa", url: trackingUrl(after.trackingToken) } };
     }
     if (before.status !== after.status) {
       if (after.status === "confirmed" && !after.isFavor && !after.waQuoteId) {
@@ -40,13 +52,15 @@ function createNotify({ db, sender, orders, push }) {
       }
       if (after.status === "delivering" && !isCadeteria) msgs.push(`🛵 Tu pedido ${num} va en camino.`);
       if (after.status === "completed") msgs.push(isCadeteria ? `✅ Envío ${num} terminado. ¡Gracias!` : `✅ Pedido ${num} entregado. ¡Gracias por pedir en GO! 💛`);
-      if (after.status === "cancelled" && after.cancelledBy !== "cliente") {
+      if (after.status === "cancelled" && after.cancelledBy === "client") {
+        msgs.push(`👍 Cancelaste el pedido ${num}. Escribí *menú* cuando quieras pedir otra cosa.`);
+      } else if (after.status === "cancelled" && after.cancelledBy !== "cliente") {
         msgs.push(`❌ Tu pedido ${num} fue cancelado${after.cancelReason ? `: ${after.cancelReason}` : "."}\nSi necesitás ayuda, escribí *menú* y elegí *Hablar con alguien*.`);
       }
     }
     if (!before.isAtDoor && after.isAtDoor) msgs.push(isCadeteria ? `📍 El cadete llegó a tu local.` : `📍 ¡Tu cadete llegó! Salí a recibirlo.`);
 
-    if (msgs.length) await sender.send(to, msgs.map((text) => ({ text })));
+    if (msgs.length) await sender.send(to, msgs.map((m) => (typeof m === "string" ? { text: m } : m)));
   }
 
   // ── Pedido escrito a un comercio ──
@@ -71,6 +85,8 @@ function createNotify({ db, sender, orders, push }) {
           (after.commerceNote ? `\n\n💬 _${after.commerceNote}_` : "") +
           "\n\n¿Lo confirmamos?",
         buttons: [{ id: `q_ok:${id}`, title: "✅ Confirmar" }, { id: `q_no:${id}`, title: "No, gracias" }],
+        asButtons: true,
+        footer: FOOTER,
       }]);
       await setSession(to, "k_quoted", { quoteId: id, comercio: { id: after.comercioId, name: after.comercioName } });
       return;
@@ -147,7 +163,21 @@ function createNotify({ db, sender, orders, push }) {
     await db.collection("wa_sessions").doc(to).set({ step: "support", data: {}, updatedAtMs: Date.now() }, { merge: true });
   }
 
-  return { onOrderChange, onQuoteWritten, expireQuotes, onSupportChat };
+  // Se conectó un cadete: avisa a los que pidieron "Avisame" cuando no había ninguno (wa_waitlist).
+  // La sesión sigue en el resumen, así que el botón Confirmar crea el pedido.
+  async function onDriverOnline() {
+    const snap = await db.collection("wa_waitlist").where("until", ">", Date.now()).get();
+    for (const doc of snap.docs) {
+      await doc.ref.delete().catch(() => {});
+      await sender.send(doc.id, [{
+        text: "🛵 ¡Ya hay un cadete conectado! ¿Confirmamos tu pedido?",
+        buttons: [{ id: "c_ok", title: "✅ Confirmar" }, { id: "go_menu", title: "Ver menú" }],
+        asButtons: true,
+      }]);
+    }
+  }
+
+  return { onOrderChange, onQuoteWritten, expireQuotes, onSupportChat, onDriverOnline };
 }
 
 module.exports = { createNotify, QUOTE_WAIT_MS, QUOTE_ANSWER_MS };

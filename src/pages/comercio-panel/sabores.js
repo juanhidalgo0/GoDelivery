@@ -32,7 +32,7 @@ export async function renderComercioSabores() {
         <button type="button" class="cp-btn is-ink is-block" id="save-sabores-btn" style="display:none; margin-top:10px">${icon('check', 18)} Guardar cambios</button>
       </div>
       <div class="cp-page" style="padding-top:4px">
-        <p class="cp-muted" id="sabores-help" style="margin:0 2px 12px">Marcá qué gustos hay hoy. Si ponés un número, se descuenta con cada pedido; vacío es ilimitado.</p>
+        <p class="cp-muted" id="sabores-help" style="margin:0 2px 12px">Prendé los gustos que hay hoy: los apagados no se le muestran al cliente. Vacío (∞) es sin límite; si ponés un número, es cuántos te quedan.</p>
         <div id="sabores-container" style="display:flex; flex-direction:column; gap:12px;">${cpSkeleton(2, 100)}</div>
       </div>
     </div>
@@ -137,7 +137,12 @@ export async function renderComercioSabores() {
           </div>
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${flavorItems.map(f => {
-              const isOutOfStock = f.isAvailable && f.stock === 0;
+              // En los datos isAvailable quiere decir "stock limitado" (sin stock = ilimitado). En
+              // pantalla la llave es "hay hoy": apagada = limitado en 0; el número vacío = ∞.
+              // (Limitado sin número cuenta como ilimitado, igual que en la tienda: comercio.js)
+              const hasNumber = f.isAvailable && f.stock !== undefined && f.stock !== null && f.stock !== '';
+              const isOutOfStock = hasNumber && Number(f.stock) <= 0;
+              const hasStockNumber = hasNumber && !isOutOfStock;
               return `
               <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--color-bg-secondary); margin-bottom:-1px;">
                 <div style="display:flex; align-items:center; gap:10px; min-width:0;">
@@ -149,11 +154,11 @@ export async function renderComercioSabores() {
                   <!-- Stock Input -->
                   <div style="display:flex; align-items:center; gap:6px;">
                     <span style="font-size:10px; font-weight:700; color:var(--color-text-secondary); text-transform:uppercase;">Stock:</span>
-                    <input type="number" class="sabor-stock-input" data-id="${f.id}" value="${f.isAvailable && f.stock !== undefined && f.stock !== null ? f.stock : ''}" placeholder="∞" ${!f.isAvailable ? 'disabled' : ''} style="width:48px; height:26px; border-radius:6px; border:1px solid var(--color-border-light); background:${f.isAvailable ? 'var(--color-surface)' : 'transparent'}; text-align:center; font-size:12px; font-weight:700; color:var(--color-text-primary);" />
+                    <input type="number" inputmode="numeric" min="0" class="sabor-stock-input" data-id="${f.id}" value="${hasStockNumber ? f.stock : ''}" placeholder="∞" title="Vacío = ilimitado (∞)" ${isOutOfStock ? 'disabled' : ''} style="width:48px; height:26px; border-radius:6px; border:1px solid var(--color-border-light); background:${isOutOfStock ? 'transparent' : 'var(--color-surface)'}; text-align:center; font-size:12px; font-weight:700; color:var(--color-text-primary);" />
                   </div>
-                  <!-- Availability Toggle -->
-                  <label class="sabor-switch" style="width:40px; height:22px; cursor:pointer; position:relative; display:inline-block; margin:0;" title="Limitar Stock">
-                    <input type="checkbox" class="sabor-availability-toggle" data-id="${f.id}" ${f.isAvailable ? 'checked' : ''} style="opacity:0; width:0; height:0;" />
+                  <!-- Llave "hay hoy" -->
+                  <label class="sabor-switch" style="width:40px; height:22px; cursor:pointer; position:relative; display:inline-block; margin:0;" title="Hay hoy">
+                    <input type="checkbox" class="sabor-availability-toggle" data-id="${f.id}" ${isOutOfStock ? '' : 'checked'} style="opacity:0; width:0; height:0;" />
                     <span class="sabor-slider" style="position:absolute; inset:0; background-color:#cbd5e1; border-radius:34px; transition:0.2s; cursor:pointer;"></span>
                   </label>
                   
@@ -190,50 +195,40 @@ export async function renderComercioSabores() {
         const id = input.dataset.id;
         const checked = input.checked;
         
+        // Prendida (hay hoy) = ilimitado ∞; si quiere, después le pone un número. Apagada = no hay.
         draftSabores = draftSabores.map(f => {
-          if (f.id === id) {
-            const nf = { ...f, isAvailable: checked };
-            if (!checked) {
-              delete nf.stock; // Infinite
-            } else {
-              if (nf.stock === undefined || nf.stock === null) nf.stock = 0;
-            }
-            return nf;
-          }
-          return f;
+          if (f.id !== id) return f;
+          const nf = { ...f };
+          if (checked) { nf.isAvailable = false; delete nf.stock; }
+          else { nf.isAvailable = true; nf.stock = 0; }
+          return nf;
         });
-        
+
         setUnsavedChanges(true);
         renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
-        
-        if (checked) {
-          const stockInput = container.querySelector(`.sabor-stock-input[data-id="${id}"]`);
-          if (stockInput) {
-            stockInput.focus();
-            stockInput.select();
-          }
-        }
       };
     });
 
-    // Stock listener
+    // Número de stock: vacío = ilimitado (∞), un número = se descuenta con cada pedido, 0 = no hay
+    const applyStock = (input, final) => {
+      const id = input.dataset.id;
+      const raw = input.value.trim();
+      const val = raw === '' ? null : parseInt(raw, 10);
+      if (val !== null && (isNaN(val) || val < 0)) return;
+      draftSabores = draftSabores.map(f => {
+        if (f.id !== id) return f;
+        const nf = { ...f };
+        if (val === null) { nf.isAvailable = false; delete nf.stock; }
+        else { nf.isAvailable = true; nf.stock = val; }
+        return nf;
+      });
+      setUnsavedChanges(true);
+      // Al terminar de escribir se redibuja (un 0 apaga la llave); mientras escribe no, para no perder el foco
+      if (final && val === 0) renderFlavors(draftSabores, document.getElementById('sabores-search')?.value || '');
+    };
     container.querySelectorAll('.sabor-stock-input').forEach(input => {
-      input.oninput = () => {
-        const id = input.dataset.id;
-        const val = input.value === '' ? null : parseInt(input.value);
-        if (val !== null && isNaN(val)) return;
-        
-        draftSabores = draftSabores.map(f => {
-          if (f.id === id) {
-            const nf = { ...f };
-            if (val === null) delete nf.stock;
-            else nf.stock = val;
-            return nf;
-          }
-          return f;
-        });
-        setUnsavedChanges(true);
-      };
+      input.oninput = () => applyStock(input, false);
+      input.onchange = () => applyStock(input, true);
     });
 
     // Delete listener
@@ -265,15 +260,7 @@ export async function renderComercioSabores() {
 
   // Save changes button logic
   document.getElementById('save-sabores-btn')?.addEventListener('click', async () => {
-    // Validate empty stock for limited flavors
-    const invalidFlavors = draftSabores.filter(f => f.isAvailable && (f.stock === undefined || f.stock === null || f.stock === 0));
-    
-    if (invalidFlavors.length > 0) {
-      const msg = `Atención: Hay sabores con "Limitar Stock" activado pero con cantidad 0 (o vacía). Aparecerán como AGOTADOS. ¿Deseas guardar de todos modos?`;
-      const proceed = confirm(msg);
-      if (!proceed) return;
-    }
-    
+    // (Antes preguntaba si guardar sabores "limitados en 0": ahora eso es la llave apagada, a propósito)
     const saveBtn = document.getElementById('save-sabores-btn');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Guardando...';

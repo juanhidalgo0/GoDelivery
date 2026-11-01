@@ -1,6 +1,7 @@
 // GoDelivery — Commerce Panel Metrics and BI Dashboard
 import { db } from '../../firebase.js';
 import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
+import { loadPanelCatalog } from '../../utils/panel-catalog.js';
 import { getRouteParams } from '../../router.js';
 import { getState } from '../../state.js';
 import { formatPrice } from '../../utils/format.js';
@@ -32,9 +33,9 @@ export async function renderComercioMetrics() {
     // Los pedidos no guardan el dueño: las reglas ya limitan a los del propio comercio
     const ordersQuery = query(collection(db, 'orders'), where('comercioId', '==', comercioId));
 
-    const [ordersSnap, prodsSnap, reviewsSnap] = await Promise.all([
+    const [ordersSnap, products, reviewsSnap] = await Promise.all([
       getDocs(ordersQuery).catch(err => { console.error("Metrics: Orders query failed:", err); throw err; }),
-      getDocs(collection(db, 'comercios', comercioId, 'products')).catch(err => { console.error("Metrics: Products query failed:", err); throw err; }),
+      loadPanelCatalog(comercioId).catch(err => { console.error("Metrics: Products query failed:", err); throw err; }),
       getDocs(query(collection(db, 'reviews'), where('comercioId', '==', comercioId))).catch(err => {
         console.warn("Metrics: Reviews query failed (graceful fallback):", err);
         return { docs: [] };
@@ -51,7 +52,6 @@ export async function renderComercioMetrics() {
       };
     }).sort((a, b) => b.createdAtDate - a.createdAtDate);
 
-    const products = prodsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     const reviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     initInteractiveDashboard(orders, products, reviews, comercioId, isGoMarket);

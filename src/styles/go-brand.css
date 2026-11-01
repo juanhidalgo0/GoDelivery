@@ -2351,6 +2351,19 @@ html.is-delivery-mode .go-drawer-session .go-drawer-session-tile { background: #
 .go-drawer-session.is-online .dsheet-row-title { color: var(--go-red); }
 #session-toggle-btn:active { transform: scale(0.97); }
 
+/* Driver drawer: GPS voice on / off row */
+.go-drawer-voice .go-drawer-voice-tile { background: var(--driver-fill-subtle); color: var(--driver-text-secondary); }
+.go-drawer-voice.is-on .go-drawer-voice-tile { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
+.go-drawer-switch { margin-left: auto; flex-shrink: 0; width: 48px; height: 28px; border-radius: 14px; background: rgba(120, 120, 128, 0.42); position: relative; transition: background 0.2s ease; }
+.go-drawer-switch span { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease; }
+.go-drawer-voice.is-on .go-drawer-switch { background: #22c55e; }
+.go-drawer-voice.is-on .go-drawer-switch span { transform: translateX(20px); }
+/* Same switch on the map, only while a delivery is in progress (the navigation card is up) */
+.go-voice-fab { display: none; }
+body:has(#driver-maneuver-hud-card) .go-voice-fab { display: flex; }
+.go-voice-fab.is-muted { color: var(--go-red) !important; }
+.go-voice-fab:active { transform: scale(0.92); }
+
 /* ============================================================
    Acciones en tinta en toda la app. El token heredado --color-primary
    era rojo y lo usan cientos de botones, pestañas, switches y títulos
@@ -2504,4 +2517,154 @@ html.is-delivery-mode:not(.driver-light-mode) .go-confirm-cancel { color: #f7f5f
   #app-overlay.active[data-route="profile"] > #app-content,
   #app-overlay.active[data-route="notifications"] > #app-content,
   #app-overlay.active[data-route="mis-chats"] > #app-content { max-width: 880px; }
+}
+
+/* ── Anuncio de comercio nuevo (Kiosco Paulos llegó a GO!) ── */
+.go-promo-sheet.go-launch { align-items: center; padding: 16px; }
+.go-launch-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 11, 12, 0.6);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.go-launch-card {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  background: var(--color-bg);
+  border-radius: 28px;
+  box-shadow: 0 24px 70px rgba(11, 11, 12, 0.4);
+  opacity: 0;
+  transform: translateY(24px) scale(0.94);
+  transition: transform 0.46s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.3s ease;
+}
+.go-launch.is-open .go-launch-backdrop { opacity: 1; }
+.go-launch.is-open .go-launch-card { opacity: 1; transform: none; }
+.go-launch.is-closing .go-launch-backdrop { opacity: 0; transition: opacity 0.22s ease-in; }
+.go-launch.is-closing .go-launch-card { opacity: 0; transform: scale(0.96); transition: transform 0.22s ease-in, opacity 0.22s ease-in; }
+.go-launch-hero {
+  position: relative;
+  height: 200px;
+  border-radius: 28px 28px 0 0;
+  background:
+    radial-gradient(circle at 50% 62%, rgba(124, 35, 145, 0.75) 0, rgba(124, 35, 145, 0) 58%),
+    var(--go-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.go-launch-hero::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 230px;
+  height: 230px;
+  margin: -103px 0 0 -115px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+}
+.go-launch-logo {
+  position: relative;
+  z-index: 1;
+  width: 128px;
+  height: 128px;
+  margin-top: 24px;
+  border-radius: 50%;
+  background: #fff;
+  padding: 4px;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.1), 0 16px 40px rgba(0, 0, 0, 0.45);
+  transform: scale(0.7) rotate(-12deg);
+  opacity: 0;
+}
+.go-launch.is-open .go-launch-logo { animation: goLaunchLogo 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.12s both; }
+@keyframes goLaunchLogo { to { transform: none; opacity: 1; } }
+.go-launch-logo img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
+.go-launch-badge {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--go-red);
+  color: #fff;
+  font: 800 11px/1 var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.go-launch-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: goLaunchPulse 1.6s ease-in-out infinite; }
+@keyframes goLaunchPulse { 50% { opacity: 0.35; } }
+.go-launch-x {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--go-ink-line);
+  background: var(--go-ink-2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.go-launch-body { padding: 22px 22px 4px; text-align: center; }
+.go-launch-body .go-eyebrow { display: block; margin-bottom: 6px; }
+.go-launch-body .go-title { font-size: 25px; line-height: 1.04; }
+.go-launch-body .go-bar { margin: 12px auto 0; }
+.go-launch-body p { margin: 14px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--go-text-2); }
+.go-launch-perks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.go-launch-perks li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 4px 11px;
+  border-radius: 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--go-line);
+  color: var(--go-text);
+  font: 700 11.5px/1.2 var(--font-body);
+}
+.go-launch-perks svg { color: var(--go-red); font-size: 18px; }
+.go-launch-actions { display: flex; flex-direction: column; gap: 4px; padding: 20px 22px 14px; }
+.go-launch-cta {
+  height: 54px;
+  border-radius: 16px;
+  border: 0;
+  background: var(--go-ink);
+  color: #fff;
+  font: 800 15.5px/1 var(--font-body);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.go-launch-cta:active { transform: scale(0.99); }
+.go-launch-later {
+  height: 42px;
+  border: 0;
+  background: transparent;
+  color: var(--go-text-2);
+  font: 700 14px/1 var(--font-body);
+  cursor: pointer;
+}
+[data-theme="dark"] .go-launch-cta { background: #fff; color: var(--go-ink); }
+@media (prefers-reduced-motion: reduce) {
+  .go-launch-card, .go-launch-backdrop { transition: none !important; }
+  .go-launch-logo, .go-launch-dot { animation: none !important; transform: none; opacity: 1; }
 }

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#e11d48" />
+  <meta name="robots" content="noindex" />
+  <title>Tu pedido en vivo · GO!</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- Los mismos estilos que la app: la pantalla de seguimiento se ve igual -->
+  <link rel="stylesheet" href="/src/styles/index.css" />
+  <link rel="stylesheet" href="/src/styles/theme.css" />
+  <link rel="stylesheet" href="/src/styles/components.css" />
+  <link rel="stylesheet" href="/src/styles/pages.css" />
+  <link rel="stylesheet" href="/src/styles/tracking.css" />
+  <link rel="stylesheet" href="/src/styles/chat.css" />
+  <link rel="stylesheet" href="/src/styles/map-styles.css" />
+  <link rel="stylesheet" href="/src/styles/go-brand.css" />
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--color-bg, #f8fafc); }
+    /* La pantalla de seguimiento se dibuja a pantalla completa: no hay encabezado ni barra de la app */
+    #app-content { position: fixed; inset: 0; padding: 0 !important; min-height: 0 !important; }
+    .ev-msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; font-family: 'Inter', system-ui, sans-serif; }
+    .ev-logo { width: 64px; height: 64px; border-radius: 18px; background: #e11d48; color: #fff; display: flex; align-items: center; justify-content: center; font-family: 'Montserrat', sans-serif; font-weight: 900; font-size: 24px; margin-bottom: 6px; }
+    .ev-msg h1 { font-size: 19px; font-weight: 900; margin: 0; color: var(--color-text-primary, #0f172a); }
+    .ev-msg p { font-size: 14px; line-height: 1.5; margin: 0; max-width: 320px; color: var(--color-text-secondary, #475569); }
+    .ev-spin { width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgba(225,29,72,.18); border-top-color: #e11d48; animation: ev-spin .8s linear infinite; }
+    .ev-btn { margin-top: 8px; height: 46px; padding: 0 22px; border-radius: 14px; border: none; background: #e11d48; color: #fff; font-weight: 800; font-size: 14px; cursor: pointer; }
+    @keyframes ev-spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="app-content">
+    <div class="ev-msg"><div class="ev-logo">GO!</div><div class="ev-spin"></div><p>Abriendo tu pedido…</p></div>
+  </div>
+  <div id="toast-container"></div>
+  <div id="modal-container"></div>
+  <script type="module" src="/src/en-vivo.js"></script>
+</body>
+</html>

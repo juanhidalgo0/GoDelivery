@@ -8,6 +8,8 @@ import { SorteoFeed, SorteoReel, SORTEO_REEL_DURATION } from './Sorteo.jsx';
 import { Viajes, VIAJES_DURATION } from './Viajes.jsx';
 import { Precio, PRECIO_DURATION } from './Precio.jsx';
 import { Tarifas, TARIFAS_DURATION } from './Tarifas.jsx';
+import { Fixstore, FIXSTORE_DURATION } from './Fixstore.jsx';
+import { Destacadas, HISTORIAS, Portadas, PORTADAS } from './Destacadas.jsx';
 
 // Los anuncios anteriores (Ad.jsx: Pedidos y Mandados) necesitan sus grabaciones en src/captures;
 // para volver a renderizarlos, regrabar con flows/pedido-hd.js y flows/mandado-hd.js y sumarlos acá.
@@ -28,5 +30,10 @@ export const Root = () => (
     {/* Un solo video con todos los destinos: npx remotion render src/index.js GoTarifas out/GO-tarifas-moto.mp4 --crf=16 */}
     <Composition id="GoTarifas" component={Tarifas} fps={FPS} width={1080} height={1920} durationInFrames={Math.ceil(TARIFAS_DURATION * FPS)} />
     <Composition id="PrecioAtalaya" component={Precio} defaultProps={{ destino: 'atalaya' }} fps={FPS} width={1080} height={1920} durationInFrames={Math.ceil(PRECIO_DURATION * FPS)} />
+    {/* Fixstore ya está en GO!: npx remotion render src/index.js GoFixstore out/GO-fixstore.mp4 --crf=16 */}
+    <Composition id="GoFixstore" component={Fixstore} fps={FPS} width={1080} height={1920} durationInFrames={Math.ceil(FIXSTORE_DURATION * FPS)} />
+    {/* Historias destacadas de Instagram: un cuadro por pieza (ver Destacadas.jsx y destacadas.mjs) */}
+    <Composition id="GoDestacadas" component={Destacadas} fps={FPS} width={1080} height={1920} durationInFrames={HISTORIAS.length} />
+    <Composition id="GoPortadas" component={Portadas} fps={FPS} width={1080} height={1080} durationInFrames={PORTADAS.length} />
   </>
 );

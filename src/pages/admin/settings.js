@@ -1,5 +1,6 @@
 import { db } from "../../firebase.js";
-import { doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, writeBatch, serverTimestamp, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, getDocs, writeBatch, serverTimestamp, query, where } from "firebase/firestore";
+import { escapeHtml } from "../../utils/escape.js";
 import { isAdmin } from "../../auth.js";
 import { icon } from "../../utils/icons.js";
 import { formatPrice } from "../../utils/format.js";
@@ -173,6 +174,18 @@ export async function renderAdminLogisticsSettings(container) {
               <div style="color:var(--color-text-tertiary);">${icon("chevronRight", 20)}</div>
             </button>
 
+            <!-- Encomiendas -->
+            <button id="btn-show-encomiendas" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:24px; cursor:pointer; text-align:left; transition:all 0.25s ease;">
+              <div style="display:flex; align-items:center; gap:16px;">
+                <div style="width:44px; height:44px; border-radius:14px; background:rgba(236, 72, 153, 0.1); color:#ec4899; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon("package", 22)}</div>
+                <div>
+                  <div style="font-family:var(--font-display); font-size:15px; font-weight:900; color:var(--color-text);">ENCOMIENDAS</div>
+                  <div style="font-size:11px; color:var(--color-text-tertiary); margin-top:2px; font-weight:600;">Tarifa propia, aparte del delivery general</div>
+                </div>
+              </div>
+              <div style="color:var(--color-text-tertiary);">${icon("chevronRight", 20)}</div>
+            </button>
+
             <!-- Viajes -->
             <button id="btn-show-viajes" style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:24px; cursor:pointer; text-align:left; transition:all 0.25s ease;">
               <div style="display:flex; align-items:center; gap:16px;">
@@ -202,6 +215,7 @@ export async function renderAdminLogisticsSettings(container) {
     `;
     document.getElementById("btn-show-delivery-general").onclick = openDeliveryGeneralModal;
     document.getElementById("btn-show-go-favores").onclick = openGoFavoresModal;
+    document.getElementById("btn-show-encomiendas").onclick = openEncomiendasModal;
     document.getElementById("btn-show-viajes").onclick = openViajesModal;
     document.getElementById("btn-show-precio-fijo").onclick = openPrecioFijoModal;
   };
@@ -277,6 +291,80 @@ export async function renderAdminLogisticsSettings(container) {
             setState("deliveryRainSurcharge", deliveryRainSurcharge);
             setState("rainMode", rainMode);
             showToast("Ajustes de Delivery General guardados.", "success");
+            closeModal();
+          } catch (err) {
+            console.error(err);
+            showToast("Error al guardar ajustes.", "error");
+            btn.disabled = false;
+            btn.textContent = "Guardar Ajustes";
+          }
+        };
+      }
+    });
+  };
+  const openEncomiendasModal = () => {
+    const s = getState();
+    const rate = s.encomiendaPricing || {};
+    // La primera vez arranca con los valores del delivery general
+    const valueOf = (own, general) => own !== void 0 ? own : general;
+    const modalContent = document.createElement("div");
+    modalContent.style.cssText = "padding: 24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg);";
+    modalContent.innerHTML = `
+      <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:var(--color-text-primary);">Encomiendas</h3>
+      <p style="font-size:12px; color:var(--color-text-secondary); margin:0; font-weight:600; line-height:1.5;">
+        Con tarifa propia, las encomiendas no usan los precios del delivery general ni los precios fijos por km. El recargo por lluvia, el nocturno y la tarifa de servicio se siguen sumando.
+      </p>
+      <div style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Tarifa a usar</label>
+          <select id="logistics-encomienda-enabled" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);">
+            <option value="off" ${rate.enabled ? "" : "selected"}>La del delivery general</option>
+            <option value="on" ${rate.enabled ? "selected" : ""}>Tarifa propia</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo Base ($)</label>
+          <input type="number" min="0" id="logistics-encomienda-base" value="${valueOf(rate.basePrice, s.deliveryBasePrice || 1500)}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Costo M\xEDnimo ($)</label>
+          <input type="number" min="0" id="logistics-encomienda-min" value="${valueOf(rate.minPrice, s.deliveryMinPrice || 1500)}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+        <div>
+          <label style="font-size:11px; font-weight:800; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Extra por Kil\xF3metro ($)</label>
+          <input type="number" min="0" id="logistics-encomienda-km" value="${valueOf(rate.pricePerKm, s.deliveryPricePerKm || 300)}" style="width:100%; height:48px; border-radius:14px; border:1.5px solid var(--color-border); padding:0 14px; font-size:14px; background:var(--color-bg-card); color:var(--color-text-primary);" />
+        </div>
+      </div>
+      <button id="btn-save-encomiendas" style="margin-top:16px; height:50px; border-radius:16px; background:var(--color-primary); color:white; border:none; font-weight:850; font-size:14px; cursor:pointer; width:100%;">
+        Guardar Ajustes
+      </button>
+    `;
+    showModal({
+      title: "",
+      content: modalContent,
+      height: "auto",
+      hideHeader: true,
+      onOpen: () => {
+        modalContent.querySelector("#btn-save-encomiendas").onclick = async () => {
+          const btn = modalContent.querySelector("#btn-save-encomiendas");
+          const amount = (id) => Math.max(0, parseFloat(modalContent.querySelector(id).value) || 0);
+          const encomiendaPricing = {
+            enabled: modalContent.querySelector("#logistics-encomienda-enabled").value === "on",
+            basePrice: amount("#logistics-encomienda-base"),
+            minPrice: amount("#logistics-encomienda-min"),
+            pricePerKm: amount("#logistics-encomienda-km")
+          };
+          // Sin base ni mínimo la encomienda saldría gratis a poca distancia
+          if (encomiendaPricing.enabled && !encomiendaPricing.basePrice && !encomiendaPricing.minPrice) {
+            showToast("Pon\xE9 un costo base o un costo m\xEDnimo.", "error");
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = "Guardando...";
+          try {
+            await setDoc(doc(db, "settings", "global"), { encomiendaPricing }, { merge: true });
+            setState("encomiendaPricing", encomiendaPricing);
+            showToast("Ajustes de Encomiendas guardados.", "success");
             closeModal();
           } catch (err) {
             console.error(err);
@@ -596,6 +684,9 @@ export async function renderAdminEconomySettings(container) {
             <button type="button" id="btn-manage-wa-commerces" style="width:100%; height:50px; border-radius:16px; background:rgba(37, 211, 102, 0.1); border:1.5px solid #25D366; color:#25D366; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
               ${icon("store", 18)} Gestionar Comercios WhatsApp
             </button>
+            <button type="button" id="btn-wa-test-mode" style="margin-top:10px; width:100%; height:50px; border-radius:16px; background:transparent; border:1.5px dashed #25D366; color:#25D366; font-weight:900; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+              ${icon("chat", 18)} Modo prueba del bot
+            </button>
           </div>
 
           <button id="save-economy-btn" style="margin-top:20px; height:54px; border-radius:18px; background:var(--color-primary); color:white; border:none; font-weight:900; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
@@ -662,6 +753,131 @@ export async function renderAdminEconomySettings(container) {
   if (btnWA) {
     btnWA.onclick = () => openWACommercesModal();
   }
+  const btnWATest = document.getElementById("btn-wa-test-mode");
+  if (btnWATest) btnWATest.onclick = () => openWATestModeModal();
+}
+
+// Número argentino → 10 dígitos (código de área sin 0 + número sin 15), como lo compara el bot.
+// Con el 15 adentro no se puede adivinar dónde termina el código de área: se pide de nuevo.
+function waTestNational(raw) {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (d.startsWith("54")) d = d.slice(2);
+  if (d.startsWith("9") && d.length === 11) d = d.slice(1);
+  if (d.startsWith("0")) d = d.slice(1);
+  return d.length === 10 ? d : null;
+}
+
+// Modo prueba del bot de WhatsApp (functions/whatsapp/index.js → allowedSender): con el modo
+// prendido, el bot contesta solo a los números de la lista. Vive en wa_config, que solo lee el admin.
+export async function openWATestModeModal() {
+  const ref = doc(db, "wa_config", "test_mode");
+  let cfg = { enabled: false, numbers: [] };
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) cfg = { enabled: snap.data().enabled === true, numbers: snap.data().numbers || [] };
+  } catch (e) {
+    console.error(e);
+    showToast("No se pudo leer el modo prueba", "error");
+    return;
+  }
+
+  const box = document.createElement("div");
+  box.style.cssText = "padding:24px; display:flex; flex-direction:column; gap:16px; background:var(--color-bg); max-height:80vh; overflow-y:auto;";
+  box.innerHTML = `
+    <h3 style="font-family:var(--font-display); font-size:18px; font-weight:900; margin:0; color:#25D366; display:flex; align-items:center; gap:8px;">
+      ${icon("chat", 22)} Modo prueba del bot
+    </h3>
+    <p style="font-size:12.5px; color:var(--color-text-secondary); margin:0; line-height:1.5;">
+      Con el modo prueba prendido, el bot le contesta <b>solo a los números de esta lista</b>. A los demás no les contesta ni les marca los mensajes como leídos: ese WhatsApp sigue funcionando como siempre. Sirve para probar el bot en un número que ya usa gente, como tu número personal.
+    </p>
+    <label style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; cursor:pointer;">
+      <span style="font-size:14px; font-weight:800; color:var(--color-text-primary);">Modo prueba prendido</span>
+      <input type="checkbox" id="wa-test-enabled" ${cfg.enabled ? "checked" : ""} style="width:22px; height:22px; accent-color:#25D366; cursor:pointer;" />
+    </label>
+    <div id="wa-test-warning" style="display:none; font-size:12px; font-weight:700; color:#b45309; background:rgba(245,158,11,0.12); padding:10px 12px; border-radius:12px;">
+      La lista está vacía: con el modo prueba prendido, el bot no le contesta a nadie.
+    </div>
+    <div style="background:var(--color-surface); padding:16px; border-radius:16px; border:1px solid var(--color-border); display:flex; flex-direction:column; gap:10px;">
+      <h4 style="font-size:12px; font-weight:800; margin:0; color:var(--color-text-primary); text-transform:uppercase;">Agregar número</h4>
+      <input type="tel" id="wa-test-phone" placeholder="Con código de área, sin 0 ni 15 (ej: 221 555 1234)" style="height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:13px; font-weight:700; background:var(--color-bg-card); color:var(--color-text-primary);" />
+      <input type="text" id="wa-test-label" maxlength="40" placeholder="De quién es (ej: Yo, Repartidor Lucas)" style="height:44px; border-radius:12px; border:1px solid var(--color-border); padding:0 12px; font-size:13px; font-weight:700; background:var(--color-bg-card); color:var(--color-text-primary);" />
+      <button id="wa-test-add" style="height:44px; border-radius:12px; background:#25D366; color:white; border:none; font-weight:900; font-size:13px; cursor:pointer;">+ Agregar a la lista</button>
+    </div>
+    <div>
+      <h4 style="font-size:12px; font-weight:800; margin:0 0 10px; color:var(--color-text-tertiary); text-transform:uppercase;">Números a los que contesta</h4>
+      <div id="wa-test-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+  `;
+  showModal({ title: "", content: box, height: "auto" });
+
+  const save = async (next) => {
+    await setDoc(ref, { enabled: next.enabled, numbers: next.numbers, updatedAt: serverTimestamp() });
+    cfg = next;
+    render();
+  };
+
+  const render = () => {
+    box.querySelector("#wa-test-warning").style.display = cfg.enabled && !cfg.numbers.length ? "block" : "none";
+    const list = box.querySelector("#wa-test-list");
+    if (!cfg.numbers.length) {
+      list.innerHTML = `<div style="font-size:12px; color:var(--color-text-tertiary); text-align:center; padding:16px; background:var(--color-surface); border-radius:12px;">Todavía no hay números.</div>`;
+      return;
+    }
+    list.innerHTML = cfg.numbers.map((n, i) => `
+      <div style="display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--color-surface); border-radius:14px; border:1px solid var(--color-border-light);">
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:14px; font-weight:900; color:var(--color-text-primary);">${escapeHtml(n.label || "Sin nombre")}</div>
+          <div style="font-size:12px; color:#25D366; font-weight:700; margin-top:2px;">${escapeHtml(n.phone)}</div>
+        </div>
+        <button class="wa-test-remove" data-i="${i}" aria-label="Quitar" style="width:32px; height:32px; border-radius:10px; background:rgba(239,68,68,0.1); border:none; color:#ef4444; cursor:pointer;">✕</button>
+      </div>`).join("");
+    list.querySelectorAll(".wa-test-remove").forEach((b) => {
+      b.onclick = async () => {
+        try {
+          await save({ ...cfg, numbers: cfg.numbers.filter((_, i) => i !== Number(b.dataset.i)) });
+        } catch (e) {
+          console.error(e);
+          showToast("No se pudo quitar el número", "error");
+        }
+      };
+    });
+  };
+
+  box.querySelector("#wa-test-enabled").onchange = async (e) => {
+    const enabled = e.target.checked;
+    try {
+      await save({ ...cfg, enabled });
+      showToast(enabled ? "Modo prueba prendido: el bot contesta solo a la lista" : "Modo prueba apagado: el bot contesta a todos", enabled ? "success" : "info");
+    } catch (err) {
+      console.error(err);
+      e.target.checked = !enabled;
+      showToast("No se pudo guardar", "error");
+    }
+  };
+
+  box.querySelector("#wa-test-add").onclick = async () => {
+    const phoneEl = box.querySelector("#wa-test-phone");
+    const labelEl = box.querySelector("#wa-test-label");
+    const phone = waTestNational(phoneEl.value);
+    if (!phone) {
+      showToast("Escribí el número con código de área, sin el 0 ni el 15 (ej: 221 555 1234)", "warning");
+      return;
+    }
+    if (cfg.numbers.some((n) => n.phone === phone)) {
+      showToast("Ese número ya está en la lista", "info");
+      return;
+    }
+    try {
+      await save({ ...cfg, numbers: [...cfg.numbers, { phone, label: labelEl.value.trim() }] });
+      phoneEl.value = "";
+      labelEl.value = "";
+    } catch (e) {
+      console.error(e);
+      showToast("No se pudo agregar el número", "error");
+    }
+  };
+
+  render();
 }
 
 export async function openWACommercesModal() {
@@ -1256,7 +1472,7 @@ export async function renderAdminDeliveriesSettings(container) {
         if (!driver) return;
         const phone = (driver.phone || driver.whatsapp || "").replace(/\D/g, "");
         if (!phone) {
-          showToast("El repartidor no tiene n\xFAmero de tel\xE9fono registrado.", "error");
+          showToast("El repartidor no tiene n\xFAmero de tel\xE9fono registrado.", "warning");
           return;
         }
         const debt = driver.deliveryDebt || 0;
@@ -1614,8 +1830,10 @@ Y subir el comprobante desde la app (Mi cuenta → Pagar). El detalle de cada mo
               await loadData();
               renderTab();
             } catch (err) {
-              console.error(err);
-              showToast(err?.message && !err.code ? err.message : "No se pudo anular la liquidaci\xF3n", "error");
+              // Sin code = aviso propio ("Esa liquidaci\xF3n ya estaba anulada"), no una falla
+              const known = !!(err?.message && !err.code);
+              (known ? console.warn : console.error)(err);
+              showToast(known ? err.message : "No se pudo anular la liquidaci\xF3n", known ? "warning" : "error");
             }
           }
         });
@@ -1942,11 +2160,11 @@ Y subir el comprobante desde la app (Mi cuenta → Pagar). El detalle de cada mo
           return;
         }
       } else if (amount <= 0) {
-        showToast("Ingres\xE1 un monto mayor a $0", "error");
+        showToast("Ingres\xE1 un monto mayor a $0", "warning");
         return;
       }
       if (mode === "adjustment" && !notes) {
-        showToast("Escrib\xED el motivo del ajuste", "error");
+        showToast("Escrib\xED el motivo del ajuste", "warning");
         return;
       }
       // Paying the driver more than their credit is an advance: ask once more, on the button itself.

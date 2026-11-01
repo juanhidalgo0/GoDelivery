@@ -130,14 +130,21 @@ export function moneyRow({ label, amount, sub = '', tone = 'amber', icon = 'cash
     neutral: [t.tx2, t.card],
   };
   const [fg, bg] = map[tone] || map.amber;
-  return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:16px;background:${bg}">
-    <span style="width:38px;height:38px;border-radius:12px;background:${isLight ? 'rgba(255,255,255,.7)' : 'rgba(0,0,0,.25)'};color:${fg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${dIcon(icon, 19, fg)}</span>
-    <div style="flex:1;min-width:0">
-      <div style="font-size:13px;font-weight:600;color:${fg}">${esc(label)}</div>
-      ${sub ? `<div style="font-size:12px;color:${t.tx2};margin-top:2px">${esc(sub)}</div>` : ''}
+  const hasAmount = amount != null && amount !== '';
+  // En un celular angosto el monto y el botón bajan juntos a otra línea (a la derecha) en vez de
+  // apretar el texto hasta partirlo palabra por palabra.
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:12px 14px;border-radius:16px;background:${bg}">
+    <div style="display:flex;align-items:center;gap:12px;flex:1 1 172px;min-width:0">
+      <span style="width:38px;height:38px;border-radius:12px;background:${isLight ? 'rgba(255,255,255,.7)' : 'rgba(0,0,0,.25)'};color:${fg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${dIcon(icon, 19, fg)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:${fg};line-height:1.3">${esc(label)}</div>
+        ${sub ? `<div style="font-size:12px;color:${t.tx2};margin-top:2px;line-height:1.35">${esc(sub)}</div>` : ''}
+      </div>
     </div>
-    ${amount != null && amount !== '' ? `<div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:700;color:${t.tx};white-space:nowrap">${esc(amount)}</div>` : ''}
-    ${action}
+    ${hasAmount || action ? `<div style="display:flex;align-items:center;gap:10px;margin-left:auto;flex-shrink:0">
+      ${hasAmount ? `<div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:700;color:${t.tx};white-space:nowrap">${esc(amount)}</div>` : ''}
+      ${action}
+    </div>` : ''}
   </div>`;
 }
 

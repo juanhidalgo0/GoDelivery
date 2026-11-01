@@ -1,6 +1,7 @@
 // GoDelivery — In-App Chat Component (Real-Time via Firestore)
 import { db } from '../firebase.js';
-import { collection, doc, setDoc, addDoc, getDoc, onSnapshot, query, orderBy, serverTimestamp, updateDoc, arrayUnion, increment } from 'firebase/firestore';
+import { collection, doc, setDoc, addDoc, getDoc, getDocFromCache, onSnapshot, query, orderBy, serverTimestamp, updateDoc, arrayUnion, increment } from 'firebase/firestore';
+import { isChatParty } from '../utils/chat-access.js';
 import { getState } from '../state.js';
 import { showModal, closeModal } from './modal.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
@@ -33,6 +34,57 @@ async function chatPartiesFor(type, orderData) {
   }
   return [...new Set(parties.filter(Boolean))];
 }
+
+// The order as this phone has it (a driver's active order is always cached). If it doesn't, up to
+// 800 ms from the server: after that the chat opens anyway and the rules still protect it.
+async function orderWithoutWaiting(orderId) {
+  const ref = doc(db, 'orders', orderId);
+  try {
+    const cached = await getDocFromCache(ref);
+    if (cached.exists()) return cached.data();
+  } catch (e) { /* not cached */ }
+  const fromServer = getDoc(ref).then(s => (s.exists() ? s.data() : null)).catch(() => null);
+  return Promise.race([fromServer, new Promise(resolve => setTimeout(() => resolve(null), 800))]);
+}
+
+// True when this chat must not open here: it belongs to other people, or the conversation
+// happens on WhatsApp (bot orders: the customer has no app; an admin can still audit).
+async function chatHandledElsewhere(order, { type, user, orderNum, isAdminUser }) {
+  if (!isAdminUser && !isChatParty(type, order, user)) {
+    const { showToast } = await import('./toast.js');
+    showToast('Este chat es privado entre otras personas del pedido.', 'warning');
+    return true;
+  }
+  if (type !== 'client-delivery' || order.source !== 'whatsapp_bot') return false;
+  const { showToast } = await import('./toast.js');
+  if (user.uid === order.userId) {
+    showToast('Tu repartidor te escribe por WhatsApp si necesita algo.', 'info');
+    return true;
+  }
+  const phone = String(order.waPhone || '').replace(/\D/g, '');
+  if (phone) {
+    const text = encodeURIComponent(`Hola ${order.userName || ''}, soy tu repartidor de GO! (pedido #${order.orderId || orderNum}).`.replace(/\s+/g, ' '));
+    window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+  } else {
+    showToast('Este pedido es de WhatsApp y no tiene el número del cliente.', 'warning');
+  }
+  return true;
+}
+
+// The shop confirms the transfer receipt the customer sent. The button existed but this function
+// didn't, so tapping it did nothing.
+window.markAsPaid = async function(chatId, orderId, messageId) {
+  const { showToast } = await import('./toast.js');
+  try {
+    await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), { paidChecked: true });
+    // Not paymentStatus: 'paid' is what Mercado Pago sets, and it notifies the shop of a new paid order.
+    await updateDoc(doc(db, 'orders', orderId), { transferVerified: true });
+    showToast('Pago marcado como recibido', 'success');
+  } catch (err) {
+    console.error('[chat] Could not mark as paid:', err);
+    showToast('No se pudo marcar el pago. Revisá tu conexión y probá de nuevo.', 'error');
+  }
+};
 
 window.playCustomAudio = function(btnEl) {
   const container = btnEl.closest('.wa-audio-player');
@@ -172,35 +224,14 @@ export async function openChat(options) {
     return;
   }
 
-  // Privacy protection: Comercio users cannot open or view client-delivery private chat UNLESS they are the client or driver of this order
   const { isAdmin } = await import('../auth.js');
-  if (type === 'client-delivery' && !isAdmin() && !isAudit) {
-    let isParticipant = false;
-    if (options && typeof options === 'object') {
-      if (options.userId === user.uid || options.clientId === user.uid || options.driverId === user.uid) {
-        isParticipant = true;
-      }
-    }
-    if (!isParticipant && orderId) {
-      try {
-        const { getDoc, doc } = await import('firebase/firestore');
-        const { db } = await import('../firebase.js');
-        const oSnap = await getDoc(doc(db, 'orders', orderId));
-        if (oSnap.exists()) {
-          const oData = oSnap.data();
-          if (oData.userId === user.uid || oData.driverId === user.uid) {
-            isParticipant = true;
-          }
-        }
-      } catch (e) {}
-    }
+  const isAdminUser = isAdmin();
 
-    if (!isParticipant && (user.role === 'comercio' || user.role === 'commerce' || user.comercioId)) {
-      const { showToast } = await import('./toast.js');
-      showToast('⚠️ El chat entre el cliente y el repartidor es privado.', 'warning');
-      return;
-    }
-  }
+  // This used to wait for the order from the server (twice) with nothing on screen, which with weak
+  // signal looked like the chat wouldn't open. Now it takes what the phone already has, or waits
+  // a moment; if the order arrives later, the same checks run again below.
+  const knownOrder = isAudit ? null : await orderWithoutWaiting(orderId);
+  if (knownOrder && await chatHandledElsewhere(knownOrder, { type, user, orderNum, isAdminUser })) return;
 
   const chatId = `${orderId}_${type}`;
   const chatRef = doc(db, 'chats', chatId);
@@ -211,10 +242,12 @@ export async function openChat(options) {
 
   // Create the chat doc right away instead of after loading the order. Not awaited: offline the
   // write only resolves once the server has it, and the chat must open anyway.
+  // An admin looking at someone else's chat stays out of participants: it would list it as theirs.
+  const adminFromOutside = isAdminUser && !(knownOrder && isChatParty(type, knownOrder, user));
   const chatDocReady = isAudit ? Promise.resolve() : setDoc(chatRef, {
     orderId,
     type,
-    participants: arrayUnion(user.uid),
+    ...(adminFromOutside ? {} : { participants: arrayUnion(user.uid) }),
     lastActivityAt: serverTimestamp(),
   }, { merge: true }).catch(err => console.warn('[chat] could not create chat doc yet:', err));
 
@@ -374,7 +407,7 @@ export async function openChat(options) {
     }
     isInitialLoad = false;
 
-    renderMessages(messagesContainer, messages, user.uid, { chatId, orderId, chatType: type, isAudit });
+    renderMessages(messagesContainer, messages, user.uid, { chatId, orderId, chatType: type, isAudit, canMarkPaid: senderDisplayName === 'Comercio' });
     initReactionListeners(messagesContainer, user, messagesRef, chatId);
 
     // Mark unread messages as read (not when an admin is only auditing: that would mark them
@@ -407,6 +440,10 @@ export async function openChat(options) {
       const orderSnap = await getDoc(doc(db, 'orders', orderId));
       if (orderSnap.exists()) {
         orderData = orderSnap.data();
+        if (!isAudit && !knownOrder && await chatHandledElsewhere(orderData, { type, user, orderNum, isAdminUser })) {
+          closeModal();
+          return;
+        }
         const orderStatus = orderData.status;
         isReadOnly = isAudit || orderStatus === 'completed' || orderStatus === 'cancelled';
 
@@ -588,10 +625,14 @@ async function updateChatMetadata(chatRef, uid, lastMessageText) {
     const unread = { [uid]: 0 };
     parties.filter(p => p !== uid).forEach(p => { unread[p] = increment(1); });
 
+    const { isAdmin } = await import('../auth.js');
+    // The sender (a shop manager isn't in `parties`), except an admin writing in someone else's chat.
+    const listed = isAdmin() && parties.length ? parties : [uid, ...parties];
+
     await setDoc(chatRef, {
       orderId,
       type: chatType,
-      participants: arrayUnion(uid, ...parties),
+      participants: arrayUnion(...listed),
       lastMessage: lastMessageText,
       lastMessageAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
@@ -1232,7 +1273,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   });
 }
 
-function renderMessages(container, messages, currentUserId, { chatId, orderId, chatType, isAudit = false } = {}) {
+function renderMessages(container, messages, currentUserId, { chatId, orderId, chatType, isAudit = false, canMarkPaid = false } = {}) {
   if (messages.length === 0) {
     container.innerHTML = `
       <div class="chat-empty">
@@ -1423,7 +1464,7 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
         ${seenTimeHtml}
       </div>
         <!-- Action: Mark as Paid (Only for Commerce) -->
-        ${!isMine && msg.type === 'image' && msg.status !== 'uploading' && chatType === 'client-commerce' && !msg.paidChecked ? `
+        ${canMarkPaid && !isMine && msg.type === 'image' && msg.status !== 'uploading' && chatType === 'client-commerce' && !msg.paidChecked ? `
           <div class="chat-bubble-actions">
             <button class="btn-mark-paid" onclick="window.markAsPaid('${chatId}', '${orderId}', '${msg.id}')">
               ${icon('checkCircle', 14)} Marcar como pagado

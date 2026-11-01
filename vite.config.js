@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { devMaplibreAssets } from './dev-maplibre-assets.js';
+import { resolve } from 'path';
 
 function devSorteoRewrite() {
   return {
@@ -9,6 +10,8 @@ function devSorteoRewrite() {
         if (req.url === '/sorteo' || req.url?.startsWith('/sorteo?')) {
           req.url = req.url.replace('/sorteo', '/sorteo.html');
         }
+        // Seguimiento en vivo de WhatsApp (en Hosting: rewrite de firebase.json)
+        if (req.url?.startsWith('/en-vivo/')) req.url = '/en-vivo.html';
         next();
       });
     }
@@ -27,6 +30,8 @@ export default defineConfig({
     sourcemap: false,
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      // en-vivo.html: seguimiento en vivo de los pedidos de WhatsApp (src/en-vivo.js)
+      input: { main: resolve(__dirname, 'index.html'), envivo: resolve(__dirname, 'en-vivo.html') },
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/firebase')) {

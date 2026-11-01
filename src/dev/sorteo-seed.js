@@ -22,3 +22,14 @@ mockDb.set('giveaways/demo', {
   chanceRules: { registration: 1, order: 5, referral: 2, appInstalled: 2 },
   shareMessage: '', totalParticipants: 0, totalChances: 0, winners: []
 });
+// Con ?sorteado=1 ya salió: sirve para ver el video para stories (se genera solo al entrar)
+if (new URLSearchParams(location.search).get('sorteado') === '1') {
+  mockDb.set('giveaways/demo', {
+    ...mockDb.get('giveaways/demo'), active: false, status: 'drawn',
+    drawnAt: Timestamp.fromMillis(Date.now() - 60 * 1000), participantsAtDraw: 312, totalParticipants: 312,
+    winners: [
+      { position: 1, userId: 'w1', userName: 'Marianela Giannobile', prizeAmount: '$70.000', prizeDescription: 'Crédito GoDelivery', chances: 41, photoURL: '/logo.png' },
+      { position: 2, userId: 'w2', userName: 'Juan Pérez', prizeAmount: '$10.000', prizeDescription: 'Crédito GoDelivery', chances: 12 },
+    ],
+  });
+}

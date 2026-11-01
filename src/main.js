@@ -12,8 +12,12 @@ import { icon } from './utils/icons.js';
 import { initScrollAnimations } from './utils/scroll-animations.js';
 import { safeStorage } from './utils/safe-storage.js';
 import { initReloadLog, markReload } from './utils/reload-log.js';
+import { initResumePlace } from './utils/resume-place.js';
 import { initErrorReporter } from './utils/error-reporter.js';
 
+// Si el sistema cerró la app en segundo plano, volver a la pantalla donde estabas (antes que el
+// registro de reinicios, que borra la marca de "salió a otra página")
+initResumePlace();
 // Diagnóstico de "la app se recarga sola": ver utils/reload-log.js y Admin → Reinicios
 initReloadLog();
 // Detector de errores: ver utils/error-reporter.js y Admin → Errores
@@ -312,13 +316,14 @@ async function init() {
   setTimeout(() => checkAppVersion({ applyNow: true }), 3000);
   setInterval(() => checkAppVersion(), 60000);
   window.addEventListener('online', () => checkAppVersion());
+  // Al volver a la app no se recarga nunca: era la mitad de los reinicios (Admin → Reinicios, 50 en
+  // 3 días) y te sacaba de donde estabas. Queda el cartelito; la versión nueva entra sola la
+  // próxima vez que se abre la app. Los archivos viejos siguen en el servidor 10 días
+  // (keep-old-assets.js), así que la versión que está abierta sigue andando.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { hiddenSince = Date.now(); return; }
-    // Back after 2+ minutes away: a safe moment. A quick switch (WhatsApp, the camera, the
-    // maps app while delivering) is not, so it only shows the banner.
-    const away = hiddenSince && Date.now() - hiddenSince > 120000;
     hiddenSince = 0;
-    checkAppVersion({ applyNow: away });
+    checkAppVersion();
   });
 
   // Capture referral code from URL (?ref=GO-REF-XXXX)
@@ -759,6 +764,7 @@ async function init() {
           // whose "search bar" is just decorative text with no <input>.
           import('./components/header.js').then(m => m.initHeader());
           import('./components/navbar.js').then(m => m.initNavbar());
+          import('./components/store-launch-ad.js').then(m => m.initStoreLaunchAd()).catch(() => {});
           return;
         }
 
@@ -1054,6 +1060,7 @@ async function init() {
         import('./components/active-order-banner.js').then(m => m.initActiveOrderBanner());
         import('./components/delivery-monitor.js').then(m => m.initDeliveryMonitor());
         import('./components/whats-new.js').then(m => m.initWhatsNew()).catch(() => {});
+        import('./components/store-launch-ad.js').then(m => m.initStoreLaunchAd()).catch(() => {});
         import('./components/challenge-progress.js').then(m => m.initChallengeProgress()).catch(() => {});
         import('./components/commerce-monitor.js').then(m => m.initCommerceMonitor());
         import('./components/chat-notifier.js').then(m => m.initChatNotifier());
@@ -1419,6 +1426,25 @@ async function init() {
   });
 }
 
+// La última que está en cada tienda y ya trae el plugin de Google nuevo (@capawesome): App Store
+// 1.7.6, Play Store 1.7.4 = versionCode 65 (16-10-2026). Nunca poner una versión que todavía no esté
+// publicada: el cartel le pediría actualizar a todos sin nada para bajar.
+// settings/global.minIosVersion y minAndroidVersionCode lo suben sin publicar.
+const MIN_IOS_VERSION = '1.7.6';
+const MIN_ANDROID_VERSION_CODE = 65;
+
+// '1.7.6' < '1.7.7' < '1.7.10'. Una versión ilegible no se marca como vieja.
+function compareVersions(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n, 10));
+  const pb = String(b || '').split('.').map((n) => parseInt(n, 10));
+  if (!pa.length || pa.some(Number.isNaN) || pb.some(Number.isNaN)) return 0;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
 async function checkAppUpdate() {
   if (!window.Capacitor) {
     console.log('[VersionCheck] Browser environment - skipping App Store / Play Store update check.');
@@ -1435,15 +1461,22 @@ async function checkAppUpdate() {
       
       const minVersion = platform === 'ios' 
         ? (settings.minIosVersionCode || settings.minIosBuild || 0)
-        : (settings.minAndroidVersionCode || 0);
+        : Math.max(Number(settings.minAndroidVersionCode) || 0, MIN_ANDROID_VERSION_CODE);
       
+      if (platform !== 'ios' && platform !== 'android') return false;
+
       const { App } = await import('@capacitor/app');
       const info = await App.getInfo();
       const localVersion = parseInt(info.build, 10) || 0;
-      
-      console.log(`[VersionCheck] Platform: ${platform}, Local Version Code: ${localVersion}, Required Minimum: ${minVersion}`);
-      
-      if (minVersion > 0 && localVersion < minVersion) {
+
+      console.log(`[VersionCheck] Platform: ${platform}, Local Version Code: ${localVersion} (${info.version}), Required Minimum: ${minVersion}`);
+
+      // En iPhone el build quedó en 14 desde la 1.7.4 hasta la 1.7.7: con el build solo no se
+      // distingue quién tiene el binario viejo (sin el plugin de Google, 14-10-2026). Se compara
+      // también la versión.
+      const iosTooOld = platform === 'ios' && compareVersions(info.version, settings.minIosVersion || MIN_IOS_VERSION) < 0;
+
+      if (iosTooOld || (minVersion > 0 && localVersion < minVersion)) {
         const storeUrl = platform === 'ios'
           ? (settings.appStoreUrl || 'https://apps.apple.com/app/go-delivery/id6790820954')
           : (settings.playStoreUrl || 'https://play.google.com/store/apps/details?id=com.godelivery.magdalena');

@@ -1,5 +1,6 @@
 import { db } from '../../firebase.js';
-import { doc, setDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
+import { escapeHtml } from '../../utils/escape.js';
 import { isAdmin } from '../../auth.js';
 import { icon } from '../../utils/icons.js';
 import { getState } from '../../state.js';
@@ -664,8 +665,8 @@ export async function renderAdminBroadcastsAutomations() {
           <div style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);border-radius:20px;padding:14px 16px;display:flex;align-items:start;gap:12px;">
             <div style="font-size:22px;line-height:1;margin-top:2px;">💡</div>
             <div style="font-size:12px;line-height:1.45;color:var(--color-text-secondary);">
-              <strong style="color:var(--color-text);display:block;font-size:13px;margin-bottom:2px;">Gatillos automáticos inteligentes</strong>
-              El servidor evalúa cada minuto las reglas activas y envía la notificación a los usuarios exactamente en los momentos de mayor deseo de consumo. Podés personalizar horarios, días, mensajes y activar o pausar cada una.
+              <strong style="color:var(--color-text);display:block;font-size:13px;margin-bottom:2px;">Salen solas y cambian cada vez</strong>
+              Cada automática tiene varios mensajes y va rotando sin repetir los últimos. Como mucho salen 2 por día (separadas 6 h), y no sale ninguna si mandaste una campaña a mano hace menos de 6 h. Si llueve, usa los mensajes de lluvia.
             </div>
           </div>
 
@@ -684,172 +685,123 @@ export async function renderAdminBroadcastsAutomations() {
   await loadAndRenderAutomations();
 }
 
+// Las automatizaciones las crea y manda el servidor (functions/push-automaticas.js). Acá solo se
+// editan: días, hora, destino y la lista de mensajes que va rotando.
+const AUTO_DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const AUTO_ORDER = ['mandados_manana', 'mandados_tarde', 'cena_semana', 'cena_finde', 'domingo_noche', 'viajes', 'merienda', 'almuerzo'];
+
+function autoConditions(auto) {
+  const parts = [];
+  if (Array.isArray(auto.categories) && auto.categories.length > 0) parts.push(`algún comercio de ${auto.categories.join(' / ')} abierto`);
+  if (auto.requireDrivers !== false) parts.push('repartidores conectados');
+  return parts.length ? `Sale solo si hay ${parts.join(' y ')}.` : '';
+}
+
+function autoVariantRow(v = {}) {
+  return `
+    <div class="auto-variant" style="display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--color-border-light);border-radius:14px;background:var(--color-bg-secondary);">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="text" class="input auto-v-title" value="${escapeHtml(v.title || '')}" placeholder="Título" style="flex:1;min-width:0;height:38px;border-radius:10px;padding:0 10px;font-weight:800;font-size:12.5px;" />
+        <button type="button" class="auto-v-remove" title="Quitar mensaje" style="width:32px;height:32px;flex-shrink:0;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;font-size:14px;font-weight:900;">✕</button>
+      </div>
+      <textarea class="input auto-v-body" placeholder="Mensaje" style="width:100%;height:52px;border-radius:10px;padding:8px 10px;font-size:12.5px;line-height:1.35;resize:none;">${escapeHtml(v.body || '')}</textarea>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--color-text-tertiary);cursor:pointer;">
+        <input type="checkbox" class="auto-v-lluvia" ${v.lluvia ? 'checked' : ''} /> ☔ Solo cuando llueve
+      </label>
+      <input type="hidden" class="auto-v-cats" value="${escapeHtml(JSON.stringify(v.categories || null))}" />
+    </div>
+  `;
+}
+
+function autoResultLine(auto) {
+  const r = auto.lastResult;
+  if (!r || !r.text) return '<span style="color:var(--color-text-tertiary);">Todavía no le tocó salir.</span>';
+  const [, m, d] = String(r.date || '').split('-');
+  const when = d ? `${d}/${m}` : '';
+  const color = r.status === 'sent' ? 'var(--color-success)' : 'var(--color-text-secondary)';
+  const label = r.status === 'sent' ? '✅' : '⏭️ No salió:';
+  return `<span style="color:${color};">${label} ${escapeHtml(r.text)}</span> <span style="color:var(--color-text-tertiary);">(${when})</span>`;
+}
+
 async function loadAndRenderAutomations() {
   const container = document.getElementById('automations-list-container');
   if (!container) return;
 
-  const defaultAutomations = [
-    {
-      id: 'lunch_daily',
-      name: 'Almuerzo Diario',
-      icon: '🍔',
-      description: 'Aviso antes del mediodía para impulsar pedidos de almuerzo sin cocinar.',
-      enabled: true,
-      days: [1, 2, 3, 4, 5, 6, 0],
-      time: '12:00',
-      title: '¿Qué comemos hoy al mediodía? 🍔',
-      body: 'Pedí tu almuerzo favorito caliente y sin moverte de tu casa ni cocinar.',
-      url: '/#/category/Comida',
-      targetAudience: 'clients'
-    },
-    {
-      id: 'dinner_weekend',
-      name: 'Cena Fin de Semana',
-      icon: '🍕',
-      description: 'Disparo nocturno para cenas de viernes, sábados y domingos.',
-      enabled: true,
-      days: [5, 6, 0],
-      time: '20:30',
-      title: '¡Arrancó la noche en GoDelivery! 🍕🍻',
-      body: 'Pizzas, empanadas, hamburguesas y bebidas frías con entrega rápida a tu puerta.',
-      url: '/#/category/Comida',
-      targetAudience: 'clients'
-    },
-    {
-      id: 'mate_afternoon',
-      name: 'Merienda y Helados',
-      icon: '☕',
-      description: 'Aviso vespertino para antojos de la tarde, facturas, panadería y helados.',
-      enabled: true,
-      days: [1, 2, 3, 4, 5, 6, 0],
-      time: '16:45',
-      title: 'Hora del mate y la merienda ☕🍦',
-      body: 'Facturas recién horneadas, cosas ricas de panadería y helados listos para salir.',
-      url: '/#/category/Heladeria',
-      targetAudience: 'clients'
-    },
-    {
-      id: 'cart_abandoned',
-      name: 'Carrito Abandonado',
-      icon: '🛒',
-      description: 'Recordatorio vespertino para usuarios con productos en el carrito.',
-      enabled: true,
-      days: [1, 2, 3, 4, 5, 6, 0],
-      time: '19:45',
-      title: 'Te olvidaste algo rico en tu carrito 🛒',
-      body: 'Tus productos te están esperando. Completá tu pedido antes de que cierren los locales.',
-      url: '/#/cart',
-      targetAudience: 'clients'
-    },
-    {
-      id: 'inactive_users',
-      name: 'Reactivación Semanal',
-      icon: '👋',
-      description: 'Impulso semanal para recordar novedades a usuarios inactivos.',
-      enabled: false,
-      days: [4], // Jueves
-      time: '19:30',
-      title: '¡Te extrañamos en GoDelivery! 👋',
-      body: 'Hay nuevos comercios adheridos y promociones en Magdalena. ¡Mirá lo nuevo!',
-      url: '/#/offers',
-      targetAudience: 'clients'
-    }
-  ];
-
   try {
-    const { collection, getDocs, doc, setDoc } = await import('firebase/firestore');
     const snap = await getDocs(collection(db, 'automated_broadcasts'));
-    const existingMap = {};
-    snap.docs.forEach(d => {
-      existingMap[d.id] = { id: d.id, ...d.data() };
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.version === 2);
+    list.sort((a, b) => {
+      const ia = AUTO_ORDER.indexOf(a.id), ib = AUTO_ORDER.indexOf(b.id);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     });
 
-    // Seed defaults if missing
-    for (const def of defaultAutomations) {
-      if (!existingMap[def.id]) {
-        await setDoc(doc(db, 'automated_broadcasts', def.id), def, { merge: true });
-        existingMap[def.id] = def;
-      }
+    if (list.length === 0) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:24px;font-size:13px;font-weight:700;color:var(--color-text-secondary);background:var(--color-surface);border:1px solid var(--color-border);border-radius:24px;">
+          El servidor crea las automáticas solo, en el próximo minuto. Volvé a entrar en un rato.
+        </div>`;
+      return;
     }
 
-    const dayLabels = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-
-    const html = Object.values(existingMap).map(auto => {
+    container.innerHTML = list.map(auto => {
       const isEnabled = auto.enabled === true;
-      const days = Array.isArray(auto.days) ? auto.days : [0, 1, 2, 3, 4, 5, 6];
-      const timeVal = auto.time || '12:00';
+      const days = Array.isArray(auto.days) ? auto.days : [];
+      const variants = Array.isArray(auto.variants) ? auto.variants : [];
+      const id = escapeHtml(auto.id);
 
       return `
-        <div class="auto-card" id="card-${auto.id}" data-id="${auto.id}" style="background:var(--color-surface);border:1.5px solid ${isEnabled ? 'rgba(168,85,247,0.3)' : 'var(--color-border)'};border-radius:24px;padding:20px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:16px;text-align:left;">
-          
-          <!-- Top Row: Icon + Title + Switch -->
+        <div class="auto-card" id="card-${id}" data-id="${id}" style="background:var(--color-surface);border:1.5px solid ${isEnabled ? 'rgba(168,85,247,0.3)' : 'var(--color-border)'};border-radius:24px;padding:20px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:16px;text-align:left;">
+
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
             <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;">
               <div style="font-size:26px;width:44px;height:44px;border-radius:14px;background:var(--color-bg-secondary);display:flex;align-items:center;justify-content:center;border:1px solid var(--color-border-light);flex-shrink:0;">
-                ${auto.icon || '🔔'}
+                ${escapeHtml(auto.icon || '🔔')}
               </div>
               <div style="min-width:0;flex:1;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <h4 style="font-family:var(--font-display);font-size:16px;font-weight:900;margin:0;color:var(--color-text);">${auto.name}</h4>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <h4 style="font-family:var(--font-display);font-size:16px;font-weight:900;margin:0;color:var(--color-text);">${escapeHtml(auto.name || auto.id)}</h4>
                   <span class="auto-status-badge" style="font-size:9.5px;font-weight:900;padding:2px 8px;border-radius:6px;text-transform:uppercase;${isEnabled ? 'background:rgba(34,197,94,0.15);color:var(--color-success);' : 'background:var(--color-bg-secondary);color:var(--color-text-tertiary);'}">
                     ${isEnabled ? 'ACTIVA' : 'PAUSADA'}
                   </span>
                 </div>
-                <p style="font-size:11px;color:var(--color-text-tertiary);margin:2px 0 0;font-weight:600;">${auto.description || ''}</p>
+                <p style="font-size:11px;color:var(--color-text-tertiary);margin:2px 0 0;font-weight:600;">${escapeHtml(auto.description || '')}</p>
               </div>
             </div>
 
-            <!-- iOS Style Toggle Switch -->
             <label style="position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0;cursor:pointer;">
-              <input type="checkbox" class="auto-toggle-input" data-id="${auto.id}" ${isEnabled ? 'checked' : ''} style="opacity:0;width:0;height:0;">
+              <input type="checkbox" class="auto-toggle-input" ${isEnabled ? 'checked' : ''} style="opacity:0;width:0;height:0;">
               <span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:${isEnabled ? '#a855f7' : '#cbd5e1'};border-radius:34px;transition:0.3s;" class="slider-track"></span>
               <span style="position:absolute;height:22px;width:22px;left:${isEnabled ? '24px' : '3px'};bottom:3px;background-color:white;border-radius:50%;transition:0.3s;box-shadow:0 2px 4px rgba(0,0,0,0.2);" class="slider-thumb"></span>
             </label>
           </div>
 
-          <!-- Schedule Settings (Days + Time) -->
+          <div style="font-size:11.5px;font-weight:700;line-height:1.4;">
+            <div>Última vez: ${autoResultLine(auto)}</div>
+            <div style="color:var(--color-text-tertiary);margin-top:2px;">${escapeHtml(autoConditions(auto))}</div>
+          </div>
+
           <div style="background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-              <label style="font-weight:800;font-size:11.5px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Días de Envío:</label>
-              <div class="day-pills-container" data-id="${auto.id}" style="display:flex;gap:4px;">
+              <label style="font-weight:800;font-size:11.5px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Días:</label>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">
                 ${[1, 2, 3, 4, 5, 6, 0].map(dNum => {
-                  const isDaySelected = days.includes(dNum);
-                  return `
-                    <button type="button" class="day-pill-btn" data-day="${dNum}" style="width:34px;height:30px;border-radius:8px;font-size:11px;font-weight:900;border:1px solid ${isDaySelected ? 'var(--color-primary)' : 'var(--color-border)'};background:${isDaySelected ? 'var(--color-primary)' : 'var(--color-surface)'};color:${isDaySelected ? 'white' : 'var(--color-text-secondary)'};cursor:pointer;padding:0;transition:all 0.15s;">
-                      ${dayLabels[dNum]}
-                    </button>
-                  `;
+                  const on = days.includes(dNum);
+                  return `<button type="button" class="day-pill-btn" data-day="${dNum}" data-on="${on ? '1' : '0'}" style="width:34px;height:30px;border-radius:8px;font-size:11px;font-weight:900;border:1px solid ${on ? 'var(--color-primary)' : 'var(--color-border)'};background:${on ? 'var(--color-primary)' : 'var(--color-surface)'};color:${on ? 'white' : 'var(--color-text-secondary)'};cursor:pointer;padding:0;">${AUTO_DAY_LABELS[dNum]}</button>`;
                 }).join('')}
               </div>
             </div>
-
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px dashed var(--color-border-light);padding-top:10px;">
-              <label style="font-weight:800;font-size:11.5px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Hora Programada:</label>
-              <input type="time" class="auto-time-input" data-id="${auto.id}" value="${timeVal}" style="height:36px;border-radius:10px;padding:0 10px;font-weight:800;font-size:13px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);outline:none;" />
+              <label style="font-weight:800;font-size:11.5px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Hora:</label>
+              <input type="time" class="auto-time-input" value="${escapeHtml(auto.time || '20:00')}" style="height:36px;border-radius:10px;padding:0 10px;font-weight:800;font-size:13px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);outline:none;" />
             </div>
-          </div>
-
-          <!-- Message Customization -->
-          <div style="display:flex;flex-direction:column;gap:10px;">
-            <div>
-              <label style="font-weight:700;font-size:10.5px;margin-bottom:4px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Título Push</label>
-              <input type="text" class="input auto-title-input" data-id="${auto.id}" value="${auto.title || ''}" placeholder="Título llamativo..." style="width:100%;height:42px;border-radius:12px;padding:0 12px;font-weight:700;font-size:13px;" />
-            </div>
-
-            <div>
-              <label style="font-weight:700;font-size:10.5px;margin-bottom:4px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Cuerpo del Mensaje</label>
-              <textarea class="input auto-body-input" data-id="${auto.id}" placeholder="Mensaje..." style="width:100%;height:60px;border-radius:12px;padding:10px 12px;font-weight:500;font-size:12.5px;line-height:1.4;resize:none;">${auto.body || ''}</textarea>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px dashed var(--color-border-light);padding-top:10px;">
               <div>
                 <label style="font-weight:700;font-size:10.5px;margin-bottom:4px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Destino (URL)</label>
-                <input type="text" class="input auto-url-input" data-id="${auto.id}" value="${auto.url || '/#/'}" placeholder="Ej: /#/category/Comida" style="width:100%;height:40px;border-radius:12px;padding:0 10px;font-weight:700;font-size:12px;" />
+                <input type="text" class="input auto-url-input" value="${escapeHtml(auto.url || '/#/')}" style="width:100%;height:38px;border-radius:10px;padding:0 10px;font-weight:700;font-size:12px;" />
               </div>
-
               <div>
                 <label style="font-weight:700;font-size:10.5px;margin-bottom:4px;display:block;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;">Audiencia</label>
-                <select class="input auto-audience-input" data-id="${auto.id}" style="width:100%;height:40px;border-radius:12px;padding:0 10px;font-weight:700;font-size:12px;background:var(--color-bg-secondary);border:1px solid var(--color-border);color:var(--color-text);outline:none;">
+                <select class="input auto-audience-input" style="width:100%;height:38px;border-radius:10px;padding:0 8px;font-weight:700;font-size:12px;background:var(--color-surface);border:1px solid var(--color-border);color:var(--color-text);outline:none;">
                   <option value="clients" ${auto.targetAudience === 'clients' ? 'selected' : ''}>🟢 Clientes</option>
                   <option value="all" ${auto.targetAudience === 'all' ? 'selected' : ''}>📢 Todos</option>
                   <option value="drivers" ${auto.targetAudience === 'drivers' ? 'selected' : ''}>🚴 Repartidores</option>
@@ -858,172 +810,159 @@ async function loadAndRenderAutomations() {
             </div>
           </div>
 
-          <!-- Actions: Test Push & Save Changes -->
-          <div style="display:flex;gap:10px;border-top:1px solid var(--color-border-light);padding-top:14px;margin-top:2px;">
-            <button type="button" class="btn-test-auto-push" data-id="${auto.id}" style="flex:1;height:44px;border-radius:14px;background:var(--color-bg-secondary);border:1px solid var(--color-border);color:var(--color-text);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;">
-              ${icon('send', 14)} Probar en mi móvil
+          <details class="auto-variants-box" style="border:1px solid var(--color-border);border-radius:18px;padding:12px 14px;">
+            <summary style="cursor:pointer;font-weight:900;font-size:12.5px;color:var(--color-text);">
+              💬 Mensajes que van rotando (<span class="auto-v-count">${variants.length}</span>)
+            </summary>
+            <p style="font-size:11px;line-height:1.4;color:var(--color-text-tertiary);font-weight:600;margin:8px 0 10px;">
+              Cada vez sale uno distinto, sin repetir los últimos. <strong>{comercio}</strong> se cambia por un comercio abierto en ese momento (y el push abre su página). <strong>{dia}</strong> se cambia por el día ("viernes").
+            </p>
+            <div class="auto-variants-list" style="display:flex;flex-direction:column;gap:8px;">
+              ${variants.map(v => autoVariantRow(v)).join('')}
+            </div>
+            <button type="button" class="auto-v-add" style="margin-top:8px;width:100%;height:38px;border-radius:12px;border:1px dashed var(--color-border);background:transparent;color:var(--color-text-secondary);font-weight:800;font-size:12px;cursor:pointer;">+ Agregar mensaje</button>
+          </details>
+
+          <div style="display:flex;gap:10px;border-top:1px solid var(--color-border-light);padding-top:14px;">
+            <button type="button" class="btn-test-auto-push" style="flex:1;height:44px;border-radius:14px;background:var(--color-bg-secondary);border:1px solid var(--color-border);color:var(--color-text);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;">
+              ${icon('send', 14)} Probar en mi celu
             </button>
-            <button type="button" class="btn-save-auto-push" data-id="${auto.id}" style="flex:1.2;height:44px;border-radius:14px;background:#0b0b0c;border:none;color:white;font-weight:900;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;box-shadow:none;">
-              ${icon('check', 14)} Guardar Regla
+            <button type="button" class="btn-save-auto-push" style="flex:1.2;height:44px;border-radius:14px;background:#0b0b0c;border:none;color:white;font-weight:900;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;">
+              ${icon('check', 14)} Guardar
             </button>
           </div>
-
         </div>
       `;
     }).join('');
 
-    container.innerHTML = html;
+    const readVariants = (card) => [...card.querySelectorAll('.auto-variant')].map(row => {
+      const v = {
+        title: row.querySelector('.auto-v-title').value.trim(),
+        body: row.querySelector('.auto-v-body').value.trim(),
+      };
+      if (row.querySelector('.auto-v-lluvia').checked) v.lluvia = true;
+      try {
+        const cats = JSON.parse(row.querySelector('.auto-v-cats').value || 'null');
+        if (Array.isArray(cats)) v.categories = cats;
+      } catch { /* sin rubro propio */ }
+      return v;
+    }).filter(v => v.title || v.body);
 
-    // Attach Day Pill toggle handlers
-    container.querySelectorAll('.day-pill-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const isSelected = btn.style.background === 'var(--color-primary)' || btn.style.background.includes('primary');
-        if (isSelected) {
-          btn.style.background = 'var(--color-surface)';
-          btn.style.color = 'var(--color-text-secondary)';
-          btn.style.borderColor = 'var(--color-border)';
-        } else {
-          btn.style.background = 'var(--color-primary)';
-          btn.style.color = 'white';
-          btn.style.borderColor = 'var(--color-primary)';
-        }
-      });
-    });
+    container.querySelectorAll('.auto-card').forEach(card => {
+      const id = card.dataset.id;
+      const count = card.querySelector('.auto-v-count');
+      const refreshCount = () => { count.textContent = card.querySelectorAll('.auto-variant').length; };
 
-    // Attach Switch toggle handlers
-    container.querySelectorAll('.auto-toggle-input').forEach(chk => {
-      chk.addEventListener('change', (e) => {
-        const card = document.getElementById(`card-${chk.dataset.id}`);
-        const badge = card?.querySelector('.auto-status-badge');
-        const track = chk.parentElement.querySelector('.slider-track');
-        const thumb = chk.parentElement.querySelector('.slider-thumb');
-
-        if (e.target.checked) {
-          if (badge) {
-            badge.textContent = 'ACTIVA';
-            badge.style.background = 'rgba(34,197,94,0.15)';
-            badge.style.color = 'var(--color-success)';
-          }
-          if (track) track.style.backgroundColor = '#a855f7';
-          if (thumb) thumb.style.left = '24px';
-          if (card) card.style.borderColor = 'rgba(168,85,247,0.3)';
-        } else {
-          if (badge) {
-            badge.textContent = 'PAUSADA';
-            badge.style.background = 'var(--color-bg-secondary)';
-            badge.style.color = 'var(--color-text-tertiary)';
-          }
-          if (track) track.style.backgroundColor = '#cbd5e1';
-          if (thumb) thumb.style.left = '3px';
-          if (card) card.style.borderColor = 'var(--color-border)';
-        }
-      });
-    });
-
-    // Attach Save Handlers
-    container.querySelectorAll('.btn-save-auto-push').forEach(saveBtn => {
-      saveBtn.addEventListener('click', async () => {
-        const id = saveBtn.dataset.id;
-        const card = document.getElementById(`card-${id}`);
-        if (!card) return;
-
-        const enabled = card.querySelector('.auto-toggle-input')?.checked === true;
-        const selectedDays = [];
-        card.querySelectorAll('.day-pill-btn').forEach(dBtn => {
-          if (dBtn.style.color === 'white') {
-            selectedDays.push(Number(dBtn.dataset.day));
-          }
+      card.querySelectorAll('.day-pill-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const on = btn.dataset.on !== '1';
+          btn.dataset.on = on ? '1' : '0';
+          btn.style.background = on ? 'var(--color-primary)' : 'var(--color-surface)';
+          btn.style.color = on ? 'white' : 'var(--color-text-secondary)';
+          btn.style.borderColor = on ? 'var(--color-primary)' : 'var(--color-border)';
         });
-        const time = card.querySelector('.auto-time-input')?.value || '12:00';
-        const title = card.querySelector('.auto-title-input')?.value.trim() || 'Go Delivery';
-        const body = card.querySelector('.auto-body-input')?.value.trim() || '';
-        const url = card.querySelector('.auto-url-input')?.value.trim() || '/#/';
-        const targetAudience = card.querySelector('.auto-audience-input')?.value || 'clients';
+      });
 
-        if (!body) {
-          showToast('El cuerpo del mensaje no puede estar vacío', 'error');
+      const chk = card.querySelector('.auto-toggle-input');
+      chk.addEventListener('change', () => {
+        const on = chk.checked;
+        const badge = card.querySelector('.auto-status-badge');
+        badge.textContent = on ? 'ACTIVA' : 'PAUSADA';
+        badge.style.background = on ? 'rgba(34,197,94,0.15)' : 'var(--color-bg-secondary)';
+        badge.style.color = on ? 'var(--color-success)' : 'var(--color-text-tertiary)';
+        chk.parentElement.querySelector('.slider-track').style.backgroundColor = on ? '#a855f7' : '#cbd5e1';
+        chk.parentElement.querySelector('.slider-thumb').style.left = on ? '24px' : '3px';
+        card.style.borderColor = on ? 'rgba(168,85,247,0.3)' : 'var(--color-border)';
+      });
+
+      const listEl = card.querySelector('.auto-variants-list');
+      listEl.addEventListener('click', (e) => {
+        const rm = e.target.closest('.auto-v-remove');
+        if (!rm) return;
+        rm.closest('.auto-variant').remove();
+        refreshCount();
+      });
+      card.querySelector('.auto-v-add').addEventListener('click', () => {
+        listEl.insertAdjacentHTML('beforeend', autoVariantRow());
+        refreshCount();
+        listEl.lastElementChild.querySelector('.auto-v-title').focus();
+      });
+
+      const saveBtn = card.querySelector('.btn-save-auto-push');
+      saveBtn.addEventListener('click', async () => {
+        const days = [...card.querySelectorAll('.day-pill-btn')].filter(b => b.dataset.on === '1').map(b => Number(b.dataset.day));
+        const variants = readVariants(card);
+        if (variants.filter(v => !v.lluvia).length === 0) {
+          showToast('Dejá al menos un mensaje que no sea solo de lluvia', 'error');
           return;
         }
-
+        if (variants.some(v => !v.body)) {
+          showToast('Hay un mensaje sin texto', 'error');
+          return;
+        }
+        const original = saveBtn.innerHTML;
         saveBtn.disabled = true;
-        const originalText = saveBtn.innerHTML;
         saveBtn.innerHTML = `${icon('loader', 14, 'animate-spin')} Guardando...`;
-
         try {
-          const { doc, updateDoc } = await import('firebase/firestore');
           await updateDoc(doc(db, 'automated_broadcasts', id), {
-            enabled,
-            days: selectedDays,
-            time,
-            title,
-            body,
-            url,
-            targetAudience,
+            enabled: chk.checked,
+            days,
+            time: card.querySelector('.auto-time-input').value || '20:00',
+            url: card.querySelector('.auto-url-input').value.trim() || '/#/',
+            targetAudience: card.querySelector('.auto-audience-input').value || 'clients',
+            variants,
             updatedAt: serverTimestamp()
           });
-
-          showToast('Configuración guardada con éxito', 'success');
+          showToast('Guardado', 'success');
         } catch (err) {
           console.error('Error saving automated push:', err);
-          showToast('Error al guardar configuración', 'error');
+          showToast('No se pudo guardar', 'error');
         } finally {
           saveBtn.disabled = false;
-          saveBtn.innerHTML = originalText;
+          saveBtn.innerHTML = original;
         }
       });
-    });
 
-    // Attach Test Push Handlers
-    container.querySelectorAll('.btn-test-auto-push').forEach(testBtn => {
+      // Manda un mensaje al azar de la lista solo a los celulares de quien prueba
+      const testBtn = card.querySelector('.btn-test-auto-push');
       testBtn.addEventListener('click', async () => {
-        const id = testBtn.dataset.id;
-        const card = document.getElementById(`card-${id}`);
-        if (!card) return;
-
-        const title = card.querySelector('.auto-title-input')?.value.trim() || 'Go Delivery';
-        const body = card.querySelector('.auto-body-input')?.value.trim() || '';
-        const url = card.querySelector('.auto-url-input')?.value.trim() || '/#/';
-
-        if (!body) {
-          showToast('El cuerpo del mensaje no puede estar vacío', 'error');
+        const variants = readVariants(card);
+        if (variants.length === 0) {
+          showToast('No hay mensajes para probar', 'error');
           return;
         }
-
+        const v = variants[Math.floor(Math.random() * variants.length)];
+        const dia = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][new Date().getDay()];
+        const fill = (t) => {
+          const s = String(t || '').replace(/\{comercio\}/g, 'La Banca').replace(/\{dia\}/g, dia);
+          return s.charAt(0).toUpperCase() + s.slice(1);
+        };
+        const original = testBtn.innerHTML;
         testBtn.disabled = true;
-        const originalText = testBtn.innerHTML;
-        testBtn.innerHTML = `${icon('loader', 14, 'animate-spin')} Enviando prueba...`;
-
+        testBtn.innerHTML = `${icon('loader', 14, 'animate-spin')} Enviando...`;
         try {
           const { auth } = await import('../../firebase.js');
           const token = await auth.currentUser?.getIdToken();
           if (!token) throw new Error('No autenticado');
-
           const res = await fetch(`https://sendglobalpush-mkje4ndb5a-uc.a.run.app`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
-              title: `[PRUEBA] ${title}`,
-              body,
-              url,
-              audience: 'clients'
+              title: `[PRUEBA] ${fill(v.title)}`,
+              body: fill(v.body),
+              url: card.querySelector('.auto-url-input').value.trim() || '/#/',
+              audience: 'me'
             })
           });
-
-          if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || 'Error al enviar prueba');
-          }
-
-          showToast('¡Notificación de prueba enviada a tu dispositivo!', 'success');
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Error al enviar prueba');
+          showToast(data.sentCount > 0 ? 'Prueba enviada a tu celular' : 'Tu cuenta no tiene celulares con notificaciones activas', data.sentCount > 0 ? 'success' : 'error');
         } catch (err) {
           console.error('Error sending test push:', err);
           showToast(err.message || 'Error al enviar prueba', 'error');
         } finally {
           testBtn.disabled = false;
-          testBtn.innerHTML = originalText;
+          testBtn.innerHTML = original;
         }
       });
     });

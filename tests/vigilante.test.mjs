@@ -100,6 +100,20 @@ await Promise.all([
   db.doc('users/contoken').set({ role: 'delivery', isOnline: true, displayName: 'Cadete A', lastFcmToken: 'abc' }),
   db.doc('users/consub').set({ role: 'delivery', isOnline: true, displayName: 'Cadete B' }),
   db.doc('users/consub/fcmTokens/t1').set({ token: 't1' }),
+  // comercios_sin_avisos: sin dispositivos, con el último de hace 45 días y sin dueño (3).
+  // No cuentan: el que tiene uno nuevo, GO! Market (lo atienden los admins), uno inactivo y el de un admin.
+  db.doc('comercios/mudo').set({ name: 'Pizza Muda', ownerId: 'duenomudo' }),
+  db.doc('users/duenomudo').set({ role: 'comercio', displayName: 'Dueño Mudo', phone: '2221999999' }),
+  db.doc('comercios/viejo').set({ name: 'Rotisería Vieja', ownerId: 'duenoviejo' }),
+  db.doc('users/duenoviejo').set({ role: 'comercio' }),
+  db.doc('users/duenoviejo/fcmTokens/tv').set({ token: 'tv', updatedAt: at(45 * 24 * 60 * MIN) }),
+  db.doc('comercios/sindueno').set({ name: 'Local Huérfano' }),
+  db.doc('comercios/avisado').set({ name: 'Heladería Avisada', ownerId: 'duenoavisado' }),
+  db.doc('users/duenoavisado').set({ role: 'comercio' }),
+  db.doc('users/duenoavisado/fcmTokens/ta').set({ token: 'ta', updatedAt: at(2 * 24 * 60 * MIN) }),
+  db.doc('comercios/gomarket').set({ name: 'GO! MARKET', ownerId: 'duenomudo' }),
+  db.doc('comercios/cerrado').set({ name: 'Cerrado Para Siempre', isActive: false }),
+  db.doc('comercios/deladmin').set({ name: 'Local del Jefe', ownerId: 'jefe' }),
   // puntos_negativos y cupones_pasados
   db.doc('users/negativo').set({ role: 'user', displayName: 'Cliente Raro', points: -50 }),
   db.doc('users/positivo').set({ role: 'user', points: 30 }),
@@ -110,8 +124,9 @@ await Promise.all([
   db.doc('users/cadete2').set({ role: 'delivery', isOnline: true, displayName: 'Ana', lastFcmToken: 'x' }),
   // clima_sin_actualizar: el chequeo de lluvia no corre hace 2 h
   db.doc('settings/weather').set({ isRaining: false, checkedAt: at(120 * MIN), lastError: 'openMeteo: timeout' }),
-  // reinicios_app: 12 recargas de la app en el día (y 5 manuales, que no cuentan)
-  ...Array.from({ length: 12 }, (_, i) => db.collection('app_restarts').add({ kind: 'la app recargó', reason: i < 9 ? 'Firestore roto (ca9)' : 'versión nueva', createdAt: at((i + 1) * 30 * MIN) })),
+  // reinicios_app: 12 recargas de la app en el día (y 5 manuales y 6 por versión nueva, que no cuentan)
+  ...Array.from({ length: 12 }, (_, i) => db.collection('app_restarts').add({ kind: 'la app recargó', reason: i < 9 ? 'Firestore roto (ca9)' : 'no cargó el mapa de seguimiento', createdAt: at((i + 1) * 30 * MIN) })),
+  ...Array.from({ length: 6 }, (_, i) => db.collection('app_restarts').add({ kind: 'la app recargó', reason: 'versión nueva de la app', createdAt: at((i + 1) * 20 * MIN) })),
   ...Array.from({ length: 5 }, (_, i) => db.collection('app_restarts').add({ kind: 'recarga manual', reason: 'botón', createdAt: at(10 * MIN) })),
   // reglas: admin y cliente
   db.doc('users/jefe').set({ role: 'admin', isAdmin: true }),
@@ -134,7 +149,7 @@ check('primera pasada: no manda avisos (línea de base)', pushes.length === 0, J
 const expectAffected = {
   pedidos_sin_cancelar: 1, pedidos_trabados: 1, ofertas_trabadas: 1, totales_descuadrados: 2, pedidos_sin_asiento: 1,
   saldo_cadete_descuadrado: 1, rastreo_cortado: 1, cadetes_sin_push: 1, puntos_negativos: 1, cupones_pasados: 1,
-  cadete_desconectado_con_pedido: 1, clima_sin_actualizar: 1, reinicios_app: 2,
+  cadete_desconectado_con_pedido: 1, clima_sin_actualizar: 1, reinicios_app: 2, comercios_sin_avisos: 3,
 };
 for (const [id, n] of Object.entries(expectAffected)) {
   const f = await audit(id);
@@ -145,6 +160,13 @@ check('el total mal cobrado dice cuánto debía ser', tot.lastSample.items.some(
 check('el mandado no se compara (se arma distinto)', !tot.lastSample.items.some((i) => i.id === 'mandado'));
 check('cadete desconectado: dice el motivo, y el programado para más tarde no cuenta', (await audit('cadete_desconectado_con_pedido')).lastSample.items[0].label.includes('debt_limit'));
 check('reinicios: agrupados por motivo, el más repetido primero', /^9× la app recargó: Firestore roto/.test((await audit('reinicios_app')).lastSample.items[0].label), JSON.stringify((await audit('reinicios_app')).lastSample.items));
+check('reinicios: la recarga por versión nueva no cuenta', !(await audit('reinicios_app')).lastSample.items.some((i) => /versión nueva/.test(i.label)));
+{
+  const sa = (await audit('comercios_sin_avisos')).lastSample.items;
+  const lbl = (id) => sa.find((i) => i.id === id)?.label || '';
+  check('comercios sin avisos: dice por qué (y el teléfono para llamarlo)', /sin ningún dispositivo · 2221999999/.test(lbl('mudo')) && /último dispositivo hace 45 días/.test(lbl('viejo')) && /sin dueño/.test(lbl('sindueno')), JSON.stringify(sa));
+  check('comercios sin avisos: no cuenta GO! Market, ni inactivos, ni de admins, ni con dispositivo nuevo', !sa.some((i) => ['gomarket', 'cerrado', 'deladmin', 'avisado'].includes(i.id)));
+}
 check('cada hallazgo explica qué revisar', typeof tot.lastSample.help === 'string' && tot.lastSample.help.length > 20);
 
 const srv = (await db.collection('client_errors').where('kind', '==', 'servidor').get()).docs.map((d) => d.data());
@@ -154,7 +176,7 @@ check('el ruido de la plataforma no se guarda', !srv.some((e) => /STARTUP TCP/.t
 check('lo de hace menos de 2 min queda para la pasada siguiente', !srv.some((e) => /muy reciente/.test(e.message)));
 
 let state = (await db.doc('system/vigilante').get()).data();
-check('system/vigilante guarda la pasada y cada revisión', !!state.lastRunAt && Object.keys(state.checks).length === 13 && state.checks.puntos_negativos.ok === false && state.logs.entries === 4, JSON.stringify({ n: Object.keys(state.checks || {}).length, logs: state.logs }));
+check('system/vigilante guarda la pasada y cada revisión', !!state.lastRunAt && Object.keys(state.checks).length === 14 && state.checks.puntos_negativos.ok === false && state.logs.entries === 4, JSON.stringify({ n: Object.keys(state.checks || {}).length, logs: state.logs }));
 
 console.log('=========== SEGUNDA PASADA ===========');
 pushes = [];
@@ -207,6 +229,19 @@ const rot = (await db.collection('client_errors').where('frame', '==', 'rotateex
 check('12 errores iguales del servidor = 1 grupo con 12', rot.length === 1 && rot[0].count === 12, JSON.stringify(rot.map((e) => e.count)));
 check('error nuevo del servidor → aviso con el nombre de la función', pushes.some((p) => /Error nuevo en el servidor/.test(p.title) && /rotateexpiredoffers/.test(p.body)), JSON.stringify(pushes));
 
+// Resuelto, y el vigilante (atrasado) recién lee registros de ANTES de que lo resolvieran: no se
+// reabre ni avisa (así volvía "Error fetching customer photo", 13-10-2026)
+pushes = [];
+await resetAlertBudget();
+const rotRef = db.doc(`client_errors/${rot[0].fingerprint}`);
+await rotRef.update({ status: 'resolved', statusBy: 'admin', statusAt: new Date() });
+logEntries.push({ metadata: { timestamp: new Date(base - 3 * MIN + 500).toISOString(), resource: { type: 'cloud_run_revision', labels: { service_name: 'rotateexpiredoffers' } } }, data: { message: '[RotateOffers] Error en el pedido 2000: Error: 9 FAILED_PRECONDITION' } });
+await runVigilante(deps);
+const rotAfter = (await rotRef.get()).data();
+check('registros viejos de un error ya resuelto no lo reabren', rotAfter.status === 'resolved' && !pushes.some((p) => /rotateexpiredoffers/.test(p.body)), JSON.stringify({ status: rotAfter.status, pushes }));
+check('…pero se cuentan', rotAfter.count === 13, String(rotAfter.count));
+check('"última vez" es la hora del registro, no la de la pasada', rotAfter.lastSeen.toMillis() <= base, String(rotAfter.lastSeen.toMillis() - base));
+
 console.log('=========== EL VIGILANTE NO PUEDE LEER LOS REGISTROS ===========');
 pushes = [];
 await resetAlertBudget();
@@ -240,7 +275,7 @@ console.log('=========== UNA REVISIÓN QUE FALLA NO FRENA LAS DEMÁS ===========
 await db.doc('users/descuadrado').update({ ledgerLastEntryId: '' });
 await db.doc('orders/roto').set({ status: 'delivering', driverId: 'x', createdAt: 'no-es-fecha' });
 out = await runVigilante(deps);
-check('la pasada termina aunque haya datos raros', Object.keys(out.checks).length === 13 && Object.values(out.checks).every((c) => c.ok !== undefined));
+check('la pasada termina aunque haya datos raros', Object.keys(out.checks).length === 14 && Object.values(out.checks).every((c) => c.ok !== undefined));
 
 console.log('=========== REGLAS ===========');
 const jefe = env.authenticatedContext('jefe').firestore();

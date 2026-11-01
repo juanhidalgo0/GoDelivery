@@ -44,7 +44,7 @@ export function confirmReverseEntry({ db, entry, onDone }) {
   btn.onclick = async () => {
     const reason = el.querySelector('#rev-reason').value.trim();
     if (!reason) {
-      showToast('Escribí el motivo de la anulación', 'error');
+      showToast('Escribí el motivo de la anulación', 'warning');
       return;
     }
     btn.disabled = true;
@@ -125,7 +125,7 @@ export function openDriverStatement({ db, driver, onAction }) {
   el.querySelector('[data-wsp]').onclick = () => {
     const phone = (driver.phone || driver.whatsapp || '').replace(/\D/g, '');
     if (!phone) {
-      showToast('El repartidor no tiene teléfono registrado', 'error');
+      showToast('El repartidor no tiene teléfono registrado', 'warning');
       return;
     }
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(statementText(driver, balance, latestEntries))}`, '_blank');

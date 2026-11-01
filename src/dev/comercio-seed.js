@@ -44,6 +44,11 @@ const prods = [
 prods.forEach(([id, name, price, categoryId, isAvailable], i) => mockDb.set(`comercios/${CID}/products/${id}`, {
   name, price, categoryId, isAvailable, image: '', description: '', optionsGroups: [], stockMode: 'unlimited', order: i, createdAt: ago(60 * 24 * 30),
 }));
+// Venta por peso (src/utils/weight.js): un corte por kilo y un pedido aceptado que falta pesar
+mockDb.set(`comercios/${CID}/products/p12`, {
+  name: 'Vacío', price: 12000, categoryId: 'c-empanadas', isAvailable: true, image: '', description: 'Por kilo',
+  optionsGroups: [], stockMode: 'unlimited', soldByWeight: true, weightStep: 250, order: 12, createdAt: ago(60 * 24 * 30),
+});
 
 const base = { comercioId: CID, comercioName: 'Pizzería Don Juan', comercioCoords: STORE, comercioAddress: 'San Martín 1240', paymentMethod: 'efectivo', paymentStatus: 'pending', deliveryType: 'delivery', deliveryCost: 1800, commissionStatus: 'pending' };
 const order = (id, n, extra) => {
@@ -53,6 +58,7 @@ const order = (id, n, extra) => {
 order('o-1042', 1042, { status: 'pending', userName: 'Lucía Martínez', userId: 'u1', createdAt: ago(2), deliveryAddress: 'Av. Mitre 820', items: [{ name: 'Muzzarella grande', qty: 2, price: 11500 }, { name: 'Fainá', qty: 1, price: 2500 }] });
 order('o-1043', 1043, { status: 'pending', userName: 'Marcos Ruiz', userId: 'u2', createdAt: ago(1), deliveryType: 'takeaway', items: [{ name: 'Napolitana', qty: 1, price: 13000 }, { name: 'Coca-Cola 1,5 L', qty: 2, price: 3400 }], notes: 'Sin aceitunas por favor' });
 order('o-1039', 1039, { status: 'confirmed', userName: 'Ana Pereyra', userId: 'u3', createdAt: ago(14), confirmedAt: ago(12), preparationTimeMinutes: 20, estimatedReadyAt: inMin(8), deliveryAddress: 'Brenan 450', items: [{ name: 'Empanada de carne', qty: 6, price: 3000 }], paymentMethod: 'transferencia' });
+order('o-1040', 1040, { status: 'confirmed', userName: 'Carla Benítez', userId: 'u10', createdAt: ago(10), confirmedAt: ago(9), preparationTimeMinutes: 15, estimatedReadyAt: inMin(6), deliveryAddress: 'Sarmiento 310', appUsageFee: 900, appUsageFeeRate: 0.05, hasWeighedItems: true, weighPending: true, items: [{ name: 'Vacío', qty: 6, price: 3000, soldByWeight: true, weightStep: 250, grams: 1500, pricePerKg: 12000 }, { name: 'Empanada de carne', qty: 2, price: 3000 }] });
 order('o-1036', 1036, { status: 'ready', userName: 'José López', userId: 'u4', createdAt: ago(30), confirmedAt: ago(28), readyAt: ago(4), deliveryAddress: 'Rivadavia 55', items: [{ name: 'Fugazzeta', qty: 1, price: 13200 }] });
 order('o-1030', 1030, { status: 'completed', userName: 'María Gómez', userId: 'u5', createdAt: ago(90), confirmedAt: ago(88), readyAt: ago(70), completedAt: ago(55), deliveryAddress: 'Moreno 1020', items: [{ name: 'Especial de jamón y morrones', qty: 1, price: 14500 }, { name: 'Flan casero', qty: 2, price: 3800 }] });
 order('o-1028', 1028, { status: 'completed', userName: 'Pablo Ríos', userId: 'u6', createdAt: ago(60 * 26), confirmedAt: ago(60 * 26 - 2), readyAt: ago(60 * 26 - 20), completedAt: ago(60 * 26 - 35), deliveryAddress: 'Belgrano 355', items: [{ name: 'Muzzarella grande', qty: 1, price: 11500 }], commissionStatus: 'paid' });

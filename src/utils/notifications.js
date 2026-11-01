@@ -58,6 +58,7 @@ async function loadNativePushPlugin() {
       createChannel: (channel) => FM.createChannel(channel),
       deleteChannel: (options) => FM.deleteChannel(options),
       removeAllDeliveredNotifications: () => FM.removeAllDeliveredNotifications(),
+      listChannels: () => FM.listChannels(),
       addListener: (eventName, cb) => FM.addListener(eventName, cb),
       getToken: (options) => FM.getToken(options),
     };
@@ -80,6 +81,7 @@ async function loadNativePushPlugin() {
     createChannel: (channel) => Legacy.createChannel(channel),
     deleteChannel: (options) => Legacy.deleteChannel(options),
     removeAllDeliveredNotifications: () => Legacy.removeAllDeliveredNotifications(),
+    listChannels: () => Legacy.listChannels(),
     registerActionTypes: (types) => Legacy.registerActionTypes(types),
     addListener: (eventName, cb) => {
       if (eventName === 'tokenReceived') {
@@ -540,7 +542,7 @@ export async function initPushNotifications() {
 
           if (title) {
             showPushBanner({ title, body, url, tag, type: pushType });
-            AudioManager.playSound('/assets/sounds/notification.mp3');
+            AudioManager.playSound('/assets/sounds/notification.wav');
             if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
           }
         }
@@ -572,7 +574,7 @@ export async function initPushNotifications() {
         }
         if (title) {
           showPushBanner({ title, body, url: payload.data?.url, tag, type: payload.data?.type });
-          AudioManager.playSound('/assets/sounds/notification.mp3');
+          AudioManager.playSound('/assets/sounds/notification.wav');
           if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
         }
       });
@@ -623,7 +625,7 @@ export async function sendLocalNotification(title, body, options = {}) {
   // Play foreground sound and vibrate (does not require native notification permission).
   // silent: quien llama ya hace sonar su propia alarma (pedidos del comercio); un segundo
   // audio encima puede cortarla en iPhone.
-  if (!options.silent) AudioManager.playSound('/assets/sounds/notification.mp3');
+  if (!options.silent) AudioManager.playSound('/assets/sounds/notification.wav');
   
   if (navigator.vibrate) {
     navigator.vibrate([200, 100, 200, 100, 300]);
@@ -813,6 +815,65 @@ export async function clearDeliveredNotifications() {
     const plugin = await getNativePushPlugin();
     await plugin.removeAllDeliveredNotifications?.();
   } catch (e) {}
+}
+
+// El comercio se entera de un pedido nuevo por la push (con el celular bloqueado es lo único que
+// suena). Antes el permiso se pedía una sola vez al arrancar y si lo rechazaban nadie se enteraba:
+// el 10-10-2026 seis comercios no tenían ningún dispositivo registrado y sus pedidos no avisaban.
+// El panel llama a esto al abrirse y cada vez que vuelve a pantalla, y muestra qué falta:
+//   'ok'          permiso dado y dispositivo registrado
+//   'prompt'      falta dar el permiso (en la web hace falta un toque: botón "Activar")
+//   'denied'      bloqueado: se habilita desde los ajustes del teléfono o del navegador
+//   'muted'       (Android) el permiso está, pero el canal "Pedidos nuevos" está apagado
+//   'unsupported' este navegador no recibe avisos (iPhone sin instalar la app)
+//   'error'       hay permiso pero no se pudo registrar el dispositivo
+let lastCommercePushCheck = { at: 0, status: null };
+export async function ensureCommercePushReady({ force = false, ask = false } = {}) {
+  if (!force && !ask && lastCommercePushCheck.status && Date.now() - lastCommercePushCheck.at < 60 * 1000) {
+    return lastCommercePushCheck.status;
+  }
+  const status = await checkCommercePush(ask);
+  lastCommercePushCheck = { at: Date.now(), status };
+  return status;
+}
+
+async function checkCommercePush(ask) {
+  const isNativeApp = window.Capacitor?.getPlatform && window.Capacitor.getPlatform() !== 'web';
+  if (isNativeApp) {
+    let plugin;
+    try { plugin = await getNativePushPlugin(); } catch (e) { return 'unsupported'; }
+    let perm = 'prompt';
+    try { perm = (await plugin.checkPermissions()).receive || 'prompt'; } catch (e) {}
+    // En la app el pedido de permiso no necesita un toque: si todavía no contestó, se pregunta
+    if (perm !== 'granted' && (perm === 'prompt' || perm === 'prompt-with-rationale' || ask)) {
+      await initPushNotifications(); // pide el permiso y, si lo dan, registra el dispositivo
+      try { perm = (await plugin.checkPermissions()).receive || perm; } catch (e) {}
+    }
+    if (perm !== 'granted') return perm === 'denied' ? 'denied' : 'prompt';
+    await initPushNotifications(); // vuelve a guardar el token (el servidor borra los vencidos)
+    if (window.Capacitor.getPlatform() === 'android') {
+      try {
+        const { channels = [] } = await plugin.listChannels();
+        const ch = channels.find(c => c.id === 'store_orders') || channels.find(c => c.id === 'default');
+        if (ch && Number(ch.importance) === 0) return 'muted';
+      } catch (e) {}
+    }
+    let saved = '';
+    try { saved = localStorage.getItem('gd_fcm_registration_status') || ''; } catch (e) {}
+    return saved === 'error' ? 'error' : 'ok';
+  }
+
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  if (Notification.permission === 'default') {
+    if (!ask) return 'prompt';
+    const result = await requestWebPushPermission(); // necesita venir de un toque
+    if (result === 'denied') return 'denied';
+    if (result !== 'granted') return result === 'unsupported' ? 'unsupported' : 'prompt';
+    return 'ok';
+  }
+  const token = await requestAndSaveFcmToken();
+  return token ? 'ok' : 'error';
 }
 
 // Drivers depend on push to hear about offers while the phone is in their pocket. Startup

@@ -191,11 +191,17 @@ export async function renderAdminOrders() {
       <div style="padding:16px 20px; flex-shrink:0; background:linear-gradient(to bottom, var(--color-surface), var(--color-bg));">
         
         <!-- Ultra-Premium Segmented Control Bar (APP / WHATSAPP) -->
-        <div class="premium-segmented-bar" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:5px; display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:14px; box-shadow:0 4px 20px rgba(0,0,0,0.03);">
-          <button class="main-segment-btn active" data-segment="app" style="height:44px; border-radius:16px; border:none; background:#0b0b0c; color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:none; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
-            <div style="width:24px; height:24px; border-radius:8px; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('smartphone', 14, '', '#FFF')}</div>
+        <div class="premium-segmented-bar" style="background:var(--color-surface); border:1.5px solid var(--color-border-light); border-radius:20px; padding:5px; display:grid; grid-template-columns:0.8fr 1fr 1.2fr; gap:6px; margin-bottom:14px; box-shadow:0 4px 20px rgba(0,0,0,0.03);">
+          <!-- Por defecto se ven todos los pedidos; App o WhatsApp filtran por origen -->
+          <button class="main-segment-btn active" data-segment="all" style="height:44px; border-radius:16px; border:none; background:#0b0b0c; color:white; font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:none; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+            <span>Todos</span>
+            <span id="seg-count-all" style="background:rgba(255,255,255,0.25); color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
+          </button>
+
+          <button class="main-segment-btn" data-segment="app" style="height:44px; border-radius:16px; border:none; background:transparent; color:var(--color-text-secondary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:none; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+            <div style="width:24px; height:24px; border-radius:8px; background:rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${icon('smartphone', 14)}</div>
             <span>App</span>
-            <span id="seg-count-app" style="background:rgba(255,255,255,0.25); color:white; padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
+            <span id="seg-count-app" style="background:var(--color-bg-secondary); color:var(--color-text-secondary); padding:2px 7px; border-radius:100px; font-size:10px; font-weight:900;">0</span>
           </button>
 
           <button class="main-segment-btn" data-segment="whatsapp" style="height:44px; border-radius:16px; border:none; background:transparent; color:var(--color-text-secondary); font-weight:900; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
@@ -417,7 +423,7 @@ export async function renderAdminOrders() {
   };
 }
 
-let currentSegment = 'app';
+let currentSegment = 'all'; // 'all' | 'app' | 'whatsapp' | 'chats'
 let supportUnsubscribe = null;
 let allSupportChats = [];
 
@@ -464,6 +470,11 @@ function setupEventListeners() {
           appBadge.style.background = 'var(--color-bg-secondary)';
           appBadge.style.color = 'var(--color-text-secondary)';
         }
+        const allBadge = b.querySelector('#seg-count-all');
+        if (allBadge) {
+          allBadge.style.background = 'var(--color-bg-secondary)';
+          allBadge.style.color = 'var(--color-text-secondary)';
+        }
         const waBadge = b.querySelector('#seg-count-wa');
         if (waBadge) {
           waBadge.style.background = 'rgba(37,211,102,0.15)';
@@ -473,11 +484,11 @@ function setupEventListeners() {
 
       btn.classList.add('active');
 
-      if (seg === 'app') {
+      if (seg === 'app' || seg === 'all') {
         btn.style.background = '#0b0b0c';
         btn.style.color = 'white';
         btn.style.boxShadow = 'none';
-        const appBadge = btn.querySelector('#seg-count-app');
+        const appBadge = btn.querySelector('#seg-count-app') || btn.querySelector('#seg-count-all');
         if (appBadge) {
           appBadge.style.background = 'rgba(255,255,255,0.25)';
           appBadge.style.color = 'white';
@@ -738,6 +749,8 @@ function renderOrdersList() {
   // Update counts on badges
   const appCount = allOrders.filter(o => o.source !== 'whatsapp_bot').length;
   const waCount = allOrders.filter(o => o.source === 'whatsapp_bot').length;
+  const badgeAll = document.getElementById('seg-count-all');
+  if (badgeAll) badgeAll.textContent = allOrders.length;
   const badgeApp = document.getElementById('seg-count-app');
   const badgeWa = document.getElementById('seg-count-wa');
   if (badgeApp) badgeApp.textContent = appCount;
@@ -1997,7 +2010,7 @@ async function openAdminToDriverSupportChatModal(driverId, driverName, orderId, 
 }
 
 export async function openReleaseDriverModal(idOrOrder) {
-  const { getDocs, collection, query, where, doc, getDoc, updateDoc, setDoc, serverTimestamp, arrayUnion } = await import('firebase/firestore');
+  const { getDocs, collection, query, where, doc, getDoc, updateDoc, setDoc, serverTimestamp, arrayUnion, arrayRemove } = await import('firebase/firestore');
   const { db } = await import('../../firebase.js');
   const { showModal, closeModal } = await import('../../components/modal.js');
   const { showToast } = await import('../../components/toast.js');

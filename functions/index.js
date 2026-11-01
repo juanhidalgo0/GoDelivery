@@ -1067,35 +1067,24 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
     const orderId = chatData.orderId;
     const senderName = message.senderName || "Mensaje nuevo";
     
-    let recipientIds = [];
-    
-    // 1. Collect participants from chat document
-    if (Array.isArray(chatData.participants)) {
-      recipientIds.push(...chatData.participants);
-    }
-    if (chatData.userId) recipientIds.push(chatData.userId);
-    if (chatData.driverId) recipientIds.push(chatData.driverId);
-    if (chatData.commerceId) recipientIds.push(chatData.commerceId);
-
-    // 2. Collect participants from order document if available
+    // Each chat notifies only its two sides. This used to notify everyone in the order, so the
+    // driver got the customer's messages to the shop (and could open that chat from the push).
+    const { chatParties, chatTypeOf } = require("./chat-access");
+    let recipientIds = null;
     if (orderId) {
       try {
         const orderDoc = await db.collection("orders").doc(orderId).get();
         if (orderDoc.exists) {
           const order = orderDoc.data();
-          if (order.userId) recipientIds.push(order.userId);
-          if (order.driverId) recipientIds.push(order.driverId);
-          if (order.comercioId) {
-            const comercioDoc = await db.collection("comercios").doc(order.comercioId).get();
-            if (comercioDoc.exists && comercioDoc.data().ownerId) {
-              recipientIds.push(comercioDoc.data().ownerId);
-            }
-          }
+          const comercioDoc = order.comercioId ? await db.collection("comercios").doc(order.comercioId).get() : null;
+          recipientIds = chatParties(chatTypeOf(chatId, chatData), order, comercioDoc && comercioDoc.exists ? comercioDoc.data() : null);
         }
       } catch (e) {
         logger.warn("Error reading order for chat push:", e);
       }
     }
+    // Without the order there is no way to tell who belongs: better no push than one to the wrong person.
+    if (!recipientIds) return;
 
     // 3. Filter out sender and duplicates
     recipientIds = [...new Set(recipientIds)].filter(id => id && String(id) !== String(message.senderId));
@@ -1240,6 +1229,15 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   }
 
   const orderNum = after.orderId || orderId.slice(0, 6);
+
+  // Reasignado: el cadete anterior deja de ver estos chats en su lista
+  if (before.driverId && before.driverId !== after.driverId) {
+    for (const type of ["client-delivery", "commerce-delivery"]) {
+      db.collection("chats").doc(`${orderId}_${type}`)
+        .update({ participants: FieldValue.arrayRemove(before.driverId) })
+        .catch(() => {}); // el chat puede no existir
+    }
+  }
 
   // Pedidos que entraron por WhatsApp: el mismo aviso le llega al cliente por ahí
   if (after.waPhone) {
@@ -2186,6 +2184,23 @@ function computeDeliveryFee(straightKm, settings) {
   return Math.ceil(Math.max(min, base + distanceKm * perKm) / 10) * 10;
 }
 
+// Encomiendas: with their own rate on (Admin → Tarifas de Logística) they skip the general prices
+// and the distance tiers. Must stay identical to calculateEncomiendaFee() in src/utils/geo.js.
+function computeEncomiendaFee(straightKm, settings) {
+  const rate = settings.encomiendaPricing;
+  if (!rate || !rate.enabled) return computeDeliveryFee(straightKm, settings);
+  const distanceKm = straightKm * 1.25; // road correction factor, as in the app
+  const calculated = (Number(rate.basePrice) || 0) + distanceKm * (Number(rate.pricePerKm) || 0);
+  return Math.ceil(Math.max(Number(rate.minPrice) || 0, calculated) / 10) * 10;
+}
+
+// Encomienda without coordinates: the minimum of the rate in use.
+function encomiendaMinFee(settings) {
+  const rate = settings.encomiendaPricing;
+  if (rate && rate.enabled) return Math.ceil((Number(rate.minPrice) || Number(rate.basePrice) || 0) / 10) * 10;
+  return Number(settings.deliveryMinPrice) || 1500;
+}
+
 // A tip only ever adds to the total: negative or absurd values from the app are dropped.
 function sanitizeTip(tip) {
   const value = Math.round(Number(tip) || 0);
@@ -2196,6 +2211,14 @@ function sanitizeTip(tip) {
 // the app (those could be edited, even negative). Mirrors getItemUnitPrice() in
 // src/state.js: an option in 'replace' mode sets the base, the rest add on top. Options
 // that aren't in the product's own groups (shared flavors) carry no price.
+// Transferencia: en la app se elige "mercadopago" (se muestra como Transferencia)
+const isTransferPayment = (method) => /mercadopago|transfer/i.test(String(method || ""));
+/** Precio con el recargo por transferencia del producto (p. ej. cigarrillos +10% en los kioscos), redondeado al peso */
+function withTransferSurcharge(price, pData, method) {
+  const pct = Number(pData && pData.transferSurcharge) || 0;
+  return isTransferPayment(method) && pct > 0 ? Math.round(price * (1 + pct / 100)) : price;
+}
+
 function secureUnitPrice(pData, clientOptions) {
   const options = Array.isArray(clientOptions) ? clientOptions : [];
   const groups = Array.isArray(pData.optionsGroups) ? pData.optionsGroups : [];
@@ -2517,7 +2540,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
         const subProductsTotal = g.items.reduce((s, item, idx) => {
           const pSnap = pDocs[idx];
           const pData = pSnap.data();
-          const basePrice = secureUnitPrice(pData, item.options);
+          const basePrice = withTransferSurcharge(secureUnitPrice(pData, item.options), pData, paymentMethod);
 
           const offer = activeOffers.find(o => 
             o.active && 
@@ -2588,7 +2611,8 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           }
         }
 
-        const subTotal = Math.max(subProductsTotal + subDeliveryCost + subAppUsageFee - subDiscount - subCouponDiscount, 0);
+        // In whole pesos: percentage surcharges and discounts left totals like 1263.1999999.
+        const subTotal = Math.round(Math.max(subProductsTotal + subDeliveryCost + subAppUsageFee - subDiscount - subCouponDiscount, 0));
         const hasWeighedItems = pDocs.some(pSnap => isSoldByWeight(pSnap.data()));
         const productsCouponPercent = couponData && subCouponDiscount > 0 && (couponData.scope || 'products') === 'products' &&
           couponData.type !== 'free_delivery' && (couponData.discountType || 'percentage') === 'percentage'
@@ -2628,7 +2652,7 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           items: g.items.map((item, idx) => {
             const pSnap = pDocs[idx];
             const pData = pSnap.data();
-            const basePrice = secureUnitPrice(pData, item.options);
+            const basePrice = withTransferSurcharge(secureUnitPrice(pData, item.options), pData, paymentMethod);
 
             const offer = activeOffers.find(o => 
               o.active && 
@@ -2659,6 +2683,8 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
             };
             // Producto publicado desde Ventra: la caja lo reconoce al cobrarle al repartidor
             if (pData.ventraId) line.ventraId = pData.ventraId;
+            // Recargo por transferencia del comercio (ya incluido en el precio): para mostrarlo en el pedido
+            if (isTransferPayment(paymentMethod) && Number(pData.transferSurcharge) > 0) line.transferSurcharge = Number(pData.transferSurcharge);
             if (pData.barcode) line.barcode = pData.barcode;
             if (pData.image && /^https?:\/\//.test(pData.image)) line.image = pData.image;
             // Por peso: el precio es estimado hasta que el comercio pesa (src/utils/weight.js applyWeights)
@@ -2708,6 +2734,12 @@ exports.createOrder = onRequest({ cors: true, maxInstances: 15, minInstances: 1 
           guestPhone: guestPhone || null,
           status: 'pending',
           paymentMethod,
+          // Lo que suman los recargos por transferencia (cigarrillos en los kioscos de Ventra)
+          transferSurchargeTotal: isTransferPayment(paymentMethod) ? g.items.reduce((t, item, idx) => {
+            const pData = pDocs[idx].data();
+            const base = secureUnitPrice(pData, item.options);
+            return t + (withTransferSurcharge(base, pData, paymentMethod) - base) * item.qty;
+          }, 0) : 0,
           paymentStatus: 'pending',
           createdAt: FieldValue.serverTimestamp()
         };
@@ -2933,15 +2965,19 @@ exports.createFavorOrder = onRequest({ cors: true, maxInstances: 15, minInstance
       const dLat = deliveryCoords && (deliveryCoords.lat !== undefined ? deliveryCoords.lat : deliveryCoords.latitude);
       const dLng = deliveryCoords && (deliveryCoords.lng !== undefined ? deliveryCoords.lng : deliveryCoords.longitude);
 
+      // The app creates encomiendas with type "mandado" and no stops (purchases are "compra")
+      const isEncomienda = type === 'mandado' && !(Array.isArray(req.body.mandadoStops) && req.body.mandadoStops.length);
+
       let secureDeliveryCost = 0;
       if (type === 'pagodeservicios' && receiptDeliveryType === 'digital') {
          secureDeliveryCost = 0;
       } else if (pLat !== undefined && pLng !== undefined && dLat !== undefined && dLng !== undefined) {
          // Mandados have no real pickup point: the app sends the town center as pickupCoords,
          // so this is center -> customer, with the same formula the app shows.
-         secureDeliveryCost = computeDeliveryFee(getDistance(pLat, pLng, dLat, dLng), globalSettings);
+         const straightKm = getDistance(pLat, pLng, dLat, dLng);
+         secureDeliveryCost = isEncomienda ? computeEncomiendaFee(straightKm, globalSettings) : computeDeliveryFee(straightKm, globalSettings);
       } else {
-         secureDeliveryCost = Number(globalSettings.deliveryMinPrice) || 1500;
+         secureDeliveryCost = isEncomienda ? encomiendaMinFee(globalSettings) : Number(globalSettings.deliveryMinPrice) || 1500;
       }
 
       const activeNightSurcharge = calculateScheduleSurcharge(globalSettings.nightSurchargeConfig, secureDeliveryCost);
@@ -5397,7 +5433,7 @@ function wa() {
     whatsappBot = require("./whatsapp").createWhatsApp({
       db,
       helpers: {
-        computeDeliveryFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled: COMMERCE_COMMISSION_ENABLED,
+        computeDeliveryFee, computeEncomiendaFee, encomiendaMinFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled: COMMERCE_COMMISSION_ENABLED,
         // Sorteos desde el bot: mismas reglas que joinGiveaway (el uid es el del cliente de WhatsApp)
         giveaways: {
           async listOpen() {
@@ -5425,7 +5461,7 @@ function wa() {
           },
         },
       },
-      push: { getUserTokens, sendPush },
+      push: { getUserTokens, sendPush, getAdminTokens },
     });
   }
   return whatsappBot;
@@ -5437,6 +5473,9 @@ exports.whatsappWebhook = onRequest({ maxInstances: 10, timeoutSeconds: 60 }, (r
 // Link de seguimiento en vivo de los pedidos del bot (/en-vivo/{token}): cambia el token del link
 // por una sesión del cliente de WhatsApp (functions/whatsapp/tracking.js).
 exports.waTrackingSession = onRequest({ maxInstances: 10, timeoutSeconds: 30 }, (req, res) => wa().tracking.handle(req, res));
+
+// Admin → Bot WhatsApp → Ajustes: vincular el número y ver cómo está (functions/whatsapp/link.js)
+exports.waBotLink = onRequest({ cors: true, maxInstances: 2, timeoutSeconds: 60 }, (req, res) => wa().link.handle(req, res, { verifyIdToken: (t) => admin.auth().verifyIdToken(t) }));
 
 // Pedido escrito a un comercio: aviso al comercio, precio o rechazo al cliente.
 exports.onWhatsAppQuoteWritten = onDocumentWritten("wa_quotes/{quoteId}", async (event) => {
@@ -5487,8 +5526,29 @@ exports.restoreShopperUnavailable = onSchedule({ schedule: "every 60 minutes", m
   if (n) logger.info(`[shopper] ${n} productos vuelven a estar disponibles`);
 });
 
+// El cadete confirma que la casa está donde entregó (ver functions/pin-correction.js)
+exports.correctDeliveryPin = onRequest({ cors: true, maxInstances: 5 }, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  const authHeader = req.headers.authorization || "";
+  if (!authHeader.startsWith("Bearer ")) return res.status(401).json({ error: "No autorizado" });
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+  const orderId = req.body && req.body.orderId;
+  if (typeof orderId !== "string" || !orderId || orderId.includes("/")) return res.status(400).json({ error: "Pedido inválido" });
+  try {
+    return res.status(200).json(await require("./pin-correction").correctPin(db, decoded.uid, orderId));
+  } catch (err) {
+    logger.error("[correctDeliveryPin] error", err);
+    return res.status(500).json({ error: "No se pudo guardar" });
+  }
+});
+
 // Dueño y correos con acceso a cada comercio (ver functions/commerce-access.js)
-exports.comercioAccess = onRequest({ cors: true, maxInstances: 10 }, async (req, res) => {
+exports.comercioAccess =onRequest({ cors: true, maxInstances: 10 }, async (req, res) => {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
   const authHeader = req.headers.authorization || "";
   if (!authHeader.startsWith("Bearer ")) return res.status(401).json({ error: "No autorizado" });

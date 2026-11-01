@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence, connectAuthEmulator } from 'firebase/auth';
+import { getAuth, initializeAuth, inMemoryPersistence, GoogleAuthProvider, setPersistence, browserLocalPersistence, connectAuthEmulator } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
@@ -49,12 +49,17 @@ if (isTesting) {
   console.log("🧪 Running in TESTING environment (godelivery-testing)");
 }
 
+// Seguimiento en vivo de un pedido de WhatsApp (/en-vivo, src/en-vivo.js): la sesión del cliente
+// vive solo en esta pestaña, en memoria. No lee ni pisa la sesión guardada en este navegador (si
+// el dueño o un admin abre el link, no pierde la suya).
+export const isWaTrackingPage = typeof window !== 'undefined' && /^\/en-vivo(\/|\.html|$)/.test(window.location.pathname);
+
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+export const auth = isWaTrackingPage ? initializeAuth(app, { persistence: inMemoryPersistence }) : getAuth(app);
 if (useEmulators) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 
 // Enforce browserLocalPersistence to guarantee session survival across iOS Safari / PWA reloads & redirects
-setPersistence(auth, browserLocalPersistence).catch((err) => {
+if (!isWaTrackingPage) setPersistence(auth, browserLocalPersistence).catch((err) => {
   console.warn('[Firebase Auth] Could not set browserLocalPersistence:', err);
 });
 
@@ -68,7 +73,7 @@ let dbInstance;
 try {
   // Contra los emuladores, caché en memoria: la caché de IndexedDB compartida entre pestañas
   // hace fallar al SDK (INTERNAL ASSERTION ca9) al probar varias cuentas a la vez.
-  if (useEmulators) throw Object.assign(new Error('emulators'), { useMemory: true });
+  if (useEmulators || isWaTrackingPage) throw Object.assign(new Error('emulators'), { useMemory: true });
   // En iPhone, también en memoria: con la caché de IndexedDB el SDK se seguía rompiendo
   // ("Firestore quedó inservible" una y otra vez) aun con firebase 12.19, y el sistema corta la
   // base local en segundo plano ("Indexed Database server lost"). En Android 12.19 alcanzó.

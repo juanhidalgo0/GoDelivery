@@ -541,7 +541,14 @@ async function startWatchingNow() {
       await addNativeWatcher();
       return; // Skip web fallback
     } catch (err) {
-      console.error('Failed to start native background geolocation:', err);
+      // GPS del teléfono apagado: no es una falla de la app, pero el cliente no lo va a ver en el
+      // mapa. Se le avisa al repartidor (antes no se enteraba; Admin → Errores, 14-10-2026).
+      if (/Location services are not enabled|OS-PLUG-GLOC-0007/i.test(String(err?.message || err))) {
+        console.warn('Background Tracking: location services are off:', err?.message || err);
+        import('../components/toast.js').then(m => m.showToast('Activá la ubicación (GPS) del teléfono: sin eso el cliente no te ve en el mapa', 'warning', 8000)).catch(() => {});
+      } else {
+        console.error('Failed to start native background geolocation:', err);
+      }
       // Fallback to web below
     }
   }

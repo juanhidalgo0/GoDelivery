@@ -1267,10 +1267,14 @@ export async function openSupportTicketModal(orderId, orderNum) {
     height: '100dvh',
     onClose: () => stopKeyboardFit(),
     onOpen: () => {
-      const messagesBox = document.getElementById('ticket-messages-container');
-      const input = document.getElementById('ticket-chat-input');
-      const sendBtn = document.getElementById('ticket-chat-send-btn');
-      const backBtn = document.getElementById('ticket-chat-back-btn');
+      // Dentro de este chat (no en todo el documento) y sin seguir si ya se cerró: onOpen corre
+      // un cuadro después de abrir y un toque rápido en volver lo dejaba sin botones (error en
+      // Admin → Errores: "Cannot set properties of null (setting 'onclick')").
+      const messagesBox = contentEl.querySelector('#ticket-messages-container');
+      const input = contentEl.querySelector('#ticket-chat-input');
+      const sendBtn = contentEl.querySelector('#ticket-chat-send-btn');
+      const backBtn = contentEl.querySelector('#ticket-chat-back-btn');
+      if (!contentEl.isConnected || !messagesBox || !input || !sendBtn || !backBtn) return;
       stopKeyboardFit = fitToVisibleViewport(contentEl, messagesBox);
 
       backBtn.onclick = () => {

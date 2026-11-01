@@ -320,8 +320,16 @@ service cloud.firestore {
       // Borrar un pedido borra también su comisión: sólo el admin.
       allow delete: if isAdmin();
 
+      // Sólo las partes del pedido (acá `resource` es el mensaje: hay que mirar el pedido).
       match /messages/{messageId} {
-        allow read, create: if isAdmin() || isDriver() || isCustomer() || isTheShop();
+        function orderHere() {
+          return get(/databases/$(database)/documents/orders/$(orderId)).data;
+        }
+        allow read, create: if isAdmin() || (isSignedIn() && (
+          orderHere().get('userId', '') == uid() ||
+          orderHere().get('driverId', '') == uid() ||
+          ownsComercio(orderHere().get('comercioId', ''))
+        ));
         allow update, delete: if isAdmin();
       }
 
@@ -357,62 +365,40 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------ chats
 
-    // El array `participants` mezcla uids con comercioId, y los pedidos no
-    // guardan comercioOwnerId, así que la pertenencia también se valida contra
-    // el pedido vinculado: cliente, cadete asignado y dueño del comercio.
-    function isPartyOfOrder(orderId) {
-      return isSignedIn() && orderId is string && orderId != '' &&
-        exists(/databases/$(database)/documents/orders/$(orderId)) && (
-          get(/databases/$(database)/documents/orders/$(orderId)).data.get('userId', '') == uid() ||
-          get(/databases/$(database)/documents/orders/$(orderId)).data.get('driverId', '') == uid() ||
-          ownsComercio(get(/databases/$(database)/documents/orders/$(orderId)).data.get('comercioId', ''))
-        );
+    function shopOfOrder(order) {
+      return order.get('comercioId', '') == uid() || ownsComercio(order.get('comercioId', ''));
     }
 
-    function chatOf(chatId) {
-      return get(/databases/$(database)/documents/chats/$(chatId)).data;
-    }
-
-    // El id del chat es `${orderId}_${tipo}`. La app empieza a escuchar los mensajes antes de
-    // que exista el doc del chat (lo crea en segundo plano); sin esto la primera escucha era
-    // rechazada y quedaba muerta: el que abría el chat no veía ni lo que mandaba.
-    function orderOfChatId(chatId) {
-      return chatId.split('_')[0];
-    }
-
-    function canUseChat(chatId) {
-      return isAdmin() || (
-        exists(/databases/$(database)/documents/chats/$(chatId))
-          ? (uid() in chatOf(chatId).get('participants', []) ||
-             isPartyOfOrder(chatOf(chatId).get('orderId', '')))
-          : isPartyOfOrder(orderOfChatId(chatId))
+    // El id del chat es `${orderId}_${tipo}` y cada tipo es de dos partes: quién entra sale del
+    // pedido de hoy, no de `participants` (que sólo sirve para listar). Así el cadete no entra al
+    // chat cliente↔comercio, el comercio no entra al cliente↔cadete y un cadete reasignado deja
+    // de ver el chat. También vale antes de que exista el doc del chat: la app escucha los
+    // mensajes mientras lo crea en segundo plano.
+    function isChatParty(chatId) {
+      let orderPath = /databases/$(database)/documents/orders/$(chatId.split('_')[0]);
+      let type = chatId.split('_')[1];
+      return isSignedIn() && chatId.split('_').size() == 2 && exists(orderPath) && (
+        type == 'client-delivery'
+          ? (get(orderPath).data.get('userId', '') == uid() || get(orderPath).data.get('driverId', '') == uid())
+        : type == 'client-commerce'
+          ? (get(orderPath).data.get('userId', '') == uid() || shopOfOrder(get(orderPath).data))
+        : type == 'commerce-delivery'
+          ? (get(orderPath).data.get('driverId', '') == uid() || shopOfOrder(get(orderPath).data))
+        : false
       );
     }
 
     match /chats/{chatId} {
-      function isParticipant() {
-        return isSignedIn() && (
-          uid() in resource.data.get('participants', []) ||
-          isPartyOfOrder(resource.data.get('orderId', ''))
-        );
-      }
-
       // Un chat que todavía no existe no tiene nada que mostrar: se puede consultar.
-      allow get:    if isAdmin() || resource == null || isParticipant();
-      allow list:   if isAdmin() || isParticipant();
-      allow create: if isSignedIn() && (
-        uid() in request.resource.data.get('participants', []) ||
-        isPartyOfOrder(request.resource.data.get('orderId', ''))
-      );
-      allow update: if isAdmin() || isParticipant();
+      allow get:    if isAdmin() || resource == null || isChatParty(chatId);
+      // "Mis chats" pide los que lo listan a uno; los mensajes igual exigen ser parte.
+      allow list:   if isAdmin() || (isSignedIn() && uid() in resource.data.get('participants', []));
+      allow create: if isAdmin() || isChatParty(chatId);
+      allow update: if isAdmin() || isChatParty(chatId);
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read:   if canUseChat(chatId);
-        // El primer mensaje puede llegar antes de que exista el doc del chat.
-        allow create: if canUseChat(chatId) ||
-          (isSignedIn() && !exists(/databases/$(database)/documents/chats/$(chatId)));
-        allow update: if canUseChat(chatId);
+        allow read, create, update: if isAdmin() || isChatParty(chatId);
         allow delete: if isAdmin();
       }
     }
@@ -471,6 +457,8 @@ service cloud.firestore {
     // Modo prueba del bot: lista de números (personales) a los que contesta. No va en settings,
     // que lee cualquiera.
     match /wa_config/{docId} { allow read, write: if isAdmin(); }
+    // Token del número vinculado: solo el servidor (functions/whatsapp/link.js)
+    match /wa_secrets/{docId} { allow read, write: if false; }
     // Uso de la IA del bot (tokens por llamada) y clientes esperando cadete: solo el servidor escribe
     match /wa_ai_log/{id} { allow read: if isAdmin(); }
     match /wa_waitlist/{waId} { allow read: if isAdmin(); }

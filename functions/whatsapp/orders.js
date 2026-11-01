@@ -2,6 +2,8 @@
 // createOrder (index.js), con las mismas funciones: el bot no tiene tarifas propias.
 const logger = require("firebase-functions/logger");
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { newTrackingToken } = require("./tracking");
+const { ensureWaUser } = require("./wa-users");
 
 // Mismo centro que usa la app para las compras (src/utils/mandado-places.js TOWN_CENTER)
 const TOWN_CENTER = { lat: -35.0811, lng: -57.5146 };
@@ -22,7 +24,7 @@ const coordsOf = (c) => {
 };
 
 function createOrders(db, h) {
-  // h: { computeDeliveryFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled }
+  // h: { computeDeliveryFee, computeEncomiendaFee, encomiendaMinFee, getDistance, calculateScheduleSurcharge, resolveAutoRain, commissionEnabled }
 
   async function hasOnlineDriver() {
     const snap = await db.collection("users").where("isOnline", "==", true).get();
@@ -62,10 +64,15 @@ function createOrders(db, h) {
   }
 
   // Mandado (compra o encomienda): mismas cuentas que la parte segura de createFavorOrder.
-  async function quoteFavor({ type, pickupCoords, deliveryCoords }) {
+  // stopsCount: comercios de una compra; cada uno después del primero suma deliveryExtraStopFee (como createFavorOrder)
+  async function quoteFavor({ type, pickupCoords, deliveryCoords, stopsCount = 1 }) {
     const { gs, isRaining, rain } = await loadPricingContext();
     const p = coordsOf(pickupCoords), d = coordsOf(deliveryCoords);
-    const base = p && d ? h.computeDeliveryFee(h.getDistance(p.lat, p.lng, d.lat, d.lng), gs) : (Number(gs.deliveryMinPrice) || 1500);
+    // Encomienda ("mandado" para el bot): su tarifa propia, si está activa
+    const isEncomienda = type === "mandado";
+    const base = p && d
+      ? (isEncomienda ? h.computeEncomiendaFee : h.computeDeliveryFee)(h.getDistance(p.lat, p.lng, d.lat, d.lng), gs)
+      : (isEncomienda ? h.encomiendaMinFee(gs) : (Number(gs.deliveryMinPrice) || 1500));
     const night = h.calculateScheduleSurcharge(gs.nightSurchargeConfig, base);
     const deliveryCost = base > 0 ? base + rain + night : 0;
     const purchaseFee = type === "compra" ? (gs.favorPurchaseFee !== undefined ? Number(gs.favorPurchaseFee) : 800) : 0;
@@ -73,8 +80,10 @@ function createOrders(db, h) {
     const appUsageFee = feeCfg.type === "fixed"
       ? Number(feeCfg.value) || 0
       : Math.ceil((base * ((Number(feeCfg.value) || 0) / 100)) / 10) * 10;
-    const total = Math.max(0, Math.ceil(deliveryCost + purchaseFee + appUsageFee));
-    return { baseFee: base, deliveryCost, isRaining, rainSurcharge: rain, nightSurcharge: night, purchaseFee, appUsageFee, total, exactDistance: !!(p && d) };
+    const stops = Math.min(10, Math.max(1, Math.floor(Number(stopsCount) || 1)));
+    const extraStopsFee = (stops - 1) * (gs.deliveryExtraStopFee !== undefined ? Number(gs.deliveryExtraStopFee) : 500);
+    const total = Math.max(0, Math.ceil(deliveryCost + purchaseFee + extraStopsFee + appUsageFee));
+    return { baseFee: base, deliveryCost, isRaining, rainSurcharge: rain, nightSurcharge: night, purchaseFee, extraStopsFee, stopsCount: stops, appUsageFee, total, exactDistance: !!(p && d) };
   }
 
   // Pedido a comercio con precio que puso el comercio: mismas cuentas que createOrder para un
@@ -111,16 +120,29 @@ function createOrders(db, h) {
       .map((m) => `${m.type === "audio" ? "🎤 Audio" : m.type === "image" ? "📷 Foto" : "📎 Archivo"}: ${m.url}`).join("\n");
   }
 
-  // f: { waId, customer, type, details, media, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, addressNotes, paymentMethod }
+  // f: { waId, customer, type, details, media, pickupAddress, pickupCoords, deliveryAddress, deliveryCoords, addressNotes, paymentMethod, tip }
+  // f.stops (compras): [{ store, items, media }] → mandadoStops, el mismo formato que la app
   async function createFavor(f) {
     const pickupCoords = f.type === "compra" ? TOWN_CENTER : coordsOf(f.pickupCoords);
-    const q = await quoteFavor({ type: f.type, pickupCoords, deliveryCoords: f.deliveryCoords });
+    const stops = f.type === "compra" && Array.isArray(f.stops)
+      ? f.stops.filter((st) => st && String(st.store || "").trim()).slice(0, 10).map((st) => ({
+        store: String(st.store).replace(/\s+/g, " ").trim().slice(0, 80),
+        items: [String(st.items || "").trim(), mediaLines(st.media)].filter(Boolean).join("\n").slice(0, 600),
+      }))
+      : [];
+    const q = await quoteFavor({ type: f.type, pickupCoords, deliveryCoords: f.deliveryCoords, stopsCount: stops.length || 1 });
+    // Propina del formulario: como en la app, va entera al cadete y solo puede sumar
+    const tip = Math.round(Number(f.tip) || 0);
+    const safeTip = tip > 0 && tip <= 100000 ? tip : 0;
     const details = [String(f.details || "").trim(), mediaLines(f.media)].filter(Boolean).join("\n\n") || "Pedido por WhatsApp";
     const orderRef = db.collection("orders").doc();
+    const trackingToken = newTrackingToken();
+    await ensureWaUser(db, { userId: f.customer.userId, userName: f.customer.userName, userPhone: f.customer.phone, waPhone: f.waId });
     const orderNum = await db.runTransaction(async (tx) => {
       const { ref, n } = await nextOrderNumber(tx);
       tx.set(orderRef, {
         orderId: n,
+        trackingToken,
         isFavor: true,
         favorType: f.type,
         source: "whatsapp_bot",
@@ -128,7 +150,10 @@ function createOrders(db, h) {
         userId: f.customer.userId,
         userName: f.customer.userName,
         userPhone: f.customer.phone,
-        pickupAddress: f.type === "compra" ? "Donde indique el pedido" : (f.pickupAddress || "A coordinar"),
+        pickupAddress: f.type === "compra"
+          ? (stops.length > 1 ? `Múltiples comercios (${stops.length} comercios)` : stops.length ? `Comercio: ${stops[0].store}` : "Donde indique el pedido")
+          : (f.pickupAddress || "A coordinar"),
+        ...(stops.length ? { mandadoStops: stops, storeName: stops[0].store } : {}),
         pickupCoords: pickupCoords || null,
         deliveryAddress: f.deliveryAddress || "A coordinar",
         deliveryCoords: coordsOf(f.deliveryCoords),
@@ -141,13 +166,13 @@ function createOrders(db, h) {
         nightSurcharge: q.nightSurcharge,
         purchaseFee: q.purchaseFee,
         appUsageFee: q.appUsageFee,
-        extraStopsFee: 0,
-        stopsCount: 1,
-        total: q.total,
+        extraStopsFee: q.extraStopsFee || 0,
+        stopsCount: q.stopsCount || 1,
+        total: q.total + safeTip,
         status: "pending",
         paymentMethod: f.paymentMethod || "efectivo",
         paymentStatus: "pending",
-        tip: 0,
+        tip: safeTip,
         couponCode: null,
         couponDiscount: 0,
         directDriverUid: null,
@@ -162,7 +187,7 @@ function createOrders(db, h) {
     await db.collection("notifications").add({
       title: "Nuevo favor disponible", message: `Hay un nuevo ${f.type} disponible`, type: "new_favor", status: "unread", createdAt: FieldValue.serverTimestamp(),
     }).catch(() => {});
-    return { id: orderRef.id, orderNum, quote: q };
+    return { id: orderRef.id, orderNum, quote: q, total: q.total + safeTip, trackingToken };
   }
 
   // El comercio escribe al bot pidiendo un cadete: mismo pedido que armaba el bot anterior.
@@ -235,12 +260,13 @@ function createOrders(db, h) {
   async function createOrderFromQuote(quoteId) {
     const quoteRef = db.collection("wa_quotes").doc(quoteId);
     const orderRef = db.collection("orders").doc();
-    return db.runTransaction(async (tx) => {
+    const trackingToken = newTrackingToken();
+    const res = await db.runTransaction(async (tx) => {
       const qSnap = await tx.get(quoteRef);
       if (!qSnap.exists) throw new Error("quote_missing");
       const qd = qSnap.data();
       // Sin pricing todavía: el precio se está calculando (el cliente tocó un botón viejo)
-      if (qd.status !== "quoted" || !qd.pricing) return { already: true, status: qd.status, orderId: qd.orderId || null, orderNum: qd.orderNum || null };
+      if (qd.status !== "quoted" || !qd.pricing) return { already: true, status: qd.status, orderId: qd.orderId || null, orderNum: qd.orderNum || null, trackingToken: qd.trackingToken || null };
       const cSnap = await tx.get(db.collection("comercios").doc(qd.comercioId));
       const comercio = cSnap.exists ? { id: cSnap.id, ...cSnap.data() } : { id: qd.comercioId, name: qd.comercioName };
       const p = qd.pricing || {};
@@ -249,6 +275,7 @@ function createOrders(db, h) {
       const note = [qd.requestText, mediaLines(qd.media), qd.commerceNote ? `Comercio: ${qd.commerceNote}` : ""].filter(Boolean).join("\n");
       tx.set(orderRef, {
         orderId: n,
+        trackingToken,
         isBundle: false,
         bundleIndex: 0,
         bundleCount: 1,
@@ -290,9 +317,14 @@ function createOrders(db, h) {
         createdAt: FieldValue.serverTimestamp(),
       });
       tx.set(ref, { lastOrderId: n }, { merge: true });
-      tx.update(quoteRef, { status: "accepted", orderId: orderRef.id, orderNum: n, acceptedAt: FieldValue.serverTimestamp() });
-      return { id: orderRef.id, orderNum: n, total: p.total || 0 };
+      tx.update(quoteRef, { status: "accepted", orderId: orderRef.id, orderNum: n, trackingToken, acceptedAt: FieldValue.serverTimestamp() });
+      return { id: orderRef.id, orderNum: n, total: p.total || 0, trackingToken };
     });
+    if (!res.already) {
+      const q = (await quoteRef.get()).data() || {};
+      await ensureWaUser(db, { userId: q.userId, userName: q.customerName, userPhone: q.customerPhone, waPhone: q.waPhone }).catch(() => {});
+    }
+    return res;
   }
 
   return { hasOnlineDriver, resolveCustomer, quoteFavor, quoteCommerce, createFavor, createCadeteria, createQuote, createOrderFromQuote, coordsOf };

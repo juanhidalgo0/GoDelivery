@@ -182,9 +182,8 @@ const ASSETS_TO_CACHE = [
   '/logo.png',
   '/badge-icon.png',
   '/go-box.png',
-  '/assets/sounds/message.mp3',
-  '/assets/sounds/notification.mp3',
-  '/assets/sounds/chime.mp3',
+  '/assets/sounds/message.wav',
+  '/assets/sounds/notification.wav',
 ];
 
 // Install: Pre-cache App Shell

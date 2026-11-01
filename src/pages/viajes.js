@@ -451,6 +451,7 @@ export async function renderViajes(content) {
 
       try {
         const tripOrder = {
+          orderId: Math.floor(80000 + Math.random() * 10000), // the driver's screens show "Pedido #..."
           userId: user.uid,
           userName: user.displayName || user.name || 'Cliente',
           userPhone: user.phone || '',
@@ -560,6 +561,7 @@ export async function renderViajes(content) {
           requestBtn.innerHTML = `${icon('loader', 20, 'animate-spin')} Enviando solicitud...`;
 
           const tripOrder = {
+            orderId: Math.floor(80000 + Math.random() * 10000), // the driver's screens show "Pedido #..."
             userId: user.uid,
             userName: user.displayName || user.name || 'Cliente',
             userPhone: user.phone || '',

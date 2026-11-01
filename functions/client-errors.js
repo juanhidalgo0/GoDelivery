@@ -48,6 +48,10 @@ function topFrame(stack) {
 // "Importing a module script failed"): no es un error del código y keep-old-assets.js lo evita.
 const NETWORK_RE = /importing a module script failed|dynamically imported module|failed to fetch|load failed|networkerror|network request failed|err_internet_disconnected|err_network|the internet connection appears to be offline|unavailable.*backend|could not reach cloud firestore|client is offline|timeout|timed out|aborted/i;
 const IGNORE_RE = /resizeobserver loop|^script error\.?$|navigator\.vibrate|chrome-extension:|moz-extension:|safari-extension:|webkit-masked-url/i;
+// Código que no es nuestro: scripts que inyecta el navegador de Instagram/Facebook (iabjs://) o el
+// lector de Google (wrsParams), y robots que abren la página. No hay nada que arreglar en la app.
+const FOREIGN_STACK_RE = /iabjs:\/\/|wrsParams\./;
+const BOT_UA_RE = /Google-Read-Aloud|Googlebot|bingbot|AdsBot|HeadlessChrome|Chrome-Lighthouse/i;
 
 function isNetworkError(message) { return NETWORK_RE.test(message); }
 
@@ -80,6 +84,7 @@ async function recordClientError(report, uid) {
   const db = getFirestore();
   const message = clip(report.message, 500).trim();
   if (!message || IGNORE_RE.test(message)) return { ignored: true };
+  if (FOREIGN_STACK_RE.test(clip(report.stack, 2000)) || BOT_UA_RE.test(clip(report.ua, 300))) return { ignored: true };
   const kind = ["error", "promesa", "capturado", "toast"].includes(report.kind) ? report.kind : "error";
   const stack = clip(report.stack, 2000);
   const fingerprint = fingerprintOf(kind, message, stack);

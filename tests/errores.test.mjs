@@ -83,6 +83,11 @@ check('los errores de red se anotan marcados como red', !!net && net.message.inc
 check('...y no avisan', (await alertsSent()) === 2);
 await report([err({ message: 'ResizeObserver loop completed with undelivered notifications.' }), err({ message: 'Script error.' })]);
 check('el ruido del navegador ni se guarda', !(await allErrors()).some((e) => /ResizeObserver|Script error/.test(e.message)));
+await report([
+  err({ message: 'Error invoking postMessage: Java object is gone', stack: 'Error: Error invoking postMessage: Java object is gone\n    at sendDataToNative (iabjs://navigation_performance_logger_android:1:11853)' }),
+  err({ kind: 'capturado', message: 'GoDelivery: SW registration failed Rejected', stack: 'Error: Rejected\n    at wrsParams.serviceWorkers.navigator.serviceWorker.register (<anonymous>:12:648)', ua: 'Mozilla/5.0 (Linux; Android 10; K) Chrome/138.0.0.0 Mobile Safari/537.36 (compatible; Google-Read-Aloud; +https://support.google.com/webmasters/answer/1061943)' }),
+]);
+check('los scripts que inyecta Instagram o el lector de Google no se guardan', !(await allErrors()).some((e) => /Java object is gone|SW registration failed/.test(e.message)));
 check('rechaza lo que no es POST', (await fetch(URL)).status === 405);
 
 console.log('=========== PERSONAS, RESUELTO Y REPETIDO ===========');

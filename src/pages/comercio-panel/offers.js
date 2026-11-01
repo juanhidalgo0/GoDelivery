@@ -1,6 +1,7 @@
 // GoDelivery — Comercio Offers Management
 import { db } from '../../firebase.js';
 import { collection, getDocs, doc, deleteDoc, updateDoc, addDoc, serverTimestamp, query, where, getDoc, setDoc } from 'firebase/firestore';
+import { loadPanelCatalog } from '../../utils/panel-catalog.js';
 import { icon } from '../../utils/icons.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
@@ -268,8 +269,7 @@ async function openOfferEditor(existingOffer = null) {
 
   // Load products & categories
   try {
-    const pSnap = await getDocs(collection(db, 'comercios', comercioId, 'products'));
-    activeProducts = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    activeProducts = await loadPanelCatalog(comercioId);
 
     const catsSnap = await getDocs(collection(db, 'comercios', comercioId, 'categories'));
     categories = catsSnap.docs.map(d => ({ id: d.id, ...d.data() }));

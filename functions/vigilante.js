@@ -236,6 +236,37 @@ const CHECKS = [
     },
   },
   {
+    id: "comercios_sin_avisos",
+    severity: "media",
+    title: "Comercios a los que no les llegan los avisos de pedidos",
+    help: "El dueño no tiene ningún dispositivo registrado para notificaciones, o el último es de hace más de 30 días. Sus pedidos entran sin sonar si no está mirando el panel. Que abra el panel en su celular: la franja de arriba le pide el permiso.",
+    async run(ctx) {
+      const items = [];
+      const comercios = (await ctx.db.collection("comercios").get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+      for (const c of comercios) {
+        if (c.isActive === false || c.active === false || c.deleted === true) continue;
+        const name = String(c.name || "").toLowerCase();
+        if (name.includes("go!") && name.includes("market")) continue; // lo atienden los admins
+        let ownerId = c.ownerId;
+        if (!ownerId) {
+          const q = await ctx.db.collection("users").where("comercioId", "==", c.id).limit(1).get();
+          ownerId = q.empty ? null : q.docs[0].id;
+        }
+        const label = c.name || c.id;
+        if (!ownerId) { items.push({ id: c.id, label: `${label} · sin dueño cargado` }); continue; }
+        const owner = (await ctx.db.collection("users").doc(ownerId).get()).data() || {};
+        if (owner.role === "admin" || owner.isAdmin === true) continue; // le llega como admin
+        const tokens = await ctx.db.collection("users").doc(ownerId).collection("fcmTokens").get();
+        let newest = tsToMs(owner.lastFcmToken ? owner.lastFcmTokenUpdatedAt : null);
+        tokens.docs.forEach((d) => { const t = d.data(); newest = Math.max(newest, tsToMs(t.updatedAt) || tsToMs(t.lastSession)); });
+        const hasAny = !tokens.empty || Boolean(owner.lastFcmToken);
+        if (!hasAny) items.push({ id: c.id, label: `${label} · sin ningún dispositivo${owner.phone ? ` · ${owner.phone}` : ""}` });
+        else if (newest && ctx.now - newest > 30 * 24 * HOUR) items.push({ id: c.id, label: `${label} · último dispositivo ${ago(newest, ctx.now)}${owner.phone ? ` · ${owner.phone}` : ""}` });
+      }
+      return { items };
+    },
+  },
+  {
     id: "cadete_desconectado_con_pedido",
     severity: "media",
     title: "Pedidos en curso con el cadete desconectado",
@@ -273,7 +304,10 @@ const CHECKS = [
     help: "Recargas que pidió la app o cierres con la app en pantalla (Admin → Reinicios tiene el detalle). Más de 10 en un día suele ser un error que fuerza la recarga.",
     async run(ctx) {
       const snap = await ctx.db.collection("app_restarts").where("createdAt", ">=", Timestamp.fromMillis(ctx.now - 24 * HOUR)).get();
-      const bad = snap.docs.map((d) => d.data()).filter((r) => r.kind === "la app recargó" || (r.kind === "reinicio sin aviso" && r.wasVisible === true));
+      // La recarga por versión nueva es la actualización normal después de publicar: no cuenta
+      // (cada publicación sumaba una por persona y disparaba el aviso, 16-10-2026).
+      const isUpdate = (r) => /^versión nueva/i.test(String(r.reason || ""));
+      const bad = snap.docs.map((d) => d.data()).filter((r) => (r.kind === "la app recargó" && !isUpdate(r)) || (r.kind === "reinicio sin aviso" && r.wasVisible === true));
       if (bad.length < 10) return { items: [] };
       const groups = new Map();
       bad.forEach((r) => { const k = `${r.kind}: ${clip(r.reason, 90)}`; groups.set(k, (groups.get(k) || 0) + 1); });
@@ -420,7 +454,9 @@ async function ingestServerErrors(db, now, deps, state) {
   const since = state.logsCursor ? new Date(state.logsCursor) : new Date(now - 20 * MIN);
   // Los registros pueden tardar en aparecer: se procesa hasta 2 min antes de ahora y lo último
   // queda para la pasada siguiente, así no se pierde nada que llegue tarde.
-  const until = new Date(now - 2 * MIN);
+  // De a tramos de 30 min: atrasado varias horas, una sola consulta superaba el tiempo de la API
+  // de registros ("Total timeout … exceeded 60000", 14-10-2026) y no avanzaba nunca
+  const until = new Date(Math.min(now - 2 * MIN, since.getTime() + 30 * MIN));
   if (until <= since) return { cursor: state.logsCursor, entries: 0, groups: 0, more: false };
   const filter = [
     "severity>=ERROR",
@@ -428,7 +464,7 @@ async function ingestServerErrors(db, now, deps, state) {
     `timestamp<="${until.toISOString()}"`,
     '(resource.type="cloud_run_revision" OR resource.type="cloud_function")',
   ].join(" AND ");
-  const [entries] = await (deps.getLogEntries || ((opts) => logging().getEntries(opts)))({ filter, orderBy: "timestamp asc", pageSize: LOGS_PAGE, autoPaginate: false });
+  const [entries] = await (deps.getLogEntries || ((opts) => logging().getEntries(opts)))({ filter, orderBy: "timestamp asc", pageSize: LOGS_PAGE, autoPaginate: false, gaxOptions: { timeout: 120000 } });
   const groups = new Map();
   let cursor = state.logsCursor || since.toISOString();
   for (const entry of entries || []) {
@@ -454,15 +490,26 @@ async function ingestServerErrors(db, now, deps, state) {
       const before = prev?.count || 0;
       const count = before + g.n;
       const sample = { service: g.service, stack: clip(g.text, 2000), at: g.at ? new Date(g.at) : new Date(now), route: "", role: "servidor", platform: "Cloud Functions" };
+      // "Última vez" = cuándo pasó el error (la hora del registro), no cuándo se leyó: si el
+      // vigilante se atrasa leyendo, antes los errores viejos parecían de recién.
+      const happenedMs = g.at ? Date.parse(g.at) : now;
+      const prevLastMs = prev?.lastSeen?.toMillis ? prev.lastSeen.toMillis() : 0;
       const update = {
         fingerprint, kind: "servidor", network: false, message: g.head, normalized: normalizeMessage(g.head), frame: g.service,
-        count, userCount: 0, lastSeen: FieldValue.serverTimestamp(), lastSample: sample,
+        count, userCount: 0, lastSeen: Timestamp.fromMillis(Math.max(happenedMs, prevLastMs)), lastSample: sample,
         [`routes.${g.service.replace(/[.~*/[\]`#$]/g, "_").slice(0, 60) || "?"}`]: FieldValue.increment(g.n),
       };
       if (!prev) {
-        tx.set(ref, { fingerprint, status: "open", firstSeen: FieldValue.serverTimestamp(), firstSample: sample });
+        tx.set(ref, { fingerprint, status: "open", firstSeen: Timestamp.fromMillis(happenedMs), firstSample: sample });
         tx.update(ref, update);
         return "nuevo";
+      }
+      // Resuelto y lo que llega es de ANTES de marcarlo resuelto (el vigilante se puso al día con
+      // registros viejos): se cuenta, pero no se reabre ni se avisa. Así volvía "customer photo".
+      const resolvedMs = prev.statusAt?.toMillis ? prev.statusAt.toMillis() : 0;
+      if (prev.status === "resolved" && resolvedMs && happenedMs <= resolvedMs) {
+        tx.update(ref, { count, [`routes.${g.service.replace(/[.~*/[\]`#$]/g, "_").slice(0, 60) || "?"}`]: FieldValue.increment(g.n) });
+        return null;
       }
       if (prev.status === "resolved") {
         tx.update(ref, { ...update, status: "open", reopenedAt: FieldValue.serverTimestamp(), reopenCount: FieldValue.increment(1) });
@@ -475,7 +522,13 @@ async function ingestServerErrors(db, now, deps, state) {
     if (alert) alerts.push({ fingerprint, alert });
   }
   if (!deps.quiet) for (const a of alerts) await alertAdmins(a, deps).catch((err) => logger.warn("[Vigilante] aviso falló:", err));
-  return { cursor, entries: (entries || []).length, groups: groups.size, more: (entries || []).length >= LOGS_PAGE };
+  const truncated = (entries || []).length >= LOGS_PAGE;
+  const behind = until.getTime() < now - 2 * MIN;
+  // Atrasado y con el tramo leído entero: la marca va hasta el final del tramo (si no, un tramo
+  // sin errores la dejaba quieta y no avanzaba nunca). Al día se deja como estaba, para levantar
+  // en la pasada siguiente los registros que llegan con demora.
+  if (!truncated && behind) cursor = until.toISOString();
+  return { cursor, entries: (entries || []).length, groups: groups.size, more: truncated || behind };
 }
 
 // ---------------------------------------------------------------- pasadas
@@ -494,9 +547,19 @@ async function runVigilante(deps = {}, { daily = false } = {}) {
   let logs = null;
   try {
     // En el emulador no hay Cloud Logging (las pruebas inyectan deps.getLogEntries)
-    logs = process.env.FUNCTIONS_EMULATOR === "true" && !deps.getLogEntries
-      ? { skipped: true, entries: 0, groups: 0 }
-      : await ingestServerErrors(db, now, deps, state);
+    if (process.env.FUNCTIONS_EMULATOR === "true" && !deps.getLogEntries) {
+      logs = { skipped: true, entries: 0, groups: 0 };
+    } else {
+      // Atrasado: hasta 6 tramos de 30 min por pasada para ponerse al día
+      let cur = { ...state };
+      logs = { entries: 0, groups: 0, more: false };
+      for (let i = 0; i < 6; i++) {
+        const r = await ingestServerErrors(db, now, deps, cur);
+        logs = { cursor: r.cursor, entries: logs.entries + r.entries, groups: logs.groups + r.groups, more: r.more };
+        if (!r.more || r.cursor === cur.logsCursor) break;
+        cur = { ...cur, logsCursor: r.cursor };
+      }
+    }
   } catch (err) {
     const msg = clip(err?.message || err, 300);
     logger.error("[Vigilante] no se pudieron leer los registros del servidor:", err);

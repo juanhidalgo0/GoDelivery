@@ -2,7 +2,15 @@
 import { showModal, closeModal } from '../components/modal.js';
 import { icon } from './icons.js';
 
-async function ensureCropperLoaded() {
+// The same load for everyone: opening the cropper twice in a row found the script tag still
+// loading, didn't wait for it and failed with "Cropper is not defined".
+let cropperLoad = null;
+function ensureCropperLoaded() {
+  if (!cropperLoad) cropperLoad = loadCropper().catch((err) => { cropperLoad = null; throw err; });
+  return cropperLoad;
+}
+
+async function loadCropper() {
   if (typeof window.Cropper !== 'undefined') return;
   if (!document.getElementById('cropper-css')) {
     const link = document.createElement('link');
@@ -11,16 +19,15 @@ async function ensureCropperLoaded() {
     link.href = 'https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css';
     document.head.appendChild(link);
   }
-  if (!document.getElementById('cropper-js')) {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.id = 'cropper-js';
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js';
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
+  document.getElementById('cropper-js')?.remove(); // a previous attempt that failed
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.id = 'cropper-js';
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js';
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('No se pudo cargar el recortador de fotos'));
+    document.head.appendChild(script);
+  });
 }
 
 /**
@@ -94,7 +101,18 @@ export async function openCropper(imageSource, options = {}) {
     // Initialize Cropper when modal is ready
     // We use a small timeout to ensure the image is rendered
     setTimeout(() => {
-      cropper = new Cropper(imageElement, defaultOptions);
+      // "Listo" se habilita recién cuando la foto cargó en el recortador. Antes se podía tocar antes
+      // (una foto grande de la cámara tarda) y getCroppedCanvas devolvía null: "Cannot read
+      // properties of null (reading 'toDataURL')" y la foto no se guardaba.
+      const doneBtn = document.getElementById('crop-done');
+      if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = 'Cargando…'; }
+      cropper = new Cropper(imageElement, {
+        ...defaultOptions,
+        ready(e) {
+          if (doneBtn) { doneBtn.disabled = false; doneBtn.textContent = 'Listo'; }
+          if (typeof defaultOptions.ready === 'function') defaultOptions.ready.call(this, e);
+        },
+      });
 
       // Toolbar actions
       document.getElementById('crop-rotate-l')?.addEventListener('click', () => cropper.rotate(-90));
@@ -114,6 +132,10 @@ export async function openCropper(imageSource, options = {}) {
           imageSmoothingEnabled: true,
           imageSmoothingQuality: 'high',
         });
+        if (!canvas) {
+          import('../components/toast.js').then(m => m.showToast('La foto todavía está cargando: esperá un segundo y tocá Listo de nuevo', 'info'));
+          return;
+        }
 
         let croppedBase64 = canvas.toDataURL('image/webp', options.quality !== undefined ? options.quality : 0.75);
         if (!croppedBase64.startsWith('data:image/webp')) {

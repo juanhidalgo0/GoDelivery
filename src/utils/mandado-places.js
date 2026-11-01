@@ -207,8 +207,10 @@ const isTrusted = (p) => p.source === 'comercio' || p.trusted === true;
 
 /**
  * El lugar al que se refiere un nombre escrito a mano, o null si no hay uno claro.
- * Coincide si el nombre es el mismo, o si uno contiene al otro y lo que sobra no es solo el rubro
- * ("Pasteur" ↔ "Farmacia Pasteur" sí; "Farmacia" ↔ "Farmacia Pasteur" no).
+ * Coincide si el nombre es el mismo, o si el cliente escribió menos que el lugar ("Pasteur" →
+ * "Farmacia Pasteur"). Al revés no: en "Pollería Chacabuco y Rivadavia" la palabra Rivadavia es la
+ * calle, no el "Supermercado Rivadavia". Dos rubros distintos nunca son el mismo lugar ("pollería
+ * san javier" no es "carnicería san javier"). Ante la duda, null: mejor sin mapa que en otro comercio.
  */
 export function resolvePlaceByName(name, list = places) {
   const n = normalizePlaceName(name);
@@ -219,10 +221,13 @@ export function resolvePlaceByName(name, list = places) {
   const core = (s) => s.split(' ').filter(w => !CATEGORY_RULES.some(r => r[1].test(w)) && !/^(el|la|los|las|de|del)$/.test(w)).join(' ');
   const nCore = core(n);
   if (nCore.length < 4) return null;
+  const nCat = placeCategory(n);
   const matches = list.filter(p => {
     const pCore = core(normalizePlaceName(p.name));
     if (pCore.length < 4) return false;
-    return pCore === nCore || (` ${pCore} `).includes(` ${nCore} `) || (` ${nCore} `).includes(` ${pCore} `);
+    const pCat = placeCategory(p.name);
+    if (nCat && pCat && nCat !== pCat) return false;
+    return pCore === nCore || (` ${pCore} `).includes(` ${nCore} `);
   });
   if (!matches.length) return null;
   matches.sort((a, b) => rankOf(b) - rankOf(a));
@@ -319,9 +324,13 @@ export function mandadoStoresOf(order = {}) {
 }
 
 /**
- * Dónde queda cada comercio del mandado: primero lo que trae el pedido, después un lugar conocido
+ * Dónde queda cada comercio del mandado: primero lo que trae el pedido, después un lugar seguro
  * con ese nombre y, si el cliente pidió "el más cercano", el del rubro que menos desvía.
- * Agrega { coords, placeName, resolvedBy: 'pedido'|'comercio'|'aprendido'|'cercano'|null }.
+ * placeName es siempre lo que escribió el cliente: el repartidor compra donde pidió el cliente, y
+ * el lugar encontrado es solo una ayuda (placeHint). Mostrar el encontrado como título hacía que
+ * "Carnicería, si está abierta San Javier" se leyera "Comprar en Carnicería Ludueña".
+ * Una sola visita de un repartidor no alcanza: puede haber marcado desde otro lado.
+ * Agrega { coords, placeName, placeHint, resolvedBy: 'pedido'|'comercio'|'aprendido'|'cercano'|null }.
  */
 export function resolveMandadoStores(order, driverPos = null, list = places) {
   const dest = toLatLng(order.deliveryCoords || order.destinationCoords || order.addressCoords);
@@ -329,10 +338,12 @@ export function resolveMandadoStores(order, driverPos = null, list = places) {
     if (s.coords && inPlaceBounds(s.coords) && !isPlaceholderCoords(s.coords)) return { ...s, placeName: s.store, resolvedBy: 'pedido' };
     if (s.nearest) {
       const p = nearestPlace(s.nearest, toLatLng(driverPos), dest, list);
-      return p ? { ...s, coords: toLatLng(p), placeName: p.name, placeAddress: p.address || '', resolvedBy: 'cercano' } : { ...s, coords: null, placeName: null, resolvedBy: null };
+      return p ? { ...s, coords: toLatLng(p), placeName: s.store, placeHint: `Más cerca: ${p.name}`, placeAddress: p.address || '', resolvedBy: 'cercano' } : { ...s, coords: null, placeName: s.store, resolvedBy: null };
     }
     const p = resolvePlaceByName(s.store, list);
-    return p ? { ...s, coords: toLatLng(p), placeName: p.name, placeAddress: p.address || '', resolvedBy: p.source, approx: !isTrusted(p) } : { ...s, coords: null, placeName: null, resolvedBy: null };
+    if (!p || !isTrusted(p)) return { ...s, coords: null, placeName: s.store, resolvedBy: null };
+    const sameName = normalizePlaceName(p.name) === normalizePlaceName(s.store);
+    return { ...s, coords: toLatLng(p), placeName: s.store, placeHint: sameName ? '' : `Mapa: ${p.name}`, placeAddress: p.address || '', resolvedBy: p.source };
   });
 }
 

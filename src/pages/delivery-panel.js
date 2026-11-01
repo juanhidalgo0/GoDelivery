@@ -24,6 +24,7 @@ export {
 };
 
 import { isDelivery } from '../auth.js';
+import { isApproximateDropoff } from '../utils/geo.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
 import { renderDriverBottomNav, updateDriverBottomNavUI, driverNavTabForActiveTab, DRIVER_NAV_BAR_HEIGHT, syncDriverBottomNavVisibility } from '../components/driver-navbar.js';
 
@@ -52,6 +53,7 @@ import { isPlaceholderCoords, toLatLng } from '../utils/mandado-places.js';
 import { purchaseDwell } from '../utils/driver-dwell.js';
 import { enforceDriverApp, assertCanGoOnline } from '../components/driver-app-gate.js';
 import { isWeighedItem, itemWeightLabel } from '../utils/weight.js';
+import { loadShopperMarks, hasShopperMarks } from '../utils/shopper-marks.js';
 
 // Set while the driver asked to disconnect and the server hasn't confirmed it yet,
 // so a write that never landed is re-sent instead of leaving the driver "online".
@@ -564,7 +566,7 @@ export function confirmPickupDistance(o, { preview = false } = {}) {
   const distM = Math.round(((placeKm(pos, target.coords) ?? 0) / 1.3) * 1000);
   if (distM <= FAR_PICKUP_M) return Promise.resolve({ pickupDistanceM: distM });
   const distTxt = distM >= 1000 ? `${(distM / 1000).toFixed(1).replace('.', ',')} km` : `${distM} m`;
-  const what = o.isTrip ? 'buscaste al pasajero' : (isShoppingFavor(o) ? (o.favorType === 'pagodeservicios' ? 'pagaste' : 'compraste') : 'retiraste el pedido');
+  const what = o.isTrip ? 'buscaste al pasajero' : (isShoppingFavor(o) ? (o.favorType === 'pagodeservicios' ? 'pagaste' : 'compraste') : (o.isShopper && o.shopPending !== false ? 'compraste' : 'retiraste el pedido'));
   return new Promise(resolve => {
     let done = false;
     showConfirm({
@@ -6402,6 +6404,8 @@ function renderStatusBar(user) {
         100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
       }
       .status-dot-active { animation: status-pulse 2s infinite; }
+      /* Celular angosto: la barra de arriba entra en un renglón (queda la plata de hoy, sin "· N pedidos") */
+      @media (max-width: 399px) { .status-today-count { display: none; } }
       .status-bar-slide { animation: slideInStatusBar 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
       @keyframes slideInStatusBar {
         from { opacity: 0; transform: translateY(-10px); }
@@ -6624,10 +6628,11 @@ function renderStatusBar(user) {
         background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'};
         border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
         display: flex; align-items: center; gap: 6px; cursor: default; user-select: none; font-family: inherit; pointer-events: none;
+        min-width: 0; flex: 0 1 auto; overflow: hidden; white-space: nowrap;
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};
       ">
-        <strong style="font-family: var(--font-display, 'Outfit', sans-serif); color: ${isLight ? '#0F172A' : '#F3F4F6'}; font-weight: 700; font-size: 16px;">${formatPrice(todayEarn)}</strong>
-        <span style="color: ${isLight ? '#64748B' : '#8A929D'}; font-size: 12px;">hoy · ${todayCount} ${todayCount === 1 ? 'pedido' : 'pedidos'}</span>
+        <strong style="font-family: var(--font-display, 'Outfit', sans-serif); color: ${isLight ? '#0F172A' : '#F3F4F6'}; font-weight: 700; font-size: 16px; flex-shrink: 0;">${formatPrice(todayEarn)}</strong>
+        <span style="color: ${isLight ? '#64748B' : '#8A929D'}; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis;">hoy<span class="status-today-count"> · ${todayCount} ${todayCount === 1 ? 'pedido' : 'pedidos'}</span></span>
       </div>
     `;
   }
@@ -6645,12 +6650,12 @@ function renderStatusBar(user) {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
       </button>
       <!-- LEFT: STATUS BADGE (tap to connect / disconnect) -->
-      <button type="button" id="session-toggle-btn" aria-label="${finalIsOnline ? 'Desconectarme' : 'Conectarme'}" style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; border-radius: 20px; cursor: pointer; font-family: inherit;
+      <button type="button" id="session-toggle-btn" aria-label="${finalIsOnline ? 'Desconectarme' : 'Conectarme'}" style="height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; border-radius: 20px; cursor: pointer; font-family: inherit;
         background: ${isLight ? 'rgba(255,255,255,0.96)' : 'rgba(20,23,28,0.94)'}; border: 1px solid ${isLight ? '#E5E7EB' : '#262B33'};
         box-shadow: 0 4px 12px ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.3)'};">
         <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
           background: ${finalIsOnline ? (isLight ? '#059669' : '#34D399') : (isLight ? '#94a3b8' : '#64748b')};"></div>
-        <span style="font-size: 14px; font-weight: 600; color: ${isLight ? '#0F172A' : '#F3F4F6'};">
+        <span style="font-size: 14px; font-weight: 600; white-space: nowrap; color: ${isLight ? '#0F172A' : '#F3F4F6'};">
           ${finalIsOnline ? 'En línea' : 'Desconectado'}
         </span>
         <span style="display:inline-flex; color: ${isLight ? '#64748B' : '#8A929D'};">${icon('power', 15)}</span>
@@ -6715,11 +6720,11 @@ function dockStopText(o, isPickup) {
       const cur = plan.current;
       const isPago = o.favorType === 'pagodeservicios';
       const step = plan.total > 1 ? ` (comercio ${Math.min(plan.doneCount + 1, plan.total)} de ${plan.total})` : '';
-      const verb = (isPago ? 'Pagar servicios en' : (cur && cur.nearest ? `Comprar en la ${categoryLabel(cur.nearest)} más cercana` : 'Comprar en')) + step;
+      const verb = (isPago ? 'Pagar servicios en' : 'Comprar en') + step;
       const title = cur ? (cur.placeName || cur.store) : (o.comercioName || 'Comercio indicado');
-      const where = cur && !cur.coords ? 'Ubicación a confirmar' : (cur && cur.approx ? 'Ubicación aproximada' : ((cur && cur.placeAddress) || ''));
+      const where = cur && !cur.coords ? 'Ubicación a confirmar' : ((cur && cur.placeAddress) || '');
       const items = cur && cur.items ? cur.items : (isPago ? '' : cleanMandadoText(o.description || o.itemsText || ''));
-      return { verb, title, sub: [where, items].filter(Boolean).join(' · '), store: cur, plan };
+      return { verb, title, sub: [cur && cur.placeHint, where, items].filter(Boolean).join(' · '), store: cur, plan };
     }
     if (o.isShopper && o.shopPending !== false) return { verb: 'Comprar en', title: o.comercioName || 'Comercio', sub: o.pickupAddress || o.comercioAddress || '' };
     return { verb: 'Retirar en', title: o.comercioName || o.originAddress || 'Comercio', sub: o.pickupAddress || o.comercioAddress || o.originAddress || '' };
@@ -6786,6 +6791,19 @@ function dockMoneyRow(o, isPickup, isLight) {
 function renderDockActionRow(order, orderIsPickup, isLight) {
   const t = driverTokens(isLight);
   const color = orderIsPickup ? t.brand : t.green;
+  // "Compra el repartidor": un botón abre la lista para ir marcando. Abrirla no cambia nada; lo que
+  // cuenta es "Listo, ya compré" adentro de la lista, que también avisa si está lejos del comercio.
+  if (orderIsPickup && order.isShopper && order.shopPending !== false) {
+    const started = hasShopperMarks(order.id);
+    return `
+    <div id="dock-pinned-action-slider-row" style="flex-shrink:0;width:100%">
+      <button class="dock-shopper-open-btn" data-id="${esc(order.id)}" style="width:100%;height:56px;border-radius:28px;background:${color};border:0;color:#fff;
+        display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;padding:0 16px;box-sizing:border-box;
+        font-family:var(--font-display,'Outfit',sans-serif);font-size:16.5px;font-weight:600;white-space:nowrap">
+        ${dIcon('bag', 20, '#fff')}${started ? 'Seguir comprando' : 'Empezar a comprar'}
+      </button>
+    </div>`;
+  }
   const label = order.isTrip
     ? (orderIsPickup ? 'Deslizá: pasajero a bordo' : 'Deslizá: terminar viaje')
     : (orderIsPickup
@@ -6832,16 +6850,18 @@ function dockQuickRow(user, isLight, compact, withSos = true) {
   const maxCat = isChofer ? 3 : 2;
   const activeCount = (filters.comercios ? 1 : 0) + (filters.mandados ? 1 : 0) + (isChofer && filters.viajes ? 1 : 0);
   const on = window.autoAcceptEnabled === true;
-  const iconBtn = (id, name, label, color) => `<button id="${id}" aria-label="${label}" title="${label}" style="width:${compact ? 40 : 44}px;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${color || t.tx2};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;padding:0">${dIcon(name, 19, color || t.tx2)}</button>`;
+  // En un celular angosto los botones cuadrados se achican (hasta 36 px) en vez de encimarse
+  const sq = compact ? 40 : 44;
+  const iconBtn = (id, name, label, color) => `<button id="${id}" aria-label="${label}" title="${label}" style="flex:0 1 ${sq}px;min-width:36px;height:${sq}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${color || t.tx2};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">${dIcon(name, 19, color || t.tx2)}</button>`;
   return `<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-    <button id="driver-quick-auto-accept-btn" aria-label="Aceptar pedidos automáticamente" style="flex:1;min-width:0;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;cursor:pointer;font-family:inherit">
+    <button id="driver-quick-auto-accept-btn" aria-label="Aceptar pedidos automáticamente" style="flex:1 1 0;min-width:84px;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 10px 0 12px;cursor:pointer;font-family:inherit">
       ${dIcon('zap', 17, on ? t.amberTx : t.tx3)}
-      <span style="flex:1;min-width:0;text-align:left;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Auto-aceptar${on ? ` · ${activeCount}/${maxCat}` : ''}</span>
+      <span class="${compact ? 'driver-auto-label-compact' : 'driver-auto-label'}" style="flex:1;min-width:0;text-align:left;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Auto-aceptar${on ? ` · ${activeCount}/${maxCat}` : ''}</span>
       <span style="width:38px;height:22px;border-radius:11px;background:${on ? t.green : (isLight ? '#CBD5E1' : '#3A404A')};position:relative;flex-shrink:0">
         <span style="position:absolute;top:3px;left:${on ? 19 : 3}px;width:16px;height:16px;border-radius:8px;background:#fff;transition:left .2s ease"></span>
       </span>
     </button>
-    <button type="button" aria-label="Menú: modo cliente, admin y más" title="Menú" onclick="event.stopPropagation(); window.__openDeliveryDrawer && window.__openDeliveryDrawer();" style="width:${compact ? 40 : 44}px;height:${compact ? 40 : 44}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;padding:0"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg></button>
+    <button type="button" aria-label="Menú: modo cliente, admin y más" title="Menú" onclick="event.stopPropagation(); window.__openDeliveryDrawer && window.__openDeliveryDrawer();" style="flex:0 1 ${sq}px;min-width:36px;height:${sq}px;border-radius:14px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg></button>
     ${iconBtn('driver-quick-support-btn', 'headset', 'Chat con soporte')}
     ${iconBtn('driver-quick-help-btn', 'help', 'Ayuda y preguntas frecuentes')}
     ${withSos ? iconBtn('driver-quick-sos-btn', 'shield', 'Centro de seguridad SOS', t.brandTx) : ''}
@@ -6935,7 +6955,9 @@ export function renderBottomDockContent(user, activeOrders = []) {
 
   const expandBtn = `<button id="dock-expand-toggle-btn" aria-label="${isExpanded ? 'Ver menos' : 'Ver el detalle y el recorrido'}" title="${isExpanded ? 'Menos' : 'Detalle'}" style="height:36px;padding:0 10px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.tx2};display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">${dIcon(isExpanded ? 'chevDown' : 'chevUp', 16)}${isExpanded ? 'Menos' : 'Detalle'}</button>`;
   const sosBtn = `<button id="driver-quick-sos-btn" aria-label="Centro de seguridad SOS" title="SOS" style="width:36px;height:36px;border-radius:12px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">${dIcon('shield', 17, t.brandTx)}</button>`;
-  const header = handleRow(`<div style="display:flex;align-items:center;gap:8px;min-width:0">${kindTag(kind, isLight)}<span style="font-size:13px;color:${t.tx3};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(meta)}</span></div>`, sosBtn + expandBtn + hideBtn);
+  // Sin lugar al lado de la etiqueta, el número de pedido no se muestra (antes quedaba un "#" suelto):
+  // baja a un segundo renglón que queda oculto, así la tarjeta no crece en un celular chico
+  const header = handleRow(`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 8px;min-width:0;max-height:30px;overflow:hidden">${kindTag(kind, isLight)}<span style="font-size:13px;color:${t.tx3};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:min(100%, 64px)">${esc(meta)}</span></div>`, sosBtn + expandBtn + hideBtn);
 
   const navUrl = dockNavUrl(o, currentIsPickup);
   // What the customer wants to buy, in full: the driver must read the whole list, never "...".
@@ -6943,10 +6965,30 @@ export function renderBottomDockContent(user, activeOrders = []) {
     ? String((txt.store && txt.store.items) || cleanMandadoText(o.description || o.itemsText || '')).trim()
     : '';
   if (shopItems && txt.sub) txt.sub = txt.sub.replace(shopItems, '').replace(/\s*·\s*$/, '').trim();
+  // "Compra el repartidor" (Kiosco Paulos y comercios así): la lista se ve al llegar, antes de
+  // comprar. Lo que ya marcó "No había" en la lista sale tachado. En un celular chico la lista se
+  // achica para que la tarjeta no tape el cartel de la ruta; en "Detalle" va entera (scrollea la tarjeta).
+  const shopperItems = currentIsPickup && o.isShopper && o.shopPending !== false && Array.isArray(o.items) ? o.items : [];
+  const shopperMarks = shopperItems.length ? loadShopperMarks(o.id, shopperItems.length) : null;
   const shopList = shopItems ? `<div style="margin-top:10px;padding:12px 14px;border-radius:14px;background:${t.card};border:1px solid ${t.line}">
       <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${t.tx3};margin-bottom:6px">Lista del cliente</div>
-      <div style="font-size:15px;line-height:1.45;color:${t.tx};white-space:pre-wrap;word-break:break-word;max-height:34vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${esc(shopItems)}</div>
-    </div>` : '';
+      <div data-dock-scroll style="font-size:15px;line-height:1.45;color:${t.tx};white-space:pre-wrap;word-break:break-word;max-height:${isExpanded ? 'none' : 'clamp(48px, calc(100dvh - 600px), 34vh)'};overflow-y:auto;-webkit-overflow-scrolling:touch">${esc(shopItems)}</div>
+    </div>` : (shopperItems.length ? `<div style="margin-top:10px;padding:12px 14px;border-radius:14px;background:${t.card};border:1px solid ${t.line}">
+      <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${t.tx3};margin-bottom:8px">Lista de compra · ${shopperItems.length} producto${shopperItems.length === 1 ? '' : 's'}</div>
+      <div data-dock-scroll style="display:flex;flex-direction:column;gap:8px;max-height:${isExpanded ? 'none' : 'clamp(96px, calc(100dvh - 540px), 30vh)'};overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain">
+        ${shopperItems.map((it, i) => {
+          const missing = shopperMarks && shopperMarks.state[i] && shopperMarks.state[i].choice === 'missing';
+          return `<div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="flex-shrink:0;min-width:36px;padding:3px 7px;box-sizing:border-box;border-radius:8px;background:${t.sheet};border:1px solid ${t.line};color:${t.tx};font-size:14px;font-weight:700;line-height:1.3;text-align:center;white-space:nowrap">${isWeighedItem(it) ? esc(itemWeightLabel(it)) : `${esc(it.qty || it.quantity || 1)}×`}</span>
+            <span style="flex:1;min-width:0;padding-top:2px">
+              <span style="display:block;font-size:15px;line-height:1.35;color:${missing ? t.tx3 : t.tx};word-break:break-word;${missing ? 'text-decoration:line-through;' : ''}">${esc(it.name || 'Producto')}</span>
+              ${missing ? `<span style="display:block;font-size:13px;font-weight:600;color:${t.tx3};margin-top:1px">No había</span>` : ''}
+              ${it.notes && !missing ? `<span style="display:block;font-size:13px;font-weight:600;color:${t.amberTx};margin-top:1px;word-break:break-word">Nota: ${esc(it.notes)}</span>` : ''}
+            </span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '');
   const stopBlock = `<div style="display:flex;align-items:center;gap:12px">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;color:${t.tx3};font-weight:600">${esc(txt.verb)}</div>
@@ -7006,7 +7048,8 @@ export function renderBottomDockContent(user, activeOrders = []) {
     const all = [...doneStops, ...list.map((s, i) => ({ ...s, num: doneStops.length + i + 1, tab: activeOrders.length > 1 ? { index: activeOrders.findIndex(x => x.id === s.orderId), orderId: s.orderId } : null }))];
     const tabs = stopsList(all, isLight);
     const items = Array.isArray(o.items) ? o.items : (Array.isArray(o.products) ? o.products : []);
-    const itemsHtml = items.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
+    // La lista de compra ya se ve arriba, con lo marcado
+    const itemsHtml = items.length && !shopperItems.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;color:${t.tx2}">
           <span>${isWeighedItem(it) ? itemWeightLabel(it) : `${esc(it.qty || it.quantity || it.cant || 1)}×`} ${esc(it.name || it.title || 'Producto')}</span>
           ${it.price ? `<span style="color:${t.tx};font-weight:600;white-space:nowrap">${money(it.price * (it.qty || it.quantity || 1))}</span>` : ''}
@@ -7018,6 +7061,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
         ${tabs}
         ${itemsHtml}
         ${notes ? infoRow('note', `“${notes}”`, isLight) : ''}
+        ${!currentIsPickup && !o.isTrip && isApproximateDropoff(o.deliveryAddress, o.deliveryCoords) ? infoRow('note', 'Ubicación aproximada: llamá al cliente', isLight) : ''}
         ${!currentIsPickup && o.verificationCode && !isOrderEncomienda(o) && !o.isEncomienda ? infoRow('key', 'Pedile al cliente el código de entrega', isLight) : ''}
       </div>`;
   }
@@ -7244,6 +7288,8 @@ export function attachBottomDockListeners(user, activeOrders = []) {
 
     const onTouchStart = (e) => {
       if (e.target.closest('.driver-swipe-slider') || e.target.closest('.swipe-slider-handle')) return;
+      // Recorrer una lista larga no esconde ni agranda el panel
+      if (e.target.closest('[data-dock-scroll]')) return;
       startY = e.touches[0].clientY;
       currentY = startY;
       isSwiping = true;
@@ -7661,6 +7707,33 @@ export function attachBottomDockListeners(user, activeOrders = []) {
           markAsPickedUp(oId, pickupCheck);
         }
       }
+    };
+  });
+
+  // "Compra el repartidor": abre la lista para ir marcando mientras compra
+  document.querySelectorAll('.dock-shopper-open-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const oId = btn.dataset.id;
+      const targetOrder = (activeOrdersList || []).find(o => o.id === oId);
+      if (!targetOrder) return;
+      const refreshDock = () => refreshBottomDock(document.getElementById('driver-footer-dock-container'), latestUser, activeOrdersList);
+      const { openShopperChecklist } = await import('./delivery-panel/shopper.js');
+      let pickupCheck = {};
+      openShopperChecklist({
+        order: targetOrder,
+        beforeConfirm: async () => (pickupCheck = await confirmPickupDistance(targetOrder)),
+        // Al cerrarla, la tarjeta muestra lo que ya marcó
+        onCancel: refreshDock,
+        onDone: (res) => {
+          if (res && res.cancelled) {
+            showToast('No había nada: el pedido se canceló y el cliente ya fue avisado.', 'info', 6000);
+            return;
+          }
+          markAsPickedUp(oId, pickupCheck);
+        }
+      });
     };
   });
 
@@ -9762,8 +9835,9 @@ export async function markAsDelivered(orderIdOrIds) {
 
     // 4. Trigger Success Celebration Modal
     const { showSuccessCelebration } = await import('./delivery-panel/success-celebration.js');
-    showSuccessCelebration(orders, () => {
-      showCustomerRatingModal(orders);
+    showSuccessCelebration(orders, async () => {
+      const { askPinCorrection } = await import('./delivery-panel/pin-correction.js');
+      askPinCorrection(orders, () => showCustomerRatingModal(orders));
     });
   } catch (err) {
     console.error('markAsDelivered error:', err);

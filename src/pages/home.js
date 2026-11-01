@@ -13,6 +13,7 @@ import { getState, subscribe } from '../state.js';
 import { getDocsOptimized } from '../utils/firestore-cache.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
 import { createSlug } from '../utils/slug.js';
+import { isSoldByWeight, weightStepOf } from '../utils/weight.js';
 
 let isLoadingComercios = true;
 let memoryCachedComercios = null;
@@ -1046,7 +1047,11 @@ async function renderOffersSection(offers = [], comercios = []) {
       const item = offerItems[idx];
       if (item) {
         if (item.product) {
-          openProductModal(item.product, offers, item.comercioId);
+          // No estaba importada (y los datos iban en otro orden): tocar una oferta de producto en
+          // el inicio no hacía nada ("openProductModal is not defined" en Admin → Errores)
+          import('../components/product-modal.js')
+            .then(m => m.openProductModal(item.product, item.comercioId, item.comercioName, !item.isClosed))
+            .catch(() => { location.hash = `#/comercio/${item.comercioId}`; });
         } else {
           location.hash = `#/comercio/${item.comercioId}`;
         }
@@ -1708,7 +1713,11 @@ async function renderRecurrentOrders(user, container) {
             }
 
             if (resolvedProduct) {
-              addToCart(resolvedProduct, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
+              // Por peso se repite el mismo peso aunque el comercio haya cambiado de a cuánto se elige
+              const qty = isSoldByWeight(resolvedProduct) && item.grams
+                ? Math.max(1, Math.round(item.grams / weightStepOf(resolvedProduct)))
+                : item.qty;
+              addToCart(resolvedProduct, selectedOrder.comercioId, selectedOrder.comercioName, qty, item.options);
             } else if (item.product) {
               addToCart(item.product, selectedOrder.comercioId, selectedOrder.comercioName, item.qty, item.options);
             } else {
@@ -2632,17 +2641,21 @@ async function showJoinTeamModal() {
     const input = modalContent.querySelector(`#${fileInputId}`);
     const preview = modalContent.querySelector(`#${previewId}`);
     if (input && preview) {
-      input.onchange = (e) => {
+      // La foto se achica antes de guardarla: entera (varios MB de la cámara) superaba el límite
+      // de 1 MB del documento y la postulación no se podía enviar (Admin → Errores, 14-10-2026).
+      input.onchange = async (e) => {
         const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            const base64 = evt.target.result;
-            preview.style.backgroundImage = `url(${base64})`;
-            preview.style.display = 'block';
-            onSetBase64(base64);
-          };
-          reader.readAsDataURL(file);
+        if (!file) return;
+        try {
+          const { compressImageToBase64 } = await import('../utils/image.js');
+          let base64 = await compressImageToBase64(file, 1280, 0.65);
+          if (base64.length > 380 * 1024) base64 = await compressImageToBase64(file, 1000, 0.5);
+          preview.style.backgroundImage = `url(${base64})`;
+          preview.style.display = 'block';
+          onSetBase64(base64);
+        } catch (err) {
+          console.warn('[Apply] No se pudo procesar la foto:', err);
+          showToast('No pudimos leer esa foto. Probá con otra.', 'warning');
         }
       };
     }

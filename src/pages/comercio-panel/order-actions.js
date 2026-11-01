@@ -5,6 +5,11 @@ import { db } from '../../firebase.js';
 import { doc, getDoc, updateDoc, runTransaction, serverTimestamp, increment, Timestamp, deleteField } from 'firebase/firestore';
 import { showToast } from '../../components/toast.js';
 import { cpSheet } from './shell.js';
+import { formatPrice } from '../../utils/format.js';
+import { escapeHtml as esc } from '../../utils/escape.js';
+import {
+  applyWeights, isWeighedItem, orderedGrams, toleranceRange, itemPricePerKg, formatWeight, parseWeightInput, WEIGHT_TOLERANCE,
+} from '../../utils/weight.js';
 
 export const PREP_OPTIONS = [10, 15, 20, 30, 45, 60];
 export const REJECT_REASONS = [
@@ -79,7 +84,8 @@ export async function acceptOrder(order, minutes) {
     showToast(`Pedido #${order.orderId || ''} aceptado · ${minutes} min`, 'success');
     return true;
   } catch (e) {
-    showToast(e.message === 'not-pending' ? 'Ese pedido ya no está pendiente (el cliente lo canceló o cambió).' : 'No se pudo aceptar. Revisá la conexión y probá de nuevo.', 'error');
+    if (e.message === 'not-pending') showToast('Ese pedido ya no está pendiente (el cliente lo canceló o cambió).', 'warning');
+    else showToast('No se pudo aceptar. Revisá la conexión y probá de nuevo.', 'error');
     return false;
   }
 }
@@ -141,6 +147,114 @@ export async function cancelOrder(order, reason) {
     return true;
   } catch (e) {
     showToast(e.message === 'moved' ? 'Ese pedido ya cambió de estado.' : 'No se pudo cancelar. Probá de nuevo.', 'error');
+    return false;
+  }
+}
+
+// Pedido con productos por peso: antes de "Listo" el comercio anota lo que pesó cada corte
+// y el pedido se recalcula (src/utils/weight.js). Si un corte se va más del 10% de lo pedido,
+// tiene que confirmar que lo habló con el cliente. Devuelve true si quedó guardado.
+export function askWeights(order) {
+  return new Promise((resolve) => {
+    const lines = (order.items || []).map((it, idx) => ({ it, idx })).filter(({ it }) => isWeighedItem(it));
+    const kgText = (g) => (g > 0 ? (g / 1000).toLocaleString('es-AR', { maximumFractionDigits: 3 }) : '');
+    const pct = Math.round(WEIGHT_TOLERANCE * 100);
+    let done = false;
+    const sheet = cpSheet({
+      title: `¿Cuánto pesó el #${order.orderId || ''}?`,
+      sub: `Anotá lo que marca la balanza. El cliente paga eso: hasta un ${pct}% más o menos de lo que pidió, sin preguntarle.`,
+      bodyHtml: `
+        <div style="display:flex; flex-direction:column; gap:10px">
+          ${lines.map(({ it, idx }) => {
+            const r = toleranceRange(it);
+            const opts = Array.isArray(it.options) && it.options.length ? `<div class="cp-small">${esc(it.options.map(o => o?.name).filter(Boolean).join(', '))}</div>` : '';
+            const note = it.notes ? `<div class="cp-small" style="color:#b45309">“${esc(it.notes)}”</div>` : '';
+            return `
+              <div style="border:1px solid var(--go-line); border-radius:14px; padding:12px">
+                <div style="font-weight:800">${esc(it.name)}</div>
+                <div class="cp-small">Pidió ${formatWeight(orderedGrams(it))} · ${formatPrice(itemPricePerKg(it))}/kg · sin preguntar: de ${formatWeight(r.min)} a ${formatWeight(r.max)}</div>
+                ${opts}${note}
+                <div class="cp-row" style="gap:8px; margin-top:8px; align-items:center">
+                  <input class="cp-input" data-w-idx="${idx}" inputmode="decimal" autocomplete="off" placeholder="Ej: ${kgText(orderedGrams(it)) || '1'}" value="${kgText(Number(it.actualGrams) || 0)}" aria-label="Kilos de ${esc(it.name)}" style="max-width:130px" />
+                  <span class="cp-small">kg</span>
+                  <span class="cp-money" data-w-line="${idx}" style="margin-left:auto">—</span>
+                </div>
+                <div class="cp-small" data-w-warn="${idx}" style="color:#b91c1c; font-weight:700; margin-top:6px; display:none"></div>
+              </div>`;
+          }).join('')}
+          <div class="cp-row" style="justify-content:space-between; font-weight:800">
+            <span>Productos</span><span class="cp-money" id="cp-w-sub">—</span>
+          </div>
+          <div class="cp-small" id="cp-w-diff"></div>
+          <label id="cp-w-ok" style="display:none; gap:8px; align-items:flex-start; background:#fef3c7; border-radius:12px; padding:10px 12px; font-size:13px; font-weight:700; cursor:pointer">
+            <input type="checkbox" id="cp-w-ok-check" style="margin-top:2px" />
+            <span>Ya lo hablé con el cliente por el chat y está de acuerdo</span>
+          </label>
+        </div>`,
+      actions: [
+        { label: 'Volver', cls: 'is-ghost' },
+        { label: 'Guardar y marcar listo', cls: 'is-go', onClick: async () => {
+          const res = compute();
+          if (res.missing.length) { showToast('Falta anotar el peso de algún producto.', 'warning'); focusFirst(res.missing[0]); return false; }
+          if (res.outOfRange.length && !sheet.el.querySelector('#cp-w-ok-check').checked) {
+            showToast(`Hay un corte que se va más del ${pct}%: hablalo con el cliente antes.`, 'warning');
+            return false;
+          }
+          const ok = await saveWeights(order, readGrams());
+          if (!ok) return false;
+          done = true;
+          resolve(true);
+        } },
+      ],
+      onClose: () => { if (!done) resolve(false); },
+    });
+
+    const inputs = [...sheet.el.querySelectorAll('[data-w-idx]')];
+    const readGrams = () => Object.fromEntries(inputs.map(i => [i.dataset.wIdx, parseWeightInput(i.value) || 0]));
+    const focusFirst = (idx) => sheet.el.querySelector(`[data-w-idx="${idx}"]`)?.focus();
+    const compute = () => {
+      const res = applyWeights(order, readGrams());
+      const estimated = Number(order.estimatedSubtotal ?? order.subtotal) || 0;
+      lines.forEach(({ it, idx }) => {
+        const line = res.patch.items[idx];
+        const has = !res.missing.includes(idx);
+        sheet.el.querySelector(`[data-w-line="${idx}"]`).textContent = has ? formatPrice(line.price * (Number(line.qty) || 1)) : '—';
+        const warn = sheet.el.querySelector(`[data-w-warn="${idx}"]`);
+        const out = res.outOfRange.includes(idx);
+        warn.style.display = out ? 'block' : 'none';
+        if (out) warn.textContent = `${formatWeight(line.actualGrams)} se va más del ${pct}% de lo que pidió (${formatWeight(orderedGrams(it))}).`;
+      });
+      const complete = !res.missing.length;
+      sheet.el.querySelector('#cp-w-sub').textContent = complete ? formatPrice(res.patch.subtotal) : '—';
+      const diff = res.patch.subtotal - estimated;
+      sheet.el.querySelector('#cp-w-diff').textContent = complete && Math.round(diff) !== 0
+        ? `${formatPrice(Math.abs(diff))} ${diff > 0 ? 'más' : 'menos'} que lo estimado (${formatPrice(estimated)}). Le avisamos el total final al cliente.`
+        : '';
+      sheet.el.querySelector('#cp-w-ok').style.display = res.outOfRange.length ? 'flex' : 'none';
+      return res;
+    };
+    inputs.forEach(i => i.addEventListener('input', compute));
+    compute();
+    setTimeout(() => inputs.find(i => !i.value)?.focus(), 300);
+  });
+}
+
+// Guarda el peso real recalculando sobre el pedido como está ahora (no sobre la copia de la tarjeta).
+export async function saveWeights(order, gramsByIndex) {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, 'orders', order.id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('gone');
+      const data = snap.data();
+      if (!['pending', 'confirmed', 'preparing', 'ready'].includes(data.status)) throw new Error('moved');
+      const res = applyWeights(data, gramsByIndex);
+      if (res.missing.length) throw new Error('missing');
+      tx.update(ref, { ...res.patch, weighedAt: serverTimestamp(), weightOverApproved: res.outOfRange.length > 0 });
+    });
+    return true;
+  } catch (e) {
+    showToast(e.message === 'moved' ? 'Ese pedido ya salió o se canceló: no se puede cambiar el peso.' : 'No se pudo guardar el peso. Probá de nuevo.', 'error');
     return false;
   }
 }

@@ -1,13 +1,17 @@
 // GoDelivery — WhatsApp Bot Admin Control Panel (3 Tabs)
 import { getState } from '../../state.js';
 import { db } from '../../firebase.js';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, setDoc, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { escapeHtml } from '../../utils/escape.js';
 import { icon } from '../../utils/icons.js';
 import { showToast } from '../../components/toast.js';
 
 let activeTab = 'mandados'; // 'mandados' | 'comercios' | 'soporte'
 let unsubOrders = null;
 let unsubSupport = null;
+let unsubChats = null;
+let unsubUsage = null;
+let unsubConfig = null;
 
 export async function renderAdminWhatsAppBot(content) {
   if (!content) content = document.getElementById('app-content');
@@ -44,6 +48,23 @@ export async function renderAdminWhatsAppBot(content) {
           <button class="wsp-tab-btn ${activeTab === 'soporte' ? 'active' : ''}" data-tab="soporte" style="flex:1; height:40px; border-radius:14px; border:none; font-weight:850; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s; white-space:nowrap; ${activeTab === 'soporte' ? 'background:white; color:#128C7E; box-shadow:0 4px 12px rgba(0,0,0,0.15);' : 'background:rgba(255,255,255,0.2); color:white;'}">
             ${icon('headset', 14)} Humano / Soporte
           </button>
+          <button class="wsp-tab-btn ${activeTab === 'charlas' ? 'active' : ''}" data-tab="charlas" style="flex:1; height:40px; border-radius:14px; border:none; font-weight:850; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s; white-space:nowrap; ${activeTab === 'charlas' ? 'background:white; color:#128C7E; box-shadow:0 4px 12px rgba(0,0,0,0.15);' : 'background:rgba(255,255,255,0.2); color:white;'}">
+            ${icon('chat', 14)} Charlas
+          </button>
+          <button class="wsp-tab-btn ${activeTab === 'ajustes' ? 'active' : ''}" data-tab="ajustes" style="flex:1; height:40px; border-radius:14px; border:none; font-weight:850; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.2s; white-space:nowrap; ${activeTab === 'ajustes' ? 'background:white; color:#128C7E; box-shadow:0 4px 12px rgba(0,0,0,0.15);' : 'background:rgba(255,255,255,0.2); color:white;'}">
+            ⚙️ Ajustes
+          </button>
+        </div>
+
+        <!-- Cupo gratis de Meta: 1.000 mensajes del bot por mes; desde el 1.001 se cobran -->
+        <div id="wsp-usage" style="margin: 0 16px 14px; padding: 10px 14px; border-radius: 14px; background: rgba(255,255,255,0.18); color: white; font-size: 12px; font-weight: 700;">
+          <div style="display:flex; justify-content:space-between; gap:8px;">
+            <span id="wsp-usage-label">Mensajes del mes: …</span>
+            <span id="wsp-usage-left" style="opacity:0.9;"></span>
+          </div>
+          <div style="height:6px; border-radius:3px; background:rgba(255,255,255,0.25); margin-top:8px; overflow:hidden;">
+            <div id="wsp-usage-bar" style="height:100%; width:0%; background:white; border-radius:3px; transition:width 0.3s;"></div>
+          </div>
         </div>
       </div>
 
@@ -72,18 +93,67 @@ export async function renderAdminWhatsAppBot(content) {
 
   const container = content.querySelector('#wsp-admin-content');
   startListeners(container);
+  watchUsage(content);
 
   return {
     cleanup: () => {
       if (unsubOrders) unsubOrders();
       if (unsubSupport) unsubSupport();
+      if (unsubChats) unsubChats();
+      if (unsubUsage) { unsubUsage(); unsubUsage = null; }
+      if (unsubConfig) { unsubConfig(); unsubConfig = null; }
     }
   };
+}
+
+// Mensajes que mandó el bot este mes (wa_usage/{AAAA-MM}, hora argentina) contra el cupo gratis
+function watchUsage(content) {
+  if (unsubUsage) unsubUsage();
+  const month = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 7);
+  const monthName = new Date(`${month}-15T12:00:00Z`).toLocaleDateString('es-AR', { month: 'long' });
+  unsubUsage = onSnapshot(doc(db, 'wa_usage', month), (snap) => {
+    const d = snap.exists() ? snap.data() : {};
+    const sent = Number(d.sent) || 0;
+    const free = Number(d.free) || 1000;
+    const label = content.querySelector('#wsp-usage-label');
+    const left = content.querySelector('#wsp-usage-left');
+    const bar = content.querySelector('#wsp-usage-bar');
+    if (!label || !left || !bar) return;
+    label.textContent = `Mensajes de ${monthName}: ${sent.toLocaleString('es-AR')} de ${free.toLocaleString('es-AR')} gratis`;
+    left.textContent = sent >= free ? 'Cupo gratis agotado' : `Quedan ${(free - sent).toLocaleString('es-AR')}`;
+    bar.style.width = `${Math.min(100, (sent / free) * 100)}%`;
+    bar.style.background = sent >= free * 0.9 ? '#fecaca' : 'white';
+  }, () => {});
 }
 
 function startListeners(container) {
   if (unsubOrders) unsubOrders();
   if (unsubSupport) unsubSupport();
+  if (unsubChats) { unsubChats(); unsubChats = null; }
+  if (unsubConfig) { unsubConfig(); unsubConfig = null; }
+
+  // Ajustes: número vinculado, gasto contra el tope y cómo contesta el bot
+  if (activeTab === 'ajustes') {
+    import('./whatsapp-bot-config.js').then(async ({ renderBotConfig }) => {
+      // Si ya se cambió de pestaña mientras cargaba, no se pisa la otra
+      const stop = await renderBotConfig(container, () => activeTab === 'ajustes' && container.isConnected);
+      if (activeTab === 'ajustes' && container.isConnected) unsubConfig = stop;
+      else stop();
+    });
+    return;
+  }
+
+  // Charlas: las últimas conversaciones del bot (wa_sessions.log) y tomar el control de una
+  if (activeTab === 'charlas') {
+    const q = query(collection(db, 'wa_sessions'), orderBy('updatedAtMs', 'desc'), limit(40));
+    unsubChats = onSnapshot(q, (snap) => {
+      renderChatsList(container, snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => {
+      console.error('Error fetching bot chats:', err);
+      container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--color-error);">Error al cargar las charlas del bot</div>`;
+    });
+    return;
+  }
 
   if (activeTab === 'mandados' || activeTab === 'comercios') {
     const q = query(
@@ -134,6 +204,72 @@ function startListeners(container) {
       container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--color-error);">Error al cargar derivaciones de WhatsApp</div>`;
     });
   }
+}
+
+const STEP_LABEL = {
+  quick: 'Contando el pedido', idle: 'En el menú', support: '🙋 Con una persona', confirm: 'Viendo el resumen', c_store: 'Eligiendo comercio', c_items: 'Armando la lista',
+  c_parsed: 'Revisando lo que entendió el bot', details: 'Contando el pedido', pickup: 'Dirección de retiro', delivery: 'Dirección de entrega',
+  notes: 'Datos para encontrarlo', pay: 'Forma de pago', k_pick: 'Eligiendo comercio', k_search: 'Buscando comercio', k_waiting: 'Esperando precio del comercio', k_quoted: 'Decidiendo con el precio',
+};
+
+function renderChatsList(container, chats) {
+  if (!container) return;
+  if (!chats.length) {
+    container.innerHTML = `<div style="text-align:center; padding:60px 20px; opacity:0.5;">Todavía no hay charlas con el bot.</div>`;
+    return;
+  }
+  const ago = (ms) => {
+    const m = Math.round((Date.now() - (ms || 0)) / 60000);
+    return m < 1 ? 'recién' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`;
+  };
+  container.innerHTML = chats.map((c) => {
+    const log = Array.isArray(c.log) ? c.log.slice(-8) : [];
+    const human = c.step === 'support';
+    return `
+      <div style="background:var(--color-surface); border:1px solid var(--color-border-light); border-radius:18px; padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div style="min-width:0;">
+            <div style="font-weight:900; font-size:14px; color:var(--color-text-primary);">${escapeHtml(c.lastName || 'Cliente')} <span style="font-weight:700; color:var(--color-text-tertiary); font-size:12px;">+${escapeHtml(c.id)}</span></div>
+            <div style="font-size:12px; color:${human ? '#d97706' : 'var(--color-text-secondary)'}; font-weight:700; margin-top:2px;">${escapeHtml(STEP_LABEL[c.step] || c.step || '')} · ${ago(c.updatedAtMs)}</div>
+          </div>
+          ${human
+            ? `<button class="wsp-chat-bot" data-id="${escapeHtml(c.id)}" style="height:36px; padding:0 12px; border-radius:12px; border:1px solid var(--color-border); background:var(--color-bg); font-weight:800; font-size:12px; cursor:pointer; white-space:nowrap;">🤖 Devolver al bot</button>`
+            : `<button class="wsp-chat-human" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.lastName || '')}" style="height:36px; padding:0 12px; border-radius:12px; border:none; background:#25D366; color:white; font-weight:800; font-size:12px; cursor:pointer; white-space:nowrap;">🙋 Atender yo</button>`}
+        </div>
+        ${log.length ? `<div style="display:flex; flex-direction:column; gap:6px; background:var(--color-bg); border-radius:14px; padding:10px;">
+          ${log.map((m) => `<div style="align-self:${m.dir === 'in' ? 'flex-start' : 'flex-end'}; max-width:85%; background:${m.dir === 'in' ? 'var(--color-surface)' : 'rgba(37,211,102,0.12)'}; border-radius:12px; padding:7px 10px; font-size:12.5px; line-height:1.4; white-space:pre-wrap; color:var(--color-text-primary);">${escapeHtml(m.text || '')}</div>`).join('')}
+        </div>` : ''}
+      </div>`;
+  }).join('');
+
+  container.querySelectorAll('.wsp-chat-human').forEach((b) => {
+    b.onclick = async () => {
+      const id = b.dataset.id;
+      try {
+        // Igual que "Hablar con alguien": lo que escriba va al panel de Soporte y se contesta desde ahí
+        await setDoc(doc(db, 'support_chats', id), {
+          userId: id, userName: b.dataset.name || 'Cliente WhatsApp', userPhone: id,
+          source: 'whatsapp_bot', isWhatsAppBot: true, humanRequested: true, status: 'pending', updatedAt: serverTimestamp(),
+        }, { merge: true });
+        await updateDoc(doc(db, 'wa_sessions', id), { step: 'support', data: {}, humanTakeoverAt: Date.now() });
+        showToast('Listo: lo que escriba el cliente va a Humano / Soporte', 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo tomar la charla', 'error');
+      }
+    };
+  });
+  container.querySelectorAll('.wsp-chat-bot').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await updateDoc(doc(db, 'wa_sessions', b.dataset.id), { step: 'idle', data: {}, humanTakeoverAt: 0 });
+        showToast('El bot vuelve a atender esta charla', 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo devolver al bot', 'error');
+      }
+    };
+  });
 }
 
 function renderOrdersList(container, orders) {

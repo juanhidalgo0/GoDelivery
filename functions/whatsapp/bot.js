@@ -1,13 +1,23 @@
-// Conversación del bot de WhatsApp, sin IA: menú, preguntas guiadas y botones.
+// Conversación del bot de WhatsApp: menú, preguntas guiadas y botones. La IA (understand.js, Claude
+// Haiku) solo se usa cuando las reglas no alcanzan para entender un pedido escrito de corrido o un audio.
 //
 // Tres caminos para cualquier pedido, según lo que GO! sabe del lugar:
 //   compra / envío  → mandado: el cadete lee el texto tal cual (no hace falta entenderlo)
 //   comercio        → con catálogo: link a su tienda; o pedido escrito que el comercio cotiza
 // El estado de cada conversación vive en wa_sessions/{waId}.
+const crypto = require("crypto");
 const logger = require("firebase-functions/logger");
 const { FieldValue } = require("firebase-admin/firestore");
 const { norm, storeUrl } = require("./comercios");
 const { TOWN_CENTER } = require("./orders");
+const { trackingUrl } = require("./tracking");
+const { APP_URL } = require("./comercios");
+const { DEFAULTS, parseQuick } = require("./bot-config");
+
+// Banner de bienvenida (public/wa-banner.jpg, scripts/make-wa-banner.py): una vez por día por cliente
+const BANNER_URL = `${APP_URL}/wa-banner.jpg`;
+const FOOTER = "GO! Delivery · Magdalena";
+const argDay = () => new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
 
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;      // un pedido a medio armar se olvida a las 2 h
 const SUPPORT_TTL_MS = 12 * 60 * 60 * 1000;
@@ -16,6 +26,14 @@ const COMERCIO_RECHECK_MS = 24 * 60 * 60 * 1000;
 const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("es-AR");
 const short = (s, n = 300) => { const t = String(s || "").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
 const PAY_LABEL = { efectivo: "💵 Efectivo", transferencia: "🏦 Transferencia" };
+// Propina del formulario: las de la app (300/500/700) o "Otro monto" con el número que quiera el
+// cliente. Va entera al cadete; se redondea a pesos y se ignora si no es un monto razonable.
+const MAX_TIP = 100000;
+function tipOf(r) {
+  const raw = r.tip === "other" ? String(r.tip_other || "").replace(/[^\d.,]/g, "").replace(/[.,](?=\d{3}\b)/g, "").replace(",", ".") : r.tip;
+  const n = Math.round(Number(raw) || 0);
+  return n > 0 && n <= MAX_TIP ? n : 0;
+}
 
 const MENU_WORDS = new Set(["menu", "inicio", "hola", "holaa", "buenas", "buen dia", "buenos dias", "buenas tardes", "buenas noches", "volver", "empezar", "opciones", "ayuda"]);
 const CANCEL_WORDS = new Set(["cancelar", "cancela", "anular", "salir"]);
@@ -33,7 +51,7 @@ const STATUS_LABEL = {
   delivering: () => "En camino 🛵",
 };
 
-function createBot({ db, orders, comercios, sender }) {
+function createBot({ db, orders, comercios, sender, understand, giveaways, ensureWaUser, formId, config }) {
   const sessions = db.collection("wa_sessions");
 
   async function loadSession(waId) {
@@ -64,23 +82,57 @@ function createBot({ db, orders, comercios, sender }) {
 
   // ───────────────────────── Mensajes ─────────────────────────
 
-  function menu(name, s) {
-    const rows = [
-      { id: "m_compra", title: "🛒 Comprar algo", description: "Un cadete te compra lo que necesites y te lo lleva" },
-      { id: "m_envio", title: "📦 Llevar o traer algo", description: "Paquetes, llaves, documentos, de un lugar a otro" },
-      { id: "m_comercio", title: "🍔 Pedir a un comercio", description: "Comida, kiosco, farmacia y más" },
-      { id: "m_pedidos", title: "📋 Mis pedidos", description: "Cómo va lo que pediste" },
-      { id: "m_humano", title: "🙋 Hablar con alguien", description: "Te atiende una persona del equipo" },
+  // Bienvenida con 3 botones (sin tener que abrir una lista). Los mandados son lo más pedido.
+  function menuSections(s = {}) {
+    return [
+      ...(s.comercio ? [{ title: "Tu local", rows: [{ id: "m_cadete", title: "🛵 Cadete para mi local", desc: `Pedí un cadete para ${s.comercio.name}` }] }] : []),
+      {
+        title: "Pedir",
+        rows: [
+          { id: "m_compra", title: "🛒 Comprar algo", desc: "Te lo compramos y te lo llevamos" },
+          { id: "m_envio", title: "📦 Llevar o traer algo", desc: "Paquetes, llaves, documentos" },
+          { id: "m_comercio", title: "🍔 Pedir a un comercio", desc: "Comida, kiosco, farmacia y más" },
+          ...(s.lastOrder ? [{ id: "m_repeat", title: "🔁 Repetir mi pedido", desc: "El mismo de la última vez" }] : []),
+        ],
+      },
+      { title: "Mi cuenta", rows: [
+        { id: "m_pedidos", title: "📋 Mis pedidos", desc: "Cómo va lo que pediste" },
+        { id: "m_puntos", title: "🎁 Puntos y sorteos", desc: "Tus GoPoints y los sorteos abiertos" },
+      ] },
+      { title: "Ayuda", rows: [{ id: "m_humano", title: "🙋 Hablar con alguien", desc: "Te atiende una persona del equipo" }] },
     ];
-    if (s.comercio) rows.unshift({ id: "m_cadete", title: "🛵 Cadete para mi local", description: `Pedí un cadete para ${s.comercio.name}` });
-    const hi = name ? `¡Hola ${String(name).split(" ")[0]}! 👋` : "¡Hola! 👋";
+  }
+
+  // El menú es un solo desplegable "Ver opciones"; el primer saludo del día va con el banner de GO!
+  function menu(name, s) {
+    const first = name ? String(name).split(" ")[0] : "";
+    const hi = first ? `¡Hola ${first}! 👋` : "¡Hola! 👋";
+    const custom = s && s.cfg && s.cfg.greeting ? s.cfg.greeting.replace(/\{nombre\}/g, first).replace(/ +/g, " ").trim() : "";
     return {
-      text: `${hi} Soy el asistente de *GO! Delivery*.\n¿Qué necesitás?\n\n_Escribí *menú* en cualquier momento para volver acá._`,
-      list: { button: "Elegir", section: "¿Qué necesitás?", rows },
+      isMenu: true,
+      greeting: `${hi} Soy el asistente de *GO! Delivery*.`,
+      text: `${custom || `${hi} ¿Qué necesitás hoy?`}\n\n_Podés escribirme el pedido de una (ej: una coca de Paulos y pan de La Unión) o mandarme un audio._`,
+      footer: FOOTER,
+      list: { button: "Ver opciones", sections: menuSections(s) },
     };
   }
 
-  const menuButton = (text) => ({ text, buttons: [{ id: "go_menu", title: "Ver menú" }] });
+  function moreMenu(s) {
+    const rows = [
+      { id: "m_compra", title: "🛒 Comprar algo", description: "Un cadete te compra lo que necesites y te lo lleva" },
+      { id: "m_envio", title: "📦 Llevar o traer algo", description: "Paquetes, llaves, documentos, de un lugar a otro" },
+      ...(s.lastOrder ? [{ id: "m_repeat", title: "🔁 Repetir mi pedido", description: "El mismo que pediste la última vez" }] : []),
+      { id: "m_comercio", title: "🍔 Pedir a un comercio", description: "Comida, kiosco, farmacia y más" },
+      { id: "m_pedidos", title: "📋 Mis pedidos", description: "Cómo va lo que pediste" },
+      { id: "m_puntos", title: "🎁 Puntos y sorteos", description: "Tus GoPoints y los sorteos abiertos" },
+      { id: "m_humano", title: "🙋 Hablar con alguien", description: "Te atiende una persona del equipo" },
+    ];
+    if (s.comercio) rows.unshift({ id: "m_cadete", title: "🛵 Cadete para mi local", description: `Pedí un cadete para ${s.comercio.name}` });
+    return { text: "¿Qué necesitás?", list: { button: "Ver opciones", section: "Opciones", rows } };
+  }
+
+  // Un aviso con el menú a mano: "Ver menú" abre directamente las opciones
+  const menuButton = (text) => ({ text, list: { button: "Ver menú", sections: menuSections() } });
 
   function askDetails(flow, comercioName) {
     if (flow === "envio") {
@@ -89,12 +141,34 @@ function createBot({ db, orders, comercios, sender }) {
     if (flow === "comercio") {
       return { text: `✍️ *Escribí tu pedido para ${comercioName}.*\nPoné todo lo que quieras: cantidades, gustos, aclaraciones. También podés mandar un audio o una foto.` };
     }
-    return { text: "🛒 *Contame qué necesitás.*\nEscribí la lista y, si querés, de dónde (ej: _2 kg de papa y una lavandina de lo de Pepe_).\nTambién podés mandar un audio o una foto de la lista." };
+    return askStore(0);
   }
 
+  // ── Compras: comercio por comercio, como la app (mandadoStops). El cadete ve en su panel el nombre
+  // de cada comercio (y lo ubica en el mapa si lo conoce) y qué comprar en cada uno.
+  const MAX_STOPS = 5;
+  function askStore(n) {
+    return n === 0
+      ? { text: "🛒 *¿En qué comercio te compramos?*\nEscribí el nombre (ej: _Kiosco de 7 y 50_, _Farmacia Pasteur_).\nSi te da igual dónde, escribí *el más cercano* y qué tipo de negocio (ej: _farmacia más cercana_)." }
+      : { text: `🏪 *¿En qué otro comercio?* (es la parada ${n + 1})\nEscribí el nombre.` };
+  }
+  const askItems = (store) => ({ text: `🛒 *¿Qué te compramos en ${store}?*\nEscribí la lista con cantidades, o mandá un audio o una foto.` });
+  const itemsAck = (s) => ({
+    text: "Anotado ✍️\nSi falta algo de este comercio, escribilo. Cuando termines, abrí *Seguir*.",
+    listLabel: "Seguir",
+    buttons: [
+      { id: "d_done", title: "✅ Listo, eso es todo", desc: "Seguimos con la entrega" },
+      ...(s.data.stops.length < MAX_STOPS ? [{ id: "c_more", title: "🏪 Agregar otro comercio", desc: "Algo de otro lugar" }] : []),
+      { id: "x_cancel", title: "❌ Cancelar" },
+    ],
+  });
+  const stopsText = (stops) => stops.map((st, i) =>
+    `${stops.length > 1 ? `${i + 1}. ` : ""}*${st.store}*: ${short(st.items || ((st.media || []).length ? "(en el audio/foto)" : "—"), 200)}`).join("\n");
+
   const detailsAck = () => ({
-    text: "Anotado ✍️\nSi querés agregar algo más, escribilo. Si ya está, tocá *Listo*.",
-    buttons: [{ id: "d_done", title: "✅ Listo" }, { id: "x_cancel", title: "Cancelar" }],
+    text: "Anotado ✍️\nSi querés agregar algo más, escribilo. Cuando termines, abrí *Seguir*.",
+    listLabel: "Seguir",
+    buttons: [{ id: "d_done", title: "✅ Listo, eso es todo", desc: "Seguimos con el pedido" }, { id: "x_cancel", title: "❌ Cancelar" }],
   });
 
   const askLocation = (what) => ({
@@ -102,14 +176,121 @@ function createBot({ db, orders, comercios, sender }) {
     askLocation: true,
   });
 
+  const addressesOf = (s) => (Array.isArray(s.addresses) && s.addresses.length ? s.addresses
+    : (s.lastAddress && s.lastAddress.address ? [s.lastAddress] : []));
+
+  // Las últimas 3 direcciones usadas, la más reciente primero
+  function rememberAddress(s, place, notes) {
+    if (!place || !place.address) return;
+    const a = { address: place.address, coords: place.coords || null, notes: notes || "" };
+    const key = norm(a.address);
+    s.addresses = [a, ...addressesOf(s).filter((x) => norm(x.address) !== key)].slice(0, 3);
+    s.lastAddress = s.addresses[0];
+  }
+
+  // Con el formulario nativo (WhatsApp Flows) la entrega, los datos, el pago y la propina se cargan
+  // en una sola pantalla. Igual se puede contestar por el chat: el paso sigue siendo "delivery".
   function askDelivery(s) {
-    if (s.lastAddress && s.lastAddress.address) {
+    if (s.formId && s.data && s.data.flow) return deliveryForm(s);
+    const list = addressesOf(s);
+    if (list.length === 1) {
       return {
-        text: `📍 ¿Lo llevamos a *${short(s.lastAddress.address, 120)}*?`,
+        text: `📍 ¿Lo llevamos a *${short(list[0].address, 120)}*?`,
         buttons: [{ id: "a_last", title: "Sí, ahí" }, { id: "a_new", title: "Otra dirección" }],
+        asButtons: true,
+      };
+    }
+    if (list.length > 1) {
+      return {
+        text: "📍 ¿Adónde lo llevamos?",
+        list: {
+          button: "Elegir dirección",
+          section: "Tus direcciones",
+          rows: [
+            ...list.map((a, i) => ({ id: `a_${i}`, title: short(a.address, 24), description: short(a.notes ? `${a.address} · ${a.notes}` : a.address, 72) })),
+            { id: "a_new", title: "📍 Otra dirección", description: "Mandá la ubicación o escribila" },
+          ],
+        },
       };
     }
     return askLocation("¿Adónde lo llevamos?");
+  }
+
+  // Resumen para el formulario, con el markdown de WhatsApp Flows (**negrita**). Lo que escribió el
+  // cliente va sin asteriscos ni guiones bajos para que no rompa el formato.
+  const plain = (t, n = 160) => short(String(t || "").replace(/[*_~`#]/g, "").replace(/\s+/g, " "), n);
+  function formSummary(d) {
+    const what = (t) => plain(t) || "(en el audio/foto)";
+    if (d.flow === "compra" && (d.stops || []).length) {
+      return d.stops.map((st) => `**${plain(st.store, 60)}**: ${what(st.items)}`).join("\n");
+    }
+    if (d.flow === "envio") return `**Qué llevamos**: ${what(d.details)}${d.pickup ? `\n**Retiro**: ${plain(d.pickup.address, 120)}` : ""}`;
+    if (d.flow === "comercio") return `**${plain(d.comercio && d.comercio.name, 60)}**: ${what(d.details)}`;
+    return what(d.details);
+  }
+
+  function deliveryForm(s) {
+    const token = crypto.randomBytes(8).toString("hex");
+    s.data.formToken = token;
+    const addresses = [
+      ...addressesOf(s).map((a, i) => ({ id: `a_${i}`, title: short(a.address, 30), description: short(a.notes || a.address, 300) })),
+      { id: "gps", title: "📍 Mandar mi ubicación", description: "Te la pido por el chat (envío exacto)" },
+      { id: "new", title: "✍️ Escribir otra", description: "Calle, número y entre calles" },
+    ];
+    return {
+      header: "📍 Entrega y pago",
+      text: "Tocá *Completar pedido* y cargá todo en una sola pantalla: adónde lo llevamos, cómo pagás y la propina.\n_Si preferís, escribí la dirección o mandá la ubicación por acá._",
+      footer: FOOTER,
+      flow: {
+        id: s.formId,
+        token,
+        cta: "Completar pedido",
+        screen: "PEDIDO",
+        // Viene elegida la última dirección usada (o "mandar mi ubicación", que da el envío exacto)
+        data: { summary: short(formSummary(s.data), 600), addresses, init_address: addresses[0].id, show_tip: s.data.flow !== "comercio" },
+      },
+    };
+  }
+
+  // Volvió el formulario: { flow_token, address: a_N | gps | new, new_address, notes, pay, tip, tip_other }
+  async function onForm(msg, s, out) {
+    const r = msg.data || {};
+    if (!s.data || !s.data.formToken || r.flow_token !== s.data.formToken) {
+      // Uno viejo: si hay un pedido armándose, se le manda el vigente
+      if (s.step === "delivery" && s.data && s.data.formToken) {
+        out.push({ text: "Ese formulario es de antes. Completá este 👇" });
+        out.push(askDelivery(s));
+        return;
+      }
+      out.push(menuButton("Ese formulario es de un pedido que ya no está en curso. Escribí *menú* para empezar otro."));
+      return;
+    }
+    const d = s.data;
+    d.pay = PAY_LABEL[r.pay] ? r.pay : "efectivo";
+    d.tip = d.flow !== "comercio" ? tipOf(r) : 0;
+    let notes = String(r.notes || "").trim().slice(0, 200);
+    const list = addressesOf(s);
+    const saved = /^a_\d$/.test(r.address || "") ? list[Number(r.address.slice(2))] : null;
+    const typed = String(r.new_address || "").trim();
+    d.editing = false;
+    if (saved) {
+      d.delivery = { address: saved.address, coords: saved.coords || null };
+      notes = notes || saved.notes || "";
+    } else if (r.address === "new" && typed.length >= 4 && /\d/.test(typed)) {
+      d.delivery = { address: typed.slice(0, 200), coords: null };
+    } else {
+      // Eligió mandar la ubicación, o escribió una calle sin altura y sin punto el cadete no sabe
+      // adónde ir: falta solo eso y después va el resumen
+      d.notes = notes;
+      d.gpsPending = true;
+      if (typed.length >= 4) d.vagueAsked = true;
+      s.step = "delivery";
+      out.push(askLocation(typed.length >= 4 ? "Esa dirección no tiene altura. Mandame la ubicación de entrega" : "Mandame la ubicación de entrega"));
+      return;
+    }
+    d.notes = notes;
+    s.step = "confirm";
+    out.push(await summary(s));
   }
 
   const askNotes = () => ({
@@ -119,10 +300,14 @@ function createBot({ db, orders, comercios, sender }) {
 
   const askPay = () => ({
     text: "💳 ¿Cómo vas a pagar?",
-    buttons: [{ id: "p_efectivo", title: "💵 Efectivo" }, { id: "p_transferencia", title: "🏦 Transferencia" }],
+    listLabel: "Elegir",
+    buttons: [{ id: "p_efectivo", title: "💵 Efectivo", desc: "Le pagás al cadete al recibir" }, { id: "p_transferencia", title: "🏦 Transferencia", desc: "Al alias del cadete, al recibir" }],
   });
 
-  const fullDetails = (d) => [d.store ? `En ${d.store}:` : "", d.details || ""].filter(Boolean).join(" ");
+  // Compra: el mismo texto que arma la app ("🏪 1. Comercio: X / 📦 Pedido: Y"), que el panel sabe leer
+  const fullDetails = (d) => (d.flow === "compra" && (d.stops || []).length
+    ? d.stops.map((st, i) => `🏪 ${i + 1}. Comercio: ${st.store}\n📦 Pedido: ${st.items || "(ver audio/foto)"}`).join("\n\n")
+    : [d.store ? `En ${d.store}:` : "", d.details || ""].filter(Boolean).join(" "));
 
   async function summary(s) {
     const d = s.data;
@@ -136,30 +321,63 @@ function createBot({ db, orders, comercios, sender }) {
         text: `🧾 *Tu pedido*\n\n🏪 ${d.comercio.name}\n📝 ${what}${media}\n📍 ${where}\n💳 ${PAY_LABEL[d.pay]}\n\n` +
           `Le preguntamos a *${d.comercio.name}* si lo tiene y cuánto sale. Después vos confirmás.\n` +
           `Envío ${q.exactDistance ? "" : "aprox. "}${money(q.deliveryCost)}`,
-        buttons: [{ id: "c_ok", title: "📨 Consultar" }, { id: "x_cancel", title: "❌ Cancelar" }],
+        buttons: [{ id: "c_ok", title: "📨 Consultar precio", desc: "Le preguntamos al comercio" }, { id: "e_edit", title: "✏️ Editar algo", desc: "Lista, dirección, datos o pago" }, { id: "x_cancel", title: "❌ Cancelar" }],
+        listLabel: "Confirmar o editar",
+        footer: FOOTER,
       };
     }
     const type = d.flow === "envio" ? "mandado" : "compra";
-    const q = await orders.quoteFavor({ type, pickupCoords: d.flow === "envio" ? d.pickup && d.pickup.coords : TOWN_CENTER, deliveryCoords: d.delivery.coords });
+    const q = await orders.quoteFavor({ type, pickupCoords: d.flow === "envio" ? d.pickup && d.pickup.coords : TOWN_CENTER, deliveryCoords: d.delivery.coords, stopsCount: type === "compra" ? Math.max(1, (d.stops || []).length) : 1 });
     const lines = [`Envío: ${money(q.deliveryCost)}${q.isRaining ? " (incluye lluvia 🌧️)" : ""}`];
     if (q.purchaseFee) lines.push(`Servicio de compra: ${money(q.purchaseFee)}`);
     if (q.appUsageFee) lines.push(`Uso de la app: ${money(q.appUsageFee)}`);
     const pickup = d.flow === "envio" ? `\n🏁 Retiro: ${short(d.pickup.address, 120)}` : "";
+    if (q.extraStopsFee) lines.push(`Paradas extra (${(d.stops || []).length - 1}): ${money(q.extraStopsFee)}`);
+    if (d.tip) lines.push(`Propina para el cadete: ${money(d.tip)}`);
+    const whatLine = d.flow === "compra" && (d.stops || []).length ? `🛒 *Compras*\n${stopsText(d.stops)}` : `${d.flow === "envio" ? "📦" : "🛒"} ${what}`;
     return {
-      text: `🧾 *Resumen*\n\n${d.flow === "envio" ? "📦" : "🛒"} ${what}${media}${pickup}\n📍 Entrega: ${where}\n💳 ${PAY_LABEL[d.pay]}\n\n` +
-        `${lines.join("\n")}\n*Total: ${money(q.total)}*` +
+      text: `🧾 *Resumen*\n\n${whatLine}${media}${pickup}\n📍 Entrega: ${where}\n💳 ${PAY_LABEL[d.pay]}\n\n` +
+        `${lines.join("\n")}\n*Total: ${money(q.total + (d.tip || 0))}*` +
         (type === "compra" ? "\n_+ lo que salga la compra, que le pagás al cadete contra ticket._" : "") +
         (q.exactDistance ? "" : "\n_El envío es estimado porque no mandaste la ubicación exacta._"),
-      buttons: [{ id: "c_ok", title: "✅ Confirmar" }, { id: "x_cancel", title: "❌ Cancelar" }],
+      buttons: [{ id: "c_ok", title: "✅ Confirmar pedido", desc: "Se lo mandamos a los cadetes" }, { id: "e_edit", title: "✏️ Editar algo", desc: "Lista, dirección, datos o pago" }, { id: "x_cancel", title: "❌ Cancelar" }],
+      listLabel: "Confirmar o editar",
+      footer: FOOTER,
     };
+  }
+
+  function editMenu(s) {
+    const d = s.data;
+    const rows = [
+      { id: "e_items", title: d.flow === "compra" ? "🛒 Lista y comercios" : d.flow === "envio" ? "📦 Qué hay que llevar" : "📝 El pedido", description: "Volver a escribirlo" },
+      ...(d.flow === "envio" ? [{ id: "e_pickup", title: "🏁 Dónde retirar" }] : []),
+      { id: "e_delivery", title: "📍 Dirección de entrega" },
+      { id: "e_notes", title: "🏠 Datos para encontrarte" },
+      { id: "e_pay", title: "💳 Forma de pago" },
+    ];
+    return { text: "✏️ ¿Qué querés cambiar?", list: { button: "Elegir", section: "Cambiar", rows } };
+  }
+
+  // Después de un paso: si se estaba editando el resumen, se vuelve al resumen; si no, al paso siguiente
+  async function next(s, out, fn) {
+    if (s.data.editing && s.data.delivery && s.data.pay) {
+      s.data.editing = false;
+      s.step = "confirm";
+      out.push(await summary(s));
+      return;
+    }
+    return fn();
   }
 
   // ───────────────────────── Entrada ─────────────────────────
 
   // msg: { kind: text|reply|location|media|other, text, id, location: {lat,lng,address,name}, media: {type,url} }
-  async function handle({ waId, name, msg, national }) {
+  async function handle({ waId, name, msg, msgId, national }) {
     const s = await loadSession(waId);
     await senderComercio(waId, s, national);
+    s.cfg = config ? await config.get() : DEFAULTS;
+    // Camino corto: entrega y pago salen del mismo mensaje, sin formulario aparte
+    s.formId = formId && !s.cfg.short ? await formId() : null;
     const out = [];
     try {
       await route({ waId, name, msg, s, out });
@@ -169,8 +387,93 @@ function createBot({ db, orders, comercios, sender }) {
       s.step = "idle"; s.data = {};
     }
     s.lastName = name || s.lastName || null;
+    const say = (m) => (m.kind === "text" ? m.text : m.kind === "reply" ? `[${m.title || m.id}]` : m.kind === "location" ? "📍 Ubicación"
+      : m.kind === "form" ? "📝 Formulario de entrega y pago" : m.kind === "media" ? `${m.media && m.media.type === "audio" ? "🎤 Audio" : "📷 Archivo"}${m.text ? `: ${m.text}` : ""}` : "(mensaje)");
+    const now = Date.now();
+    s.log = [...(s.log || []), { at: now, dir: "in", text: short(say(msg), 500) },
+      ...out.map((o) => ({ at: now, dir: "out", text: short(o.text || "", 500) }))].slice(-30);
+    // Primer menú del día: el banner va arriba y el saludo pasa a ser su texto
+    const first = out.find((o) => o && o.isMenu);
+    if (first && s.cfg.banner && s.bannerDay !== argDay()) {
+      s.bannerDay = argDay();
+      out.splice(out.indexOf(first), 0, { image: BANNER_URL, caption: `${first.greeting}\nCompramos, llevamos y traemos lo que necesites en Magdalena 🛵` });
+    }
+    out.forEach((o) => { if (o && o.react) o.reactTo = msgId; });
+    hideOptions(out, s.cfg.hiddenOptions);
+    delete s.formId;
+    delete s.cfg;
     await saveSession(waId, s);
     await sender.send(waId, out);
+  }
+
+  // Opciones que el admin sacó del menú (Admin → Bot → Ajustes), en todos los menús que salen
+  function hideOptions(out, hidden) {
+    if (!hidden || !hidden.length) return;
+    const keep = (rows) => rows.filter((row) => !hidden.includes(row.id));
+    out.forEach((o) => {
+      if (!o || !o.list) return;
+      if (o.list.rows) o.list.rows = keep(o.list.rows);
+      if (o.list.sections) o.list.sections = o.list.sections.map((sec) => ({ ...sec, rows: keep(sec.rows) }));
+    });
+  }
+
+  // ── Camino corto: todo en un solo mensaje. Solo se repregunta lo que falta, de a un mensaje. ──
+  function startQuick(s, flow, extra = {}) {
+    s.step = "quick";
+    s.data = { quick: true, flow, details: "", media: [], ...(flow === "compra" ? { stops: [] } : {}), ...extra };
+    if (flow === "envio") return { text: s.cfg.askEnvio };
+    if (flow === "comercio") return { text: s.cfg.askComercio.replace(/\{comercio\}/g, extra.comercio.name) };
+    return { text: s.cfg.askCompra };
+  }
+
+  async function onQuick(waId, msg, s, out) {
+    const d = s.data;
+    let text = msg.kind === "text" ? msg.text : "";
+    if (msg.kind === "location") {
+      const place = readPlace(msg);
+      if (place) d.delivery = place;
+    }
+    if (msg.kind === "media" && msg.media) {
+      d.media = [...(d.media || []), msg.media].slice(0, 6);
+      text = msg.text || "";
+      // Un audio se escucha para sacar la dirección y el pago; si no se puede, va igual al cadete
+      if (msg.media.type === "audio" && msg.media.path && understand) {
+        const bytes = await sender.readMedia(msg.media.path);
+        const parsed = bytes ? await understand.order(waId, { media: { type: "audio", bytes, mime: msg.media.mime } }).catch(() => null) : null;
+        if (parsed && parsed.heard) text = parsed.heard;
+      }
+    }
+    if (text.trim()) {
+      const p = parseQuick(text);
+      if (p.pay) d.pay = p.pay;
+      // Sin altura no queda como dirección: quickNext se la pide con la ubicación
+      if (p.address && /\d/.test(p.address)) d.delivery = { address: p.address.slice(0, 200), coords: null };
+      else if (p.address) d.vagueAsked = true;
+      if (p.pickup) d.pickup = { address: p.pickup.slice(0, 200), coords: null };
+      if (p.what) d.details = [d.details, p.what].filter(Boolean).join("\n").slice(0, 2000);
+    }
+    // Si dijo en qué comercio, cada uno queda como parada; si no, el cadete lee el texto tal cual
+    if (d.flow === "compra" && d.details && understand && !(d.stops || []).length) {
+      const parsed = await understand.order(waId, { text: d.details }, { useAI: false }).catch(() => null);
+      if (parsed && parsed.stops.length) d.stops = parsed.stops.map((st, i) => ({ store: st.store, items: st.items, media: i === 0 ? d.media : [] }));
+    }
+    return quickNext(s, out);
+  }
+
+  // Sigue por lo primero que falte; con todo, el resumen
+  async function quickNext(s, out) {
+    const d = s.data;
+    s.step = "quick";
+    if (!d.details && !(d.media || []).length) {
+      out.push({ text: "Todavía no me dijiste qué necesitás 🙂 Escribilo o mandá un audio." });
+      return;
+    }
+    if (d.flow === "envio" && !d.pickup) { s.step = "pickup"; out.push(askLocation("¿Dónde lo retiramos?")); return; }
+    if (!d.delivery) { s.step = "delivery"; out.push(askDelivery(s)); return; }
+    if (!d.pay) { s.step = "pay"; out.push(askPay()); return; }
+    d.editing = false;
+    s.step = "confirm";
+    out.push(await summary(s));
   }
 
   function startFlow(s, flow, extra = {}) {
@@ -178,16 +481,24 @@ function createBot({ db, orders, comercios, sender }) {
     s.data = { flow, details: "", media: [], ...extra };
   }
 
+  // Compra: arranca pidiendo el comercio (o directo la lista si ya se sabe dónde)
+  function startCompra(s, store, extra = {}) {
+    s.data = { flow: "compra", stops: store ? [{ store, items: "", media: [] }] : [], media: [], ...extra };
+    s.step = store ? "c_items" : "c_store";
+  }
+
   async function route({ waId, name, msg, s, out }) {
     const t = msg.kind === "text" ? norm(msg.text) : "";
     let id = msg.kind === "reply" ? msg.id : "";
     if (!id && t) {
-      if (s.step === "details" && DONE_WORDS.has(t)) id = "d_done";
+      if ((s.step === "details" || s.step === "c_items") && DONE_WORDS.has(t)) id = "d_done";
+      else if (s.step === "c_items" && (t === "otro" || t === "otro comercio" || t === "otro lugar")) id = "c_more";
       else if (s.step === "confirm" && YES_WORDS.has(t)) id = "c_ok";
       else if (s.step === "notes" && NO_NOTES_WORDS.has(t)) id = "n_none";
       else if (s.step === "pay" && t.includes("efectivo")) id = "p_efectivo";
       else if (s.step === "pay" && t.includes("transfer")) id = "p_transferencia";
       else if (s.step === "delivery" && s.lastAddress && YES_WORDS.has(t)) id = "a_last";
+      else if (s.step === "c_parsed" && YES_WORDS.has(t)) id = "p_ok";
     }
 
     // Soporte: todo lo que escribe va a la persona, salvo que pida volver al menú.
@@ -204,6 +515,8 @@ function createBot({ db, orders, comercios, sender }) {
     if (id.startsWith("qm:")) return quoteToMandado(id.slice(3), s, out);
     if (id.startsWith("oc:")) return cancelOrder(waId, id.slice(3), s, out);
     if (id.startsWith("k:")) return pickComercio(id.slice(2), s, out);
+    if (id.startsWith("gw:")) return joinGiveaway(waId, name, id.slice(3), out);
+    if (msg.kind === "form") return onForm(msg, s, out);
 
     if (id === "go_menu" || MENU_WORDS.has(t)) {
       if (s.step === "k_waiting" && s.data.quoteId) {
@@ -219,12 +532,34 @@ function createBot({ db, orders, comercios, sender }) {
       case "m_compra": {
         // Viene de "no encontré ese comercio": se recuerda dónde comprar
         const store = s.data && s.data.suggested;
-        startFlow(s, "compra", store ? { store } : {});
-        out.push(store ? { text: `🛒 *¿Qué te compramos en ${store}?*
-Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
+        if (s.cfg.short) {
+          out.push(startQuick(s, "compra", store ? { store } : {}));
+          return;
+        }
+        startCompra(s, store || null);
+        out.push(store ? askItems(store) : askStore(0));
         return;
       }
-      case "m_envio": startFlow(s, "envio"); out.push(askDetails("envio")); return;
+      case "m_envio":
+        if (s.cfg.short) { out.push(startQuick(s, "envio")); return; }
+        startFlow(s, "envio"); out.push(askDetails("envio")); return;
+      case "m_more": out.push(moreMenu(s)); return;
+      case "m_repeat": return repeatLast(name, s, out);
+      case "m_puntos": return showPoints(waId, name, out);
+      case "w_yes":
+        await db.collection("wa_waitlist").doc(waId).set({ at: Date.now(), until: Date.now() + 2 * 60 * 60 * 1000 });
+        out.push({ text: "👍 Listo, te aviso por acá apenas se conecte un cadete. Tu pedido queda guardado." });
+        return;
+      case "e_edit":
+        if (!s.data.delivery) { out.push(menu(name, s)); return; }
+        out.push(editMenu(s));
+        return;
+      case "e_items":
+      case "e_pickup":
+      case "e_delivery":
+      case "e_notes":
+      case "e_pay":
+        return editStep(id, s, out);
       case "m_comercio": return listComercios(s, out);
       case "m_pedidos": return myOrders(waId, out);
       case "m_humano": return startSupport(waId, name, s, out);
@@ -232,12 +567,18 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
       case "cd_ok": return createCadete(waId, s, out);
       case "k_other": s.step = "k_search"; s.data = {}; out.push({ text: "🔎 Escribí el nombre del comercio." }); return;
       case "k_menu": return sendStoreLink(s, out);
-      case "k_write": startFlow(s, "comercio", { comercio: s.data.comercio }); out.push(askDetails("comercio", s.data.comercio.name)); return;
+      case "k_write":
+        if (s.cfg.short) { out.push(startQuick(s, "comercio", { comercio: s.data.comercio })); return; }
+        startFlow(s, "comercio", { comercio: s.data.comercio }); out.push(askDetails("comercio", s.data.comercio.name)); return;
       default: break;
     }
 
     switch (s.step) {
+      case "quick": return onQuick(waId, msg, s, out);
       case "details": return onDetails(msg, id, s, out);
+      case "c_store": return onStore(waId, msg, s, out);
+      case "c_items": return onItems(msg, id, s, out);
+      case "c_parsed": return onParsed(waId, msg, id, s, out);
       case "pickup": return onPickup(msg, s, out);
       case "delivery": return onDelivery(msg, id, s, out);
       case "notes": return onNotes(msg, id, s, out);
@@ -247,6 +588,7 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
       case "k_search": return onComercioText(msg, s, out);
       case "k_mode":
         // Escribió el pedido directamente en vez de elegir un botón
+        if (s.cfg.short) { startQuick(s, "comercio", { comercio: s.data.comercio }); return onQuick(waId, msg, s, out); }
         startFlow(s, "comercio", { comercio: s.data.comercio });
         return onDetails(msg, "", s, out);
       case "k_waiting":
@@ -256,7 +598,7 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
         out.push({ text: "Tocá *Confirmar* o *No, gracias* en el mensaje de arriba 👆 (o escribí *cancelar*)." });
         return;
       default:
-        out.push(menu(name, s));
+        return onIdle(waId, name, msg, s, out);
     }
   }
 
@@ -268,10 +610,11 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
         out.push({ text: "Todavía no me dijiste qué necesitás 🙂 Escribilo o mandá un audio." });
         return;
       }
-      if (s.data.flow === "envio") { s.step = "pickup"; out.push(askLocation("¿Dónde lo retiramos?")); return; }
-      s.step = "delivery";
-      out.push(askDelivery(s));
-      return;
+      return next(s, out, () => {
+        if (s.data.flow === "envio") { s.step = "pickup"; out.push(askLocation("¿Dónde lo retiramos?")); return; }
+        s.step = "delivery";
+        out.push(askDelivery(s));
+      });
     }
     if (msg.kind === "text" && msg.text.trim()) {
       s.data.details = [s.data.details, msg.text.trim()].filter(Boolean).join("\n").slice(0, 2000);
@@ -285,6 +628,119 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
       return;
     }
     out.push(askDetails(s.data.flow, s.data.comercio && s.data.comercio.name));
+  }
+
+  async function onStore(waId, msg, s, out) {
+    if (msg.kind === "media" && msg.media) {
+      // Un audio o una foto con todo el pedido: se intenta entender; si no, igual va al cadete
+      const bytes = msg.media.path ? await sender.readMedia(msg.media.path) : null;
+      const parsed = bytes && understand ? await understand.order(waId, { text: msg.text, media: { type: msg.media.type, bytes, mime: msg.media.mime } }).catch(() => null) : null;
+      if (parsed && parsed.stops.length) return offerParsed(s, out, parsed, msg.media);
+      s.data.pendingMedia = [...(s.data.pendingMedia || []), msg.media].slice(0, 4);
+      s.data.media = [...(s.data.media || []), msg.media].slice(0, 6);
+      out.push({ text: `${msg.media.type === "audio" ? "🎤 No llegué a entender bien el audio" : "📷 Recibí la foto"}, igual se la paso al cadete.\n¿En qué comercio te compramos?` });
+      return;
+    }
+    const text = msg.kind === "text" ? msg.text.replace(/\s+/g, " ").trim() : "";
+    if (text.length < 2) { out.push({ text: "Primero decime el *nombre del comercio* ✍️ (después me pasás la lista)." }); return; }
+    // ¿Escribió todo el pedido junto ("una coca de paulos y pan de la unión")?
+    if (understand && !understand.looksLikeStoreName(text)) {
+      const parsed = await understand.order(waId, { text }).catch(() => null);
+      if (parsed && parsed.stops.length) return offerParsed(s, out, parsed, null);
+    }
+    const store = text.slice(0, 80);
+    const pending = s.data.pendingMedia || [];
+    delete s.data.pendingMedia;
+    s.data.stops.push({ store, items: "", media: pending });
+    s.step = "c_items";
+    out.push(pending.length ? itemsAck(s) : askItems(store));
+  }
+
+  // "Entendí esto: …" — el cliente confirma o lo hace de a uno
+  function offerParsed(s, out, parsed, media) {
+    const stops = parsed.stops.map((st) => ({ store: st.store, items: st.items, media: [] }));
+    if (media) { stops[0].media = [media]; s.data.media = [...(s.data.media || []), media].slice(0, 6); }
+    s.data.flow = "compra";
+    s.data.parsed = { stops, heard: parsed.heard || null };
+    s.step = "c_parsed";
+    out.push({
+      text: `${parsed.via === "ia" ? "🧠" : "📝"} *Entendí esto:*\n${stopsText(stops)}` +
+        (parsed.heard ? `\n\n🎤 _"${short(parsed.heard, 220)}"_` : "") + "\n\n¿Está bien?",
+      listLabel: "¿Está bien?",
+      buttons: [{ id: "p_ok", title: "✅ Sí, está bien", desc: "Seguimos con la entrega" }, { id: "p_fix", title: "✏️ Corregir", desc: "Lo armamos de a un comercio" }, { id: "x_cancel", title: "❌ Cancelar" }],
+    });
+  }
+
+  async function onParsed(waId, msg, id, s, out) {
+    if (id === "p_ok" && s.data.parsed) {
+      s.data.stops = s.data.parsed.stops;
+      delete s.data.parsed;
+      return next(s, out, () => { s.step = "delivery"; out.push(askDelivery(s)); });
+    }
+    if (id === "p_fix") {
+      delete s.data.parsed;
+      s.data.stops = [];
+      s.step = "c_store";
+      out.push({ text: "Dale, vamos de a uno 👍" });
+      out.push(askStore(0));
+      return;
+    }
+    // Lo volvió a escribir distinto
+    if (msg.kind === "text" && msg.text.trim() && understand) {
+      const parsed = await understand.order(waId, { text: msg.text }).catch(() => null);
+      if (parsed && parsed.stops.length) return offerParsed(s, out, parsed, null);
+    }
+    out.push({ text: "Abrí *¿Está bien?* en el mensaje de arriba 👆 y elegí *Sí, está bien* o *Corregir*." });
+  }
+
+  // Sin nada en curso: si escribe el pedido de una, se arma solo (en texto, solo con reglas: un
+  // "hola, ¿tienen delivery en Magdalena?" no gasta IA). Un audio sí se escucha.
+  const ORDERISH = /^(un|una|unos|unas|dos|tres|cuatro|cinco|seis|siete|ocho|diez|doce|medio|media|\d)/i;
+  async function onIdle(waId, name, msg, s, out) {
+    if (understand && msg.kind === "text" && msg.text.trim().length >= 8) {
+      const parsed = await understand.order(waId, { text: msg.text }, { useAI: false }).catch(() => null);
+      if (parsed && parsed.stops.length && parsed.stops.every((st) => ORDERISH.test(st.items) || /\d/.test(st.items))) {
+        startCompra(s, null, s.cfg.short ? { quick: true } : {});
+        return offerParsed(s, out, parsed, null);
+      }
+    }
+    if (understand && msg.kind === "media" && msg.media && msg.media.type === "audio" && msg.media.path) {
+      const bytes = await sender.readMedia(msg.media.path);
+      const parsed = bytes ? await understand.order(waId, { media: { type: "audio", bytes, mime: msg.media.mime } }).catch(() => null) : null;
+      if (parsed && parsed.stops.length) {
+        startCompra(s, null, s.cfg.short ? { quick: true } : {});
+        return offerParsed(s, out, parsed, msg.media);
+      }
+    }
+    out.push(menu(name, s));
+  }
+
+  async function onItems(msg, id, s, out) {
+    const cur = s.data.stops[s.data.stops.length - 1];
+    const empty = (st) => !st.items && !(st.media || []).length;
+    if (id === "d_done" || id === "c_more") {
+      if (empty(cur)) { out.push({ text: `Todavía no me dijiste qué comprar en *${cur.store}* 🙂 Escribilo o mandá un audio.` }); return; }
+      if (id === "c_more") {
+        if (s.data.stops.length >= MAX_STOPS) { out.push({ text: `Hasta ${MAX_STOPS} comercios por pedido. Tocá *Listo* para seguir.`, buttons: [{ id: "d_done", title: "✅ Listo" }] }); return; }
+        s.step = "c_store";
+        out.push(askStore(s.data.stops.length));
+        return;
+      }
+      return next(s, out, () => { s.step = "delivery"; out.push(askDelivery(s)); });
+    }
+    if (msg.kind === "text" && msg.text.trim()) {
+      cur.items = [cur.items, msg.text.trim()].filter(Boolean).join("\n").slice(0, 600);
+      out.push(itemsAck(s));
+      return;
+    }
+    if (msg.kind === "media") {
+      cur.media = [...(cur.media || []), msg.media].slice(0, 4);
+      s.data.media = [...(s.data.media || []), msg.media].slice(0, 6);
+      if (msg.text) cur.items = [cur.items, msg.text.trim()].filter(Boolean).join("\n").slice(0, 600);
+      out.push(itemsAck(s));
+      return;
+    }
+    out.push(askItems(cur.store));
   }
 
   function readPlace(msg) {
@@ -303,22 +759,39 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     const place = readPlace(msg);
     if (!place) { out.push(askLocation("¿Dónde lo retiramos?")); return; }
     s.data.pickup = place;
-    s.step = "delivery";
-    out.push(askDelivery(s));
+    if (s.data.quick && !s.data.editing) return quickNext(s, out);
+    return next(s, out, () => { s.step = "delivery"; out.push(askDelivery(s)); });
   }
 
   async function onDelivery(msg, id, s, out) {
-    if (id === "a_last" && s.lastAddress) {
-      s.data.delivery = { address: s.lastAddress.address, coords: s.lastAddress.coords || null };
-      s.data.notes = s.lastAddress.notes || "";
-      s.step = "pay";
-      out.push(askPay());
-      return;
+    const list = addressesOf(s);
+    const pick = id === "a_last" ? 0 : (/^a_\d$/.test(id) ? Number(id.slice(2)) : -1);
+    if (pick >= 0 && list[pick]) {
+      s.data.delivery = { address: list[pick].address, coords: list[pick].coords || null };
+      s.data.notes = list[pick].notes || "";
+      if (s.data.quick && !s.data.editing) return quickNext(s, out);
+      return next(s, out, () => { s.step = "pay"; out.push(askPay()); });
     }
     if (id === "a_new") { out.push(askLocation("¿Adónde lo llevamos?")); return; }
     const place = readPlace(msg);
-    if (!place) { out.push(askLocation("¿Adónde lo llevamos?")); return; }
+    if (!place) { out.push(s.formId && !s.data.gpsPending ? askDelivery(s) : askLocation("¿Adónde lo llevamos?")); return; }
+    // Sin altura ni punto: se pide la ubicación una vez. Si vuelve a escribir se acepta, para no
+    // dejarlo trabado (barrios y casas sin número); el cadete ve "ubicación aproximada".
+    if (!place.coords && !/\d/.test(place.address) && !s.data.vagueAsked) {
+      s.data.vagueAsked = true;
+      out.push(askLocation("Esa dirección no tiene altura. Mandame la ubicación de entrega, o escribí calle y número"));
+      return;
+    }
+    delete s.data.vagueAsked;
     s.data.delivery = place;
+    if (s.data.gpsPending && s.data.pay) {
+      delete s.data.gpsPending;
+      s.step = "confirm";
+      out.push(await summary(s));
+      return;
+    }
+    // En el camino corto los datos para encontrarlo van con la dirección: una pregunta menos
+    if (s.data.quick && !s.data.editing) return quickNext(s, out);
     s.step = "notes";
     out.push(askNotes());
   }
@@ -327,8 +800,7 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     if (id === "n_none") s.data.notes = "";
     else if (msg.kind === "text" && msg.text.trim()) s.data.notes = msg.text.trim().slice(0, 200);
     else { out.push(askNotes()); return; }
-    s.step = "pay";
-    out.push(askPay());
+    return next(s, out, () => { s.step = "pay"; out.push(askPay()); });
   }
 
   async function onPay(id, s, out) {
@@ -342,12 +814,15 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     if (id !== "c_ok") { out.push(await summary(s)); return; }
     const d = s.data;
     if (!(await orders.hasOnlineDriver())) {
-      out.push(menuButton("😕 En este momento no hay cadetes conectados. Probá de nuevo en un rato."));
-      s.step = "idle"; s.data = {};
+      out.push({
+        text: "😕 En este momento no hay cadetes conectados.\n¿Te aviso por acá apenas se conecte uno? Tu pedido queda guardado.",
+        listLabel: "¿Qué hacemos?",
+        buttons: [{ id: "w_yes", title: "🔔 Avisame", desc: "Te escribo apenas haya un cadete" }, { id: "x_cancel", title: "❌ Cancelar el pedido" }],
+      });
       return;
     }
     const customer = await orders.resolveCustomer(waId, name);
-    s.lastAddress = { address: d.delivery.address, coords: d.delivery.coords || null, notes: d.notes || "" };
+    rememberAddress(s, d.delivery, d.notes);
 
     if (d.flow === "comercio") {
       const c = await comercios.get(d.comercio.id);
@@ -370,14 +845,22 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     }
 
     const res = await orders.createFavor({
-      waId, customer, type: d.flow === "envio" ? "mandado" : "compra", details: fullDetails(d), media: d.media,
+      waId, customer, type: d.flow === "envio" ? "mandado" : "compra", details: fullDetails(d), media: d.media, stops: d.flow === "compra" ? d.stops : null,
       pickupAddress: d.pickup && d.pickup.address, pickupCoords: d.pickup && d.pickup.coords,
-      deliveryAddress: d.delivery.address, deliveryCoords: d.delivery.coords, addressNotes: d.notes, paymentMethod: d.pay,
+      deliveryAddress: d.delivery.address, deliveryCoords: d.delivery.coords, addressNotes: d.notes, paymentMethod: d.pay, tip: d.tip || 0,
     });
+    // Para "Repetir pedido" (sin la parte de edición)
+    s.lastOrder = { flow: d.flow, stops: d.stops || null, details: d.details || "", media: d.media || [], pickup: d.pickup || null, delivery: d.delivery, notes: d.notes || "", pay: d.pay, tip: d.tip || 0, at: Date.now() };
+    db.collection("wa_waitlist").doc(waId).delete().catch(() => {});
     s.step = "idle"; s.data = {};
+    // Es el último mensaje del pedido: el seguimiento (cadete, mapa, llegada) se ve en el link
     out.push({
-      text: `✅ *¡Listo! Pedido #${res.orderNum}*\nYa lo están viendo los cadetes. Te aviso por acá cuando alguien lo tome.\n\nTotal: *${money(res.quote.total)}*` +
-        (d.flow === "compra" ? " + la compra" : "") + "\n_Si necesitás cancelarlo, entrá a *Mis pedidos* desde el menú._",
+      header: `✅ Pedido #${res.orderNum} confirmado`,
+      text: `Ya lo están viendo los cadetes.\n\nTotal: *${money(res.total)}*` +
+        (d.flow === "compra" ? " + la compra" : "") +
+        "\n\nTocá *Seguir en vivo* para ver quién lo toma, dónde está el cadete y cuándo llega. Mientras nadie lo tome, desde ahí podés cancelarlo.\n_Si el cadete necesita algo, te escribe por acá._",
+      footer: FOOTER,
+      link: { title: "📍 Seguir en vivo", url: trackingUrl(res.trackingToken) },
     });
   }
 
@@ -449,9 +932,11 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
       out.push({
         text: `🏪 *${c.name}* tiene su menú en GO!. ¿Cómo querés pedir?`,
         buttons: [{ id: "k_menu", title: "📖 Ver menú" }, { id: "k_write", title: "✍️ Escribir pedido" }],
+        asButtons: true,
       });
       return;
     }
+    if (s.cfg.short) { out.push(startQuick(s, "comercio", { comercio: s.data.comercio })); return; }
     startFlow(s, "comercio", { comercio: s.data.comercio });
     out.push(askDetails("comercio", c.name));
   }
@@ -473,6 +958,7 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
       out.push({
         text: "😕 Justo ahora no hay cadetes conectados para llevarlo. Probá confirmar en unos minutos.",
         buttons: [{ id: `q_ok:${quoteId}`, title: "✅ Confirmar" }, { id: `q_no:${quoteId}`, title: "No, gracias" }],
+        asButtons: true,
       });
       return;
     }
@@ -483,8 +969,14 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
       return;
     }
     const qd = qSnap.data();
-    if (qd.deliveryAddress) s.lastAddress = { address: qd.deliveryAddress, coords: qd.deliveryCoords || null, notes: qd.addressNotes || "" };
-    out.push({ text: `✅ *¡Pedido #${res.orderNum} confirmado!*\n*${qd.comercioName}* ya lo está preparando${qd.prepMinutes ? ` (unos ${qd.prepMinutes} min)` : ""}. Te aviso cuando salga.\n\nTotal: *${money(res.total)}*` });
+    if (qd.deliveryAddress) rememberAddress(s, { address: qd.deliveryAddress, coords: qd.deliveryCoords || null }, qd.addressNotes || "");
+    out.push({
+      header: `✅ Pedido #${res.orderNum} confirmado`,
+      text: `*${qd.comercioName}* ya lo está preparando${qd.prepMinutes ? ` (unos ${qd.prepMinutes} min)` : ""}.\n\nTotal: *${money(res.total)}*` +
+        (res.trackingToken ? "\n\nTocá *Seguir en vivo* para ver cuándo sale, dónde está el cadete y cuándo llega." : ""),
+      footer: FOOTER,
+      ...(res.trackingToken ? { link: { title: "📍 Seguir en vivo", url: trackingUrl(res.trackingToken) } } : {}),
+    });
   }
 
   async function quoteDecline(quoteId, s, out) {
@@ -500,17 +992,18 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
   // El comercio no pudo: lo mismo pasa a ser un mandado con todo lo que ya contó el cliente.
   async function quoteToMandado(quoteId, s, out) {
     const snap = await db.collection("wa_quotes").doc(quoteId).get();
-    if (!snap.exists) { startFlow(s, "compra"); out.push(askDetails("compra")); return; }
+    if (!snap.exists) { startCompra(s, null); out.push(askStore(0)); return; }
     const q = snap.data();
-    s.data = {
-      flow: "compra",
-      details: q.requestText ? `${q.requestText}` : "",
-      media: q.media || [],
+    const store = q.comercioName || "El comercio";
+    startCompra(s, store, {
       delivery: { address: q.deliveryAddress, coords: q.deliveryCoords || null },
       notes: q.addressNotes || "",
       pay: q.paymentMethod || "efectivo",
-    };
-    if (!s.data.details && !s.data.media.length) { s.step = "details"; out.push(askDetails("compra")); return; }
+    });
+    s.data.stops[0].items = String(q.requestText || "").slice(0, 600);
+    s.data.stops[0].media = (q.media || []).slice(0, 4);
+    s.data.media = q.media || [];
+    if (!s.data.stops[0].items && !s.data.media.length) { out.push(askItems(store)); return; }
     s.step = "confirm";
     out.push({ text: "🛒 Perfecto, un cadete te lo consigue. Te muestro cómo queda:" });
     out.push(await summary(s));
@@ -538,9 +1031,12 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     });
     waiting.forEach((q) => lines.push(`*${q.comercioName}*\n${q.status === "waiting" ? "Esperando que responda el precio ⏳" : "Te mandó el precio, falta que confirmes"}`));
     const cancellable = active.filter((o) => o.status === "pending" && !o.driverId).slice(0, 2);
-    const buttons = cancellable.map((o) => ({ id: `oc:${o.id}`, title: `Cancelar #${o.orderId}` }));
-    buttons.push({ id: "go_menu", title: "Ver menú" });
-    out.push({ text: `📋 *Tus pedidos en curso*\n\n${lines.join("\n\n")}`, buttons });
+    const buttons = cancellable.map((o) => ({ id: `oc:${o.id}`, title: `❌ Cancelar #${o.orderId}`, desc: "Todavía nadie lo tomó" }));
+    buttons.push({ id: "go_menu", title: "🏠 Ver menú" });
+    out.push({ header: "📋 Tus pedidos en curso", text: lines.join("\n\n"), buttons, listLabel: "Opciones", footer: FOOTER });
+    active.filter((o) => o.trackingToken).slice(0, 3).forEach((o) => {
+      out.push({ text: `*#${o.orderId}*${o.comercioName ? ` · ${o.comercioName}` : ""}`, link: { title: "📍 Seguir en vivo", url: trackingUrl(o.trackingToken) } });
+    });
   }
 
   async function cancelOrder(waId, orderDocId, s, out) {
@@ -567,6 +1063,7 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     out.push({
       text: `🛵 ¿Pedimos un cadete para *${s.comercio.name}*?\nVa al local y coordina en el mostrador cuántos envíos lleva.`,
       buttons: [{ id: "cd_ok", title: "✅ Sí, pedir" }, { id: "x_cancel", title: "No" }],
+      asButtons: true,
     });
   }
 
@@ -577,7 +1074,7 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     if (!c) { out.push(menuButton("No encontré tu comercio.")); return; }
     const res = await orders.createCadeteria({ waId, comercio: c });
     s.step = "idle"; s.data = {};
-    out.push({ text: `🛵 *Cadete pedido para ${c.name}* (#${res.orderNum}).\nTe aviso cuando alguien lo tome.` });
+    out.push({ text: `🛵 *Cadete pedido para ${c.name}* (#${res.orderNum}).\nYa lo están viendo los cadetes; el que lo tome va para tu local.` });
   }
 
   // ───────────────────────── Soporte ─────────────────────────
@@ -621,7 +1118,75 @@ Escribí la lista, o mandá un audio o una foto.` } : askDetails("compra"));
     }, { merge: true });
   }
 
+  // ── Editar el resumen ──
+  function editStep(id, s, out) {
+    if (!s.data.delivery) { out.push(menuButton("Ese pedido ya no está. Escribí *menú* para empezar uno.")); return; }
+    s.data.editing = true;
+    if (id === "e_items") {
+      s.data.media = [];
+      if (s.data.flow === "compra") { s.data.stops = []; s.step = "c_store"; out.push(askStore(0)); return; }
+      s.data.details = "";
+      s.step = "details";
+      out.push(askDetails(s.data.flow, s.data.comercio && s.data.comercio.name));
+      return;
+    }
+    if (id === "e_pickup") { s.step = "pickup"; out.push(askLocation("¿Dónde lo retiramos?")); return; }
+    if (id === "e_delivery") { s.step = "delivery"; out.push(askDelivery(s)); return; }
+    if (id === "e_notes") { s.step = "notes"; out.push(askNotes()); return; }
+    s.step = "pay";
+    out.push(askPay());
+  }
+
+  // ── Repetir el último pedido ──
+  async function repeatLast(name, s, out) {
+    if (!s.lastOrder || !s.lastOrder.delivery) { out.push(menu(name, s)); return; }
+    const { at, ...last } = s.lastOrder;
+    s.data = JSON.parse(JSON.stringify(last));
+    s.step = "confirm";
+    out.push({ text: "🔁 Te armé el mismo pedido de la última vez. Revisalo y confirmá (o tocá *Editar*):" });
+    out.push(await summary(s));
+  }
+
+  // ── GoPoints y sorteos ──
+  async function showPoints(waId, name, out) {
+    const customer = await orders.resolveCustomer(waId, name);
+    const u = await db.collection("users").doc(customer.userId).get().catch(() => null);
+    const points = u && u.exists ? Number(u.data().points) || 0 : 0;
+    const open = giveaways ? await giveaways.listOpen().catch(() => []) : [];
+    let text = `🎁 *Tus GoPoints: ${points.toLocaleString("es-AR")}*\n_Sumás puntos con cada pedido entregado${customer.linked ? " (los de la app y los de acá van a la misma cuenta)" : ""}._`;
+    const buttons = [];
+    if (open.length) {
+      text += "\n\n🎟️ *Sorteos abiertos*";
+      for (const [i, g] of open.slice(0, 2).entries()) {
+        const mine = await giveaways.entryOf(g.id, customer.userId).catch(() => null);
+        text += `\n${i + 1}. *${g.title || "Sorteo"}*${g.subtitle ? ` — ${short(g.subtitle, 120)}` : ""}`;
+        if (mine) text += `\n   ✅ Ya estás anotado (${mine.chances || 1} chance${(mine.chances || 1) > 1 ? "s" : ""})`;
+        else buttons.push({ id: `gw:${g.id}`, title: open.length > 1 ? `🎟️ Anotarme al ${i + 1}` : "🎟️ Anotarme" });
+      }
+    } else {
+      text += "\n\nAhora no hay sorteos abiertos. Te avisamos cuando haya uno 😉";
+    }
+    buttons.push({ id: "go_menu", title: "Ver menú" });
+    out.push({ text, buttons: buttons.slice(0, 3) });
+  }
+
+  async function joinGiveaway(waId, name, giveawayId, out) {
+    if (!giveaways) { out.push(menuButton("Ahora no se puede anotar en sorteos.")); return; }
+    const customer = await orders.resolveCustomer(waId, name);
+    if (!customer.linked && ensureWaUser) {
+      await ensureWaUser(db, { userId: customer.userId, userName: customer.userName, userPhone: customer.phone, waPhone: waId });
+    }
+    const r = await giveaways.join(giveawayId, customer.userId);
+    if (r.error === "closed" || r.error === "not_found") { out.push(menuButton("Ese sorteo ya cerró 😕")); return; }
+    if (r.error === "not_eligible") { out.push(menuButton("Este sorteo no está abierto para tu cuenta.")); return; }
+    if (r.error) { out.push(menuButton("😕 No te pude anotar. Probá de nuevo en un rato.")); return; }
+    const chances = (r.entry && r.entry.chances) || 1;
+    out.push(menuButton(r.created
+      ? `🎉 ¡Listo! Ya estás participando en *${r.title || "el sorteo"}* con ${chances} chance${chances > 1 ? "s" : ""}.\nCada pedido entregado te suma más.`
+      : `✅ Ya estabas anotado en *${r.title || "el sorteo"}* (${chances} chance${chances > 1 ? "s" : ""}).`));
+  }
+
   return { handle, loadSession, saveSession, money };
 }
 
-module.exports = { createBot, money };
+module.exports = { createBot, money, FOOTER };

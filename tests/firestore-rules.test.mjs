@@ -4,7 +4,7 @@ import {
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, collectionGroup, query, where, getDocs, addDoc, writeBatch,
+  doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, collectionGroup, query, where, getDocs, addDoc, writeBatch, runTransaction,
 } from 'firebase/firestore';
 import fs from 'fs';
 import path from 'path';
@@ -44,7 +44,7 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'comercios/kiosco'), { name: 'El Kiosco', ownerId: 'duenoKiosco', isActive: true });
   await setDoc(doc(db, 'comercios/pizza/products/p1'), { name: 'Muzzarella', price: 12000 });
 
-  await setDoc(doc(db, 'orders/o1'), { userId: 'cliente1', comercioId: 'pizza', status: 'pending', total: 15000 });
+  await setDoc(doc(db, 'orders/o1'), { userId: 'cliente1', comercioId: 'pizza', driverId: 'cadete1', status: 'pending', total: 15000 });
   await setDoc(doc(db, 'orders/o2'), { userId: 'cliente2', comercioId: 'kiosco', status: 'ready', total: 5000 });
   await setDoc(doc(db, 'orders/o3'), { userId: 'cliente1', comercioId: 'pizza', status: 'ready', driverId: 'cadete1', total: 9000 });
 
@@ -58,6 +58,10 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'delivery_applications/cliente1'), { userId: 'cliente1', dni: '12345678' });
   await setDoc(doc(db, 'chats/o1_client-delivery'), { participants: ['cliente1', 'cadete1'], orderId: 'o1' });
   await setDoc(doc(db, 'users/usuarioViejo'), { role: 'user', displayName: 'Cuenta vieja sin clientId' });
+  // Cuentas viejas con el número GO guardado vacío o en null: el perfil lo completa.
+  await setDoc(doc(db, 'users/goIdVacio'), { role: 'user', displayName: 'Sin número', goId: '' });
+  await setDoc(doc(db, 'users/goIdNull'), { role: 'user', displayName: 'Número null', goId: null });
+  await setDoc(doc(db, 'settings/users'), { lastGoId: 1500 });
   await setDoc(doc(db, 'users/appleTester'), { role: 'user', email: 'test-delivery@godelivery.com' });
 });
 
@@ -315,6 +319,24 @@ await check('usuario NO puede cambiar su codigo de referido ya asignado',
   assertFails(updateDoc(doc(viejo, 'users/usuarioViejo'), { referralCode: 'GO-REF-TRUCHO' })));
 await check('usuario NO puede cambiar su numero de cliente ya asignado',
   assertFails(updateDoc(doc(viejo, 'users/usuarioViejo'), { clientId: 1 })));
+// Lo mismo que hace profile.js al abrir el perfil sin número GO (Admin → Errores, 16-10-2026:
+// "Error assigning goId inside profile: permission-denied" seguía con el código nuevo).
+const assignGoId = (fs, uid) => runTransaction(fs, async (t) => {
+  const cRef = doc(fs, 'counters', 'users');
+  const uRef = doc(fs, 'users', uid);
+  const [cSnap, sSnap] = await Promise.all([t.get(cRef), t.get(doc(fs, 'settings', 'users')), t.get(uRef)]);
+  const last = Math.max(cSnap.exists() ? Number(cSnap.data().lastGoId) || 0 : 0, sSnap.exists() ? Number(sSnap.data().lastGoId) || 0 : 0, 1000) + 1;
+  t.update(uRef, { goId: `GO-${last}` });
+  t.set(cRef, { lastGoId: last }, { merge: true });
+});
+await check('usuario sin numero GO se lo asigna desde el perfil',
+  assertSucceeds(assignGoId(viejo, 'usuarioViejo')));
+await check('usuario con numero GO vacio se lo asigna desde el perfil',
+  assertSucceeds(assignGoId(env.authenticatedContext('goIdVacio').firestore(), 'goIdVacio')));
+await check('usuario con numero GO en null se lo asigna desde el perfil',
+  assertSucceeds(assignGoId(env.authenticatedContext('goIdNull').firestore(), 'goIdNull')));
+await check('usuario NO puede cambiar su numero GO ya asignado',
+  assertFails(updateDoc(doc(viejo, 'users/usuarioViejo'), { goId: 'GO-1' })));
 await check('cuenta de revision de Apple se habilita como cadete de prueba',
   assertSucceeds(setDoc(doc(apple, 'users/appleTester'), { role: 'admin', isDelivery: true, deliveryStatus: 'approved', deliveryId: 'DL-TEST' }, { merge: true })));
 await check('otra cuenta NO puede hacer lo mismo que la de revision',
@@ -327,14 +349,20 @@ await check('cliente entra al chat de su pedido',
   assertSucceeds(getDoc(doc(cliente1, 'chats/o1_client-delivery'))));
 await check('cadete entra al chat del pedido',
   assertSucceeds(getDoc(doc(cadete1, 'chats/o1_client-delivery'))));
-await check('comercio entra al chat de su pedido aunque no figure en participants',
-  assertSucceeds(getDoc(doc(duenoPizza, 'chats/o1_client-delivery'))));
+await check('comercio entra a su chat con el cliente aunque no figure en participants',
+  assertSucceeds(getDoc(doc(duenoPizza, 'chats/o1_client-commerce'))));
+await check('el comercio NO entra al chat privado cliente↔cadete',
+  assertFails(getDoc(doc(duenoPizza, 'chats/o1_client-delivery'))));
 await check('un vecino ajeno NO entra al chat',
   assertFails(getDoc(doc(cliente2, 'chats/o1_client-delivery'))));
 await check('cliente lee los mensajes de su chat',
   assertSucceeds(getDocs(collection(cliente1, 'chats/o1_client-delivery/messages'))));
-await check('comercio lee los mensajes del chat de su pedido',
-  assertSucceeds(getDocs(collection(duenoPizza, 'chats/o1_client-delivery/messages'))));
+await check('comercio lee los mensajes de su chat con el cliente',
+  assertSucceeds(getDocs(collection(duenoPizza, 'chats/o1_client-commerce/messages'))));
+await check('el comercio NO lee los mensajes del chat cliente↔cadete',
+  assertFails(getDocs(collection(duenoPizza, 'chats/o1_client-delivery/messages'))));
+await check('el cadete NO lee los mensajes del chat cliente↔comercio',
+  assertFails(getDocs(collection(cadete1, 'chats/o1_client-commerce/messages'))));
 await check('un vecino ajeno NO lee los mensajes del chat',
   assertFails(getDocs(collection(cliente2, 'chats/o1_client-delivery/messages'))));
 await check('un vecino ajeno NO escribe en el chat',
@@ -588,18 +616,6 @@ await check('admin marca pagada la comision',
   assertSucceeds(updateDoc(doc(jefe, 'orders/o9'), { commissionStatus: 'paid' })));
 
 console.log('');
-console.log('================================================');
-console.log('  PASARON: ' + pass + '   |   FALLARON: ' + fail);
-if (failures.length) {
-  console.log('');
-  console.log('  DETALLE DE LO QUE FALLO:');
-  failures.forEach(f => console.log('   - ' + f));
-}
-console.log('================================================');
-
-await env.cleanup();
-process.exit(fail > 0 ? 1 : 0);
-console.log('');
 console.log('=========== PERSONAS CON ACCESO A UN COMERCIO ===========');
 
 // managerIds y private/team los escribe solo functions/commerce-access.js
@@ -646,3 +662,15 @@ await check('otro usuario NO ve invitaciones ajenas',
 await check('nadie crea invitaciones desde la app',
   assertFails(setDoc(doc(cliente1, 'comercio_invites/x'), { comercioId: 'kioscoEquipo', email: 'c1@mail.com', role: 'owner' })));
 
+console.log('');
+console.log('================================================');
+console.log('  PASARON: ' + pass + '   |   FALLARON: ' + fail);
+if (failures.length) {
+  console.log('');
+  console.log('  DETALLE DE LO QUE FALLO:');
+  failures.forEach(f => console.log('   - ' + f));
+}
+console.log('================================================');
+
+await env.cleanup();
+process.exit(fail > 0 ? 1 : 0);

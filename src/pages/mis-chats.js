@@ -4,6 +4,7 @@ import { db } from '../firebase.js';
 import { collection, doc, query, where, getDoc, onSnapshot, or } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
 import { isAdmin, isComercio } from '../auth.js';
+import { isChatParty } from '../utils/chat-access.js';
 
 let unsubSupport = null;
 let unsubChats = null;
@@ -215,24 +216,16 @@ function startChatsListener(container, user) {
           chat.order = orderSnap.data();
         }
       } catch (e) {
-        console.error('[MisChats] Error fetching order:', chat.orderId, e);
+        // permission-denied = el pedido ya no es de este comercio/cadete (reasignado o de otro
+        // local): el chat se muestra igual, sin el detalle del pedido. No es una falla.
+        (e?.code === 'permission-denied' ? console.warn : console.error)('[MisChats] Error fetching order:', chat.orderId, e);
       }
     });
     await Promise.all(orderPromises);
 
     orderChats = orderChats.filter(chat => {
       if (chat.deletedFor && chat.deletedFor.includes(user.uid)) return false;
-      if (chat.order) {
-        // The shop owner is listed in the shop's chats (orders don't store the owner's uid).
-        const isShopOwnerHere = chat.type !== 'client-delivery' &&
-                                (user.role === 'comercio' || user.isComercio === true);
-        const isActualParty = chat.order.userId === user.uid ||
-                              chat.order.driverId === user.uid ||
-                              chat.order.comercioId === user.uid ||
-                              chat.order.comercioOwnerId === user.uid ||
-                              isShopOwnerHere;
-        return isActualParty;
-      }
+      if (chat.order) return isChatParty(chat.type || chat.id.split('_').slice(1).join('_'), chat.order, user);
       return true;
     });
 

@@ -71,6 +71,76 @@ export async function loadGoogleMaps() {
 
 const geocodeCache = new Map();
 
+// Coordinates exactly as Google returned them (7 decimals, ignoring float noise): nobody placed that
+// pin by hand. A dragged pin or a GPS reading has many more decimals.
+const isGeocodedCoord = (v) => Math.abs(v - Number(v.toFixed(7))) < 1e-9;
+const streetOnlyCache = new Map();
+
+/**
+ * For the driver, without paying a Geocoder call per screen: true when the order has no point, or
+ * its address has no number and nobody placed the pin. A shop picked from the suggestions also
+ * matches, which is why the driver only sees a hint to call and nothing is blocked.
+ */
+export function isApproximateDropoff(address, coords) {
+  if (!coords || coords.lat == null || coords.lng == null) return true;
+  // Mandados store "<address> (Detalle: x)": a number in the detail is not the street number.
+  const clean = String(address || '').replace(/\s*\(Detalle:.*$/s, '');
+  if (/\d/.test(clean) || clean.includes('&')) return false;
+  return isGeocodedCoord(Number(coords.lat)) && isGeocodedCoord(Number(coords.lng));
+}
+
+/**
+ * True when an address is a whole street with a pin nobody moved, so the pin is just some point of
+ * that street (order 2408: 2.9 km from the house). Only those few addresses reach the paid Geocoder;
+ * if it fails the answer is false, because this check must never stop anyone from ordering.
+ */
+export async function isStreetOnlyLocation(address, coords) {
+  if (!address || !coords || /\d/.test(address) || address.includes('&')) return false;
+  if (!isGeocodedCoord(Number(coords.lat)) || !isGeocodedCoord(Number(coords.lng))) return false;
+  if (streetOnlyCache.has(address)) return streetOnlyCache.get(address);
+  try {
+    await loadGoogleMaps();
+    const types = await new Promise((resolve, reject) => {
+      new window.google.maps.Geocoder().geocode({ address: `${address}, Buenos Aires, Argentina` }, (results, status) => {
+        if (status === 'OK' && results?.[0]) resolve(results[0].types || []);
+        else reject(new Error(`Google Geocode status: ${status}`));
+      });
+    });
+    const isStreet = types.includes('route');
+    streetOnlyCache.set(address, isStreet);
+    return isStreet;
+  } catch (err) {
+    console.warn('[isStreetOnlyLocation] Could not classify the address:', err);
+    return false;
+  }
+}
+
+/**
+ * The point of a house number on a street the customer already picked, or null if Google doesn't
+ * really know it: a partial match or a result far from that street is another place with the same
+ * street name (there is a "Moreno" in every town), and then the customer places the pin by hand.
+ */
+export async function geocodeHouseNumber(street, number, near) {
+  try {
+    await loadGoogleMaps();
+    const results = await new Promise((resolve) => {
+      new window.google.maps.Geocoder().geocode(
+        { address: `${street} ${number}, Magdalena, Buenos Aires, Argentina`, componentRestrictions: { country: 'ar' } },
+        (res, status) => resolve(status === 'OK' && res ? res : [])
+      );
+    });
+    const best = results[0];
+    if (!best || best.partial_match) return null;
+    if (!best.types?.some(t => ['street_address', 'premise', 'subpremise'].includes(t))) return null;
+    const point = { lat: best.geometry.location.lat(), lng: best.geometry.location.lng() };
+    const meters = Math.hypot((point.lat - near.lat) * 111000, (point.lng - near.lng) * 91000);
+    return meters <= 6000 ? point : null;
+  } catch (err) {
+    console.warn('[geocodeHouseNumber] Could not look up the number:', err);
+    return null;
+  }
+}
+
 /**
  * Geocodes an address string to { lat, lng } using Google Maps (on-demand) with Nominatim fallback.
  */
@@ -169,6 +239,17 @@ export function calculateDynamicFee(distanceKm) {
 
   // Round to nearest 10 for clean prices
   return Math.ceil(total / 10) * 10;
+}
+
+/**
+ * Encomiendas: con tarifa propia activa (Admin → Tarifas de Logística) no usan las reglas ni los
+ * precios del delivery general. Debe coincidir con computeEncomiendaFee() en functions/index.js.
+ */
+export function calculateEncomiendaFee(distanceKm) {
+  const rate = getState().encomiendaPricing;
+  if (!rate?.enabled) return calculateDynamicFee(distanceKm);
+  const calculated = (Number(rate.basePrice) || 0) + distanceKm * (Number(rate.pricePerKm) || 0);
+  return Math.ceil(Math.max(Number(rate.minPrice) || 0, calculated) / 10) * 10;
 }
 
 const ALLOWED_LOCAL_ZONES = [
@@ -273,7 +354,8 @@ export async function searchAddressSuggestions(term) {
         if (!display.toLowerCase().includes('magdalena')) display += ', Magdalena';
         if (seenNames.has(display.toLowerCase())) return;
         seenNames.add(display.toLowerCase());
-        googleResults.push({ placeId: pred.place_id, address: display, displayName: pred.description });
+        // 'route' = a whole street with no house number: its coordinates are just some point on it.
+        googleResults.push({ placeId: pred.place_id, address: display, displayName: pred.description, isStreet: !!pred.types?.includes('route') });
       });
       if (googleResults.length > 0) return googleResults.slice(0, 6);
     } catch (gErr) {
@@ -310,10 +392,11 @@ export async function searchAddressSuggestions(term) {
           lat: parseFloat(item.lat),
           lng: parseFloat(item.lon),
           address: display || item.display_name.split(',')[0],
-          displayName: item.display_name
+          displayName: item.display_name,
+          isStreet: !!(a.road || a.pedestrian) && !number
         });
       });
-      
+
     return results.slice(0, 6);
   } catch (err) {
     console.error('Error querying Nominatim suggestions:', err);

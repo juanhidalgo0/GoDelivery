@@ -1,5 +1,5 @@
 import { getState, setState, subscribe, getUserLevel } from '../state.js';
-import { signInWithGoogle, signInWithApple, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from '../auth.js';
+import { signInWithGoogle, signInWithApple, isAppleSignInAvailable, signOut, isAdmin, isSuperAdmin, isComercio, isDelivery, isLoggedIn } from '../auth.js';
 import { db, auth } from '../firebase.js';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { icon } from '../utils/icons.js';
@@ -66,7 +66,7 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
               <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               Continuar con Google
             </button>
-            <button class="btn btn-block btn-lg" id="apple-login-btn" style="background: black; color: white; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 12px; border-radius: 100px; font-weight: 700; height: 48px; border: none; cursor: pointer; transition: all 0.2s;">
+            <button class="btn btn-block btn-lg" id="apple-login-btn" style="background: black; color: white; display: ${isAppleSignInAvailable() ? 'flex' : 'none'}; align-items: center; justify-content: center; gap: 10px; margin-top: 12px; border-radius: 100px; font-weight: 700; height: 48px; border: none; cursor: pointer; transition: all 0.2s;">
               <svg width="18" height="22" viewBox="0 0 18 22" fill="white"><path d="M15.22 10.95c.04-2.73 2.23-4.04 2.33-4.11-1.27-1.86-3.25-2.11-3.95-2.16-1.68-.17-3.29.99-4.14.99-.86 0-2.19-.97-3.62-.94-1.88.03-3.61 1.1-4.57 2.76-1.95 3.37-.5 8.35 1.39 11.08.93 1.33 2.01 2.82 3.44 2.77 1.38-.05 1.9-.89 3.57-.89 1.66 0 2.14.89 3.58.86 1.46-.02 2.41-1.35 3.33-2.69 1.07-1.56 1.51-3.07 1.53-3.15-.03-.02-2.95-1.13-2.98-4.51zM11.95 2.81c.75-.91 1.25-2.18 1.11-3.44-1.08.04-2.39.72-3.17 1.63-.68.78-1.28 2.07-1.12 3.31 1.2.09 2.43-.59 3.18-1.5z"/></svg>
               Continuar con Apple
             </button>
@@ -130,14 +130,23 @@ async function renderProfileContent(content, { updateInstallVisibility, showInst
 
     if (user && !user.goId) {
       const { runTransaction, doc: fDoc } = await import('firebase/firestore');
+      // El contador vive en counters/users (como clientId). Antes estaba en settings/users, que
+      // solo escribe el admin desde que se cerraron las reglas: a todos los demás les fallaba
+      // ("Error assigning goId inside profile: permission-denied"). Sigue desde el último número
+      // que quedó en settings para no repetir.
       runTransaction(db, async (t) => {
-        const sRef = fDoc(db, 'settings', 'users');
-        const sSnap = await t.get(sRef);
-        let last = sSnap.exists() ? sSnap.data().lastGoId || 1000 : 1000;
-        last++;
+        const cRef = fDoc(db, 'counters', 'users');
+        const uRef = fDoc(db, 'users', user.uid);
+        const [cSnap, sSnap, uSnap] = await Promise.all([t.get(cRef), t.get(fDoc(db, 'settings', 'users')), t.get(uRef)]);
+        // Recién registrado: el perfil todavía no existe (se crea al iniciar sesión) o otra
+        // pantalla ya le puso el número. Se completa la próxima vez (Admin → Errores, 12-10-2026).
+        if (!uSnap.exists() || uSnap.data().goId) { if (uSnap.exists()) user.goId = uSnap.data().goId; return; }
+        const fromCounter = cSnap.exists() ? Number(cSnap.data().lastGoId) || 0 : 0;
+        const fromSettings = sSnap.exists() ? Number(sSnap.data().lastGoId) || 0 : 0;
+        const last = Math.max(fromCounter, fromSettings, 1000) + 1;
         const goId = `GO-${last}`;
         t.update(fDoc(db, 'users', user.uid), { goId });
-        t.set(sRef, { lastGoId: last }, { merge: true });
+        t.set(cRef, { lastGoId: last }, { merge: true });
         user.goId = goId;
       }).catch(err => console.error('Error assigning goId inside profile:', err));
     }

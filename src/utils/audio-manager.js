@@ -346,7 +346,8 @@ export const AudioManager = {
       audio.play().catch(err => {
         // NotAllowedError = el navegador no deja sonar hasta que la persona toque la pantalla:
         // es normal, no un error de la app (no va al detector de errores)
-        (err?.name === 'NotAllowedError' ? console.warn : console.error)('Playback failed, falling back to synth chime:', err);
+        // AbortError = otro sonido o una pausa lo cortó (normal, tampoco va al detector)
+        (err?.name === 'NotAllowedError' || err?.name === 'AbortError' ? console.warn : console.error)('Playback failed, falling back to synth chime:', err);
         this.playSynthNotification();
       });
     } catch (err) {
@@ -387,7 +388,13 @@ export const AudioManager = {
           hookFirstGesture();
           return;
         }
-        console.error('Playback loop failed, falling back to synth loop:', err);
+        if (err?.name === 'AbortError') {
+          // La cortó una pausa: si la alarma ya se apagó, no hay que reemplazarla por el sintetizador
+          if (!wantedLoops.has(url)) return;
+          console.warn('Playback loop interrupted, falling back to synth loop:', err);
+        } else {
+          console.error('Playback loop failed, falling back to synth loop:', err);
+        }
         this.startSynthLoop(url);
       });
       return audio;

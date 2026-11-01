@@ -18,6 +18,7 @@ setPlaces([
   { name: 'Farmacia Pasteur', slug: 'farmacia-pasteur', lat: -35.0842, lng: -57.5212, category: 'farmacia', source: 'aprendido', visits: 2, verified: true, address: 'Mitre 640' },
   { name: 'Verdulería El Trébol', slug: 'verduleria-el-trebol', lat: -35.0772, lng: -57.5150, category: 'verduleria', source: 'aprendido', visits: 3 },
   { name: 'Maxikiosco Paulos', slug: 'maxikiosco-paulos', lat: -35.0815, lng: -57.5147, category: 'kiosco', source: 'comercio', address: 'San Martín 1102' },
+  { name: 'Carnicería lucas Ludueña', slug: 'carniceria-lucas-luduena', lat: -35.0825, lng: -57.5062, category: 'carniceria', source: 'aprendido', visits: 3, trusted: true },
 ]);
 setState({ driverTodayEarnings: 12400, driverTodayOrdersCount: 6 });
 window.currentDemandHotspots = [{ name: 'Pizzería Los Sabores', count: 2, coords: [-57.5147, -35.0815] }, { name: 'Burger Norte', count: 1, coords: [-57.5060, -35.0790] }];
@@ -62,6 +63,23 @@ const base = {
     userPhone: '2221665544', deliveryAddress: 'Moreno 1020', deliveryCoords: { lat: -35.0780, lng: -57.5120 }, paymentMethod: 'transferencia',
     totalAmount: 900, total: 900, shippingCost: 900, deliveryCost: 900, driverEarnings: 900,
   }),
+  // "Compra el repartidor" (como Kiosco Paulos): el repartidor compra con la lista del pedido
+  shopper: () => ({
+    id: 'sim_s1', orderId: '9105', status: 'ready', isShopper: true, shopPending: true, allowReplacement: true,
+    comercioName: 'Kiosco Paulos', comercioAddress: 'San Martín 1102', comercioCoordinates: { lat: -35.0815, lng: -57.5147 }, comercioCoords: { lat: -35.0815, lng: -57.5147 },
+    userName: 'Carla M.', userPhone: '2221330099', deliveryAddress: 'Av. Mitre 820', addressNotes: 'Timbre B',
+    deliveryCoords: { lat: -35.0835, lng: -57.5230 }, paymentMethod: 'efectivo', estimatedSubtotal: 23150, subtotal: 23150,
+    totalAmount: 25150, total: 25150, estimatedTotal: 25150, shippingCost: 2000, deliveryCost: 2000, driverEarnings: 2000, verificationCode: '3307',
+    items: [
+      { name: 'Coca-Cola sabor original 2,25 L', qty: 2, price: 3900 },
+      { name: 'Alfajor Jorgito triple chocolate', qty: 4, price: 900, notes: 'Si no hay triple, simple' },
+      { name: 'Galletitas Oreo 118 g', qty: 1, price: 1650 },
+      { name: "Papas fritas Lay's clásicas 145 g", qty: 1, price: 3200 },
+      { name: 'Chicle Beldent menta x 10', qty: 3, price: 700 },
+      { name: 'Agua mineral Villavicencio sin gas 1,5 L', qty: 2, price: 1500 },
+      { name: 'Cerveza Quilmes Clásica lata 473 ml', qty: 1, price: 1800 },
+    ],
+  }),
   burger: (n, name, addr, lat, lng, pay) => ({
     id: `sim_b${n}`, orderId: `77${n}0`, status: 'ready', comercioName: 'Burger Norte', comercioAddress: 'Calle 12 n° 100',
     comercioCoordinates: { lat: -35.0790, lng: -57.5060 }, comercioCoords: { lat: -35.0790, lng: -57.5060 }, userName: name, userPhone: '222155000' + n, deliveryAddress: addr,
@@ -87,6 +105,10 @@ const CASES = {
   '1 pedido · retirar': () => ({ orders: [base.comercio()] }),
   '1 pedido · entregar': () => ({ orders: [{ ...base.comercio(), status: 'delivering', pickedUpAt: now() }] }),
   '1 mandado · comprar': () => ({ orders: [base.mandado()] }),
+  'Mandado · cualquier carnicería': () => ({ orders: [{ ...base.mandado(), comercioName: '', description: '', mandadoStops: [{ store: 'Carnicería', nearest: 'carniceria', items: 'Si está abierta San Javier, 1 kg de asado' }] }] }),
+  'Compra el repartidor · Kiosco Paulos': () => ({ orders: [base.shopper()] }),
+  'Compra el repartidor · 1 producto': () => ({ orders: [{ ...base.shopper(), id: 'sim_s2', items: [{ name: 'Cigarrillos Marlboro box 20', qty: 1, price: 4200 }], estimatedSubtotal: 4200, subtotal: 4200 }] }),
+  'Compra el repartidor · ya compró': () => ({ orders: [{ ...base.shopper(), shopPending: false }] }),
   'Mandado · comercio sin ubicación': () => ({ orders: [{ ...base.mandado(), id: 'sim_m2', description: '', details: '🏪 **1. Comercio:** Almacén Don Pepe\n📦 **Pedido:** 1 yerba, 2 fideos' }] }),
   'Mandado · 2 comercios': () => ({ orders: [{ ...base.mandado(), id: 'sim_m3', stopsCount: 2, description: '',
     details: '🏪 **1. Comercio:** Maxikiosco Paulos\n📦 **Pedido:** 2 alfajores, 1 coca 2.25L\n\n🏪 **2. Comercio:** Verdulería El Trébol\n📦 **Pedido:** 1kg papas, 1/2kg tomates' }] }),
@@ -158,6 +180,24 @@ function bindDock() {
   const nextStore = document.getElementById('dock-mandado-next-store-btn');
   if (nextStore) nextStore.onclick = (e) => { e.stopPropagation(); markStoreVisited(nextStore.dataset.orderId, Number(nextStore.dataset.index)); rerender(); drawRoute(); };
   document.querySelectorAll('.driver-swipe-slider').forEach(bindSlider);
+  document.querySelectorAll('.dock-shopper-open-btn').forEach((btn) => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const { openShopperChecklist } = await import('../pages/delivery-panel/shopper.js');
+      openShopperChecklist({
+        order: orders.find((o) => o.id === id),
+        beforeConfirm: () => confirmPickupDistance(orders.find((o) => o.id === id), { preview: true }),
+        submit: async () => ({}),
+        onCancel: rerender,
+        onDone: () => {
+          orders = orders.map((o) => (o.id === id ? { ...o, shopPending: false, status: 'delivering', pickedUpAt: now() } : o));
+          showToast('Compra cargada (vista previa)', 'success');
+          render(); drawRoute();
+        },
+      });
+    };
+  });
 }
 
 // Deslizador: mismo gesto que en la app (se confirma al pasar el 80 %), pero solo avanza el caso
@@ -210,7 +250,7 @@ function bindSlider(slider) {
 
 function showCase(name) {
   hideExclusiveOfferOverlay(); stopExclusiveOfferAlert();
-  try { localStorage.removeItem('go_mandado_visited_v1'); } catch (e) { /* sin almacenamiento */ }
+  try { localStorage.removeItem('go_mandado_visited_v1'); ['sim_s1', 'sim_s2'].forEach((id) => localStorage.removeItem(`go_shopper_marks_${id}`)); } catch (e) { /* sin almacenamiento */ }
   const c = CASES[name]();
   orders = c.orders;
   window.driverDockExpanded = false;

@@ -73,6 +73,10 @@
           "destination": "/seguimiento.html"
         },
         {
+          "source": "/en-vivo/**",
+          "destination": "/en-vivo.html"
+        },
+        {
           "source": "/sorteo",
           "destination": "/sorteo.html"
         },

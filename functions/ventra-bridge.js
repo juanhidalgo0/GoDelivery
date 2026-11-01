@@ -287,10 +287,12 @@ async function catalog(db, storage, { comercioId }, body) {
       name: keepName ? prev.name : name,
       ventraName,
       searchKeys: searchKeys(keepName ? prev.name : name, clean(u.barcode, 40)),
-      // Unidades vendidas en la caja en los últimos 90 días: "Lo más vendido" de la tienda
+      // En cuántos tickets de la caja aparece (90 días): "Lo más vendido" de la tienda
       ...(Number.isFinite(sold) ? { popularity: Math.max(0, Math.round(sold)) } : {}),
       // Lo que más se compra junto en los tickets de la caja (ventraIds): "Combiná con…"
       ...(pairs ? { pairsVentra: pairs } : {}),
+      // % que se suma si se paga con transferencia (recargos de la caja por rubro: p. ej. cigarrillos)
+      ...(u.transferSurcharge !== undefined ? { transferSurcharge: Math.max(0, Math.min(100, Number(u.transferSurcharge) || 0)) } : {}),
       price: Math.round(price * 100) / 100,
       barcode: clean(u.barcode, 40),
       description: clean(u.description, 500),
